@@ -57,11 +57,12 @@ export function DraftLive({
   const deadlineRef = useRef<string | null>(null);
   const firedRef = useRef<string | null>(null);
   useEffect(() => {
+    console.log("[autopick] deadline updated → phase:", phase, "pickDeadline:", pickDeadline);
     deadlineRef.current = phase === "nomination" ? pickDeadline : null;
   }, [phase, pickDeadline]);
 
   // Poll every 500ms — fires once per deadline the moment it passes.
-  // Lives outside the phase/pickDeadline deps so page refreshes never reset it.
+  // Empty deps: interval runs for the entire component lifetime, never reset by refreshes.
   useEffect(() => {
     const id = setInterval(() => {
       const dl = deadlineRef.current;
@@ -70,11 +71,11 @@ export function DraftLive({
       firedRef.current = dl;
       triggerAutoPick().then(res => {
         console.log("[autopick] triggered, done=", res.done);
-        router.refresh();
+        // UI update handled by the 5-second refresh interval
       });
     }, 500);
     return () => clearInterval(id);
-  }, [router]);
+  }, []);
 
   const roundNum = currentPick + 1;
   const isNomination = phase === "nomination";
