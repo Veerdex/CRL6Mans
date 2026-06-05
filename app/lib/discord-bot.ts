@@ -792,9 +792,13 @@ async function nominatePlayer(userId: string, playerUsername: string, startingBi
   if (startingBid < 1 || startingBid > 800)
     return reply("❌ Starting bid must be between **1** and **800** credits.");
 
-  const { data: currentTeam } = await supabaseAdmin.from("teams")
-    .select("id, name, credits").eq("name", `Team ${currentTeamNum}`).single();
-  if (!currentTeam) return reply("❌ Could not find the current team.");
+  const { data: teamRows } = await supabaseAdmin.from("teams")
+    .select("id, name, credits").eq("name", `Team ${currentTeamNum}`);
+  if (!teamRows?.length)
+    return reply(`❌ No team named "Team ${currentTeamNum}" found (pick ${currentPick}/${numTeams * 2}, ${numTeams} teams). Check team names in Supabase.`);
+  if (teamRows.length > 1)
+    return reply(`❌ Multiple teams named "Team ${currentTeamNum}" — duplicate team names in DB.`);
+  const currentTeam = teamRows[0];
 
   const { count: rosterSize } = await supabaseAdmin.from("players")
     .select("*", { count: "exact", head: true }).eq("team_id", currentTeam.id).eq("status", "approved");
