@@ -253,7 +253,7 @@ function confirmModal(customId: string, title: string, code: string) {
 }
 
 async function getCaptainPing(teamNum: number): Promise<string> {
-  const { data: team } = await supabaseAdmin.from("teams").select("id").eq("name", `Team ${teamNum}`).single();
+  const { data: team } = await supabaseAdmin.from("teams").select("id").eq("slot_number", teamNum).single();
   if (!team) return `**Team ${teamNum}**`;
   const { data: cap } = await supabaseAdmin.from("players")
     .select("discord_id, username").eq("team_id", team.id).eq("is_captain", true).single();
@@ -502,7 +502,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
 
     const currentTeamNum = getTeamNumberForPick(currentPick, numTeams);
     const { data: currentTeam } = await supabaseAdmin.from("teams")
-      .select("id, name, credits, discord_role_id").eq("name", `Team ${currentTeamNum}`).single();
+      .select("id, name, credits, discord_role_id").eq("slot_number", currentTeamNum).single();
     if (!currentTeam) return { done: true };
 
     const { data: available } = await supabaseAdmin.from("players")
@@ -784,21 +784,18 @@ async function nominatePlayer(userId: string, playerUsername: string, startingBi
   if (!isAdmin(userId)) {
     const { data: caller } = await supabaseAdmin.from("players").select("is_captain, team_id").eq("discord_id", userId).single();
     if (!caller?.is_captain) return reply("❌ Only captains can nominate.");
-    const { data: callerTeam } = await supabaseAdmin.from("teams").select("name").eq("id", caller.team_id).single();
-    if (!callerTeam || callerTeam.name !== `Team ${currentTeamNum}`)
+    const { data: callerTeam } = await supabaseAdmin.from("teams").select("slot_number").eq("id", caller.team_id).single();
+    if (!callerTeam || callerTeam.slot_number !== currentTeamNum)
       return reply(`❌ It's **Team ${currentTeamNum}**'s turn to nominate.`);
   }
 
   if (startingBid < 1 || startingBid > 800)
     return reply("❌ Starting bid must be between **1** and **800** credits.");
 
-  const { data: teamRows } = await supabaseAdmin.from("teams")
-    .select("id, name, credits").eq("name", `Team ${currentTeamNum}`);
-  if (!teamRows?.length)
-    return reply(`❌ No team named "Team ${currentTeamNum}" found (pick ${currentPick}/${numTeams * 2}, ${numTeams} teams). Check team names in Supabase.`);
-  if (teamRows.length > 1)
-    return reply(`❌ Multiple teams named "Team ${currentTeamNum}" — duplicate team names in DB.`);
-  const currentTeam = teamRows[0];
+  const { data: currentTeam } = await supabaseAdmin.from("teams")
+    .select("id, name, credits").eq("slot_number", currentTeamNum).single();
+  if (!currentTeam)
+    return reply(`❌ No team with slot_number ${currentTeamNum} found (pick ${currentPick}/${numTeams * 2}).`);
 
   const { count: rosterSize } = await supabaseAdmin.from("players")
     .select("*", { count: "exact", head: true }).eq("team_id", currentTeam.id).eq("status", "approved");
