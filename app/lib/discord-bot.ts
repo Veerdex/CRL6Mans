@@ -252,8 +252,14 @@ function confirmModal(customId: string, title: string, code: string) {
   };
 }
 
+async function getTeamByPosition(position: number, fields = "id"): Promise<Record<string, unknown> | null> {
+  const { data } = await supabaseAdmin.from("teams")
+    .select(fields).not("slot_number", "is", null).order("slot_number");
+  return (data ?? [])[position - 1] ?? null;
+}
+
 async function getCaptainPing(teamNum: number): Promise<string> {
-  const { data: team } = await supabaseAdmin.from("teams").select("id").eq("slot_number", teamNum).single();
+  const team = await getTeamByPosition(teamNum, "id");
   if (!team) return `**Team ${teamNum}**`;
   const { data: cap } = await supabaseAdmin.from("players")
     .select("discord_id, username").eq("team_id", team.id).eq("is_captain", true).single();
@@ -480,16 +486,20 @@ async function concludeAuction(s: AuctionSettings): Promise<{ ok: boolean; messa
 }
 
 export async function execAutoPick(): Promise<{ done: boolean }> {
-  const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
-  if (!settings?.draft_active) return { done: true };
+  const { data: settings, error: settingsErr } = await supabaseAdmin.from("league_settings").select("*").single();
+  if (settingsErr) { console.error("[execAutoPick] settings read failed:", settingsErr.message); return { done: true }; }
+  if (!settings?.draft_active) { console.log("[execAutoPick] draft not active"); return { done: true }; }
 
   const deadline: Date | null = settings.pick_deadline ? new Date(settings.pick_deadline) : null;
-  if (!deadline || new Date() < deadline) return { done: true };
+  if (!deadline) { console.log("[execAutoPick] no pick_deadline"); return { done: true }; }
+  if (new Date() < deadline) { console.log("[execAutoPick] deadline not yet reached, msLeft:", deadline.getTime() - Date.now()); return { done: true }; }
 
   const numTeams: number = settings.num_teams;
   const currentPick: number = settings.current_pick ?? 0;
   const channelId: string | null = settings.draft_channel_id ?? null;
   const totalPicks = numTeams * 2;
+
+  console.log(`[execAutoPick] phase=${settings.draft_phase} pick=${currentPick}/${totalPicks}`);
 
   // Nomination timeout → auto-nominate highest RV player at 1 credit
   if (settings.draft_phase === "nomination") {
@@ -501,15 +511,21 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
     }
 
     const currentTeamNum = getTeamNumberForPick(currentPick, numTeams);
-    const { data: currentTeam } = await supabaseAdmin.from("teams")
-      .select("id, name, credits, discord_role_id").eq("slot_number", currentTeamNum).single();
-    if (!currentTeam) return { done: true };
+    // Select only id — credits not needed for auto-nomination and may not be in schema cache
+    const teamRow = await getTeamByPosition(currentTeamNum, "id, name") as { id: string; name: string } | null;
+    if (!teamRow) {
+      console.error(`[execAutoPick] No team at position ${currentTeamNum} (pick ${currentPick}/${totalPicks}, numTeams=${numTeams})`);
+      return { done: true };
+    }
+    console.log(`[execAutoPick] team position ${currentTeamNum} → id=${teamRow.id} name="${teamRow.name}"`);
 
-    const { data: available } = await supabaseAdmin.from("players")
+    const { data: available, error: avErr } = await supabaseAdmin.from("players")
       .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
       .eq("status", "approved").eq("draft_entered", true).is("team_id", null);
+    if (avErr) { console.error("[execAutoPick] available players query failed:", avErr.message); return { done: true }; }
 
     if (!available?.length) {
+      console.log("[execAutoPick] no available players — ending draft");
       await supabaseAdmin.from("league_settings").update({
         draft_active: false, draft_phase: null, pick_deadline: null, updated_at: new Date().toISOString(),
       }).not("id", "is", null);
@@ -517,15 +533,17 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
     }
 
     const best = [...available].sort((a, b) => rankValue(b) - rankValue(a))[0];
-    await supabaseAdmin.from("league_settings").update({
+    console.log(`[execAutoPick] auto-nominating "${best.username}" for team "${teamRow.name}"`);
+    const { error: updateErr } = await supabaseAdmin.from("league_settings").update({
       draft_phase: "bidding",
       nominated_player_id: best.id,
       current_bid: 1,
-      current_bid_team_id: currentTeam.id,
+      current_bid_team_id: teamRow.id,
       current_bid_time: new Date().toISOString(),
       pick_deadline: new Date(Date.now() + 45 * 1000).toISOString(),
       updated_at: new Date().toISOString(),
     }).not("id", "is", null);
+    if (updateErr) { console.error("[execAutoPick] league_settings update failed:", updateErr.message); return { done: true }; }
 
     if (channelId) {
       await sendChannelMessage(channelId,
@@ -536,8 +554,8 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
     return { done: false };
   }
 
-  // Bidding phase: admin closes manually via /endround — autopick does not auto-conclude.
-  return { done: false };
+  // Bidding phase: admin closes manually via /endround — deadline expiry does nothing.
+  return { done: true };
 }
 
 const PRESET_MIN_TEAMS: Record<string, number> = {
@@ -782,10 +800,11 @@ async function nominatePlayer(userId: string, playerUsername: string, startingBi
   if (startingBid < 1 || startingBid > 800)
     return reply("❌ Starting bid must be between **1** and **800** credits.");
 
-  const { data: currentTeam, error: teamError } = await supabaseAdmin.from("teams")
-    .select("id, name, credits").eq("slot_number", currentTeamNum).single();
+  const currentTeam = await getTeamByPosition(currentTeamNum, "id, name, credits") as {
+    id: string; name: string; credits: number;
+  } | null;
   if (!currentTeam)
-    return reply(`❌ Team lookup failed: ${teamError?.message ?? `no team with slot_number ${currentTeamNum}`} (pick ${currentPick}/${numTeams * 2}).`);
+    return reply(`❌ Team lookup failed: no team at position ${currentTeamNum} (pick ${currentPick}/${numTeams * 2}).`);
 
   const { count: rosterSize } = await supabaseAdmin.from("players")
     .select("*", { count: "exact", head: true }).eq("team_id", currentTeam.id).eq("status", "approved");

@@ -7,8 +7,8 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { execAutoPick } from "@/app/lib/discord-bot";
 
-export async function triggerAutoPick(): Promise<void> {
-  await execAutoPick();
+export async function triggerAutoPick(): Promise<{ done: boolean }> {
+  return execAutoPick();
 }
 
 export async function enterDraft(): Promise<{ error?: string; ok?: boolean }> {
