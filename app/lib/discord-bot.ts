@@ -554,8 +554,21 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
     return { done: false };
   }
 
-  // Bidding phase: admin closes manually via /endround — deadline expiry does nothing.
-  return { done: true };
+  // Bidding phase: deadline expired → auto-close, highest bidder wins.
+  if (!settings.nominated_player_id || !settings.current_bid_team_id || !settings.current_bid) {
+    console.error("[execAutoPick] bidding phase expired but missing auction data");
+    return { done: true };
+  }
+  const closeResult = await concludeAuction({
+    num_teams: numTeams,
+    current_pick: currentPick,
+    draft_channel_id: channelId,
+    nominated_player_id: settings.nominated_player_id as string,
+    current_bid_team_id: settings.current_bid_team_id as string,
+    current_bid: settings.current_bid as number,
+  });
+  console.log("[execAutoPick] bidding auto-closed:", closeResult.message);
+  return { done: false };
 }
 
 const PRESET_MIN_TEAMS: Record<string, number> = {

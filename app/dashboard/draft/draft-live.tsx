@@ -58,7 +58,7 @@ export function DraftLive({
   const firedRef = useRef<string | null>(null);
   useEffect(() => {
     console.log("[autopick] deadline updated → phase:", phase, "pickDeadline:", pickDeadline);
-    deadlineRef.current = phase === "nomination" ? pickDeadline : null;
+    deadlineRef.current = pickDeadline;
   }, [phase, pickDeadline]);
 
   // Poll every 500ms — fires once per deadline the moment it passes.
