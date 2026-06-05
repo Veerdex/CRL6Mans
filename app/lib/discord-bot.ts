@@ -792,10 +792,10 @@ async function nominatePlayer(userId: string, playerUsername: string, startingBi
   if (startingBid < 1 || startingBid > 800)
     return reply("❌ Starting bid must be between **1** and **800** credits.");
 
-  const { data: currentTeam } = await supabaseAdmin.from("teams")
+  const { data: currentTeam, error: teamError } = await supabaseAdmin.from("teams")
     .select("id, name, credits").eq("slot_number", currentTeamNum).single();
   if (!currentTeam)
-    return reply(`❌ No team with slot_number ${currentTeamNum} found (pick ${currentPick}/${numTeams * 2}).`);
+    return reply(`❌ Team lookup failed: ${teamError?.message ?? `no team with slot_number ${currentTeamNum}`} (pick ${currentPick}/${numTeams * 2}).`);
 
   const { count: rosterSize } = await supabaseAdmin.from("players")
     .select("*", { count: "exact", head: true }).eq("team_id", currentTeam.id).eq("status", "approved");
