@@ -333,13 +333,19 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
     ),
   ]);
 
-  await supabaseAdmin.from("league_settings").update({
-    draft_active: true, draft_open: false, current_pick: 0,
-    draft_phase: "nomination",
-    nominated_player_id: null, current_bid: null, current_bid_team_id: null, current_bid_time: null,
-    pick_deadline: new Date(Date.now() + 45 * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  }).not("id", "is", null);
+  const { data: activateRows, error: activateError } = await supabaseAdmin
+    .from("league_settings").update({
+      draft_active: true, draft_open: false, current_pick: 0,
+      draft_phase: "nomination",
+      nominated_player_id: null, current_bid: null, current_bid_team_id: null, current_bid_time: null,
+      pick_deadline: new Date(Date.now() + 45 * 1000).toISOString(),
+      updated_at: new Date().toISOString(),
+    }).not("id", "is", null).select("id, draft_active");
+
+  if (activateError)
+    return { ok: false, message: `❌ DB error activating draft: ${activateError.message}` };
+  if (!activateRows?.length)
+    return { ok: false, message: "❌ draft_active write matched 0 rows — check league_settings table (may be empty or id is null)." };
 
   // ── Phase 2: Discord (best-effort, won't block draft if slow) ────────────
 
