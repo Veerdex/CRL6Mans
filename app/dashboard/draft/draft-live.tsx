@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { triggerAutoPick } from "@/app/dashboard/draft-actions";
 
@@ -53,20 +53,28 @@ export function DraftLive({
     return () => clearInterval(id);
   }, [router]);
 
-  // Schedule autopick to fire at the exact moment the nomination deadline passes.
-  // Resets whenever pickDeadline or phase changes.
+  // Track the current nomination deadline and whether we already fired for it.
+  const deadlineRef = useRef<string | null>(null);
+  const firedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (phase !== "nomination" || !pickDeadline) return;
-    const msLeft = new Date(pickDeadline).getTime() - Date.now();
-    if (msLeft <= 0) return; // already expired — cron will handle it
-    const id = setTimeout(() => {
+    deadlineRef.current = phase === "nomination" ? pickDeadline : null;
+  }, [phase, pickDeadline]);
+
+  // Poll every 500ms — fires once per deadline the moment it passes.
+  // Lives outside the phase/pickDeadline deps so page refreshes never reset it.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const dl = deadlineRef.current;
+      if (!dl || firedRef.current === dl) return;
+      if (new Date(dl).getTime() - Date.now() > 0) return;
+      firedRef.current = dl;
       triggerAutoPick().then(res => {
         console.log("[autopick] triggered, done=", res.done);
         router.refresh();
       });
-    }, msLeft + 500);
-    return () => clearTimeout(id);
-  }, [phase, pickDeadline, router]);
+    }, 500);
+    return () => clearInterval(id);
+  }, [router]);
 
   const roundNum = currentPick + 1;
   const isNomination = phase === "nomination";
