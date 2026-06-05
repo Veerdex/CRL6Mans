@@ -536,17 +536,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
     return { done: false };
   }
 
-  // Bidding timeout → auto-conclude round
-  if (settings.draft_phase === "bidding" && settings.nominated_player_id && settings.current_bid_team_id) {
-    await concludeAuction({
-      num_teams: numTeams, current_pick: currentPick, draft_channel_id: channelId,
-      nominated_player_id: settings.nominated_player_id as string,
-      current_bid_team_id: settings.current_bid_team_id as string,
-      current_bid: settings.current_bid as number,
-    });
-    return { done: currentPick + 1 >= totalPicks };
-  }
-
+  // Bidding phase: admin closes manually via /endround — autopick does not auto-conclude.
   return { done: false };
 }
 
@@ -845,8 +835,17 @@ async function placeBid(userId: string, amount: number) {
   if (!caller.is_captain && !isAdmin(userId)) return reply("❌ Only team captains can bid.");
   if (caller.team_id === settings.current_bid_team_id) return reply("❌ You are already the highest bidder.");
 
-  const { data: team } = await supabaseAdmin.from("teams").select("id, name, credits").eq("id", caller.team_id).single();
+  const { data: team } = await supabaseAdmin.from("teams").select("id, name, credits, last_bid_time").eq("id", caller.team_id).single();
   if (!team) return reply("❌ Team not found.");
+
+  // 5-second slow mode: enforce per-team cooldown between bids
+  if (team.last_bid_time) {
+    const msSinceLastBid = Date.now() - new Date(team.last_bid_time as string).getTime();
+    if (msSinceLastBid < 5000) {
+      const secondsLeft = Math.ceil((5000 - msSinceLastBid) / 1000);
+      return reply(`❌ Slow mode — wait **${secondsLeft}s** before bidding again.`);
+    }
+  }
 
   const { count: rosterSize } = await supabaseAdmin.from("players")
     .select("*", { count: "exact", head: true }).eq("team_id", caller.team_id).eq("status", "approved");
@@ -865,6 +864,9 @@ async function placeBid(userId: string, amount: number) {
     updated_at: new Date().toISOString(),
   }).not("id", "is", null).eq("current_bid", settings.current_bid as number ?? 0).select("id");
   if (!bidUpdate?.length) return reply("❌ Another bid was placed at the same time. Please try again.");
+
+  // Record bid time for slow mode
+  await supabaseAdmin.from("teams").update({ last_bid_time: new Date().toISOString() }).eq("id", caller.team_id);
 
   const { data: player } = await supabaseAdmin.from("players").select("username").eq("id", settings.nominated_player_id).single();
   if (settings.draft_channel_id) {
