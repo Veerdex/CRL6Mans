@@ -22,16 +22,23 @@ const GROUND_TILE = 60;
 
 const WING_CYCLE = [0, 1, 2, 1] as const; // up · mid · down · mid
 
+// ─── Difficulty (computed per-pipe at spawn time) ─────────────────────────────
+// score 0  → speed 2.4, gap 145px, spawnMs 1600
+// score 30 → speed 4.2, gap 105px, spawnMs 1050  (all caps hit)
+function pipeSpeed(score: number)   { return Math.min(4.2,  2.4  + score * 0.06) }
+function pipeGap(score: number)     { return Math.max(105,  145  - score * 1.35) }
+function spawnInterval(score: number) { return Math.max(1050, 1600 - score * 18) }
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Status = "idle" | "running" | "dead";
-interface Pipe     { x: number; topH: number; scored: boolean }
+interface Pipe     { x: number; topH: number; scored: boolean; gap: number; speed: number }
 interface Particle { x: number; y: number; vx: number; vy: number; life: number; color: string }
 interface Popup    { x: number; y: number; life: number }
 interface Cloud    { x: number; y: number; s: number }
 
 // ─── Module-level helpers (no component state) ────────────────────────────────
-function randomTopH() {
-  return Math.random() * (PLAY_H - PIPE_GAP - 80) + 40;
+function randomTopH(gap: number) {
+  return Math.random() * (PLAY_H - gap - 80) + 40;
 }
 
 function drawCloud(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {
@@ -200,7 +207,7 @@ export default function FlappyBird({
 
       // Pipes
       for (const p of pipesRef.current) {
-        const botY = p.topH + PIPE_GAP;
+        const botY = p.topH + p.gap;
 
         // Body
         ctx.fillStyle = "#17355a";
@@ -337,21 +344,32 @@ export default function FlappyBird({
         // Wing: cycle every 4 frames while playing
         if (f % 4 === 0) wingRef.current = (wingRef.current + 1) % 4;
 
+        // Difficulty at current score
+        const curSpeed   = pipeSpeed(scoreRef.current);
+        const curGap     = pipeGap(scoreRef.current);
+        const curSpawnMs = spawnInterval(scoreRef.current);
+
         // Ground + cloud scroll
-        groundXRef.current -= PIPE_SPEED * dt;
+        groundXRef.current -= curSpeed * dt;
         for (const c of cloudsRef.current) {
           c.x -= 0.3 * dt;
           if (c.x < -80) c.x = W + 60;
         }
 
-        // Pipe spawn
+        // Pipe spawn — each pipe bakes in the speed + gap at the moment it appears
         if (t >= nextPipeRef.current) {
-          pipesRef.current.push({ x: W + 10, topH: randomTopH(), scored: false });
-          nextPipeRef.current = t + SPAWN_MS;
+          pipesRef.current.push({
+            x: W + 10,
+            topH: randomTopH(curGap),
+            scored: false,
+            gap: curGap,
+            speed: curSpeed,
+          });
+          nextPipeRef.current = t + curSpawnMs;
         }
 
-        // Move & cull
-        for (const p of pipesRef.current) p.x -= PIPE_SPEED * dt;
+        // Move & cull — each pipe uses its own baked speed
+        for (const p of pipesRef.current) p.x -= p.speed * dt;
         pipesRef.current = pipesRef.current.filter(p => p.x > -PIPE_W - 20);
 
         // Score
@@ -372,7 +390,7 @@ export default function FlappyBird({
         const hitGround  = birdYRef.current + BIRD_R >= PLAY_H;
         const hitPipe = pipesRef.current.some(p => {
           if (bR < p.x || bL > p.x + PIPE_W) return false;
-          return bT < p.topH || bB > p.topH + PIPE_GAP;
+          return bT < p.topH || bB > p.topH + p.gap;
         });
 
         if (hitCeiling || hitGround || hitPipe) {
