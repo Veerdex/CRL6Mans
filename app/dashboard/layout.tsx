@@ -63,10 +63,10 @@ const ALL_NAV: Record<string, NavItem> = {
     label: "About",
     icon: icon("M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"),
   },
-  rules: {
-    href: "/dashboard/rules",
-    label: "Rules",
-    icon: icon("M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8"),
+  game: {
+    href: "/dashboard/game",
+    label: "Game",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 11h4M8 9v4M15 12h.01M17 10h.01M5 7h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/></svg>,
   },
   admin: {
     href: "/dashboard/admin",
@@ -93,12 +93,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
     navKeys = [
       "home",
       ...(teamId ? ["myteam"] : []),
-      "teams", "players", "draft", "season", "scrims", "settings", "about", "rules",
+      "teams", "players", "draft", "season", "scrims", "settings", "about", "game",
     ];
   } else if (status === "pending") {
-    navKeys = ["home", "about", "rules"];
+    navKeys = ["home", "about", "game"];
   } else {
-    navKeys = ["home", "register", "about", "rules"];
+    navKeys = ["home", "register", "about", "game"];
   }
   if (admin) navKeys.push("admin");
 
