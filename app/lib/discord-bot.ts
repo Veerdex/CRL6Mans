@@ -282,15 +282,23 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
 
   const numTeams: number = settings.num_teams;
 
-  const { data: entered } = await supabaseAdmin
+  const { data: enteredAll } = await supabaseAdmin
     .from("players")
-    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at")
     .eq("status", "approved")
-    .eq("draft_entered", true);
+    .eq("draft_entered", true)
+    .order("draft_entered_at", { ascending: true, nullsFirst: false });
 
-  if (!entered?.length) return { ok: false, message: "No players have entered the draft." };
+  if (!enteredAll?.length) return { ok: false, message: "No players have entered the draft." };
+
+  // Apply cutoff: first numTeams × 3 by sign-up time
+  const entered = enteredAll.slice(0, numTeams * 3);
   if (entered.length < numTeams)
-    return { ok: false, message: `Need at least ${numTeams} players to start with ${numTeams} teams.` };
+    return { ok: false, message: `Need at least ${numTeams} players in the draft pool (have ${entered.length} after cutoff, need ${numTeams}).` };
+
+  // Mark only cutoff players as active; clear any previous active flags first
+  await supabaseAdmin.from("players").update({ in_active_draft: false }).eq("status", "approved");
+  await supabaseAdmin.from("players").update({ in_active_draft: true }).in("id", entered.map(p => p.id));
 
   // Validate pre-created team slots (identified by slot_number, not current name)
   const { data: allPreTeams } = await supabaseAdmin
@@ -420,11 +428,14 @@ export async function execEndDraft(): Promise<{ ok: boolean; message: string }> 
     .from("league_settings").select("draft_active").single();
   if (!settings?.draft_active)
     return { ok: false, message: "❌ No draft is currently active." };
-  await supabaseAdmin.from("league_settings").update({
-    draft_active: false, draft_phase: null,
-    nominated_player_id: null, current_bid: null, current_bid_team_id: null, current_bid_time: null,
-    pick_deadline: null, updated_at: new Date().toISOString(),
-  }).not("id", "is", null);
+  await Promise.all([
+    supabaseAdmin.from("league_settings").update({
+      draft_active: false, draft_phase: null,
+      nominated_player_id: null, current_bid: null, current_bid_team_id: null, current_bid_time: null,
+      pick_deadline: null, updated_at: new Date().toISOString(),
+    }).not("id", "is", null),
+    supabaseAdmin.from("players").update({ in_active_draft: false }).eq("status", "approved"),
+  ]);
   return { ok: true, message: "🔒 **Draft has ended.** Rosters are now locked." };
 }
 
@@ -521,7 +532,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
 
     const { data: available, error: avErr } = await supabaseAdmin.from("players")
       .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
-      .eq("status", "approved").eq("draft_entered", true).is("team_id", null);
+      .eq("status", "approved").eq("in_active_draft", true).is("team_id", null);
     if (avErr) { console.error("[execAutoPick] available players query failed:", avErr.message); return { done: true }; }
 
     if (!available?.length) {
@@ -830,7 +841,7 @@ async function nominatePlayer(userId: string, playerUsername: string, startingBi
 
   const { data: target } = await supabaseAdmin.from("players")
     .select("id, username, peak_2v2, current_2v2, peak_3v3, current_3v3")
-    .ilike("username", playerUsername).eq("status", "approved").eq("draft_entered", true).is("team_id", null).single();
+    .ilike("username", playerUsername).eq("status", "approved").eq("in_active_draft", true).is("team_id", null).single();
   if (!target) return reply(`❌ "${playerUsername}" is not in the draft pool.`);
 
   await supabaseAdmin.from("league_settings").update({

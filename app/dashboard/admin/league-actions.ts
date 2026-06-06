@@ -309,7 +309,7 @@ export async function resetSeason() {
   // Reset all player assignments and draft entries
   await supabaseAdmin
     .from("players")
-    .update({ team_id: null, is_captain: false, draft_entered: false })
+    .update({ team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null, in_active_draft: false })
     .not("id", "is", null);
 
   // Strip Discord roles (Drafted, Captain, all team roles) from real players

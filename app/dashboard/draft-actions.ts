@@ -35,7 +35,7 @@ export async function enterDraft(): Promise<{ error?: string; ok?: boolean }> {
 
   await supabaseAdmin
     .from("players")
-    .update({ draft_entered: true, updated_at: new Date().toISOString() })
+    .update({ draft_entered: true, draft_entered_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", player.id);
 
   revalidatePath("/dashboard");

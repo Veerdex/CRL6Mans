@@ -11,7 +11,7 @@ export default async function SettingsPage() {
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2")
+    .select("status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, sub_willing")
     .eq("discord_id", session.userId)
     .single();
 
@@ -29,6 +29,7 @@ export default async function SettingsPage() {
         current_3v3:  player.current_3v3  ?? "",
         peak_2v2:     player.peak_2v2     ?? "",
         current_2v2:  player.current_2v2  ?? "",
+        sub_willing:  player.sub_willing  ?? false,
       }} />
     </div>
   );

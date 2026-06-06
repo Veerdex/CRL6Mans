@@ -9,23 +9,30 @@ export default async function DashboardPage() {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const [playerRes, settingsRes, draftCountRes] = await Promise.all([
+  const [playerRes, settingsRes, draftQueueRes] = await Promise.all([
     supabaseAdmin
       .from("players")
-      .select("status, draft_entered")
+      .select("id, status, draft_entered, sub_willing")
       .eq("discord_id", session.userId)
       .single(),
     supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, num_teams").single(),
     supabaseAdmin
       .from("players")
-      .select("*", { count: "exact", head: true })
+      .select("id")
       .eq("status", "approved")
-      .eq("draft_entered", true),
+      .eq("draft_entered", true)
+      .order("draft_entered_at", { ascending: true, nullsFirst: false }),
   ]);
 
   const player = playerRes.data;
   const settings = settingsRes.data;
-  const draftCount = draftCountRes.count ?? 0;
+  const draftQueue = draftQueueRes.data ?? [];
+  const draftCount = draftQueue.length;
+  const numTeams = settings?.num_teams ?? 0;
+  const cutoffSize = numTeams * 3;
+  const queuePosition = player?.draft_entered && player?.id
+    ? (draftQueue.findIndex(p => p.id === player.id) + 1) || null
+    : null;
 
   // Show signup card only during the open-signups window, not during the snake draft itself or season
   const signupsOpen = (settings?.draft_open ?? false) && !(settings?.draft_active ?? false) && !(settings?.season_active ?? false);
@@ -48,6 +55,9 @@ export default async function DashboardPage() {
           signupsOpen={signupsOpen}
           draftActive={settings?.draft_active ?? false}
           seasonActive={settings?.season_active ?? false}
+          queuePosition={queuePosition}
+          cutoffSize={cutoffSize}
+          subWilling={player?.sub_willing ?? false}
         />
       )}
 

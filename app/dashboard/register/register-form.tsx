@@ -10,6 +10,7 @@ export type ExistingPlayerData = {
   peak_2v2: string;
   current_2v2: string;
   college_image_url: string;
+  sub_willing: boolean;
 };
 
 interface Props {
@@ -77,6 +78,19 @@ export function RegisterForm({ isResubmit, existing }: Props) {
           required={!isResubmit || !existing?.college_image_url}
           className="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-zinc-700 file:text-white hover:file:bg-zinc-600 cursor-pointer"
         />
+      </div>
+
+      <div className="flex items-center justify-between p-4 bg-zinc-800/50 border border-zinc-700/50 rounded-lg">
+        <div>
+          <p className="text-sm font-medium text-zinc-300">Substitute availability</p>
+          <p className="text-xs text-zinc-500 mt-0.5">
+            If you don&apos;t make the draft cutoff, would you like to be available as a substitute?
+          </p>
+        </div>
+        <label className="relative inline-flex items-center cursor-pointer ml-4 shrink-0">
+          <input type="checkbox" name="sub_willing" defaultChecked={existing?.sub_willing ?? false} className="sr-only peer" />
+          <div className="w-11 h-6 bg-zinc-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600" />
+        </label>
       </div>
 
       {state?.error && (

@@ -11,7 +11,7 @@ export default async function RegisterPage() {
 
   const { data: existing } = await supabaseAdmin
     .from("players")
-    .select("status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, college_image_url")
+    .select("status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, college_image_url, sub_willing")
     .eq("discord_id", session.userId)
     .single();
 
@@ -37,6 +37,7 @@ export default async function RegisterPage() {
         peak_2v2:          existing.peak_2v2,
         current_2v2:       existing.current_2v2,
         college_image_url: existing.college_image_url,
+        sub_willing:       existing.sub_willing ?? false,
       }
     : null;
 

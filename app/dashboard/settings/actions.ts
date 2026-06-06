@@ -19,6 +19,7 @@ export async function updatePlayerSettings(
   const current3v3 = formData.get("current_3v3") as string;
   const peak2v2    = formData.get("peak_2v2")    as string;
   const current2v2 = formData.get("current_2v2") as string;
+  const subWilling = formData.get("sub_willing") === "on";
 
   if (!trackerUrl || !peak3v3 || !current3v3 || !peak2v2 || !current2v2) {
     return { error: "All fields are required." };
@@ -50,6 +51,7 @@ export async function updatePlayerSettings(
       current_3v3:  current3v3,
       peak_2v2:     peak2v2,
       current_2v2:  current2v2,
+      sub_willing:  subWilling,
       updated_at:   new Date().toISOString(),
     })
     .eq("discord_id", session.userId)

@@ -16,6 +16,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
   const current3v3  = formData.get("current_3v3")  as string;
   const peak2v2     = formData.get("peak_2v2")     as string;
   const current2v2  = formData.get("current_2v2")  as string;
+  const subWilling  = formData.get("sub_willing") === "on";
   const file        = formData.get("college_image") as File;
 
   if (!trackerUrl || !peak3v3 || !current3v3 || !peak2v2 || !current2v2) {
@@ -97,6 +98,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     peak_2v2:          peak2v2,
     current_2v2:       current2v2,
     college_image_url: collegeImageUrl,
+    sub_willing:       subWilling,
     updated_at:        new Date().toISOString(),
   }, { onConflict: "discord_id" });
 

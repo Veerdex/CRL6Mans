@@ -9,6 +9,7 @@ export type PlayerSettings = {
   current_3v3: string;
   peak_2v2: string;
   current_2v2: string;
+  sub_willing: boolean;
 };
 
 export function SettingsForm({ current }: { current: PlayerSettings }) {
@@ -36,6 +37,19 @@ export function SettingsForm({ current }: { current: PlayerSettings }) {
         <MMRInput name="current_3v3" label="Current 3v3 MMR" defaultValue={current.current_3v3} />
         <MMRInput name="peak_2v2"    label="Peak 2v2 MMR"    defaultValue={current.peak_2v2} />
         <MMRInput name="current_2v2" label="Current 2v2 MMR" defaultValue={current.current_2v2} />
+      </div>
+
+      <div className="flex items-center justify-between p-4 bg-zinc-800/50 border border-zinc-700/50 rounded-lg">
+        <div>
+          <p className="text-sm font-medium text-zinc-300">Substitute availability</p>
+          <p className="text-xs text-zinc-500 mt-0.5">
+            Be available as a substitute if you don&apos;t make the draft cutoff.
+          </p>
+        </div>
+        <label className="relative inline-flex items-center cursor-pointer ml-4 shrink-0">
+          <input type="checkbox" name="sub_willing" defaultChecked={current.sub_willing} className="sr-only peer" />
+          <div className="w-11 h-6 bg-zinc-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600" />
+        </label>
       </div>
 
       {state?.error && (
