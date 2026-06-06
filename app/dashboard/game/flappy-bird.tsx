@@ -13,7 +13,6 @@ const BIRD_R = 13;
 const DEG = Math.PI / 180;
 
 const GRAVITY = 0.38;
-const FLAP_V = -7.2;
 const PIPE_W = 52;
 const PIPE_GAP = 145;
 const PIPE_SPEED = 2.4;
@@ -22,12 +21,13 @@ const GROUND_TILE = 60;
 
 const WING_CYCLE = [0, 1, 2, 1] as const; // up · mid · down · mid
 
-// ─── Difficulty (computed per-pipe at spawn time) ─────────────────────────────
-// score 0  → speed 2.4, gap 145px, spawnMs 1600
-// score 30 → speed 4.2, gap 105px, spawnMs 1050  (all caps hit)
-function pipeSpeed(score: number)   { return Math.min(4.2,  2.4  + score * 0.06) }
-function pipeGap(score: number)     { return Math.max(105,  145  - score * 1.35) }
-function spawnInterval(score: number) { return Math.max(1050, 1600 - score * 18) }
+// ─── Difficulty (computed per-pipe at spawn time, all caps hit at score 100) ──
+// score   0 → speed 2.4, gap 145px, flap -7.2, spawnMs 1600
+// score 100 → speed 4.8, gap  73px, flap -3.6, spawnMs 1000
+function pipeSpeed(score: number)     { return Math.min(4.8,  2.4  + score * 0.024) }
+function pipeGap(score: number)       { return Math.max(73,   145  - score * 0.72)  }
+function spawnInterval(score: number) { return Math.max(1000, 1600 - score * 6)     }
+function flapVelocity(score: number)  { return Math.min(-3.6, -7.2 + score * 0.036) }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Status = "idle" | "running" | "dead";
@@ -159,7 +159,7 @@ export default function FlappyBird({
       setUiScore(0);
       setNewBest(false);
     } else if (s === "running") {
-      birdVyRef.current = FLAP_V;
+      birdVyRef.current = flapVelocity(scoreRef.current);
     }
   }, []);
 
