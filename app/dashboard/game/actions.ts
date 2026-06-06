@@ -16,7 +16,7 @@ export async function getLeaderboard(): Promise<{ username: string; score: numbe
 
 export async function submitScore(
   score: number
-): Promise<{ error?: string; leaderboard?: { username: string; score: number }[] }> {
+): Promise<{ error?: string; newBest?: boolean; leaderboard?: { username: string; score: number }[] }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
@@ -29,7 +29,9 @@ export async function submitScore(
     .eq("discord_id", session.userId)
     .maybeSingle();
 
-  if (!existing || score > (existing.score ?? 0)) {
+  const isNewBest = !existing || score > (existing.score ?? 0);
+
+  if (isNewBest) {
     const { error } = await supabaseAdmin.from("game_scores").upsert(
       {
         discord_id: session.userId,
@@ -43,5 +45,5 @@ export async function submitScore(
   }
 
   const leaderboard = await getLeaderboard();
-  return { leaderboard };
+  return { leaderboard, newBest: isNewBest };
 }

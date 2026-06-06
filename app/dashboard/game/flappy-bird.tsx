@@ -128,57 +128,49 @@ export default function FlappyBird({
     { x: 200, y: 45,  s: 0.7 },
     { x: 310, y: 105, s: 1.2 },
   ]);
-  const particlesRef = useRef<Particle[]>([]);
-  const popupsRef    = useRef<Popup[]>([]);
-  const flashRef     = useRef(0);
+  const particlesRef  = useRef<Particle[]>([]);
+  const popupsRef     = useRef<Popup[]>([]);
+  const flashRef      = useRef(0);
+  const submittingRef = useRef(false); // prevents double-submit on rapid deaths
 
   // React state — only for overlay rendering
   const [status,    setStatus]    = useState<Status>("idle");
   const [uiScore,   setUiScore]   = useState(0);
   const [highScore, setHighScore] = useState(0);
-  const [submitted, setSubmitted] = useState(false);
+  const [newBest,   setNewBest]   = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>(initialLeaderboard);
 
-  // Stable: called from canvas onClick, keyboard handler, and inside rAF loop
   const flap = useCallback(() => {
     const s = statusRef.current;
     if (s === "idle") {
-      statusRef.current = "running";
-      birdVyRef.current = FLAP_V;
+      statusRef.current   = "running";
+      birdVyRef.current   = FLAP_V;
       nextPipeRef.current = performance.now() + SPAWN_MS;
-      prevTRef.current = 0; // reset dt so first frame isn't giant
-      scoreRef.current  = 0;
+      prevTRef.current    = 0;
+      scoreRef.current    = 0;
       setStatus("running");
       setUiScore(0);
-      setSubmitted(false);
+      setNewBest(false);
     } else if (s === "running") {
       birdVyRef.current = FLAP_V;
     }
   }, []);
 
   const restart = useCallback(() => {
-    statusRef.current   = "idle";
-    birdYRef.current    = PLAY_H / 2;
-    birdVyRef.current   = 0;
-    birdRotRef.current  = 0;
-    pipesRef.current    = [];
-    scoreRef.current    = 0;
+    statusRef.current    = "idle";
+    birdYRef.current     = PLAY_H / 2;
+    birdVyRef.current    = 0;
+    birdRotRef.current   = 0;
+    pipesRef.current     = [];
+    scoreRef.current     = 0;
     particlesRef.current = [];
-    popupsRef.current   = [];
-    flashRef.current    = 0;
-    prevTRef.current    = 0;
+    popupsRef.current    = [];
+    flashRef.current     = 0;
+    prevTRef.current     = 0;
+    submittingRef.current = false;
     setStatus("idle");
     setUiScore(0);
-    setSubmitted(false);
-    // rAF loop already running from mount — no need to restart it
-  }, []);
-
-  const handleSubmit = useCallback(async () => {
-    const result = await submitScore(scoreRef.current);
-    if (!result.error) {
-      setSubmitted(true);
-      if (result.leaderboard) setLeaderboard(result.leaderboard);
-    }
+    setNewBest(false);
   }, []);
 
   // ── Single unified rAF loop — runs from mount until unmount ──
@@ -389,10 +381,23 @@ export default function FlappyBird({
           birdRotRef.current = 70 * DEG;
           wingRef.current    = 2; // freeze on down-flap
           spawnParticles(BIRD_X, birdYRef.current);
-          setHighScore(prev => Math.max(prev, scoreRef.current));
+          const finalScore = scoreRef.current;
+          setHighScore(prev => Math.max(prev, finalScore));
           setStatus("dead");
-          setUiScore(scoreRef.current);
-          setSubmitted(false);
+          setUiScore(finalScore);
+          setNewBest(false);
+
+          // Auto-submit: fire-and-forget; server only saves if it's a new best
+          if (finalScore > 0 && !submittingRef.current) {
+            submittingRef.current = true;
+            submitScore(finalScore).then(result => {
+              submittingRef.current = false;
+              if (!result.error) {
+                if (result.newBest) setNewBest(true);
+                if (result.leaderboard) setLeaderboard(result.leaderboard);
+              }
+            });
+          }
         }
       }
 
@@ -452,8 +457,7 @@ export default function FlappyBird({
           ref={canvasRef}
           width={W}
           height={H}
-          onClick={flap}
-          onTouchStart={e => { e.preventDefault(); flap(); }}
+          onPointerDown={e => { e.preventDefault(); flap(); }}
           className="rounded-xl cursor-pointer select-none block"
           style={{ touchAction: "none" }}
         />
@@ -469,28 +473,16 @@ export default function FlappyBird({
           <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/55 gap-2">
             <p className="text-white text-2xl font-bold">Game Over</p>
             <p className="text-white text-5xl font-mono font-bold mt-1">{uiScore}</p>
-            {highScore > 0 && (
-              <p className="text-zinc-400 text-sm">Best: {highScore}</p>
-            )}
-            <div className="flex gap-3 mt-3">
-              <button
-                onClick={restart}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
-              >
-                Play Again
-              </button>
-              {uiScore > 0 && !submitted && (
-                <button
-                  onClick={handleSubmit}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg transition-colors"
-                >
-                  Submit Score
-                </button>
-              )}
-              {submitted && (
-                <p className="text-emerald-400 text-sm self-center">Submitted!</p>
-              )}
-            </div>
+            {newBest
+              ? <p className="text-yellow-400 text-sm font-semibold">New personal best!</p>
+              : highScore > 0 && <p className="text-zinc-500 text-sm">Best: {highScore}</p>
+            }
+            <button
+              onClick={restart}
+              className="px-5 py-2 mt-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
+            >
+              Play Again
+            </button>
           </div>
         )}
       </div>
