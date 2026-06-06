@@ -3,37 +3,102 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { submitScore } from "./actions";
 
+// ─── Constants ────────────────────────────────────────────────────────────────
 const W = 380;
 const H = 520;
 const GROUND_H = 44;
 const PLAY_H = H - GROUND_H;
 const BIRD_X = 75;
 const BIRD_R = 13;
-const GRAVITY = 0.48;
-const FLAP_V = -8.5;
+const DEG = Math.PI / 180;
+
+const GRAVITY = 0.38;
+const FLAP_V = -7.2;
 const PIPE_W = 52;
-const PIPE_GAP = 148;
+const PIPE_GAP = 145;
 const PIPE_SPEED = 2.4;
-const SPAWN_MS = 1550;
+const SPAWN_MS = 1600;
+const GROUND_TILE = 60;
 
+const WING_CYCLE = [0, 1, 2, 1] as const; // up · mid · down · mid
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 type Status = "idle" | "running" | "dead";
+interface Pipe     { x: number; topH: number; scored: boolean }
+interface Particle { x: number; y: number; vx: number; vy: number; life: number; color: string }
+interface Popup    { x: number; y: number; life: number }
+interface Cloud    { x: number; y: number; s: number }
 
-interface Pipe {
-  x: number;
-  topH: number;
-  scored: boolean;
+// ─── Module-level helpers (no component state) ────────────────────────────────
+function randomTopH() {
+  return Math.random() * (PLAY_H - PIPE_GAP - 80) + 40;
 }
 
-interface LeaderboardRow {
-  username: string;
-  score: number;
+function drawCloud(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  ctx.fillStyle = "rgba(255,255,255,0.055)";
+  ctx.beginPath();
+  ctx.arc(x,            y,            20 * s, 0, Math.PI * 2);
+  ctx.arc(x + 22 * s,  y - 7 * s,   15 * s, 0, Math.PI * 2);
+  ctx.arc(x + 40 * s,  y,            17 * s, 0, Math.PI * 2);
+  ctx.fill();
 }
 
-const STARS: [number, number][] = [
-  [30, 60], [120, 30], [200, 80], [290, 20],
-  [350, 55], [80, 150], [330, 140], [160, 110],
-  [60, 200], [310, 90],
-];
+function drawBird(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number,
+  rotation: number,
+  wing: 0 | 1 | 2,
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotation);
+
+  // Wing (behind body); angle changes per frame-state
+  const wAngles: Record<0 | 1 | 2, number> = { 0: -0.55, 1: 0, 2: 0.55 };
+  ctx.save();
+  ctx.rotate(wAngles[wing]);
+  ctx.beginPath();
+  ctx.ellipse(-4, 3, 8, 4, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "#f59e0b";
+  ctx.fill();
+  ctx.restore();
+
+  // Body
+  ctx.beginPath();
+  ctx.arc(0, 0, BIRD_R, 0, Math.PI * 2);
+  ctx.fillStyle = "#fbbf24";
+  ctx.fill();
+
+  // Belly highlight
+  ctx.beginPath();
+  ctx.arc(1, 3, 7, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  ctx.fill();
+
+  // Eye white
+  ctx.beginPath();
+  ctx.arc(5, -4, 3.5, 0, Math.PI * 2);
+  ctx.fillStyle = "white";
+  ctx.fill();
+  // Pupil
+  ctx.beginPath();
+  ctx.arc(6, -4, 1.8, 0, Math.PI * 2);
+  ctx.fillStyle = "#0f172a";
+  ctx.fill();
+
+  // Beak
+  ctx.beginPath();
+  ctx.moveTo(BIRD_R - 1, -1);
+  ctx.lineTo(BIRD_R + 6,  1);
+  ctx.lineTo(BIRD_R - 1,  3);
+  ctx.fillStyle = "#f97316";
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+interface LeaderboardRow { username: string; score: number }
 
 export default function FlappyBird({
   username,
@@ -44,182 +109,69 @@ export default function FlappyBird({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // All mutable game state in refs — avoids stale closures in the rAF loop
-  const statusRef = useRef<Status>("idle");
-  const birdYRef = useRef(PLAY_H / 2);
-  const birdVyRef = useRef(0);
-  const pipesRef = useRef<Pipe[]>([]);
-  const scoreRef = useRef(0);
+  // Game state — all in refs so the rAF loop never sees stale values
+  const statusRef   = useRef<Status>("idle");
+  const birdYRef    = useRef(PLAY_H / 2);
+  const birdVyRef   = useRef(0);
+  const birdRotRef  = useRef(0);
+  const wingRef     = useRef(0);          // index into WING_CYCLE
+  const pipesRef    = useRef<Pipe[]>([]);
+  const scoreRef    = useRef(0);
   const nextPipeRef = useRef(0);
-  const prevTRef = useRef(0);
-  const rafRef = useRef(0);
-  const tickRef = useRef<FrameRequestCallback>(() => {});
+  const prevTRef    = useRef(0);
+  const frameRef    = useRef(0);
+  const rafRef      = useRef(0);
+  const tickRef     = useRef<FrameRequestCallback>(() => {});
+  const groundXRef  = useRef(0);
+  const cloudsRef   = useRef<Cloud[]>([
+    { x: 55,  y: 75,  s: 1   },
+    { x: 200, y: 45,  s: 0.7 },
+    { x: 310, y: 105, s: 1.2 },
+  ]);
+  const particlesRef = useRef<Particle[]>([]);
+  const popupsRef    = useRef<Popup[]>([]);
+  const flashRef     = useRef(0);
 
-  const [status, setStatus] = useState<Status>("idle");
-  const [uiScore, setUiScore] = useState(0);
+  // React state — only for overlay rendering
+  const [status,    setStatus]    = useState<Status>("idle");
+  const [uiScore,   setUiScore]   = useState(0);
   const [highScore, setHighScore] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>(initialLeaderboard);
 
-  function randomTopH() {
-    return Math.random() * (PLAY_H - PIPE_GAP - 80) + 40;
-  }
-
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d")!;
-
-    // Sky
-    ctx.fillStyle = "#0f172a";
-    ctx.fillRect(0, 0, W, PLAY_H);
-
-    // Stars
-    ctx.fillStyle = "rgba(255,255,255,0.35)";
-    for (const [sx, sy] of STARS) ctx.fillRect(sx, sy, 1.5, 1.5);
-
-    // Pipes
-    for (const p of pipesRef.current) {
-      const botY = p.topH + PIPE_GAP;
-      // Top pipe body
-      ctx.fillStyle = "#1e3a5f";
-      ctx.fillRect(p.x, 0, PIPE_W, p.topH);
-      // Top pipe cap
-      ctx.fillStyle = "#2d5a8e";
-      ctx.fillRect(p.x - 4, p.topH - 14, PIPE_W + 8, 14);
-      // Bottom pipe cap
-      ctx.fillRect(p.x - 4, botY, PIPE_W + 8, 14);
-      // Bottom pipe body
-      ctx.fillStyle = "#1e3a5f";
-      ctx.fillRect(p.x, botY + 14, PIPE_W, PLAY_H - botY - 14);
-    }
-
-    // Ground
-    ctx.fillStyle = "#1e293b";
-    ctx.fillRect(0, PLAY_H, W, GROUND_H);
-    ctx.fillStyle = "#334155";
-    ctx.fillRect(0, PLAY_H, W, 2);
-
-    // Bird
-    const by = birdYRef.current;
-    ctx.beginPath();
-    ctx.arc(BIRD_X, by, BIRD_R, 0, Math.PI * 2);
-    ctx.fillStyle = "#fbbf24";
-    ctx.fill();
-    // Wing
-    ctx.beginPath();
-    ctx.ellipse(BIRD_X - 3, by + 4, 7, 4, -0.4, 0, Math.PI * 2);
-    ctx.fillStyle = "#f59e0b";
-    ctx.fill();
-    // Eye white
-    ctx.beginPath();
-    ctx.arc(BIRD_X + 5, by - 4, 3.5, 0, Math.PI * 2);
-    ctx.fillStyle = "white";
-    ctx.fill();
-    // Pupil
-    ctx.beginPath();
-    ctx.arc(BIRD_X + 6, by - 4, 1.8, 0, Math.PI * 2);
-    ctx.fillStyle = "#0f172a";
-    ctx.fill();
-
-    // Score while playing
-    if (statusRef.current === "running") {
-      ctx.textAlign = "center";
-      ctx.font = "bold 34px monospace";
-      ctx.fillStyle = "rgba(0,0,0,0.4)";
-      ctx.fillText(String(scoreRef.current), W / 2 + 1, 51);
-      ctx.fillStyle = "white";
-      ctx.fillText(String(scoreRef.current), W / 2, 50);
-    }
-  }, []);
-
-  // Register the rAF tick — runs once since draw is stable ([] deps)
-  useEffect(() => {
-    tickRef.current = (t: DOMHighResTimeStamp) => {
-      if (statusRef.current !== "running") return;
-
-      const dt = prevTRef.current
-        ? Math.min((t - prevTRef.current) / (1000 / 60), 3)
-        : 1;
-      prevTRef.current = t;
-
-      // Physics
-      birdVyRef.current += GRAVITY * dt;
-      birdYRef.current += birdVyRef.current * dt;
-
-      // Spawn pipes
-      if (t >= nextPipeRef.current) {
-        pipesRef.current.push({ x: W + 10, topH: randomTopH(), scored: false });
-        nextPipeRef.current = t + SPAWN_MS;
-      }
-
-      // Move & cull off-screen pipes
-      for (const p of pipesRef.current) p.x -= PIPE_SPEED * dt;
-      pipesRef.current = pipesRef.current.filter(p => p.x > -PIPE_W - 20);
-
-      // Scoring
-      for (const p of pipesRef.current) {
-        if (!p.scored && p.x + PIPE_W < BIRD_X - BIRD_R) {
-          p.scored = true;
-          scoreRef.current++;
-          setUiScore(scoreRef.current);
-        }
-      }
-
-      // Collision — slight pixel forgiveness so near-misses don't feel unfair
-      const hitGround = birdYRef.current + BIRD_R >= PLAY_H;
-      const hitCeiling = birdYRef.current - BIRD_R <= 0;
-      const hitPipe = pipesRef.current.some(
-        p =>
-          BIRD_X + BIRD_R - 3 > p.x &&
-          BIRD_X - BIRD_R + 3 < p.x + PIPE_W &&
-          (birdYRef.current - BIRD_R + 3 < p.topH ||
-            birdYRef.current + BIRD_R - 3 > p.topH + PIPE_GAP)
-      );
-
-      if (hitGround || hitCeiling || hitPipe) {
-        statusRef.current = "dead";
-        setHighScore(prev => Math.max(prev, scoreRef.current));
-        setStatus("dead");
-        setUiScore(scoreRef.current);
-        draw();
-        return;
-      }
-
-      draw();
-      rafRef.current = requestAnimationFrame(tickRef.current);
-    };
-  }, [draw]);
-
+  // Stable: called from canvas onClick, keyboard handler, and inside rAF loop
   const flap = useCallback(() => {
-    if (statusRef.current === "idle") {
+    const s = statusRef.current;
+    if (s === "idle") {
       statusRef.current = "running";
       birdVyRef.current = FLAP_V;
       nextPipeRef.current = performance.now() + SPAWN_MS;
-      prevTRef.current = 0;
-      scoreRef.current = 0;
+      prevTRef.current = 0; // reset dt so first frame isn't giant
+      scoreRef.current  = 0;
       setStatus("running");
       setUiScore(0);
       setSubmitted(false);
-      rafRef.current = requestAnimationFrame(tickRef.current);
-    } else if (statusRef.current === "running") {
+    } else if (s === "running") {
       birdVyRef.current = FLAP_V;
     }
   }, []);
 
   const restart = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    statusRef.current = "idle";
-    birdYRef.current = PLAY_H / 2;
-    birdVyRef.current = 0;
-    pipesRef.current = [];
-    scoreRef.current = 0;
-    prevTRef.current = 0;
+    statusRef.current   = "idle";
+    birdYRef.current    = PLAY_H / 2;
+    birdVyRef.current   = 0;
+    birdRotRef.current  = 0;
+    pipesRef.current    = [];
+    scoreRef.current    = 0;
+    particlesRef.current = [];
+    popupsRef.current   = [];
+    flashRef.current    = 0;
+    prevTRef.current    = 0;
     setStatus("idle");
     setUiScore(0);
     setSubmitted(false);
-    draw();
-  }, [draw]);
+    // rAF loop already running from mount — no need to restart it
+  }, []);
 
   const handleSubmit = useCallback(async () => {
     const result = await submitScore(scoreRef.current);
@@ -229,24 +181,272 @@ export default function FlappyBird({
     }
   }, []);
 
+  // ── Single unified rAF loop — runs from mount until unmount ──
   useEffect(() => {
-    draw();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code === "Space" || e.key === " ") {
-        e.preventDefault();
-        flap();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d")!;
+
+    function drawFrame() {
+      // Sky gradient
+      const sky = ctx.createLinearGradient(0, 0, 0, PLAY_H);
+      sky.addColorStop(0, "#06111f");
+      sky.addColorStop(1, "#0e2040");
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, W, PLAY_H);
+
+      // Stars
+      ctx.fillStyle = "rgba(255,255,255,0.38)";
+      for (const [sx, sy] of [
+        [28,58],[118,28],[198,78],[288,18],[348,52],
+        [78,148],[328,138],[158,108],[58,198],[308,88],
+        [238,168],[44,278],[368,218],[130,240],[260,60],
+      ] as [number,number][]) ctx.fillRect(sx, sy, 1.5, 1.5);
+
+      // Clouds (parallax)
+      for (const c of cloudsRef.current) drawCloud(ctx, c.x, c.y, c.s);
+
+      // Pipes
+      for (const p of pipesRef.current) {
+        const botY = p.topH + PIPE_GAP;
+
+        // Body
+        ctx.fillStyle = "#17355a";
+        ctx.fillRect(p.x, 0,        PIPE_W, p.topH);
+        ctx.fillRect(p.x, botY + 16, PIPE_W, PLAY_H - botY - 16);
+
+        // Highlight strip on body
+        ctx.fillStyle = "rgba(255,255,255,0.045)";
+        ctx.fillRect(p.x + 7, 0,        7, p.topH);
+        ctx.fillRect(p.x + 7, botY + 16, 7, PLAY_H - botY - 16);
+
+        // Cap top
+        ctx.fillStyle = "#2b5590";
+        ctx.fillRect(p.x - 5, p.topH - 16, PIPE_W + 10, 16);
+        // Cap top: left shadow / right highlight
+        ctx.fillStyle = "rgba(0,0,0,0.25)";
+        ctx.fillRect(p.x + PIPE_W + 5 - 4, p.topH - 16, 4, 16);
+        ctx.fillStyle = "rgba(255,255,255,0.07)";
+        ctx.fillRect(p.x - 5, p.topH - 16, 4, 16);
+
+        // Cap bottom
+        ctx.fillStyle = "#2b5590";
+        ctx.fillRect(p.x - 5, botY, PIPE_W + 10, 16);
+        ctx.fillStyle = "rgba(0,0,0,0.25)";
+        ctx.fillRect(p.x + PIPE_W + 5 - 4, botY, 4, 16);
+        ctx.fillStyle = "rgba(255,255,255,0.07)";
+        ctx.fillRect(p.x - 5, botY, 4, 16);
       }
+
+      // Ground base
+      ctx.fillStyle = "#0c1c30";
+      ctx.fillRect(0, PLAY_H, W, GROUND_H);
+      // Ground top edge highlight
+      ctx.fillStyle = "#1a3a5c";
+      ctx.fillRect(0, PLAY_H, W, 3);
+      // Ground scrolling vertical lines
+      ctx.fillStyle = "rgba(255,255,255,0.04)";
+      const gx = ((groundXRef.current % GROUND_TILE) + GROUND_TILE) % GROUND_TILE;
+      for (let tx = gx - GROUND_TILE; tx < W; tx += GROUND_TILE) {
+        ctx.fillRect(tx, PLAY_H + 8, 2, GROUND_H - 10);
+      }
+
+      // Particles
+      ctx.save();
+      for (const par of particlesRef.current) {
+        ctx.globalAlpha = Math.max(0, par.life);
+        ctx.fillStyle = par.color;
+        ctx.fillRect(par.x - 3, par.y - 3, 6, 6);
+      }
+      ctx.restore();
+
+      // Score popups (+1 floating text)
+      ctx.save();
+      ctx.font = "bold 15px monospace";
+      ctx.textAlign = "center";
+      for (const pop of popupsRef.current) {
+        ctx.globalAlpha = Math.max(0, pop.life);
+        ctx.fillStyle = "#fbbf24";
+        ctx.fillText("+1", pop.x, pop.y);
+      }
+      ctx.restore();
+
+      // Bird
+      const wing = WING_CYCLE[wingRef.current % 4];
+      drawBird(ctx, BIRD_X, birdYRef.current, birdRotRef.current, wing);
+
+      // In-game score
+      if (statusRef.current === "running") {
+        ctx.textAlign = "center";
+        ctx.font = "bold 34px monospace";
+        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        ctx.fillText(String(scoreRef.current), W / 2 + 1, 51);
+        ctx.fillStyle = "white";
+        ctx.fillText(String(scoreRef.current), W / 2, 50);
+      }
+
+      // Death flash
+      if (flashRef.current > 0) {
+        ctx.fillStyle = `rgba(255,255,255,${flashRef.current.toFixed(3)})`;
+        ctx.fillRect(0, 0, W, H);
+      }
+    }
+
+    function spawnParticles(x: number, y: number) {
+      const colors = ["#fbbf24", "#f97316", "#ef4444", "#fde68a", "#fb923c"];
+      for (let i = 0; i < 14; i++) {
+        const angle = (Math.PI * 2 * i) / 14 + Math.random() * 0.4;
+        const speed = 1.5 + Math.random() * 3.5;
+        particlesRef.current.push({
+          x, y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 1.2,
+          life: 1,
+          color: colors[Math.floor(Math.random() * colors.length)],
+        });
+      }
+    }
+
+    tickRef.current = (t: DOMHighResTimeStamp) => {
+      const s = statusRef.current;
+      const dt = prevTRef.current
+        ? Math.min((t - prevTRef.current) / (1000 / 60), 3)
+        : 1;
+      prevTRef.current = t;
+      frameRef.current++;
+      const f = frameRef.current;
+
+      // ── Idle ──────────────────────────────────────────────
+      if (s === "idle") {
+        birdYRef.current   = PLAY_H / 2 + Math.sin(f * 0.05) * 8;
+        birdRotRef.current = 0;
+        if (f % 20 === 0) wingRef.current = (wingRef.current + 1) % 4;
+        // slow cloud drift even on start screen
+        for (const c of cloudsRef.current) {
+          c.x -= 0.3 * dt;
+          if (c.x < -80) c.x = W + 60;
+        }
+      }
+
+      // ── Running ───────────────────────────────────────────
+      if (s === "running") {
+        // Physics
+        birdVyRef.current += GRAVITY * dt;
+        birdYRef.current  += birdVyRef.current * dt;
+
+        // Rotation: smooth lerp toward target angle
+        const vy = birdVyRef.current;
+        const targetRot = vy <= 0
+          ? -20 * DEG
+          : Math.min(70 * DEG, vy * 9 * DEG);
+        const lerpSpeed = vy <= 0 ? 0.2 : 0.08;
+        birdRotRef.current += (targetRot - birdRotRef.current) * lerpSpeed;
+
+        // Wing: cycle every 4 frames while playing
+        if (f % 4 === 0) wingRef.current = (wingRef.current + 1) % 4;
+
+        // Ground + cloud scroll
+        groundXRef.current -= PIPE_SPEED * dt;
+        for (const c of cloudsRef.current) {
+          c.x -= 0.3 * dt;
+          if (c.x < -80) c.x = W + 60;
+        }
+
+        // Pipe spawn
+        if (t >= nextPipeRef.current) {
+          pipesRef.current.push({ x: W + 10, topH: randomTopH(), scored: false });
+          nextPipeRef.current = t + SPAWN_MS;
+        }
+
+        // Move & cull
+        for (const p of pipesRef.current) p.x -= PIPE_SPEED * dt;
+        pipesRef.current = pipesRef.current.filter(p => p.x > -PIPE_W - 20);
+
+        // Score
+        for (const p of pipesRef.current) {
+          if (!p.scored && p.x + PIPE_W < BIRD_X - BIRD_R) {
+            p.scored = true;
+            scoreRef.current++;
+            setUiScore(scoreRef.current);
+            popupsRef.current.push({ x: BIRD_X + 28, y: birdYRef.current - 22, life: 1 });
+          }
+        }
+
+        // AABB collision (3px forgiveness so near-misses don't feel cheap)
+        const F = 3;
+        const bL = BIRD_X - BIRD_R + F, bR = BIRD_X + BIRD_R - F;
+        const bT = birdYRef.current - BIRD_R + F, bB = birdYRef.current + BIRD_R - F;
+        const hitCeiling = birdYRef.current - BIRD_R <= 0;
+        const hitGround  = birdYRef.current + BIRD_R >= PLAY_H;
+        const hitPipe = pipesRef.current.some(p => {
+          if (bR < p.x || bL > p.x + PIPE_W) return false;
+          return bT < p.topH || bB > p.topH + PIPE_GAP;
+        });
+
+        if (hitCeiling || hitGround || hitPipe) {
+          statusRef.current  = "dead";
+          flashRef.current   = 0.75;
+          birdRotRef.current = 70 * DEG;
+          wingRef.current    = 2; // freeze on down-flap
+          spawnParticles(BIRD_X, birdYRef.current);
+          setHighScore(prev => Math.max(prev, scoreRef.current));
+          setStatus("dead");
+          setUiScore(scoreRef.current);
+          setSubmitted(false);
+        }
+      }
+
+      // ── Dead ──────────────────────────────────────────────
+      if (s === "dead") {
+        // Flash fade
+        if (flashRef.current > 0)
+          flashRef.current = Math.max(0, flashRef.current - 0.05 * dt);
+        // Bird keeps falling until it hits the ground
+        if (birdYRef.current + BIRD_R < PLAY_H) {
+          birdVyRef.current += GRAVITY * dt;
+          birdYRef.current   = Math.min(
+            birdYRef.current + birdVyRef.current * dt,
+            PLAY_H - BIRD_R,
+          );
+        }
+      }
+
+      // ── Always: update particles + popups ─────────────────
+      for (const p of particlesRef.current) {
+        p.x   += p.vx * dt;
+        p.y   += p.vy * dt;
+        p.vy  += 0.22 * dt;
+        p.life -= 0.032 * dt;
+      }
+      particlesRef.current = particlesRef.current.filter(p => p.life > 0);
+
+      for (const p of popupsRef.current) {
+        p.y    -= 0.8 * dt;
+        p.life -= 0.028 * dt;
+      }
+      popupsRef.current = popupsRef.current.filter(p => p.life > 0);
+
+      drawFrame();
+      rafRef.current = requestAnimationFrame(tickRef.current);
+    };
+
+    // Start loop immediately so idle hover animation is visible on load
+    rafRef.current = requestAnimationFrame(tickRef.current);
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Space" || e.key === " ") { e.preventDefault(); flap(); }
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
       cancelAnimationFrame(rafRef.current);
     };
-  }, [draw, flap]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex flex-col lg:flex-row gap-8 items-start">
-      {/* Game canvas */}
+      {/* Canvas */}
       <div className="relative shrink-0" style={{ width: W, height: H }}>
         <canvas
           ref={canvasRef}
@@ -259,14 +459,14 @@ export default function FlappyBird({
         />
 
         {status === "idle" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/40 pointer-events-none">
-            <p className="text-white text-3xl font-bold mb-2">Flappy Bird</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/35 pointer-events-none">
+            <p className="text-white text-3xl font-bold mb-2 drop-shadow-lg">Flappy Bird</p>
             <p className="text-zinc-300 text-sm">Click or press Space to start</p>
           </div>
         )}
 
         {status === "dead" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/60 gap-2">
+          <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/55 gap-2">
             <p className="text-white text-2xl font-bold">Game Over</p>
             <p className="text-white text-5xl font-mono font-bold mt-1">{uiScore}</p>
             {highScore > 0 && (
@@ -315,13 +515,10 @@ export default function FlappyBird({
                   >
                     <td
                       className={`py-3 pl-4 w-10 font-mono text-xs ${
-                        i === 0
-                          ? "text-yellow-400"
-                          : i === 1
-                          ? "text-zinc-300"
-                          : i === 2
-                          ? "text-amber-700"
-                          : "text-zinc-600"
+                        i === 0 ? "text-yellow-400"
+                        : i === 1 ? "text-zinc-300"
+                        : i === 2 ? "text-amber-700"
+                        : "text-zinc-600"
                       }`}
                     >
                       #{i + 1}
