@@ -456,11 +456,14 @@ export default function FlappyBird({
     // Start loop immediately so idle hover animation is visible on load
     rafRef.current = requestAnimationFrame(tickRef.current);
 
+    const onPointer = (e: PointerEvent) => { e.preventDefault(); flap(); };
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "Space" || e.key === " ") { e.preventDefault(); flap(); }
     };
+    canvas.addEventListener("pointerdown", onPointer);
     window.addEventListener("keydown", onKey);
     return () => {
+      canvas.removeEventListener("pointerdown", onPointer);
       window.removeEventListener("keydown", onKey);
       cancelAnimationFrame(rafRef.current);
     };
@@ -475,7 +478,6 @@ export default function FlappyBird({
           ref={canvasRef}
           width={W}
           height={H}
-          onPointerDown={e => { e.preventDefault(); flap(); }}
           className="rounded-xl cursor-pointer select-none block"
           style={{ touchAction: "none" }}
         />
