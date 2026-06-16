@@ -1,13 +1,25 @@
 import { supabaseAdmin } from "./supabase";
-import { isAdmin } from "./players";
-import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, getGuildChannels, createTextChannel, deleteChannel } from "./discord-api";
+import { isModerator } from "./players";
+import { pushToAllApproved } from "./push";
+import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
   DE_WINNERS, DE_LOSERS, DE_GF,
   DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS,
+  HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF,
+  HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF,
   wbLoserTarget, lbWinnerTarget,
+  getRoundName, GROUP_STAGE_PREFIX, parseGroupNum,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
+
+async function roleMentionByName(
+  teamName: string,
+  roles: Array<{ id: string; name: string }>,
+): Promise<string> {
+  const role = roles.find((r) => r.name === teamName);
+  return role ? `<@&${role.id}>` : `**${teamName}**`;
+}
 
 type Option = { name: string; value: string | number; focused?: boolean };
 type Interaction = {
@@ -25,6 +37,12 @@ type Interaction = {
 
 const reply = (content: string) => ({ type: 4, data: { content } });
 
+// Pace Discord channel/category create & delete operations so bulk work (season
+// start, /openround, and especially match simulation) stays under Discord's
+// per-guild rate limits instead of firing them all at once.
+const DISCORD_PACE_MS = 350;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 
 function getUserId(i: Interaction) {
   return i.member?.user.id ?? i.user?.id ?? "";
@@ -34,9 +52,29 @@ function opt(i: Interaction, name: string): string | number {
   return i.data.options?.find((o) => o.name === name)?.value ?? "";
 }
 
-function adminGuard(userId: string) {
-  if (!isAdmin(userId)) return reply("❌ You don't have permission to use this command.");
+async function adminGuard(userId: string) {
+  if (!(await isModerator(userId))) return reply("❌ You don't have permission to use this command.");
   return null;
+}
+
+// Stores the Discord role ID for a staff tier so the bot can @mention/ping that
+// role — e.g. notifying moderators when a sub request is escalated.
+const STAFF_ROLE_ID_COLUMN = {
+  moderator: "moderator_role_id",
+  director: "director_role_id",
+  ceo: "ceo_role_id",
+} as const;
+
+async function setStaffRoleId(userId: string, roleId: string, tier: "moderator" | "director" | "ceo") {
+  const denied = await adminGuard(userId);
+  if (denied) return denied;
+  if (!roleId) return reply("❌ You must specify a role.");
+  const { error } = await supabaseAdmin.from("league_settings")
+    .update({ [STAFF_ROLE_ID_COLUMN[tier]]: roleId, updated_at: new Date().toISOString() })
+    .not("id", "is", null);
+  if (error) return reply(`❌ Failed to save: ${error.message}`);
+  const title = tier === "ceo" ? "CEO" : tier === "director" ? "Director" : "Moderator";
+  return reply(`✅ ${title} role set to <@&${roleId}>. The bot will use it for staff pings.`);
 }
 
 // Returns a Unix timestamp (seconds) for the next occurrence of targetDay at hour:minute PT.
@@ -62,21 +100,7 @@ type ChannelResult = { created: true } | { created: false; skipped?: true; error
 
 const BEST_OF_DEFAULTS: Record<string, number> = { standard: 3, quarterfinals: 3, semifinals: 3, finals: 3 };
 
-async function buildTeamMmrByName(): Promise<Record<string, number>> {
-  const [{ data: teams }, { data: players }] = await Promise.all([
-    supabaseAdmin.from("teams").select("id, name"),
-    supabaseAdmin.from("players").select("team_id, peak_2v2, peak_3v3").not("team_id", "is", null),
-  ]);
-  const mmr: Record<string, number> = {};
-  teams?.forEach(t => {
-    const roster = players?.filter(p => p.team_id === t.id) ?? [];
-    const sum = roster.reduce((s, p) => s + Math.max(Number(p.peak_2v2) || 0, Number(p.peak_3v3) || 0), 0);
-    mmr[t.name] = roster.length ? sum / roster.length : 0;
-  });
-  return mmr;
-}
-
-function getTier(round: number, totalRounds: number): string {
+export function getTier(round: number, totalRounds: number): string {
   const fromFinal = totalRounds - round;
   if (fromFinal === 0) return "finals";
   if (fromFinal === 1) return "semifinals";
@@ -84,8 +108,31 @@ function getTier(round: number, totalRounds: number): string {
   return "standard";
 }
 
+export function validateSeriesScore(home: number, away: number, bestOf: number): string | null {
+  const winsNeeded = Math.ceil(bestOf / 2);
+  if (Math.max(home, away) !== winsNeeded)
+    return `Invalid BO${bestOf} score — the winning team must have exactly ${winsNeeded} wins.`;
+  return null;
+}
+
+export async function getBestOfForMatch(matchId: string): Promise<number> {
+  const [{ data: match }, { data: settings }] = await Promise.all([
+    supabaseAdmin.from("matches").select("stage, round").eq("id", matchId).single(),
+    supabaseAdmin.from("league_settings").select("season_format").single(),
+  ]);
+  const format = settings?.season_format as { roundBestOf?: Record<string, number>; best_of?: number } | null;
+  const roundBestOf = format?.roundBestOf ?? {};
+  if (!match?.stage) return format?.best_of ?? 3;
+  if (match.stage.startsWith("hybrid")) return 7; // hybrid bracket is always BO7
+  const { data: stageRows } = await supabaseAdmin
+    .from("matches").select("round").eq("stage", match.stage);
+  const maxRound = Math.max(...(stageRows ?? []).map((m: { round: number }) => m.round), match.round);
+  const tier = getTier(match.round, maxRound);
+  return roundBestOf[tier] ?? BEST_OF_DEFAULTS[tier] ?? format?.best_of ?? 3;
+}
+
 type MatchChannelContext = {
-  categoryId: string;
+  categoryCache: Map<string, string>; // label → discord_category_id
   deadlineDay: number;
   playDay: number;
   playHour: number;
@@ -94,8 +141,206 @@ type MatchChannelContext = {
   guildRoles: Array<{ id: string; name: string }>;
   roundBestOf: Record<string, number>;
   maxRoundByStage: Record<string, number>;
-  teamMmrByName: Record<string, number>;
 };
+
+// ─── Dynamic category management ──────────────────────────────────────────────
+
+// Compute the Discord category label and Swiss bucket string for a match.
+function computeCategoryInfo(
+  stage: string,
+  round: number,
+  maxRoundByStage: Record<string, number>,
+  swissWins = 0,
+  swissLosses = 0,
+): { label: string; bucket: string | null; categoryRound: number | null } {
+  // Group stage — one category per group per round (created week by week)
+  if (stage.startsWith(GROUP_STAGE_PREFIX)) {
+    const g = parseGroupNum(stage) ?? stage.replace(GROUP_STAGE_PREFIX, "");
+    return { label: `Group ${g} - Round ${round}`, bucket: null, categoryRound: round };
+  }
+
+  // Swiss — one category per win-loss bucket per round
+  if (stage === "swiss") {
+    const bucket = `${swissWins}-${swissLosses}`;
+    return { label: `Swiss ${bucket}`, bucket, categoryRound: round };
+  }
+
+  // Single elimination
+  if (stage === "single_elimination") {
+    const totalRounds = maxRoundByStage[stage] ?? round;
+    const name = getRoundName(totalRounds, round);
+    return { label: name, bucket: null, categoryRound: round };
+  }
+
+  // DE Winners
+  if (stage === DE_WINNERS) {
+    const totalRounds = maxRoundByStage[stage] ?? round;
+    const name = getRoundName(totalRounds, round);
+    return { label: `Winners ${name}`, bucket: null, categoryRound: round };
+  }
+
+  // DE Losers
+  if (stage === DE_LOSERS) {
+    const totalRounds = maxRoundByStage[stage] ?? round;
+    const fromEnd = totalRounds - round;
+    let name: string;
+    if (fromEnd === 0)      name = "Losers Finals";
+    else if (fromEnd === 1) name = "Losers Semifinals";
+    else if (fromEnd === 2) name = "Losers Quarterfinals";
+    else                    name = `Losers Round ${round}`;
+    return { label: name, bucket: null, categoryRound: round };
+  }
+
+  // DE Grand Final
+  if (stage === DE_GF) {
+    return { label: "Grand Final", bucket: null, categoryRound: null };
+  }
+
+  // DE Qualifier Winners
+  if (stage === DE_QUALIFIER_WINNERS) {
+    const totalRounds = maxRoundByStage[stage] ?? round;
+    const name = getRoundName(totalRounds, round);
+    return { label: `Qualifier Winners ${name}`, bucket: null, categoryRound: round };
+  }
+
+  // DE Qualifier Losers
+  if (stage === DE_QUALIFIER_LOSERS) {
+    const totalRounds = maxRoundByStage[stage] ?? round;
+    const fromEnd = totalRounds - round;
+    let name: string;
+    if (fromEnd === 0)      name = "Qualifier Losers Finals";
+    else if (fromEnd === 1) name = "Qualifier Losers Semifinals";
+    else                    name = `Qualifier Losers Round ${round}`;
+    return { label: name, bucket: null, categoryRound: round };
+  }
+
+  // SE Qualifier
+  return { label: `SE Qualifier Round ${round}`, bucket: null, categoryRound: round };
+}
+
+// Get the Swiss record (wins, losses) for a team in completed Swiss matches before a given round.
+async function getSwissRecord(teamId: string, beforeRound: number): Promise<{ wins: number; losses: number }> {
+  const { data } = await supabaseAdmin
+    .from("matches")
+    .select("home_team_id, home_score, away_score")
+    .eq("stage", "swiss")
+    .eq("status", "completed")
+    .lt("round", beforeRound)
+    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
+  let wins = 0, losses = 0;
+  for (const m of data ?? []) {
+    const isHome = m.home_team_id === teamId;
+    const myScore = isHome ? m.home_score : m.away_score;
+    const theirScore = isHome ? m.away_score : m.home_score;
+    if ((myScore ?? 0) > (theirScore ?? 0)) wins++; else losses++;
+  }
+  return { wins, losses };
+}
+
+// Look up or create a Discord category, storing it in the DB for lifecycle tracking.
+// Uses categoryCache (in MatchChannelContext) to avoid redundant API calls during bulk creation.
+async function getOrCreateStageCategory(
+  label: string,
+  stage: string,
+  categoryRound: number | null,
+  bucket: string | null,
+  categoryCache: Map<string, string>,
+): Promise<string | null> {
+  // Check in-memory cache first
+  const cached = categoryCache.get(label);
+  if (cached) return cached;
+
+  // Check DB
+  let q = supabaseAdmin
+    .from("match_discord_categories")
+    .select("discord_category_id")
+    .eq("stage", stage);
+  if (categoryRound !== null) q = q.eq("round", categoryRound); else q = q.is("round", null);
+  if (bucket !== null) q = q.eq("bucket", bucket); else q = q.is("bucket", null);
+  const { data: existing } = await q.maybeSingle();
+  if (existing?.discord_category_id) {
+    categoryCache.set(label, existing.discord_category_id);
+    return existing.discord_category_id;
+  }
+
+  // Create via Discord API
+  const result = await createCategory(label);
+  if (!result.id) {
+    console.error("[getOrCreateStageCategory]", result.error);
+    return null;
+  }
+
+  // Save to DB
+  await supabaseAdmin.from("match_discord_categories").insert({
+    discord_category_id: result.id,
+    label,
+    stage,
+    round: categoryRound,
+    bucket,
+  });
+
+  categoryCache.set(label, result.id);
+  return result.id;
+}
+
+// After a match completes, check if ALL matches in its stage+round are done.
+// If so, delete all channels in every Discord category for that round, then delete the categories.
+export async function cleanupStageCategoryIfComplete(stage: string, round: number): Promise<void> {
+  const { count } = await supabaseAdmin
+    .from("matches")
+    .select("id", { count: "exact", head: true })
+    .eq("stage", stage)
+    .eq("round", round)
+    .neq("status", "completed");
+  if (count !== 0) return;
+
+  const { data: cats } = await supabaseAdmin
+    .from("match_discord_categories")
+    .select("id, discord_category_id")
+    .eq("stage", stage)
+    .eq("round", round);
+  if (!cats?.length) return;
+
+  const catDiscordIds = new Set(cats.map(c => c.discord_category_id));
+  const allChannels = await getGuildChannels();
+  const toDelete = allChannels.filter(c => c.parent_id && catDiscordIds.has(c.parent_id));
+
+  // Delete all channels inside these categories, then the categories themselves —
+  // sequentially and paced to avoid Discord rate limits during bulk simulation.
+  let channelFailures = 0;
+  for (const c of toDelete) {
+    const ok = await deleteChannel(c.id);
+    if (!ok) channelFailures++;
+    await sleep(DISCORD_PACE_MS);
+  }
+  if (channelFailures > 0)
+    console.error(`[cleanupStageCategoryIfComplete] stage=${stage} round=${round}: ${channelFailures}/${toDelete.length} channel deletions failed`);
+  for (const id of catDiscordIds) {
+    await deleteChannel(id);
+    await sleep(DISCORD_PACE_MS);
+  }
+
+  // Remove from DB
+  await supabaseAdmin.from("match_discord_categories").delete().in("id", cats.map(c => c.id));
+}
+
+// Deletes ALL dynamically-created match categories and their channels. Used on season reset.
+export async function deleteAllMatchCategories(): Promise<number> {
+  const { data: cats } = await supabaseAdmin
+    .from("match_discord_categories")
+    .select("id, discord_category_id");
+  if (!cats?.length) return 0;
+
+  const catDiscordIds = new Set(cats.map(c => c.discord_category_id));
+  const allChannels = await getGuildChannels();
+  const toDelete = allChannels.filter(c => c.parent_id && catDiscordIds.has(c.parent_id));
+
+  await Promise.all(toDelete.map(c => deleteChannel(c.id)));
+  await Promise.all([...catDiscordIds].map(id => deleteChannel(id)));
+  await supabaseAdmin.from("match_discord_categories").delete().not("id", "is", null);
+
+  return cats.length;
+}
 
 // Creates a private Discord channel for a match and posts the welcome message.
 // Pass a pre-fetched ctx to avoid redundant API calls when creating multiple channels.
@@ -104,7 +349,7 @@ export async function createMatchChannel(
   awayTeamName: string,
   weekNum: number,
   ctx?: MatchChannelContext,
-  matchInfo?: { round: number; stage: string },
+  matchInfo?: { round: number; stage: string; homeTeamId?: string; awayTeamId?: string; matchId?: string },
 ): Promise<ChannelResult> {
   let resolvedCtx: MatchChannelContext;
 
@@ -113,23 +358,20 @@ export async function createMatchChannel(
   } else {
     const { data: settings } = await supabaseAdmin
       .from("league_settings")
-      .select("match_category_id, match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format")
+      .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format")
       .single();
-    const categoryId: string | null = settings?.match_category_id ?? null;
-    if (!categoryId) return { created: false, error: "No match category set — run `/setmatchcategory` first." };
     const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
-    const [existingChannels, guildRoles, allMatches, teamMmrByName] = await Promise.all([
+    const [existingChannels, guildRoles, allMatches] = await Promise.all([
       getGuildChannels(),
       getGuildRoles(),
       supabaseAdmin.from("matches").select("stage, round").then(r => r.data ?? []),
-      buildTeamMmrByName(),
     ]);
     const maxRoundByStage: Record<string, number> = {};
     allMatches.forEach(m => {
       maxRoundByStage[m.stage] = Math.max(maxRoundByStage[m.stage] ?? 0, m.round);
     });
     resolvedCtx = {
-      categoryId,
+      categoryCache: new Map(),
       deadlineDay: settings?.match_deadline_day ?? 2,
       playDay:     settings?.match_play_day   ?? 0,
       playHour:    settings?.match_play_hour  ?? 19,
@@ -138,16 +380,30 @@ export async function createMatchChannel(
       guildRoles,
       roundBestOf: format?.roundBestOf ?? {},
       maxRoundByStage,
-      teamMmrByName,
     };
   }
 
-  const { categoryId, deadlineDay, playDay, playHour, rulesChannelId, existingChannels, guildRoles, roundBestOf, maxRoundByStage, teamMmrByName } = resolvedCtx;
+  const { categoryCache, deadlineDay, playDay, playHour, rulesChannelId, existingChannels, guildRoles, roundBestOf, maxRoundByStage } = resolvedCtx;
+
+  // Determine which Discord category this match belongs to
+  let categoryId: string | null = null;
+  if (matchInfo) {
+    let swissWins = 0, swissLosses = 0;
+    if (matchInfo.stage === "swiss" && matchInfo.homeTeamId) {
+      const rec = await getSwissRecord(matchInfo.homeTeamId, matchInfo.round);
+      swissWins = rec.wins;
+      swissLosses = rec.losses;
+    }
+    const { label, bucket, categoryRound } = computeCategoryInfo(
+      matchInfo.stage, matchInfo.round, maxRoundByStage, swissWins, swissLosses
+    );
+    categoryId = await getOrCreateStageCategory(label, matchInfo.stage, categoryRound, bucket, categoryCache);
+  }
 
   const channelName = `${homeTeamName}-vs-${awayTeamName}`
     .toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 100);
 
-  if (existingChannels.some(c => c.name === channelName && c.parent_id === categoryId)) {
+  if (existingChannels.some(c => c.name === channelName && (categoryId ? c.parent_id === categoryId : true))) {
     return { created: false, skipped: true };
   }
 
@@ -156,7 +412,7 @@ export async function createMatchChannel(
   let awayRole = guildRoles.find(r => r.name === awayTeamName);
   if (!homeRole || !awayRole) {
     const needed = [homeTeamName, awayTeamName].filter(n => !guildRoles.find(r => r.name === n));
-    const newRoles = await ensureRoles(needed);
+    await ensureRoles(needed);
     const refreshed = await getGuildRoles();
     homeRole = refreshed.find(r => r.name === homeTeamName);
     awayRole = refreshed.find(r => r.name === awayTeamName);
@@ -166,26 +422,30 @@ export async function createMatchChannel(
   const result = await createTextChannel(channelName, categoryId, allowedRoleIds);
   if (!result.id) return { created: false, error: result.error };
 
+  // Record channel ID on the match for targeted cleanup
+  if (matchInfo?.matchId) {
+    await supabaseAdmin.from("matches")
+      .update({ discord_channel_id: result.id })
+      .eq("id", matchInfo.matchId);
+  }
+
   const deadlineTs = nextWeekdayTimestamp(deadlineDay, 23, 59);
   const playTs     = nextWeekdayTimestamp(playDay, playHour, 0);
 
-  // Determine home/away by MMR (higher MMR = home; equal = random)
-  const mmrA = teamMmrByName[homeTeamName] ?? 0;
-  const mmrB = teamMmrByName[awayTeamName] ?? 0;
-  const aIsHome = mmrA > mmrB ? true : mmrA < mmrB ? false : Math.random() >= 0.5;
-  const [trueHome, trueAway] = aIsHome ? [homeTeamName, awayTeamName] : [awayTeamName, homeTeamName];
-  const trueHomeRole = aIsHome ? homeRole : awayRole;
-  const trueAwayRole = aIsHome ? awayRole : homeRole;
-  const homePing = trueHomeRole ? `<@&${trueHomeRole.id}>` : `**${trueHome}**`;
-  const awayPing = trueAwayRole ? `<@&${trueAwayRole.id}>` : `**${trueAway}**`;
+  // Home/Away match the match record (home_team_id = the seeded/scheduled home team).
+  const homePing = homeRole ? `<@&${homeRole.id}>` : `**${homeTeamName}**`;
+  const awayPing = awayRole ? `<@&${awayRole.id}>` : `**${awayTeamName}**`;
   const rulesRef = rulesChannelId ? `<#${rulesChannelId}>` : "the rulebook";
 
-  // Determine best-of from round tier
   let bestOf = 3;
   if (matchInfo) {
-    const totalRounds = maxRoundByStage[matchInfo.stage] ?? matchInfo.round;
-    const tier = getTier(matchInfo.round, totalRounds);
-    bestOf = roundBestOf[tier] ?? BEST_OF_DEFAULTS[tier] ?? 3;
+    if (matchInfo.stage.startsWith("hybrid")) {
+      bestOf = 7; // hybrid bracket is always BO7
+    } else {
+      const totalRounds = maxRoundByStage[matchInfo.stage] ?? matchInfo.round;
+      const tier = getTier(matchInfo.round, totalRounds);
+      bestOf = roundBestOf[tier] ?? BEST_OF_DEFAULTS[tier] ?? 3;
+    }
   }
 
   const message =
@@ -204,16 +464,39 @@ export async function createMatchChannel(
   return { created: true };
 }
 
-// Deletes all channels inside the configured match category. Returns count deleted.
+// Deletes all dynamic match categories (and their channels) created during the season.
+// Also handles channels tracked on individual match rows and the legacy match_category_id.
 export async function deleteMatchChannels(): Promise<number> {
+  let deleted = 0;
+
+  // Delete all dynamically-created stage categories (primary path)
+  deleted += await deleteAllMatchCategories();
+
+  // Fallback: also delete any channels stored directly on match rows — catches anything
+  // the category table missed (e.g. if a category DB write failed mid-creation).
+  const { data: matchRows } = await supabaseAdmin
+    .from("matches")
+    .select("discord_channel_id")
+    .not("discord_channel_id", "is", null);
+  const orphanIds = (matchRows ?? []).map(m => m.discord_channel_id as string).filter(Boolean);
+  if (orphanIds.length > 0) {
+    await Promise.all(orphanIds.map(id => deleteChannel(id).catch(() => {})));
+    await supabaseAdmin.from("matches").update({ discord_channel_id: null }).not("id", "is", null);
+    deleted += orphanIds.length;
+  }
+
+  // Legacy: also clear any channels from the legacy single match_category_id (backward compat)
   const { data: settings } = await supabaseAdmin
     .from("league_settings").select("match_category_id").single();
-  const categoryId = settings?.match_category_id;
-  if (!categoryId) return 0;
-  const channels = await getGuildChannels();
-  const matchChannels = channels.filter(c => c.parent_id === categoryId);
-  await Promise.all(matchChannels.map(c => deleteChannel(c.id)));
-  return matchChannels.length;
+  const legacyCategoryId = settings?.match_category_id;
+  if (legacyCategoryId) {
+    const channels = await getGuildChannels();
+    const legacyChannels = channels.filter(c => c.parent_id === legacyCategoryId);
+    await Promise.all(legacyChannels.map(c => deleteChannel(c.id)));
+    deleted += legacyChannels.length;
+  }
+
+  return deleted;
 }
 
 // Snake draft: picks go N, N-1, ..., 1, 1, 2, ..., N, ...
@@ -230,32 +513,10 @@ function rankValue(p: { peak_2v2: string; current_2v2: string; peak_3v3: string;
   ) / 4;
 }
 
-function confirmModal(customId: string, title: string, code: string) {
-  return {
-    type: 9,
-    data: {
-      title,
-      custom_id: customId,
-      components: [{
-        type: 1,
-        components: [{
-          type: 4,
-          custom_id: "code",
-          label: `Type "${code}" to confirm`,
-          style: 1,
-          min_length: code.length,
-          max_length: code.length,
-          placeholder: code,
-        }],
-      }],
-    },
-  };
-}
-
 async function getTeamByPosition(position: number, fields = "id"): Promise<Record<string, unknown> | null> {
   const { data } = await supabaseAdmin.from("teams")
     .select(fields).not("slot_number", "is", null).order("slot_number");
-  return (data ?? [])[position - 1] ?? null;
+  return ((data as unknown as Record<string, unknown>[]) ?? [])[position - 1] ?? null;
 }
 
 async function getCaptainPing(teamNum: number): Promise<string> {
@@ -271,16 +532,12 @@ async function getCaptainPing(teamNum: number): Promise<string> {
 
 export async function execStartDraft(): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
-  if (!settings?.num_teams)
-    return { ok: false, message: "Set the number of teams first with `/setnumteams`." };
   if (!settings?.draft_channel_id)
     return { ok: false, message: "Set a draft channel first with `/setdraftchannel`." };
   if (settings.draft_active)
     return { ok: false, message: "❌ A draft is already in progress. Use `/enddraft` first." };
   if (settings.season_active)
     return { ok: false, message: "❌ A season is currently active. End the season before starting a new draft." };
-
-  const numTeams: number = settings.num_teams;
 
   const { data: enteredAll } = await supabaseAdmin
     .from("players")
@@ -290,6 +547,10 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
     .order("draft_entered_at", { ascending: true, nullsFirst: false });
 
   if (!enteredAll?.length) return { ok: false, message: "No players have entered the draft." };
+
+  const numTeams: number = (settings?.num_teams as number | null) || Math.floor(enteredAll.length / 3);
+  if (numTeams < 2)
+    return { ok: false, message: "Not enough players to form teams (need at least 6 in the pool)." };
 
   // Apply cutoff: first numTeams × 3 by sign-up time
   const entered = enteredAll.slice(0, numTeams * 3);
@@ -336,9 +597,9 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
   await Promise.all([
     supabaseAdmin.from("players").update({ team_id: null, is_captain: false }).eq("status", "approved"),
     supabaseAdmin.from("matches").delete().not("id", "is", null),
-    supabaseAdmin.from("teams").update({ credits: 1000 }).in("id", teamsToUse.map(t => t.id)),
+    // credits column kept in DB but unused in snake draft
     ...teamsToUse.map(t =>
-      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: `Team ${t.num}` }).eq("id", t.id)
+      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: `Team ${t.num}`, logo_url: null }).eq("id", t.id)
     ),
     ...sorted.slice(0, numTeams).map((captain, i) =>
       supabaseAdmin.from("players")
@@ -350,8 +611,7 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
   const { data: activateRows, error: activateError } = await supabaseAdmin
     .from("league_settings").update({
       draft_active: true, draft_open: false, current_pick: 0,
-      draft_phase: "nomination",
-      nominated_player_id: null, current_bid: null, current_bid_team_id: null, current_bid_time: null,
+      draft_phase: "picking", num_teams: numTeams,
       pick_deadline: new Date(Date.now() + 45 * 1000).toISOString(),
       updated_at: new Date().toISOString(),
     }).not("id", "is", null).select("id, draft_active");
@@ -377,16 +637,7 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
     ...guildRoles.filter(r => r.name === "Drafted" || r.name === "Captain").map(r => r.id),
     ...teamsToUse.map(t => t.discord_role_id).filter(Boolean) as string[],
   ];
-  if (realDiscordIds.length > 0 && roleIdsToStrip.length > 0) {
-    const BATCH = 5;
-    for (let i = 0; i < realDiscordIds.length; i += BATCH) {
-      await Promise.all(
-        realDiscordIds.slice(i, i + BATCH).flatMap(uid =>
-          roleIdsToStrip.map(rid => removeRoleById(uid, rid))
-        )
-      );
-    }
-  }
+  await stripRoleIdsFromMembers(realDiscordIds, roleIdsToStrip);
 
   // Rename team roles and assign captain roles in parallel
   const roleMap = await ensureRoles(["Drafted", "Captain"]);
@@ -407,20 +658,229 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
 
   const round1 = Array.from({ length: numTeams }, (_, i) => numTeams - i).join(", ");
   const round2 = Array.from({ length: numTeams }, (_, i) => i + 1).join(", ");
-  const sizeNote = `3 per team · 1,000 credits each${undrafted > 0 ? ` · ${undrafted} not drafted` : ""}`;
+  const sizeNote = `3 per team${undrafted > 0 ? ` · ${undrafted} not drafted` : ""}`;
   const firstTeamNum = getTeamNumberForPick(0, numTeams);
   const firstCaptainPing = await getCaptainPing(firstTeamNum);
 
   const startMsg =
-    `🚀 **Auction Draft has started!**\n` +
+    `🚀 **Snake Draft has started!**\n` +
     `${numTeams} teams · ${sorted.length} entered · ${sizeNote}\n\n` +
     `**Captains (auto-assigned by Rank Value):**\n${captainLines.join("\n")}\n\n` +
-    `**Nomination order (snake):** ${round1}, ${round2}, …\n` +
-    `Max starting bid: **800 credits** · Use \`/budget\` to check credits\n\n` +
-    `⏭️ ${firstCaptainPing} (**Team ${firstTeamNum}**), you're on the clock! Use \`/nominate <player> <bid>\` *(45 sec)*`;
+    `**Pick order (snake):** ${round1}, ${round2}, …\n\n` +
+    `⏭️ ${firstCaptainPing} (**Team ${firstTeamNum}**), you're on the clock! Use \`/pick <player>\` *(45 sec)*`;
 
   await sendChannelMessage(settings.draft_channel_id, startMsg);
-  return { ok: true, message: `Auction draft started! Check <#${settings.draft_channel_id}>.` };
+  return { ok: true, message: `Snake draft started! Check <#${settings.draft_channel_id}>.` };
+}
+
+/**
+ * Auto-balance the draft pool into even teams by Rank Value (snake distribution),
+ * with no live draft. Mirrors execStartDraft's DB-then-Discord ordering.
+ */
+export async function execAutoBalanceTeams(): Promise<{ ok: boolean; message: string }> {
+  const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
+  if (settings.draft_active)
+    return { ok: false, message: "❌ A draft is in progress. End it before auto-balancing." };
+  if (settings.season_active)
+    return { ok: false, message: "❌ A season is active. End it before forming new teams." };
+
+  const { data: enteredAll } = await supabaseAdmin
+    .from("players")
+    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at")
+    .eq("status", "approved")
+    .eq("draft_entered", true)
+    .order("draft_entered_at", { ascending: true, nullsFirst: false });
+
+  if (!enteredAll?.length) return { ok: false, message: "No players have entered the pool." };
+
+  const numTeams: number = (settings?.num_teams as number | null) || Math.floor(enteredAll.length / 3);
+  if (numTeams < 2)
+    return { ok: false, message: "Not enough players to form teams (need at least 6 in the pool)." };
+
+  const entered = enteredAll.slice(0, numTeams * 3);
+  if (entered.length < numTeams * 3)
+    return { ok: false, message: `Need ${numTeams * 3} players to fill ${numTeams} teams (have ${entered.length}).` };
+
+  // Validate pre-created team slots + role IDs (same checks as the snake draft)
+  const { data: allPreTeams } = await supabaseAdmin
+    .from("teams").select("id, name, discord_role_id, slot_number").not("slot_number", "is", null).order("slot_number");
+  const numberedTeams = (allPreTeams ?? [])
+    .filter((t): t is typeof t & { slot_number: number } => typeof t.slot_number === "number")
+    .map(t => ({ ...t, num: t.slot_number }))
+    .sort((a, b) => a.num - b.num);
+  if (numberedTeams.length < numTeams)
+    return { ok: false, message: `Need ${numTeams} team slots but only ${numberedTeams.length} exist.` };
+
+  const teamsToUse = numberedTeams.slice(0, numTeams);
+  const missingRoleIds = teamsToUse.filter(t => !t.discord_role_id).map(t => `Team ${t.num}`);
+  if (missingRoleIds.length > 0)
+    return { ok: false, message: `Missing Discord role IDs for: ${missingRoleIds.join(", ")}.` };
+
+  const rvById = new Map<string, number>(entered.map(p => [p.id, rankValue(p)]));
+
+  // Random shuffle into groups, then 10000 greedy single-swap iterations.
+  // Each iteration proposes one swap between two random groups and keeps it
+  // only if it reduces the sum of squared team totals (equivalent to minimising
+  // variance of group means since the grand total is constant).
+  const shuffled = [...entered].sort(() => Math.random() - 0.5);
+  const teamPlayerIds: string[][] = Array.from({ length: numTeams }, (_, i) =>
+    shuffled.slice(i * 3, (i + 1) * 3).map(p => p.id)
+  );
+  const teamTotals = teamPlayerIds.map(ids => ids.reduce((s, id) => s + rvById.get(id)!, 0));
+
+  for (let iter = 0; iter < 10000; iter++) {
+    const gi = Math.floor(Math.random() * numTeams);
+    let gj = Math.floor(Math.random() * numTeams);
+    while (gj === gi) gj = Math.floor(Math.random() * numTeams);
+
+    const pi = Math.floor(Math.random() * 3);
+    const pj = Math.floor(Math.random() * 3);
+
+    const idA = teamPlayerIds[gi][pi];
+    const idB = teamPlayerIds[gj][pj];
+    const rvA = rvById.get(idA)!;
+    const rvB = rvById.get(idB)!;
+
+    const newTI = teamTotals[gi] - rvA + rvB;
+    const newTJ = teamTotals[gj] - rvB + rvA;
+
+    if (newTI * newTI + newTJ * newTJ < teamTotals[gi] ** 2 + teamTotals[gj] ** 2) {
+      teamPlayerIds[gi][pi] = idB;
+      teamPlayerIds[gj][pj] = idA;
+      teamTotals[gi] = newTI;
+      teamTotals[gj] = newTJ;
+    }
+  }
+
+  // Captain = highest-RV player per team (recomputed after swaps may have
+  // changed the ordering within each team's list).
+  const captainIds = teamPlayerIds
+    .filter(ids => ids.length > 2)
+    .map(ids => ids.reduce((best, id) => (rvById.get(id) ?? 0) > (rvById.get(best) ?? 0) ? id : best))
+    .filter(Boolean);
+
+  // ── Phase 1: DB writes ───────────────────────────────────────────────────
+  await supabaseAdmin.from("players").update({ in_active_draft: false }).eq("status", "approved");
+  await supabaseAdmin.from("players").update({ team_id: null, is_captain: false }).eq("status", "approved");
+  await supabaseAdmin.from("matches").delete().not("id", "is", null);
+
+  await Promise.all([
+    ...teamsToUse.map(t =>
+      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: `Team ${t.num}`, logo_url: null }).eq("id", t.id)
+    ),
+    ...teamsToUse.map((t, i) =>
+      teamPlayerIds[i].length
+        ? supabaseAdmin.from("players")
+            .update({ team_id: t.id, in_active_draft: true, updated_at: new Date().toISOString() })
+            .in("id", teamPlayerIds[i])
+        : Promise.resolve()
+    ),
+  ]);
+  if (captainIds.length)
+    await supabaseAdmin.from("players").update({ is_captain: true }).in("id", captainIds);
+
+  await supabaseAdmin.from("league_settings").update({
+    draft_open: false, draft_active: false, draft_phase: null,
+    num_teams: numTeams, updated_at: new Date().toISOString(),
+  }).not("id", "is", null);
+
+  // ── Phase 2: Discord roles (best-effort) ─────────────────────────────────
+  await deleteMatchChannels();
+  await execSyncRoles();
+
+  return { ok: true, message: `Auto-balanced ${entered.length} players into ${numTeams} teams.` };
+}
+
+/**
+ * Finalize team sign-ups: drop pending invites, disband teams under the minimum,
+ * keep the earliest-formed teams up to the limit, and map them onto the team-slot pool.
+ */
+export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message: string }> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings")
+    .select("active_tournament_id, num_teams, season_active")
+    .single();
+  if (settings?.season_active) return { ok: false, message: "❌ Season already active." };
+  const tid = settings?.active_tournament_id as string | null | undefined;
+  if (!tid) return { ok: false, message: "❌ No active tournament." };
+  const teamLimit: number = settings?.num_teams ?? 0;
+
+  const { data: signups } = await supabaseAdmin
+    .from("team_signups")
+    .select("id, name, creator_player_id, formed_at, created_at, team_signup_members(player_id, status)")
+    .eq("tournament_id", tid);
+
+  const signupIds = (signups ?? []).map((s) => s.id);
+  if (signupIds.length)
+    await supabaseAdmin.from("team_signup_members").delete().in("team_signup_id", signupIds).eq("status", "invited");
+
+  // Valid = 3+ accepted; ordered by when they first reached the minimum (then creation).
+  const valid = (signups ?? [])
+    .map((s) => {
+      const accepted = (s.team_signup_members as { player_id: string; status: string }[])
+        .filter((m) => m.status === "accepted");
+      return {
+        name: s.name,
+        creator: s.creator_player_id as string,
+        formed_at: s.formed_at as string | null,
+        created_at: s.created_at as string,
+        memberIds: accepted.map((m) => m.player_id),
+      };
+    })
+    .filter((t) => t.memberIds.length >= 3)
+    .sort((a, b) => {
+      const fa = a.formed_at ? new Date(a.formed_at).getTime() : Infinity;
+      const fb = b.formed_at ? new Date(b.formed_at).getTime() : Infinity;
+      if (fa !== fb) return fa - fb;
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+
+  const { data: allPreTeams } = await supabaseAdmin
+    .from("teams").select("id, discord_role_id, slot_number").not("slot_number", "is", null).order("slot_number");
+  const numberedTeams = (allPreTeams ?? [])
+    .filter((t): t is typeof t & { slot_number: number } => typeof t.slot_number === "number")
+    .sort((a, b) => a.slot_number - b.slot_number);
+
+  const capacity = teamLimit > 0 ? Math.min(teamLimit, numberedTeams.length) : numberedTeams.length;
+  const kept = valid.slice(0, capacity);
+  if (kept.length === 0) return { ok: false, message: "❌ No valid teams (each needs at least 3 players)." };
+
+  const teamsToUse = numberedTeams.slice(0, kept.length);
+
+  // ── DB writes ──
+  await supabaseAdmin.from("players").update({ team_id: null, is_captain: false, in_active_draft: false }).eq("status", "approved");
+  await supabaseAdmin.from("matches").delete().not("id", "is", null);
+  await Promise.all([
+    ...teamsToUse.map((t, i) =>
+      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: kept[i].name }).eq("id", t.id)
+    ),
+    ...teamsToUse.map((t, i) =>
+      supabaseAdmin.from("players")
+        .update({ team_id: t.id, in_active_draft: true, updated_at: new Date().toISOString() })
+        .in("id", kept[i].memberIds)
+    ),
+  ]);
+  await Promise.all(
+    teamsToUse.map((t, i) =>
+      supabaseAdmin.from("players").update({ is_captain: true }).eq("id", kept[i].creator)
+    )
+  );
+
+  await supabaseAdmin.from("league_settings")
+    .update({ num_teams: kept.length, draft_open: false, updated_at: new Date().toISOString() })
+    .not("id", "is", null);
+
+  // Sign-up records are no longer needed once rosters are committed.
+  await supabaseAdmin.from("team_signups").delete().eq("tournament_id", tid);
+
+  // ── Discord ──
+  await deleteMatchChannels();
+  await execSyncRoles();
+  const { data: renameTeams } = await supabaseAdmin
+    .from("teams").select("name, discord_role_id").not("discord_role_id", "is", null);
+  for (const t of renameTeams ?? []) await editRole(t.discord_role_id!, { name: t.name });
+
+  return { ok: true, message: `Finalized ${kept.length} team(s) from sign-ups.` };
 }
 
 export async function execEndDraft(): Promise<{ ok: boolean; message: string }> {
@@ -431,7 +891,6 @@ export async function execEndDraft(): Promise<{ ok: boolean; message: string }> 
   await Promise.all([
     supabaseAdmin.from("league_settings").update({
       draft_active: false, draft_phase: null,
-      nominated_player_id: null, current_bid: null, current_bid_team_id: null, current_bid_time: null,
       pick_deadline: null, updated_at: new Date().toISOString(),
     }).not("id", "is", null),
     supabaseAdmin.from("players").update({ in_active_draft: false }).eq("status", "approved"),
@@ -439,31 +898,24 @@ export async function execEndDraft(): Promise<{ ok: boolean; message: string }> 
   return { ok: true, message: "🔒 **Draft has ended.** Rosters are now locked." };
 }
 
-type AuctionSettings = {
-  num_teams: number; current_pick: number; draft_channel_id: string | null;
-  nominated_player_id: string; current_bid_team_id: string; current_bid: number;
-};
+type PickSettings = { num_teams: number; current_pick: number; draft_channel_id: string | null };
 
-async function concludeAuction(s: AuctionSettings): Promise<{ ok: boolean; message: string }> {
+async function completePick(s: PickSettings, teamId: string, playerId: string): Promise<{ ok: boolean; message: string }> {
   const totalPicks = s.num_teams * 2;
 
-  const [{ data: player }, { data: winnerTeam }] = await Promise.all([
-    supabaseAdmin.from("players").select("id, username, discord_id").eq("id", s.nominated_player_id).single(),
-    supabaseAdmin.from("teams").select("id, name, credits, discord_role_id").eq("id", s.current_bid_team_id).single(),
+  const [{ data: player }, { data: team }] = await Promise.all([
+    supabaseAdmin.from("players").select("id, username, discord_id").eq("id", playerId).single(),
+    supabaseAdmin.from("teams").select("id, name, discord_role_id").eq("id", teamId).single(),
   ]);
-  if (!player || !winnerTeam) return { ok: false, message: "❌ Could not find player or team." };
+  if (!player || !team) return { ok: false, message: "❌ Could not find player or team." };
 
-  const remainingCredits = (winnerTeam.credits ?? 0) - s.current_bid;
-  await Promise.all([
-    supabaseAdmin.from("players").update({ team_id: winnerTeam.id, updated_at: new Date().toISOString() }).eq("id", player.id),
-    supabaseAdmin.from("teams").update({ credits: remainingCredits }).eq("id", winnerTeam.id),
-  ]);
+  await supabaseAdmin.from("players").update({ team_id: team.id, updated_at: new Date().toISOString() }).eq("id", player.id);
 
   if (player.discord_id) {
     const roleMap = await ensureRoles(["Drafted"]);
     if (roleMap["Drafted"]) await addRoleById(player.discord_id, roleMap["Drafted"]);
-    if (winnerTeam.discord_role_id) await addRoleById(player.discord_id, winnerTeam.discord_role_id);
-    else await addRole(player.discord_id, winnerTeam.name);
+    if (team.discord_role_id) await addRoleById(player.discord_id, team.discord_role_id);
+    else await addRole(player.discord_id, team.name);
     await removeRole(player.discord_id, "EnteredDraft");
   }
 
@@ -471,8 +923,7 @@ async function concludeAuction(s: AuctionSettings): Promise<{ ok: boolean; messa
   const isDone = newPick >= totalPicks;
 
   await supabaseAdmin.from("league_settings").update({
-    draft_phase: isDone ? null : "nomination",
-    nominated_player_id: null, current_bid: null, current_bid_team_id: null, current_bid_time: null,
+    draft_phase: isDone ? null : "picking",
     current_pick: newPick,
     pick_deadline: isDone ? null : new Date(Date.now() + 45 * 1000).toISOString(),
     ...(isDone ? { draft_active: false } : {}),
@@ -480,105 +931,84 @@ async function concludeAuction(s: AuctionSettings): Promise<{ ok: boolean; messa
   }).not("id", "is", null);
 
   if (s.draft_channel_id) {
-    let msg =
-      `🏆 **${player.username}** → **${winnerTeam.name}** for **${s.current_bid}** credits! ` +
-      `(${winnerTeam.name}: **${remainingCredits}** credits remaining)`;
+    await sendChannelMessage(s.draft_channel_id,
+      `✅ **${team.name}** picks **${player.username}**!\n\n${"—".repeat(32)}`
+    );
     if (isDone) {
-      msg += "\n\n🏁 **Auction draft complete! Rosters are locked.**";
+      await sendChannelMessage(s.draft_channel_id, "🏁 **Snake draft complete! Rosters are locked.**");
     } else {
       const nextTeamNum = getTeamNumberForPick(newPick, s.num_teams);
       const nextPing = await getCaptainPing(nextTeamNum);
-      msg += `\n\n⏭️ ${nextPing} (**Team ${nextTeamNum}**), nominate next! Use \`/nominate <player> <bid>\` *(45 sec)*`;
+      await sendChannelMessage(s.draft_channel_id,
+        `⏭️ ${nextPing} (**Team ${nextTeamNum}**), you're on the clock! Use \`/pick <player>\` *(45 sec)*`
+      );
     }
-    await sendChannelMessage(s.draft_channel_id, msg);
   }
 
-  return { ok: true, message: isDone ? "🏁 Draft complete!" : `✅ **${player.username}** → **${winnerTeam.name}** for **${s.current_bid}** credits.` };
+  return { ok: true, message: isDone ? "🏁 Draft complete!" : `✅ **${player.username}** → **${team.name}**` };
 }
 
 export async function execAutoPick(): Promise<{ done: boolean }> {
   const { data: settings, error: settingsErr } = await supabaseAdmin.from("league_settings").select("*").single();
   if (settingsErr) { console.error("[execAutoPick] settings read failed:", settingsErr.message); return { done: true }; }
-  if (!settings?.draft_active) { console.log("[execAutoPick] draft not active"); return { done: true }; }
+  if (!settings?.draft_active || settings.draft_phase !== "picking") return { done: true };
 
   const deadline: Date | null = settings.pick_deadline ? new Date(settings.pick_deadline) : null;
-  if (!deadline) { console.log("[execAutoPick] no pick_deadline"); return { done: true }; }
-  if (new Date() < deadline) { console.log("[execAutoPick] deadline not yet reached, msLeft:", deadline.getTime() - Date.now()); return { done: true }; }
+  if (!deadline || new Date() < deadline) return { done: true };
+
+  // Atomically claim this autopick by clearing the deadline only if it still matches.
+  // If two callers race here (cron + client timer), only one will update a row; the
+  // other gets 0 rows back and exits early, preventing duplicate messages.
+  const { data: claimed } = await supabaseAdmin
+    .from("league_settings")
+    .update({ pick_deadline: null, updated_at: new Date().toISOString() })
+    .eq("pick_deadline", settings.pick_deadline)
+    .select("id");
+  if (!claimed?.length) return { done: true };
 
   const numTeams: number = settings.num_teams;
   const currentPick: number = settings.current_pick ?? 0;
   const channelId: string | null = settings.draft_channel_id ?? null;
   const totalPicks = numTeams * 2;
 
-  console.log(`[execAutoPick] phase=${settings.draft_phase} pick=${currentPick}/${totalPicks}`);
-
-  // Nomination timeout → auto-nominate highest RV player at 1 credit
-  if (settings.draft_phase === "nomination") {
-    if (currentPick >= totalPicks) {
-      await supabaseAdmin.from("league_settings").update({
-        draft_active: false, draft_phase: null, pick_deadline: null, updated_at: new Date().toISOString(),
-      }).not("id", "is", null);
-      return { done: true };
-    }
-
-    const currentTeamNum = getTeamNumberForPick(currentPick, numTeams);
-    // Select only id — credits not needed for auto-nomination and may not be in schema cache
-    const teamRow = await getTeamByPosition(currentTeamNum, "id, name") as { id: string; name: string } | null;
-    if (!teamRow) {
-      console.error(`[execAutoPick] No team at position ${currentTeamNum} (pick ${currentPick}/${totalPicks}, numTeams=${numTeams})`);
-      return { done: true };
-    }
-    console.log(`[execAutoPick] team position ${currentTeamNum} → id=${teamRow.id} name="${teamRow.name}"`);
-
-    const { data: available, error: avErr } = await supabaseAdmin.from("players")
-      .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
-      .eq("status", "approved").eq("in_active_draft", true).is("team_id", null);
-    if (avErr) { console.error("[execAutoPick] available players query failed:", avErr.message); return { done: true }; }
-
-    if (!available?.length) {
-      console.log("[execAutoPick] no available players — ending draft");
-      await supabaseAdmin.from("league_settings").update({
-        draft_active: false, draft_phase: null, pick_deadline: null, updated_at: new Date().toISOString(),
-      }).not("id", "is", null);
-      return { done: true };
-    }
-
-    const best = [...available].sort((a, b) => rankValue(b) - rankValue(a))[0];
-    console.log(`[execAutoPick] auto-nominating "${best.username}" for team "${teamRow.name}"`);
-    const { error: updateErr } = await supabaseAdmin.from("league_settings").update({
-      draft_phase: "bidding",
-      nominated_player_id: best.id,
-      current_bid: 1,
-      current_bid_team_id: teamRow.id,
-      current_bid_time: new Date().toISOString(),
-      pick_deadline: new Date(Date.now() + 45 * 1000).toISOString(),
-      updated_at: new Date().toISOString(),
+  if (currentPick >= totalPicks) {
+    await supabaseAdmin.from("league_settings").update({
+      draft_active: false, draft_phase: null, pick_deadline: null, updated_at: new Date().toISOString(),
     }).not("id", "is", null);
-    if (updateErr) { console.error("[execAutoPick] league_settings update failed:", updateErr.message); return { done: true }; }
-
-    if (channelId) {
-      await sendChannelMessage(channelId,
-        `⏰ **Team ${currentTeamNum}** ran out of time! **${best.username}** auto-nominated for **1** credit.\n` +
-        `Use \`/bid <amount>\` to bid higher. *(45 sec)*`
-      );
-    }
-    return { done: false };
-  }
-
-  // Bidding phase: deadline expired → auto-close, highest bidder wins.
-  if (!settings.nominated_player_id || !settings.current_bid_team_id || !settings.current_bid) {
-    console.error("[execAutoPick] bidding phase expired but missing auction data");
     return { done: true };
   }
-  const closeResult = await concludeAuction({
-    num_teams: numTeams,
-    current_pick: currentPick,
-    draft_channel_id: channelId,
-    nominated_player_id: settings.nominated_player_id as string,
-    current_bid_team_id: settings.current_bid_team_id as string,
-    current_bid: settings.current_bid as number,
-  });
-  console.log("[execAutoPick] bidding auto-closed:", closeResult.message);
+
+  const currentTeamNum = getTeamNumberForPick(currentPick, numTeams);
+  const teamRow = await getTeamByPosition(currentTeamNum, "id, name") as { id: string; name: string } | null;
+  if (!teamRow) {
+    console.error(`[execAutoPick] No team at position ${currentTeamNum}`);
+    return { done: true };
+  }
+
+  const { data: available, error: avErr } = await supabaseAdmin.from("players")
+    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .eq("status", "approved").eq("in_active_draft", true).is("team_id", null);
+  if (avErr) { console.error("[execAutoPick] available players query failed:", avErr.message); return { done: true }; }
+
+  if (!available?.length) {
+    await supabaseAdmin.from("league_settings").update({
+      draft_active: false, draft_phase: null, pick_deadline: null, updated_at: new Date().toISOString(),
+    }).not("id", "is", null);
+    return { done: true };
+  }
+
+  const best = [...available].sort((a, b) => rankValue(b) - rankValue(a))[0];
+  if (channelId) {
+    await sendChannelMessage(channelId,
+      `⏰ **Team ${currentTeamNum}** ran out of time! Auto-picking **${best.username}**…`
+    );
+  }
+
+  const result = await completePick(
+    { num_teams: numTeams, current_pick: currentPick, draft_channel_id: channelId },
+    teamRow.id, best.id,
+  );
+  console.log("[execAutoPick] auto-pick:", result.message);
   return { done: false };
 }
 
@@ -591,6 +1021,55 @@ const PRESET_MIN_TEAMS: Record<string, number> = {
   de_swiss_single_elimination: 32,
 };
 const GROUP_PRESETS = new Set(["group_single_elimination", "group_swiss_single_elimination"]);
+
+/**
+ * Default-schedule all scheduled matches off the active tournament's season start.
+ * "Gap between rounds": every match in round R starts at season_start + (R-1) × gap,
+ * where gap = match_spacing_min override, else round(bestOf × 7 / 5) × 5 minutes.
+ * No-op if there's no active tournament or no season_start_at (teams propose times).
+ */
+async function scheduleMatchTimes(): Promise<void> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings")
+    .select("active_tournament_id, season_format")
+    .single();
+  const tid = settings?.active_tournament_id as string | null | undefined;
+  if (!tid) return;
+
+  const { data: t } = await supabaseAdmin
+    .from("tournaments")
+    .select("season_start_at, match_spacing_min, season_format, stage_starts")
+    .eq("id", tid)
+    .single();
+
+  const start = t?.season_start_at ? new Date(t.season_start_at) : null;
+  if (!start || isNaN(start.getTime())) return;
+
+  const format = (t?.season_format ?? settings?.season_format) as
+    | { roundBestOf?: Record<string, number>; best_of?: number }
+    | null;
+  const bestOf = format?.roundBestOf?.standard ?? format?.roundBestOf?.finals ?? format?.best_of ?? 5;
+  const gapMin = t?.match_spacing_min ?? Math.ceil((8 * bestOf) / 5) * 5;
+  const stageStarts = (t?.stage_starts ?? null) as Record<string, string> | null;
+
+  const { data: matches } = await supabaseAdmin
+    .from("matches")
+    .select("id, round, stage")
+    .eq("status", "scheduled");
+  if (!matches?.length) return;
+
+  await Promise.all(
+    matches.map((m) => {
+      const round = Math.max(1, (m.round as number) ?? 1);
+      const stageKey = (m.stage as string | null) ?? null;
+      const stageBase = stageKey && stageStarts?.[stageKey]
+        ? new Date(stageStarts[stageKey])
+        : start;
+      const when = new Date(stageBase.getTime() + (round - 1) * gapMin * 60_000).toISOString();
+      return supabaseAdmin.from("matches").update({ scheduled_at: when }).eq("id", m.id);
+    })
+  );
+}
 
 export async function execStartSeason(): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin
@@ -632,6 +1111,9 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
     return { ok: false, message: `❌ Season start failed: bracket generation error — ${bracketResult.error}` };
   }
 
+  // Default-schedule match times off the tournament's season start (admin can override per-match).
+  await scheduleMatchTimes();
+
   // Rename each Discord role to match the team's current name (set by captains pre-season).
   const { data: teamsToRename } = await supabaseAdmin
     .from("teams").select("name, discord_role_id").not("discord_role_id", "is", null);
@@ -642,29 +1124,10 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   // Lock all team info now that the season is live; admins can unlock individual teams later.
   await supabaseAdmin.from("teams").update({ is_locked: true }).not("id", "is", null);
 
-  // Create match channels for round 1 matches that already have both teams assigned.
-  const { data: r1Matches } = await supabaseAdmin
-    .from("matches")
-    .select("home_team_id, away_team_id, round, stage")
-    .eq("status", "scheduled")
-    .eq("round", 1)
-    .not("home_team_id", "is", null)
-    .not("away_team_id", "is", null);
-
-  if (r1Matches?.length) {
-    const teamIds = [...new Set(r1Matches.flatMap(m => [m.home_team_id!, m.away_team_id!]))];
-    const { data: teamsData } = await supabaseAdmin.from("teams").select("id, name").in("id", teamIds);
-    const teamNameById: Record<string, string> = {};
-    teamsData?.forEach(t => { teamNameById[t.id] = t.name; });
-    for (const m of r1Matches) {
-      const h = teamNameById[m.home_team_id!];
-      const a = teamNameById[m.away_team_id!];
-      if (h && a) {
-        const r = await createMatchChannel(h, a, m.round, undefined, { round: m.round, stage: m.stage });
-        if (!r.created && r.error) console.error("[createMatchChannel]", r.error);
-      }
-    }
-  }
+  // Open channels for the opening round. openReadyMatchChannels only opens matches
+  // whose teams have no earlier unplayed round, so at season start that's round 1;
+  // later rounds open automatically as matches are reported (no /openround needed).
+  await openReadyMatchChannels();
 
   return { ok: true, message: `🏆 **Season has officially started!** ${numTeams} teams · ${format.preset.replace(/_/g, " ")} · Bracket generated.` };
 }
@@ -683,50 +1146,6 @@ async function totalUsers() {
   return reply(`👥 **Total registered users:** ${count ?? 0} (all statuses)`);
 }
 
-async function pending(userId: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-
-  const { data } = await supabaseAdmin
-    .from("players").select("username, peak_3v3, peak_2v2").eq("status", "pending")
-    .order("created_at", { ascending: true });
-
-  if (!data?.length) return reply("✅ No pending registrations.");
-  const list = data
-    .map((p, i) => `${i + 1}. **${p.username}** — 3s: ${p.peak_3v3} | 2s: ${p.peak_2v2}`)
-    .join("\n");
-  return reply(`📋 **Pending registrations (${data.length}):**\n${list}`);
-}
-
-async function approve(userId: string, username: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-
-  const { data, error } = await supabaseAdmin
-    .from("players")
-    .update({ status: "approved", updated_at: new Date().toISOString() })
-    .ilike("username", username).eq("status", "pending")
-    .select("username, discord_id").single();
-
-  if (error || !data) return reply(`❌ No pending player found: "${username}"`);
-  if (data.discord_id) await addRole(data.discord_id, "Registered");
-  return reply(`✅ **${data.username}** has been approved!`);
-}
-
-async function reject(userId: string, username: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-
-  const { data, error } = await supabaseAdmin
-    .from("players")
-    .update({ status: "rejected", updated_at: new Date().toISOString() })
-    .ilike("username", username).eq("status", "pending")
-    .select("username").single();
-
-  if (error || !data) return reply(`❌ No pending player found: "${username}"`);
-  return reply(`❌ **${data.username}** has been rejected.`);
-}
-
 async function playerInfo(username: string) {
   const { data } = await supabaseAdmin
     .from("players")
@@ -743,54 +1162,8 @@ async function playerInfo(username: string) {
   );
 }
 
-async function setNumTeams(userId: string, count: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-
-  const { count: enteredCount } = await supabaseAdmin
-    .from("players").select("*", { count: "exact", head: true })
-    .eq("status", "approved").eq("draft_entered", true);
-  const entered = enteredCount ?? 0;
-
-  let numTeams: number;
-  if (count.toLowerCase() === "max") {
-    numTeams = Math.floor(entered / 3);
-    if (numTeams < 1) return reply(`❌ Need at least 3 players in the draft pool to create teams (currently ${entered}).`);
-  } else {
-    numTeams = parseInt(count);
-    if (isNaN(numTeams) || numTeams < 1) return reply("❌ Provide a valid number or `max`.");
-    const required = numTeams * 3;
-    if (entered < required)
-      return reply(`❌ ${numTeams} teams requires **${required} players** in the draft pool (currently ${entered}).`);
-  }
-
-  await supabaseAdmin.from("league_settings")
-    .update({ num_teams: numTeams, updated_at: new Date().toISOString() }).not("id", "is", null);
-
-  return reply(`✅ Number of teams set to **${numTeams}**.`);
-}
-
-// Start/End/Season now show confirmation modals
-async function startDraft(userId: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-  return confirmModal("confirm_startdraft", "Start Draft", "CONFIRM DRAFT");
-}
-
-async function endDraft(userId: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-  return confirmModal("confirm_enddraft", "End Draft", "END DRAFT");
-}
-
-async function startSeason(userId: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-  return confirmModal("confirm_startseason", "Start Season", "START SEASON");
-}
-
 async function setDraftChannel(userId: string, channelId: string) {
-  const denied = adminGuard(userId);
+  const denied = await adminGuard(userId);
   if (denied) return denied;
   if (!channelId) return reply("❌ Provide a channel ID.");
 
@@ -800,12 +1173,10 @@ async function setDraftChannel(userId: string, channelId: string) {
   return reply(`✅ Draft channel set to <#${channelId}>. The draft will post there.`);
 }
 
-async function nominatePlayer(userId: string, playerUsername: string, startingBid: number) {
+async function pickPlayer(userId: string, playerUsername: string) {
   const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
   if (!settings?.draft_active) return reply("❌ No draft is currently active.");
-  if (settings.draft_phase === "bidding")
-    return reply(`❌ **${(await supabaseAdmin.from("players").select("username").eq("id", settings.nominated_player_id).single()).data?.username}** is already up for auction. Use \`/bid\`.`);
-  if (settings.draft_phase !== "nomination") return reply("❌ Not in nomination phase.");
+  if (settings.draft_phase !== "picking") return reply("❌ Not in picking phase.");
 
   const numTeams: number = settings.num_teams;
   const currentPick: number = settings.current_pick ?? 0;
@@ -813,255 +1184,31 @@ async function nominatePlayer(userId: string, playerUsername: string, startingBi
 
   const currentTeamNum = getTeamNumberForPick(currentPick, numTeams);
 
-  if (!isAdmin(userId)) {
+  if (!(await isModerator(userId))) {
     const { data: caller } = await supabaseAdmin.from("players").select("is_captain, team_id").eq("discord_id", userId).single();
-    if (!caller?.is_captain) return reply("❌ Only captains can nominate.");
+    if (!caller?.is_captain) return reply("❌ Only captains can pick.");
     const { data: callerTeam } = await supabaseAdmin.from("teams").select("slot_number").eq("id", caller.team_id).single();
     if (!callerTeam || callerTeam.slot_number !== currentTeamNum)
-      return reply(`❌ It's **Team ${currentTeamNum}**'s turn to nominate.`);
+      return reply(`❌ It's **Team ${currentTeamNum}**'s turn to pick.`);
   }
 
-  if (startingBid < 1 || startingBid > 800)
-    return reply("❌ Starting bid must be between **1** and **800** credits.");
-
-  const currentTeam = await getTeamByPosition(currentTeamNum, "id, name, credits") as {
-    id: string; name: string; credits: number;
-  } | null;
-  if (!currentTeam)
-    return reply(`❌ Team lookup failed: no team at position ${currentTeamNum} (pick ${currentPick}/${numTeams * 2}).`);
-
-  const { count: rosterSize } = await supabaseAdmin.from("players")
-    .select("*", { count: "exact", head: true }).eq("team_id", currentTeam.id).eq("status", "approved");
-  const stillNeeded = 3 - (rosterSize ?? 0);
-  const reserve = Math.max(0, stillNeeded - 1);
-  const maxBid = (currentTeam.credits ?? 0) - reserve;
-
-  if (startingBid > maxBid)
-    return reply(`❌ You have **${currentTeam.credits}** credits with **${reserve}** reserved. Max bid: **${maxBid}**.`);
+  const currentTeam = await getTeamByPosition(currentTeamNum, "id, name") as { id: string; name: string } | null;
+  if (!currentTeam) return reply(`❌ Team lookup failed for position ${currentTeamNum}.`);
 
   const { data: target } = await supabaseAdmin.from("players")
     .select("id, username, peak_2v2, current_2v2, peak_3v3, current_3v3")
     .ilike("username", playerUsername).eq("status", "approved").eq("in_active_draft", true).is("team_id", null).single();
   if (!target) return reply(`❌ "${playerUsername}" is not in the draft pool.`);
 
-  await supabaseAdmin.from("league_settings").update({
-    draft_phase: "bidding",
-    nominated_player_id: target.id,
-    current_bid: startingBid,
-    current_bid_team_id: currentTeam.id,
-    current_bid_time: new Date().toISOString(),
-    pick_deadline: new Date(Date.now() + 45 * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  }).not("id", "is", null);
-
-  if (settings.draft_channel_id) {
-    await sendChannelMessage(settings.draft_channel_id,
-      `🎯 **${currentTeam.name}** nominates **${target.username}** (RV: ${rankValue(target).toFixed(0)}) ` +
-      `with a starting bid of **${startingBid}** credits!\n` +
-      `Current high bid: **${startingBid}** — **${currentTeam.name}**\n` +
-      `Use \`/bid <amount>\` to bid higher. *(45 sec)*`
-    );
-  }
-  return reply(`✅ Nominated **${target.username}** for **${startingBid}** credits.`);
-}
-
-async function placeBid(userId: string, amount: number) {
-  const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
-  if (!settings?.draft_active) return reply("❌ No draft is currently active.");
-  if (settings.draft_phase !== "bidding") return reply("❌ No player is currently up for auction.");
-
-  if (amount <= (settings.current_bid ?? 0))
-    return reply(`❌ Bid must be higher than the current bid of **${settings.current_bid}** credits.`);
-
-  const { data: caller } = await supabaseAdmin.from("players").select("team_id, is_captain").eq("discord_id", userId).single();
-  if (!caller?.team_id) return reply("❌ You are not on a team.");
-  if (!caller.is_captain && !isAdmin(userId)) return reply("❌ Only team captains can bid.");
-  if (caller.team_id === settings.current_bid_team_id) return reply("❌ You are already the highest bidder.");
-
-  const { data: team } = await supabaseAdmin.from("teams").select("id, name, credits, last_bid_time").eq("id", caller.team_id).single();
-  if (!team) return reply("❌ Team not found.");
-
-  // 5-second slow mode: enforce per-team cooldown between bids
-  if (team.last_bid_time) {
-    const msSinceLastBid = Date.now() - new Date(team.last_bid_time as string).getTime();
-    if (msSinceLastBid < 5000) {
-      const secondsLeft = Math.ceil((5000 - msSinceLastBid) / 1000);
-      return reply(`❌ Slow mode — wait **${secondsLeft}s** before bidding again.`);
-    }
-  }
-
-  const { count: rosterSize } = await supabaseAdmin.from("players")
-    .select("*", { count: "exact", head: true }).eq("team_id", caller.team_id).eq("status", "approved");
-  if ((rosterSize ?? 0) >= 3) return reply("❌ Your roster is already full.");
-  const stillNeeded = 3 - (rosterSize ?? 0);
-  const reserve = Math.max(0, stillNeeded - 1);
-  const maxBid = (team.credits ?? 0) - reserve;
-
-  if (amount > maxBid)
-    return reply(`❌ You have **${team.credits}** credits with **${reserve}** reserved. Max bid: **${maxBid}**.`);
-
-  const { data: bidUpdate } = await supabaseAdmin.from("league_settings").update({
-    current_bid: amount,
-    current_bid_team_id: caller.team_id,
-    current_bid_time: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }).not("id", "is", null).eq("current_bid", settings.current_bid as number ?? 0).select("id");
-  if (!bidUpdate?.length) return reply("❌ Another bid was placed at the same time. Please try again.");
-
-  // Record bid time for slow mode
-  await supabaseAdmin.from("teams").update({ last_bid_time: new Date().toISOString() }).eq("id", caller.team_id);
-
-  const { data: player } = await supabaseAdmin.from("players").select("username").eq("id", settings.nominated_player_id).single();
-  if (settings.draft_channel_id) {
-    await sendChannelMessage(settings.draft_channel_id,
-      `💰 **${team.name}** bids **${amount}** credits for **${player?.username ?? "?"}**!`
-    );
-  }
-  return reply(`✅ Bid of **${amount}** credits placed!`);
-}
-
-async function endRound(userId: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-  const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
-  if (!settings?.draft_active || settings.draft_phase !== "bidding")
-    return reply("❌ No active auction to end.");
-  const result = await concludeAuction({
-    num_teams: settings.num_teams as number,
-    current_pick: (settings.current_pick as number) ?? 0,
-    draft_channel_id: settings.draft_channel_id as string | null,
-    nominated_player_id: settings.nominated_player_id as string,
-    current_bid_team_id: settings.current_bid_team_id as string,
-    current_bid: settings.current_bid as number,
-  });
+  const result = await completePick(
+    { num_teams: numTeams, current_pick: currentPick, draft_channel_id: settings.draft_channel_id as string | null },
+    currentTeam.id, target.id,
+  );
   return reply(result.message);
 }
 
-async function checkBudget(userId: string) {
-  const { data: player } = await supabaseAdmin.from("players").select("team_id, is_captain").eq("discord_id", userId).single();
-  if (!player?.team_id) return reply("❌ You are not on a team.");
-  const { data: team } = await supabaseAdmin.from("teams").select("name, credits").eq("id", player.team_id).single();
-  if (!team) return reply("❌ Team not found.");
-  const { count: rosterSize } = await supabaseAdmin.from("players")
-    .select("*", { count: "exact", head: true }).eq("team_id", player.team_id).eq("status", "approved");
-  const stillNeeded = 3 - (rosterSize ?? 0);
-  const reserve = Math.max(0, stillNeeded - 1);
-  return reply(
-    `💰 **${team.name}** — **${team.credits ?? 0}** credits\n` +
-    `Players still needed: **${stillNeeded}** · Reserved: **${reserve}** · Max bid: **${(team.credits ?? 0) - reserve}**`
-  );
-}
-
-async function draftPool(userId: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-
-  const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
-  const numTeams: number = settings?.num_teams ?? 0;
-  const currentPick: number = settings?.current_pick ?? 0;
-
-  const { data } = await supabaseAdmin
-    .from("players").select("username, peak_3v3, current_3v3, peak_2v2, current_2v2")
-    .eq("status", "approved").eq("draft_entered", true).is("team_id", null);
-
-  if (!data?.length) return reply("No players available in the draft pool.");
-
-  const sorted = [...data].sort((a, b) => rankValue(b) - rankValue(a));
-  const lines = sorted.map((p, i) =>
-    `${i + 1}. **${p.username}** — RV: ${rankValue(p).toFixed(0)} (3s: ${p.peak_3v3} | 2s: ${p.peak_2v2})`
-  );
-
-  let header = `🎯 **Draft Pool (${sorted.length} players):**`;
-  if (settings?.draft_active && numTeams > 0)
-    header += `\n⏱️ **Team ${getTeamNumberForPick(currentPick, numTeams)}** is on the clock.`;
-
-  const content = `${header}\n${lines.join("\n")}`;
-  return reply(content.length > 1900 ? content.slice(0, 1900) + "\n…(truncated)" : content);
-}
-
-async function draftCount() {
-  const { count } = await supabaseAdmin
-    .from("players").select("*", { count: "exact", head: true })
-    .eq("status", "approved").eq("draft_entered", true);
-  return reply(`📋 **Players entered in draft:** ${count ?? 0}`);
-}
-
-async function enterDraft(userId: string) {
-  const { data: player } = await supabaseAdmin
-    .from("players")
-    .select("id, username, status, peak_2v2, current_2v2, peak_3v3, current_3v3")
-    .eq("discord_id", userId).single();
-
-  if (!player) return reply("❌ You are not registered. Sign up on the website first.");
-  if (player.status !== "approved") return reply("❌ Your registration must be approved first.");
-
-  const rv = rankValue(player);
-  if (rv < 1280) {
-    return reply(
-      `❌ Your Rank Value of **${rv.toFixed(0)}** is below the minimum of **1280**.\n` +
-      `RV = [(Peak 2s + Season Peak 2s) × 1.2 + (Peak 3s + Season Peak 3s) × 0.8] ÷ 4`
-    );
-  }
-
-  const { data: signupSettings } = await supabaseAdmin
-    .from("league_settings").select("draft_open").single();
-  if (!signupSettings?.draft_open) return reply("❌ Draft signups are not currently open.");
-
-  await supabaseAdmin.from("players")
-    .update({ draft_entered: true, updated_at: new Date().toISOString() }).eq("id", player.id);
-  await addRole(userId, "EnteredDraft");
-  return reply(`✅ **${player.username}**, you've entered the draft! (RV: ${rv.toFixed(0)})`);
-}
-
-async function leaveDraft(userId: string) {
-  const { data: draftSettings } = await supabaseAdmin
-    .from("league_settings").select("draft_active, season_active").single();
-  if (draftSettings?.draft_active || draftSettings?.season_active)
-    return reply("❌ You cannot leave the draft once the draft or season has started.");
-
-  const { data: player } = await supabaseAdmin
-    .from("players").select("id, username").eq("discord_id", userId).single();
-
-  if (!player) return reply("❌ You are not registered.");
-
-  await supabaseAdmin.from("players")
-    .update({ draft_entered: false, updated_at: new Date().toISOString() }).eq("id", player.id);
-  await removeRole(userId, "EnteredDraft");
-  return reply(`👋 **${player.username}**, you've been removed from the draft.`);
-}
-
-const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-
-async function setMatchCategory(userId: string, categoryId: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-  const { error } = await supabaseAdmin.from("league_settings")
-    .update({ match_category_id: categoryId, updated_at: new Date().toISOString() }).not("id", "is", null);
-  if (error) return reply(`❌ DB error: ${error.message} — make sure the \`match_category_id\` column exists in \`league_settings\`.`);
-  return reply(`✅ Match channels will be created in <#${categoryId}>.`);
-}
-
-async function setDeadlineDay(userId: string, day: number) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-  const { error } = await supabaseAdmin.from("league_settings")
-    .update({ match_deadline_day: day, updated_at: new Date().toISOString() }).not("id", "is", null);
-  if (error) return reply(`❌ DB error: ${error.message}`);
-  return reply(`✅ Match deadline set to **${DAYS[day]}s at 11:59 pm PT**.`);
-}
-
-async function setPlayTime(userId: string, day: number, hour: number) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-  const h12 = hour === 0 ? "12:00 am" : hour < 12 ? `${hour}:00 am` : hour === 12 ? "12:00 pm" : `${hour - 12}:00 pm`;
-  const { error } = await supabaseAdmin.from("league_settings")
-    .update({ match_play_day: day, match_play_hour: hour, updated_at: new Date().toISOString() }).not("id", "is", null);
-  if (error) return reply(`❌ DB error: ${error.message}`);
-  return reply(`✅ Default play time set to **${DAYS[day]}s at ${h12} PT**.`);
-}
-
 async function setRulesChannel(userId: string, channelId: string) {
-  const denied = adminGuard(userId);
+  const denied = await adminGuard(userId);
   if (denied) return denied;
   const { error } = await supabaseAdmin.from("league_settings")
     .update({ rules_channel_id: channelId, updated_at: new Date().toISOString() }).not("id", "is", null);
@@ -1070,51 +1217,53 @@ async function setRulesChannel(userId: string, channelId: string) {
 }
 
 async function openRound(userId: string, roundOverride?: number) {
-  const denied = adminGuard(userId);
+  const denied = await adminGuard(userId);
   if (denied) return denied;
 
-  const { data: matches } = await supabaseAdmin
+  // Only consider matches that don't have a channel yet
+  const { data: pending } = await supabaseAdmin
     .from("matches")
-    .select("home_team_id, away_team_id, round, stage")
+    .select("id, home_team_id, away_team_id, round, stage")
     .eq("status", "scheduled")
+    .is("discord_channel_id", null)
     .not("home_team_id", "is", null)
     .not("away_team_id", "is", null);
 
-  if (!matches?.length) return reply("❌ No upcoming matches found.");
+  if (!pending?.length) return reply("❌ No upcoming matches without channels found.");
+
+  // Use provided round or auto-detect: lowest round number that has no channels yet
+  const targetRound = roundOverride ?? Math.min(...pending.map(m => m.round));
+  const matches = pending.filter(m => m.round === targetRound);
+
+  if (!matches.length) return reply(`❌ No matches found for round ${targetRound}.`);
 
   const teamIds = [...new Set(matches.flatMap(m => [m.home_team_id!, m.away_team_id!]))];
   const { data: teamsData } = await supabaseAdmin.from("teams").select("id, name").in("id", teamIds);
   const teamNameById: Record<string, string> = {};
   teamsData?.forEach(t => { teamNameById[t.id] = t.name; });
 
-  // Pre-fetch settings, channels, and roles once for all matches
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("match_category_id, match_deadline_day, match_play_day, match_play_hour, rules_channel_id")
+    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format")
     .single();
 
-  const categoryId: string | null = settings?.match_category_id ?? null;
-  if (!categoryId) return reply("❌ No match category set — run `/setmatchcategory` first.");
-
-  // Ensure every team that appears in a scheduled match has a Discord role
   const allTeamNames = [...new Set(
     matches.flatMap(m => [teamNameById[m.home_team_id!], teamNameById[m.away_team_id!]]).filter(Boolean)
   )];
   await ensureRoles(allTeamNames);
 
   const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
-  const [existingChannels, guildRoles, allMatchRows, teamMmrByName] = await Promise.all([
+  const [existingChannels, guildRoles, allMatchRows] = await Promise.all([
     getGuildChannels(),
     getGuildRoles(),
     supabaseAdmin.from("matches").select("stage, round").then(r => r.data ?? []),
-    buildTeamMmrByName(),
   ]);
   const maxRoundByStage: Record<string, number> = {};
   allMatchRows.forEach((m: { stage: string; round: number }) => {
     maxRoundByStage[m.stage] = Math.max(maxRoundByStage[m.stage] ?? 0, m.round);
   });
-  const ctx = {
-    categoryId,
+  const ctx: MatchChannelContext = {
+    categoryCache:  new Map(),
     deadlineDay:    settings?.match_deadline_day ?? 2,
     playDay:        settings?.match_play_day   ?? 0,
     playHour:       settings?.match_play_hour  ?? 19,
@@ -1123,7 +1272,6 @@ async function openRound(userId: string, roundOverride?: number) {
     guildRoles,
     roundBestOf: format?.roundBestOf ?? {},
     maxRoundByStage,
-    teamMmrByName,
   };
 
   let created = 0;
@@ -1133,7 +1281,10 @@ async function openRound(userId: string, roundOverride?: number) {
     const h = teamNameById[m.home_team_id!];
     const a = teamNameById[m.away_team_id!];
     if (!h || !a) continue;
-    const result = await createMatchChannel(h, a, roundOverride ?? m.round, ctx, { round: m.round, stage: m.stage });
+    const result = await createMatchChannel(h, a, targetRound, ctx, {
+      round: m.round, stage: m.stage,
+      homeTeamId: m.home_team_id!, awayTeamId: m.away_team_id!, matchId: m.id,
+    });
     if (result.created) {
       created++;
     } else if (result.skipped) {
@@ -1145,13 +1296,93 @@ async function openRound(userId: string, roundOverride?: number) {
 
   if (firstError && created === 0 && skipped === 0) return reply(`❌ ${firstError}`);
   const parts: string[] = [];
-  if (created > 0) parts.push(`✅ Created **${created}** channel${created === 1 ? "" : "s"}`);
-  if (skipped > 0) parts.push(`ℹ️ **${skipped}** already exist in <#${categoryId}>`);
+  if (created > 0) parts.push(`✅ Created **${created}** channel${created === 1 ? "" : "s"} for Round ${targetRound}`);
+  if (skipped > 0) parts.push(`ℹ️ **${skipped}** already exist`);
   if (firstError) parts.push(`⚠️ ${firstError}`);
   return reply(parts.join(" · ") || "ℹ️ Nothing to do.");
 }
 
-// Creates all missing Discord roles and assigns them to every player based on current DB state.
+// Format-agnostic auto channel creation. Opens a Discord channel for every
+// scheduled match that is "ready": both teams are assigned AND neither team has
+// an unplayed (scheduled) match in an EARLIER round of the same stage — i.e.
+// both teams have finished the round that gates this one. This covers group /
+// round-robin (a round-N+1 match opens once both its teams finish round N),
+// Swiss, and bracket first-rounds after a stage transition. Idempotent: matches
+// that already have a channel are skipped, and createMatchChannel creates the
+// match's category lazily only if one doesn't already exist. Called after every
+// match report and every round/stage generation, replacing the need for /openround.
+export async function openReadyMatchChannels(): Promise<void> {
+  const { data: allMatches } = await supabaseAdmin
+    .from("matches")
+    .select("id, home_team_id, away_team_id, round, match_number, stage, status, discord_channel_id");
+  if (!allMatches?.length) return;
+
+  const ready = allMatches.filter((m) => {
+    if (m.status !== "scheduled" || m.discord_channel_id || !m.home_team_id || !m.away_team_id) return false;
+    const blockedByEarlierRound = (teamId: string) =>
+      allMatches.some((x) =>
+        x.stage === m.stage &&
+        x.round < m.round &&
+        x.status === "scheduled" &&
+        (x.home_team_id === teamId || x.away_team_id === teamId),
+      );
+    return !blockedByEarlierRound(m.home_team_id) && !blockedByEarlierRound(m.away_team_id);
+  });
+  if (!ready.length) return;
+
+  const teamIds = [...new Set(ready.flatMap((m) => [m.home_team_id!, m.away_team_id!]))];
+  const { data: teamsData } = await supabaseAdmin.from("teams").select("id, name").in("id", teamIds);
+  const teamNameById: Record<string, string> = {};
+  teamsData?.forEach((t) => { teamNameById[t.id] = t.name; });
+
+  await ensureRoles([...new Set(Object.values(teamNameById))]);
+
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings")
+    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format")
+    .single();
+  const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
+
+  const [existingChannels, guildRoles] = await Promise.all([
+    getGuildChannels(),
+    getGuildRoles(),
+  ]);
+  const maxRoundByStage: Record<string, number> = {};
+  allMatches.forEach((m) => {
+    maxRoundByStage[m.stage] = Math.max(maxRoundByStage[m.stage] ?? 0, m.round);
+  });
+  const ctx: MatchChannelContext = {
+    categoryCache: new Map(),
+    deadlineDay: settings?.match_deadline_day ?? 2,
+    playDay: settings?.match_play_day ?? 0,
+    playHour: settings?.match_play_hour ?? 19,
+    rulesChannelId: settings?.rules_channel_id ?? null,
+    existingChannels,
+    guildRoles,
+    roundBestOf: format?.roundBestOf ?? {},
+    maxRoundByStage,
+  };
+
+  for (const m of ready) {
+    const h = teamNameById[m.home_team_id!];
+    const a = teamNameById[m.away_team_id!];
+    if (!h || !a) continue;
+    const r = await createMatchChannel(h, a, m.round, ctx, {
+      round: m.round, stage: m.stage,
+      homeTeamId: m.home_team_id!, awayTeamId: m.away_team_id!, matchId: m.id,
+    });
+    if (!r.created && r.error) console.error("[openReadyMatchChannels]", r.error);
+    await sleep(DISCORD_PACE_MS);
+  }
+}
+
+// Reconciles every approved player's Discord roles to the current DB state. First
+// strips all managed roles (every team role + Drafted + Captain) using the
+// rate-limit-safe strategy (only removes roles a member actually has), then re-adds
+// only the roles each player should have. This both fills in missing roles and
+// removes stale/incorrect ones (e.g. a player who switched teams, left a team, or
+// rejoined the server). Every approved player is processed, not just rostered ones,
+// so free agents get leftover team/Drafted/Captain roles cleared.
 export async function execSyncRoles(): Promise<{ assigned: number; roleNames: string[]; warnings: string[] }> {
   const warnings: string[] = [];
 
@@ -1160,7 +1391,6 @@ export async function execSyncRoles(): Promise<{ assigned: number; roleNames: st
     supabaseAdmin.from("players")
       .select("discord_id, team_id, is_captain")
       .eq("status", "approved")
-      .not("team_id", "is", null)
       .not("discord_id", "is", null),
   ]);
 
@@ -1176,8 +1406,16 @@ export async function execSyncRoles(): Promise<{ assigned: number; roleNames: st
     ? await ensureRoles(teamsNeedingFallback.map(t => t.name))
     : {};
 
-  const teamById: Record<string, { name: string; discord_role_id: string | null }> = {};
-  (teams ?? []).forEach(t => { teamById[t.id] = { name: t.name, discord_role_id: t.discord_role_id }; });
+  const teamById: Record<string, { name: string; roleId: string | null }> = {};
+  (teams ?? []).forEach(t => {
+    teamById[t.id] = { name: t.name, roleId: t.discord_role_id ?? fallbackMap[t.name] ?? null };
+  });
+
+  // Every role this sync owns — used to strip stale assignments before re-adding.
+  const managedRoleIds = [
+    roleMap["Drafted"], roleMap["Captain"],
+    ...Object.values(teamById).map(t => t.roleId),
+  ].filter((id): id is string => !!id);
 
   // Skip test users (fake IDs like "test_...") — they don't exist in Discord
   const realPlayers = (players ?? []).filter(p => {
@@ -1185,29 +1423,35 @@ export async function execSyncRoles(): Promise<{ assigned: number; roleNames: st
     return id && !id.startsWith("test_");
   });
 
-  // Assign all players' roles in parallel instead of sequentially
+  // 1) Strip every managed role off every player (only removes ones they actually
+  //    have, sequentially with backoff — clears stale/wrong roles).
+  if (managedRoleIds.length) {
+    await stripRoleIdsFromMembers(realPlayers.map(p => p.discord_id as string), managedRoleIds);
+  }
+
+  // 2) Re-add only the roles each player should have per the DB.
+  let assigned = 0;
   await Promise.all(
     realPlayers.map(player => {
       const discordId = player.discord_id as string;
-      const team = teamById[player.team_id as string];
-      if (!team) return Promise.resolve();
-      const teamRoleId = team.discord_role_id ?? fallbackMap[team.name];
+      const team = player.team_id ? teamById[player.team_id as string] : null;
+      if (!team) return Promise.resolve(); // free agent — keeps no managed roles
+      assigned++;
       const promises: Promise<void>[] = [];
       if (roleMap["Drafted"]) promises.push(addRoleById(discordId, roleMap["Drafted"]));
-      if (teamRoleId)         promises.push(addRoleById(discordId, teamRoleId));
+      if (team.roleId)        promises.push(addRoleById(discordId, team.roleId));
       if (player.is_captain && roleMap["Captain"])
         promises.push(addRoleById(discordId, roleMap["Captain"]));
       return Promise.all(promises);
     })
   );
-  const assigned = realPlayers.length;
 
   const roleNames = ["Drafted", "Captain", ...(teams ?? []).map(t => t.name)];
   return { assigned, roleNames, warnings };
 }
 
 async function syncRoles(userId: string) {
-  const denied = adminGuard(userId);
+  const denied = await adminGuard(userId);
   if (denied) return denied;
 
   const { data: teams } = await supabaseAdmin.from("teams").select("id").limit(1);
@@ -1223,7 +1467,7 @@ async function syncRoles(userId: string) {
 }
 
 async function diagRoles(userId: string) {
-  const denied = adminGuard(userId);
+  const denied = await adminGuard(userId);
   if (denied) return denied;
 
   // Look up the player record for the calling admin
@@ -1279,48 +1523,17 @@ async function diagRoles(userId: string) {
 }
 
 async function assignRole(userId: string, targetUserId: string, roleId: string) {
-  const denied = adminGuard(userId);
+  const denied = await adminGuard(userId);
   if (denied) return denied;
   await addRoleById(targetUserId, roleId);
   return reply(`✅ Role assigned to <@${targetUserId}>.`);
 }
 
 async function removeRoleCmd(userId: string, targetUserId: string, roleId: string) {
-  const denied = adminGuard(userId);
+  const denied = await adminGuard(userId);
   if (denied) return denied;
   await removeRoleById(targetUserId, roleId);
   return reply(`✅ Role removed from <@${targetUserId}>.`);
-}
-
-async function assignTeam(userId: string, playerUsername: string, teamName: string) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-
-  const { data: player } = await supabaseAdmin
-    .from("players").select("id, username").ilike("username", playerUsername)
-    .eq("status", "approved").single();
-  if (!player) return reply(`❌ No approved player found: "${playerUsername}"`);
-
-  let { data: team } = await supabaseAdmin
-    .from("teams").select("id, name").ilike("name", teamName).single();
-  if (!team) {
-    const { data: newTeam } = await supabaseAdmin
-      .from("teams").insert({ name: teamName }).select().single();
-    team = newTeam;
-  }
-  if (!team) return reply("❌ Failed to find or create team.");
-
-  await supabaseAdmin.from("players")
-    .update({ team_id: team.id, updated_at: new Date().toISOString() }).eq("id", player.id);
-  return reply(`✅ **${player.username}** → **${team.name}**`);
-}
-
-// Parses "team-1-vs-team-2" → ["Team 1", "Team 2"]. Returns null if "-vs-" not found.
-function parseChannelTeams(channelName: string): [string, string] | null {
-  const idx = channelName.indexOf("-vs-");
-  if (idx === -1) return null;
-  const toTitle = (s: string) => s.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-  return [toTitle(channelName.slice(0, idx)), toTitle(channelName.slice(idx + 4))];
 }
 
 // Sets a team into a match slot and marks it scheduled if both teams are now set.
@@ -1358,6 +1571,28 @@ async function getDEQBracketSizes() {
   return { numWBQ, numLBQ };
 }
 
+// Creates a channel for a match if both teams are now set after a slot assignment.
+async function maybeCreateChannelForMatch(
+  stage: string, round: number, matchNum: number,
+): Promise<void> {
+  const { data: m } = await supabaseAdmin
+    .from("matches")
+    .select("id, home_team_id, away_team_id")
+    .eq("stage", stage).eq("round", round).eq("match_number", matchNum)
+    .maybeSingle();
+  if (!m?.home_team_id || !m?.away_team_id) return;
+  const [{ data: hTeam }, { data: aTeam }] = await Promise.all([
+    supabaseAdmin.from("teams").select("name").eq("id", m.home_team_id).single(),
+    supabaseAdmin.from("teams").select("name").eq("id", m.away_team_id).single(),
+  ]);
+  if (!hTeam || !aTeam) return;
+  const r = await createMatchChannel(hTeam.name, aTeam.name, round, undefined, {
+    round, stage,
+    homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, matchId: m.id,
+  });
+  if (!r.created && r.error) console.error("[createMatchChannel]", r.error);
+}
+
 // Shared bracket advancement after a match result is recorded. Handles SE, DE, Swiss, and group stages.
 async function advanceBracketWinner(
   bracketMatch: { round: number; match_number: number; stage: string },
@@ -1372,17 +1607,20 @@ async function advanceBracketWinner(
     if (!sizes) return;
 
     if (round < sizes.numWB) {
-      const nr   = round + 1;
-      const nm   = Math.ceil(match_number / 2);
+      const nr = round + 1;
+      const nm = Math.ceil(match_number / 2);
       const slot = match_number % 2 === 1 ? "home_team_id" : "away_team_id";
       await setMatchSlot(DE_WINNERS, nr, nm, slot, winnerId);
+      await maybeCreateChannelForMatch(DE_WINNERS, nr, nm);
     } else {
       await setMatchSlot(DE_GF, 1, 1, "home_team_id", winnerId);
+      await maybeCreateChannelForMatch(DE_GF, 1, 1);
     }
 
     if (loserId) {
       const { lbRound, lbMatchNum, slot } = wbLoserTarget(round, match_number);
       await setMatchSlot(DE_LOSERS, lbRound, lbMatchNum, slot, loserId);
+      await maybeCreateChannelForMatch(DE_LOSERS, lbRound, lbMatchNum);
     }
     return;
   }
@@ -1395,15 +1633,16 @@ async function advanceBracketWinner(
     const target = lbWinnerTarget(round, match_number, sizes.numLB);
     if (target.section === "grand_final") {
       await setMatchSlot(DE_GF, 1, 1, "away_team_id", winnerId);
+      await maybeCreateChannelForMatch(DE_GF, 1, 1);
     } else {
       await setMatchSlot(DE_LOSERS, target.round, target.matchNum, target.slot, winnerId);
+      await maybeCreateChannelForMatch(DE_LOSERS, target.round, target.matchNum);
     }
     return;
   }
 
   // ── Double Elimination — Grand Final ──────────────────────────────────────
   if (stage === DE_GF && match_number === 1) {
-    // If the LB team (away slot) wins GF M1, trigger bracket reset
     const { data: gf } = await supabaseAdmin
       .from("matches").select("home_team_id, away_team_id")
       .eq("stage", DE_GF).eq("match_number", 1).maybeSingle();
@@ -1411,6 +1650,7 @@ async function advanceBracketWinner(
       await supabaseAdmin.from("matches")
         .update({ home_team_id: gf.home_team_id, away_team_id: gf.away_team_id, status: "scheduled" })
         .eq("stage", DE_GF).eq("match_number", 2);
+      await maybeCreateChannelForMatch(DE_GF, 1, 2);
     }
     return;
   }
@@ -1421,16 +1661,17 @@ async function advanceBracketWinner(
     if (!sizes) return;
 
     if (round < sizes.numWBQ) {
-      const nr   = round + 1;
-      const nm   = Math.ceil(match_number / 2);
+      const nr = round + 1;
+      const nm = Math.ceil(match_number / 2);
       const slot = match_number % 2 === 1 ? "home_team_id" : "away_team_id";
       await setMatchSlot(DE_QUALIFIER_WINNERS, nr, nm, slot, winnerId);
+      await maybeCreateChannelForMatch(DE_QUALIFIER_WINNERS, nr, nm);
     }
-    // Last WB round: winner is a qualifier survivor, no further WB routing
 
     if (loserId) {
       const { lbRound, lbMatchNum, slot } = wbLoserTarget(round, match_number);
       await setMatchSlot(DE_QUALIFIER_LOSERS, lbRound, lbMatchNum, slot, loserId);
+      await maybeCreateChannelForMatch(DE_QUALIFIER_LOSERS, lbRound, lbMatchNum);
     }
     return;
   }
@@ -1444,13 +1685,98 @@ async function advanceBracketWinner(
       const target = lbWinnerTarget(round, match_number, sizes.numLBQ);
       if (target.section === "losers") {
         await setMatchSlot(DE_QUALIFIER_LOSERS, target.round, target.matchNum, target.slot, winnerId);
+        await maybeCreateChannelForMatch(DE_QUALIFIER_LOSERS, target.round, target.matchNum);
       }
     }
-    // Last LB round: winner is a qualifier survivor, no further routing
     return;
   }
 
-  // ── SE / Swiss / Group — simple advancement in same stage ─────────────────
+  // ── Hybrid UB ─────────────────────────────────────────────────────────────
+  if (stage === HYBRID_UB) {
+    // UB QF winner → SF home slot (match_number preserved); loser → LB R3 away slot
+    await setMatchSlot(HYBRID_SF, 1, match_number, "home_team_id", winnerId);
+    await maybeCreateChannelForMatch(HYBRID_SF, 1, match_number);
+    if (loserId) {
+      await setMatchSlot(HYBRID_LB, 3, match_number, "away_team_id", loserId);
+      await maybeCreateChannelForMatch(HYBRID_LB, 3, match_number);
+    }
+    return;
+  }
+
+  // ── Hybrid LB ─────────────────────────────────────────────────────────────
+  if (stage === HYBRID_LB) {
+    if (round === 1) {
+      // LB R1 M1/M2 winners → LB R2 M1; M3/M4 → LB R2 M2
+      const nm   = Math.ceil(match_number / 2);
+      const slot = match_number % 2 === 1 ? "home_team_id" : "away_team_id";
+      await setMatchSlot(HYBRID_LB, 2, nm, slot, winnerId);
+      await maybeCreateChannelForMatch(HYBRID_LB, 2, nm);
+    } else if (round === 2) {
+      // LB R2 winner → LB R3 home slot (match_number preserved)
+      await setMatchSlot(HYBRID_LB, 3, match_number, "home_team_id", winnerId);
+      await maybeCreateChannelForMatch(HYBRID_LB, 3, match_number);
+    } else if (round === 3) {
+      // LB QF winner → SF away slot (match_number preserved)
+      await setMatchSlot(HYBRID_SF, 1, match_number, "away_team_id", winnerId);
+      await maybeCreateChannelForMatch(HYBRID_SF, 1, match_number);
+    }
+    return;
+  }
+
+  // ── Hybrid SF ─────────────────────────────────────────────────────────────
+  if (stage === HYBRID_SF) {
+    const slot = match_number === 1 ? "home_team_id" : "away_team_id";
+    await setMatchSlot(HYBRID_GF, 1, 1, slot, winnerId);
+    await maybeCreateChannelForMatch(HYBRID_GF, 1, 1);
+    return;
+  }
+
+  // HYBRID_GF: winner is champion, no further routing needed.
+  if (stage === HYBRID_GF) return;
+
+  // ── Hybrid8 UB ────────────────────────────────────────────────────────────
+  if (stage === HYBRID8_UB) {
+    // UB winner → SF home; loser → LB R2 away (straight into LB QF)
+    await setMatchSlot(HYBRID8_SF, 1, match_number, "home_team_id", winnerId);
+    await maybeCreateChannelForMatch(HYBRID8_SF, 1, match_number);
+    if (loserId) {
+      await setMatchSlot(HYBRID8_LB, 2, match_number, "away_team_id", loserId);
+      await maybeCreateChannelForMatch(HYBRID8_LB, 2, match_number);
+    }
+    return;
+  }
+
+  // ── Hybrid8 LB ────────────────────────────────────────────────────────────
+  if (stage === HYBRID8_LB) {
+    if (round === 1) {
+      // LB R1: each match winner feeds same-numbered LB R2 match, home slot
+      await setMatchSlot(HYBRID8_LB, 2, match_number, "home_team_id", winnerId);
+      await maybeCreateChannelForMatch(HYBRID8_LB, 2, match_number);
+    } else if (round === 2) {
+      // LB QF winner → SF away (same match_number)
+      await setMatchSlot(HYBRID8_SF, 1, match_number, "away_team_id", winnerId);
+      await maybeCreateChannelForMatch(HYBRID8_SF, 1, match_number);
+    }
+    return;
+  }
+
+  // ── Hybrid8 SF ────────────────────────────────────────────────────────────
+  if (stage === HYBRID8_SF) {
+    const slot = match_number === 1 ? "home_team_id" : "away_team_id";
+    await setMatchSlot(HYBRID8_GF, 1, 1, slot, winnerId);
+    await maybeCreateChannelForMatch(HYBRID8_GF, 1, 1);
+    return;
+  }
+
+  if (stage === HYBRID8_GF) return;
+
+  // Group / Swiss matches don't advance a winner into a fixed next slot — their
+  // next-round pairings are pre-generated (group) or generated as a batch (Swiss).
+  // openReadyMatchChannels opens those channels once both teams finish the prior
+  // round, so there's nothing to advance here.
+  if (stage.startsWith(GROUP_STAGE_PREFIX) || stage === "swiss") return;
+
+  // ── SE — winner advances into the next round's slot ───────────────────────
   const nr   = round + 1;
   const nm   = nextMatchNumber(match_number);
   const slot = nextSlot(match_number);
@@ -1472,7 +1798,10 @@ async function advanceBracketWinner(
       supabaseAdmin.from("teams").select("name").eq("id", awayId).single(),
     ]);
     if (hTeam && aTeam) {
-      const r = await createMatchChannel(hTeam.name, aTeam.name, nr, undefined, { round: nr, stage });
+      const r = await createMatchChannel(hTeam.name, aTeam.name, nr, undefined, {
+        round: nr, stage,
+        homeTeamId: homeId, awayTeamId: awayId, matchId: nextMatch.id,
+      });
       if (!r.created && r.error) console.error("[createMatchChannel]", r.error);
     }
   }
@@ -1485,7 +1814,7 @@ export async function execReportMatchResult(
 ): Promise<{ ok: boolean; message: string }> {
   const { data: match } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, stage, round, match_number, status")
+    .select("id, home_team_id, away_team_id, stage, round, match_number, status, discord_channel_id")
     .eq("id", matchId).single();
   if (!match) return { ok: false, message: "Match not found." };
   if (match.status === "completed") return { ok: false, message: "Match already reported." };
@@ -1499,6 +1828,10 @@ export async function execReportMatchResult(
   await supabaseAdmin.from("matches")
     .update({ home_score: homeScore, away_score: awayScore, status: "completed" })
     .eq("id", matchId);
+
+  // A match's sub requests are consumed once it's played — clear them so the team
+  // is free to request a sub for their next match and the panel stays clean.
+  await supabaseAdmin.from("sub_requests").delete().eq("match_id", matchId);
 
   const winnerId = homeScore > awayScore ? homeTeam.id : awayScore > homeScore ? awayTeam.id : null;
   const loserId  = homeScore > awayScore ? awayTeam.id : awayScore > homeScore ? homeTeam.id : null;
@@ -1515,216 +1848,80 @@ export async function execReportMatchResult(
         winnerId!,
         loserId ?? undefined,
       );
+      await cleanupStageCategoryIfComplete(match.stage, match.round);
     }
   }
 
+  // Open channels for any match whose teams just became free (e.g. the other
+  // group/Swiss pairing finishing the round). Format-agnostic; idempotent.
+  await openReadyMatchChannels();
+
   const winnerName = homeScore > awayScore ? homeTeam.name : awayScore > homeScore ? awayTeam.name : null;
+
+  if (match.discord_channel_id) {
+    try {
+      const roles = await getGuildRoles();
+      const homeMention = await roleMentionByName(homeTeam.name, roles);
+      const awayMention = await roleMentionByName(awayTeam.name, roles);
+      const resultLine = winnerName ? `🏆 **${winnerName} wins!**` : "🤝 **Draw**";
+      await sendChannelMessage(
+        match.discord_channel_id,
+        `${homeMention} ${awayMention}\n📊 **Match result: ${homeTeam.name} ${homeScore}–${awayScore} ${awayTeam.name}**\n${resultLine}`,
+      );
+    } catch { /* best-effort */ }
+  }
+
+  // Fire a completion notification when the championship-deciding match is
+  // reported. The decider always lives in a terminal stage (an SE final or a
+  // grand final); group/swiss/qualifier matches are never terminal, so a
+  // between-stages lull (0 scheduled matches mid-event) can't trigger it. Once
+  // we're in a terminal stage with no scheduled matches left, the event is over
+  // and the just-reported winner is the champion. (For a DE grand final, a
+  // lower-bracket win has already scheduled the reset match above, so the count
+  // stays > 0 until the bracket is truly decided.)
+  const TERMINAL_STAGES = new Set(["single_elimination", DE_GF, HYBRID_GF, HYBRID8_GF]);
+  try {
+    if (TERMINAL_STAGES.has(match.stage ?? "") && winnerName) {
+      const { count: remaining } = await supabaseAdmin
+        .from("matches")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "scheduled")
+        .not("home_team_id", "is", null)
+        .not("away_team_id", "is", null);
+
+      if ((remaining ?? 1) === 0) {
+        const { data: ls } = await supabaseAdmin
+          .from("league_settings").select("active_tournament_id").single();
+        const tournamentId = ls?.active_tournament_id as string | null | undefined;
+
+        if (tournamentId) {
+          const { data: t } = await supabaseAdmin
+            .from("tournaments").select("name").eq("id", tournamentId).single();
+          const name = t?.name ?? "The tournament";
+          pushToAllApproved({
+            title: "Tournament Complete!",
+            body: `${name} is over. Congratulations to ${winnerName} on winning!`,
+            url: "/dashboard/podium",
+            tag: "tournament-complete",
+            category: "tournament",
+          }).catch(() => {});
+        } else {
+          pushToAllApproved({
+            title: "Season Complete!",
+            body: `All matches have been played. Congratulations to ${winnerName} on winning the season!`,
+            url: "/dashboard/season",
+            tag: "season-complete",
+            category: "season",
+          }).catch(() => {});
+        }
+      }
+    }
+  } catch { /* best-effort — never block the match report */ }
+
   return {
     ok: true,
     message: `${homeTeam.name} ${homeScore} — ${awayScore} ${awayTeam.name}${winnerName ? ` · ${winnerName} wins` : " · Draw"}`,
   };
-}
-
-async function reportResult(userId: string, team1Name: string, score1: number, team2Name: string, score2: number) {
-  const denied = adminGuard(userId);
-  if (denied) return denied;
-
-  const [{ data: team1 }, { data: team2 }] = await Promise.all([
-    supabaseAdmin.from("teams").select("id, name, wins, losses").ilike("name", team1Name).single(),
-    supabaseAdmin.from("teams").select("id, name, wins, losses").ilike("name", team2Name).single(),
-  ]);
-
-  if (!team1) return reply(`❌ Team not found: "${team1Name}"`);
-  if (!team2) return reply(`❌ Team not found: "${team2Name}"`);
-
-  // Find if this is a bracket match (has round/match_number/stage)
-  const { data: bracketMatch } = await supabaseAdmin
-    .from("matches")
-    .select("id, round, match_number, stage")
-    .eq("home_team_id", team1.id)
-    .eq("away_team_id", team2.id)
-    .eq("status", "scheduled")
-    .not("stage", "is", null)
-    .maybeSingle();
-
-  if (bracketMatch) {
-    // Update existing bracket match
-    await supabaseAdmin.from("matches")
-      .update({ home_score: score1, away_score: score2, status: "completed" })
-      .eq("id", bracketMatch.id);
-  } else {
-    await supabaseAdmin.from("matches").insert({
-      home_team_id: team1.id, away_team_id: team2.id,
-      home_score: score1, away_score: score2,
-      status: "completed",
-    });
-  }
-
-  const winnerId = score1 > score2 ? team1.id : score2 > score1 ? team2.id : null;
-  const loserId  = score1 > score2 ? team2.id : score2 > score1 ? team1.id : null;
-
-  if (score1 !== score2) {
-    const [winner, loser] = score1 > score2 ? [team1, team2] : [team2, team1];
-    await Promise.all([
-      supabaseAdmin.from("teams").update({ wins: (winner.wins ?? 0) + 1 }).eq("id", winner.id),
-      supabaseAdmin.from("teams").update({ losses: (loser.losses ?? 0) + 1 }).eq("id", loser.id),
-    ]);
-
-    if (bracketMatch && winnerId) await advanceBracketWinner(bracketMatch, winnerId, loserId ?? undefined);
-  }
-
-  const winnerName = score1 > score2 ? team1.name : score2 > score1 ? team2.name : null;
-  const result = winnerName ? `🏆 **${winnerName} wins!**` : "🤝 **Draw!**";
-  return reply(`📊 **Match Recorded**\n**${team1.name}** ${score1} — ${score2} **${team2.name}**\n${result}`);
-}
-
-async function submitScore(userId: string, channelId: string, channelName: string, homeScore: number, awayScore: number) {
-  if (!isAdmin(userId)) return reply("❌ Only admins can submit scores.");
-
-  const teams = parseChannelTeams(channelName);
-  if (!teams) return reply("❌ Run this command inside a match channel (name must contain \"-vs-\").");
-  const [homeName, awayName] = teams;
-
-  const [{ data: homeTeam }, { data: awayTeam }] = await Promise.all([
-    supabaseAdmin.from("teams").select("id, name, wins, losses").ilike("name", homeName).single(),
-    supabaseAdmin.from("teams").select("id, name, wins, losses").ilike("name", awayName).single(),
-  ]);
-  if (!homeTeam) return reply(`❌ Team not found: "${homeName}"`);
-  if (!awayTeam) return reply(`❌ Team not found: "${awayName}"`);
-
-  const { data: bracketMatch } = await supabaseAdmin
-    .from("matches")
-    .select("id, round, match_number, stage")
-    .eq("home_team_id", homeTeam.id)
-    .eq("away_team_id", awayTeam.id)
-    .eq("status", "scheduled")
-    .not("stage", "is", null)
-    .maybeSingle();
-
-  if (bracketMatch) {
-    await supabaseAdmin.from("matches")
-      .update({ home_score: homeScore, away_score: awayScore, status: "completed" })
-      .eq("id", bracketMatch.id);
-  } else {
-    await supabaseAdmin.from("matches").insert({
-      home_team_id: homeTeam.id, away_team_id: awayTeam.id,
-      home_score: homeScore, away_score: awayScore, status: "completed",
-    });
-  }
-
-  const winnerId = homeScore > awayScore ? homeTeam.id : awayScore > homeScore ? awayTeam.id : null;
-  const loserId  = homeScore > awayScore ? awayTeam.id : awayScore > homeScore ? homeTeam.id : null;
-  if (homeScore !== awayScore) {
-    const [winner, loser] = homeScore > awayScore ? [homeTeam, awayTeam] : [awayTeam, homeTeam];
-    await Promise.all([
-      supabaseAdmin.from("teams").update({ wins: (winner.wins ?? 0) + 1 }).eq("id", winner.id),
-      supabaseAdmin.from("teams").update({ losses: (loser.losses ?? 0) + 1 }).eq("id", loser.id),
-    ]);
-    if (bracketMatch && winnerId) await advanceBracketWinner(bracketMatch, winnerId, loserId ?? undefined);
-  }
-
-  const winnerName = homeScore > awayScore ? homeTeam.name : awayScore > homeScore ? awayTeam.name : null;
-  const resultLine = winnerName ? `🏆 **${winnerName} wins!**` : "🤝 **Draw**";
-
-  // Announce result in draft channel, then delete match channel
-  const { data: cfg } = await supabaseAdmin.from("league_settings").select("draft_channel_id").single();
-  if (cfg?.draft_channel_id) {
-    await sendChannelMessage(
-      cfg.draft_channel_id,
-      `📊 **Match Result** | **${homeTeam.name}** ${homeScore} — ${awayScore} **${awayTeam.name}** · ${resultLine}`
-    );
-  }
-  await deleteChannel(channelId);
-
-  // Ephemeral reply (flag 64) — visible only to the admin who ran the command
-  return { type: 4, data: { content: `✅ Score submitted. Channel deleted.`, flags: 64 } };
-}
-
-async function myTeam(userId: string) {
-  const { data: player } = await supabaseAdmin
-    .from("players")
-    .select("team_id")
-    .eq("discord_id", userId)
-    .single();
-
-  if (!player?.team_id) return reply("❌ You are not on a team.");
-
-  const teamId = player.team_id as string;
-
-  const [{ data: team }, { data: roster }, { data: nextMatch }] = await Promise.all([
-    supabaseAdmin.from("teams").select("name, wins, losses").eq("id", teamId).single(),
-    supabaseAdmin.from("players")
-      .select("username, peak_2v2, peak_3v3, is_captain")
-      .eq("team_id", teamId)
-      .eq("status", "approved"),
-    supabaseAdmin.from("matches")
-      .select("home_team_id, away_team_id, week, scheduled_at")
-      .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
-      .eq("status", "scheduled")
-      .order("scheduled_at", { ascending: true })
-      .limit(1)
-      .maybeSingle(),
-  ]);
-
-  if (!team) return reply("❌ Team not found.");
-
-  const wins = team.wins ?? 0;
-  const losses = team.losses ?? 0;
-  const winRate = wins + losses > 0
-    ? ` (${Math.round((wins / (wins + losses)) * 100)}% WR)` : "";
-
-  const sorted = [...(roster ?? [])].sort((a, b) => {
-    if (a.is_captain !== b.is_captain) return a.is_captain ? -1 : 1;
-    const peakA = Math.max(Number(a.peak_2v2) || 0, Number(a.peak_3v3) || 0);
-    const peakB = Math.max(Number(b.peak_2v2) || 0, Number(b.peak_3v3) || 0);
-    return peakB - peakA;
-  });
-
-  const rosterLines = sorted.map((p) => {
-    const peak = Math.max(Number(p.peak_2v2) || 0, Number(p.peak_3v3) || 0);
-    return `${p.is_captain ? "👑" : "•"} **${p.username}** · ${peak.toLocaleString()} MMR`;
-  }).join("\n");
-
-  let matchLine = "";
-  if (nextMatch) {
-    const opponentId = nextMatch.home_team_id === teamId
-      ? nextMatch.away_team_id : nextMatch.home_team_id;
-    const { data: opp } = await supabaseAdmin
-      .from("teams").select("name").eq("id", opponentId).single();
-    const weekStr = nextMatch.week ? `Round ${nextMatch.week}` : "";
-    const dateStr = nextMatch.scheduled_at
-      ? new Date(nextMatch.scheduled_at).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-      : "";
-    const timeInfo = [weekStr, dateStr].filter(Boolean).join(" · ");
-    matchLine = `\n\n📅 **Next:** vs **${opp?.name ?? "TBD"}**${timeInfo ? ` — ${timeInfo}` : ""}`;
-  }
-
-  return reply(
-    `🛡️ **${team.name}** — ${wins}W ${losses}L${winRate}\n` +
-    `━━━━━━━━━━━━━━━━\n` +
-    rosterLines +
-    matchLine
-  );
-}
-
-async function standings() {
-  const { data: teams } = await supabaseAdmin.from("teams").select("id, name");
-  const { data: matches } = await supabaseAdmin.from("matches").select("*");
-
-  if (!teams?.length) return reply("No teams found.");
-  if (!matches?.length) return reply("No matches played yet.");
-
-  const stats: Record<string, { name: string; wins: number; losses: number }> = {};
-  teams.forEach((t) => { stats[t.id] = { name: t.name, wins: 0, losses: 0 }; });
-
-  matches.forEach((m) => {
-    if (m.home_score > m.away_score) { stats[m.home_team_id].wins++; stats[m.away_team_id].losses++; }
-    else if (m.away_score > m.home_score) { stats[m.away_team_id].wins++; stats[m.home_team_id].losses++; }
-  });
-
-  const sorted = Object.values(stats).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
-  const list = sorted.map((t, i) => `${i + 1}. **${t.name}** — ${t.wins}W ${t.losses}L`).join("\n");
-  return reply(`🏆 **Standings**\n${list}`);
 }
 
 // ─── Autocomplete ─────────────────────────────────────────────────────────────
@@ -1735,29 +1932,15 @@ export async function handleAutocomplete(interaction: Interaction) {
 
   const value = String(focused.value ?? "");
   const pattern = value ? `%${value}%` : "%";
-  const commandName = interaction.data.name;
 
-  if (commandName === "reportresult") {
-    const { data: teams } = await supabaseAdmin
-      .from("teams").select("name").ilike("name", pattern).limit(25);
-    return { type: 8, data: { choices: (teams ?? []).map((t) => ({ name: t.name, value: t.name })) } };
+  if (interaction.data.name === "pick") {
+    const { data } = await supabaseAdmin
+      .from("players").select("username").ilike("username", pattern)
+      .eq("status", "approved").eq("in_active_draft", true).is("team_id", null).limit(25);
+    return { type: 8, data: { choices: (data ?? []).map((p) => ({ name: p.username, value: p.username })) } };
   }
 
-  const base = supabaseAdmin.from("players").select("username").ilike("username", pattern);
-  let queryResult;
-
-  if (commandName === "approve" || commandName === "reject") {
-    queryResult = await base.eq("status", "pending").limit(25);
-  } else if (commandName === "assignteam") {
-    queryResult = await base.eq("status", "approved").limit(25);
-  } else if (commandName === "nominate") {
-    queryResult = await base
-      .eq("status", "approved").eq("draft_entered", true).is("team_id", null).limit(25);
-  } else {
-    queryResult = await base.limit(25);
-  }
-
-  return { type: 8, data: { choices: (queryResult.data ?? []).map((p) => ({ name: p.username, value: p.username })) } };
+  return { type: 8, data: { choices: [] } };
 }
 
 // ─── Modal submit handler ─────────────────────────────────────────────────────
@@ -1775,7 +1958,7 @@ export async function handleModalSubmit(interaction: Interaction) {
 
   const modal = modals[customId];
   if (!modal) return reply("❌ Unknown confirmation.");
-  if (!isAdmin(userId)) return reply("❌ You don't have permission.");
+  if (!(await isModerator(userId))) return reply("❌ You don't have permission.");
   if (value !== modal.code) return reply(`❌ Incorrect code. Type exactly: "${modal.code}"`);
 
   const result = await modal.fn();
@@ -1791,40 +1974,21 @@ export async function handleCommand(interaction: Interaction) {
   switch (name) {
     case "totalplayers":  return totalPlayers();
     case "totalusers":    return totalUsers();
-    case "pending":       return pending(userId);
-    case "approve":       return approve(userId, String(opt(interaction, "username")));
-    case "reject":        return reject(userId, String(opt(interaction, "username")));
     case "playerinfo":    return playerInfo(String(opt(interaction, "username")));
-    case "setnumteams":   return setNumTeams(userId, String(opt(interaction, "count")));
-    case "setdraftchannel": return setDraftChannel(userId, String(opt(interaction, "channel")));
-    case "startdraft":    return startDraft(userId);
-    case "enddraft":      return endDraft(userId);
-    case "draftpool":     return draftPool(userId);
-    case "draftcount":    return draftCount();
-    case "enterdraft":    return enterDraft(userId);
-    case "leavedraft":    return leaveDraft(userId);
-    case "nominate":      return nominatePlayer(userId, String(opt(interaction, "player")), Number(opt(interaction, "bid")));
-    case "bid":           return placeBid(userId, Number(opt(interaction, "amount")));
-    case "endround":      return endRound(userId);
-    case "budget":        return checkBudget(userId);
-    case "assignteam":    return assignTeam(userId, String(opt(interaction, "player")), String(opt(interaction, "team")));
+    case "setdraftchannel": return setDraftChannel(userId, interaction.channel_id ?? "");
+    case "pick":          return pickPlayer(userId, String(opt(interaction, "player")));
     case "syncroles":         return syncRoles(userId);
     case "diagroles":         return diagRoles(userId);
+    case "setmoderatorid":    return setStaffRoleId(userId, String(opt(interaction, "role")), "moderator");
+    case "setdirectorid":     return setStaffRoleId(userId, String(opt(interaction, "role")), "director");
+    case "setceoid":          return setStaffRoleId(userId, String(opt(interaction, "role")), "ceo");
     case "assignrole":        return assignRole(userId, String(opt(interaction, "user")), String(opt(interaction, "role")));
     case "removerole":        return removeRoleCmd(userId, String(opt(interaction, "user")), String(opt(interaction, "role")));
-    case "setmatchcategory":  return setMatchCategory(userId, String(opt(interaction, "category")));
-    case "setdeadlineday":    return setDeadlineDay(userId, Number(opt(interaction, "day")));
-    case "setplaytime":       return setPlayTime(userId, Number(opt(interaction, "day")), Number(opt(interaction, "hour")));
-    case "setruleschannel":   return setRulesChannel(userId, String(opt(interaction, "channel")));
+    case "setruleschannel":   return setRulesChannel(userId, interaction.channel_id ?? "");
     case "openround": {
       const w = opt(interaction, "round");
       return openRound(userId, w ? Number(w) : undefined);
     }
-    case "startseason":   return startSeason(userId);
-    case "reportresult":  return reportResult(userId, String(opt(interaction, "team1")), Number(opt(interaction, "score1")), String(opt(interaction, "team2")), Number(opt(interaction, "score2")));
-    case "score":         return submitScore(userId, interaction.channel_id ?? "", interaction.channel?.name ?? "", Number(opt(interaction, "home")), Number(opt(interaction, "away")));
-    case "standings":     return standings();
-    case "myteam":        return myTeam(userId);
     default:              return reply("Unknown command.");
   }
 }

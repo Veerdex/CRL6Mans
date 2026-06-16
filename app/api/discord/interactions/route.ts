@@ -3,7 +3,7 @@ import { after } from "next/server";
 import nacl from "tweetnacl";
 import { handleCommand, handleAutocomplete, handleModalSubmit } from "@/app/lib/discord-bot";
 
-const DEFERRED_COMMANDS = new Set(["openround", "score", "syncroles", "nominate", "bid", "endround"]);
+const DEFERRED_COMMANDS = new Set(["openround", "syncroles"]);
 const DEFERRED_MODALS = new Set(["confirm_startdraft", "confirm_enddraft", "confirm_startseason"]);
 
 function verify(publicKey: string, signature: string, timestamp: string, body: string): boolean {
@@ -19,7 +19,8 @@ function verify(publicKey: string, signature: string, timestamp: string, body: s
 }
 
 async function followUp(token: string, content: string) {
-  const appId = process.env.DISCORD_CLIENT_ID!;
+  const appId = process.env.DISCORD_CLIENT_ID;
+  if (!appId) { console.error("[followUp] DISCORD_CLIENT_ID is not set"); return; }
   await fetch(`https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },

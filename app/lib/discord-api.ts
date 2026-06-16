@@ -99,11 +99,11 @@ export async function addRoleById(userId: string, roleId: string, attempt = 0): 
       headers: botHeaders(),
     });
     if (res.status === 429) {
-      const data = await res.json() as { retry_after?: number };
+      const data = await res.json().catch(() => ({})) as { retry_after?: number };
       const retryAfter = data.retry_after ?? 1;
-      if (attempt === 0 && retryAfter <= 10) {
-        await new Promise(r => setTimeout(r, Math.ceil(retryAfter * 1000) + 200));
-        return addRoleById(userId, roleId, 1);
+      if (attempt < 4 && retryAfter <= 15) {
+        await new Promise(r => setTimeout(r, Math.ceil(retryAfter * 1000) + 250));
+        return addRoleById(userId, roleId, attempt + 1);
       }
       console.error(`[addRoleById] user=${userId} role=${roleId} rate limited (retry_after: ${retryAfter}s)`);
       return;
@@ -117,20 +117,37 @@ export async function addRoleById(userId: string, roleId: string, attempt = 0): 
   }
 }
 
-export async function removeRoleById(userId: string, roleId: string): Promise<void> {
-  if (!GUILD_ID || !BOT_TOKEN) return;
-  if (userId.startsWith("test_")) return;
+// Returns { ok, status, message } so callers can diagnose failures (e.g. 403
+// "Missing Permissions" when the bot's role is below the target role).
+export async function removeRoleById(
+  userId: string,
+  roleId: string,
+  attempt = 0,
+): Promise<{ ok: boolean; status: number; message?: string }> {
+  if (!GUILD_ID || !BOT_TOKEN) return { ok: false, status: 0, message: "Missing guild/bot config" };
+  if (userId.startsWith("test_")) return { ok: true, status: 204 };
   try {
     const res = await fetch(`${API}/guilds/${GUILD_ID}/members/${userId}/roles/${roleId}`, {
       method: "DELETE",
       headers: botHeaders(),
     });
-    if (!res.ok && res.status !== 204) {
-      const text = await res.text();
-      console.error(`[removeRoleById] user=${userId} role=${roleId} status=${res.status}`, text);
+    if (res.status === 429) {
+      const data = await res.json().catch(() => ({})) as { retry_after?: number };
+      const retryAfter = data.retry_after ?? 1;
+      if (attempt < 4 && retryAfter <= 15) {
+        await new Promise(r => setTimeout(r, Math.ceil(retryAfter * 1000) + 250));
+        return removeRoleById(userId, roleId, attempt + 1);
+      }
+      return { ok: false, status: 429, message: "You are being rate limited." };
     }
+    if (res.ok || res.status === 204) return { ok: true, status: res.status };
+    let message: string | undefined;
+    try { message = (await res.json())?.message; } catch { /* no body */ }
+    console.error(`[removeRoleById] user=${userId} role=${roleId} status=${res.status} ${message ?? ""}`);
+    return { ok: false, status: res.status, message };
   } catch (err) {
     console.error(`[removeRoleById] network error user=${userId} role=${roleId}`, err);
+    return { ok: false, status: 0, message: err instanceof Error ? err.message : "network error" };
   }
 }
 
@@ -210,10 +227,109 @@ export async function removeRole(userId: string, roleName: string): Promise<void
   const roles = await fetchRoles();
   const role = roles.find((r) => r.name === roleName);
   if (!role) return;
-  await fetch(`${API}/guilds/${GUILD_ID}/members/${userId}/roles/${role.id}`, {
+  await removeRoleById(userId, role.id);
+}
+
+export async function timeoutMember(userId: string, durationMs: number): Promise<void> {
+  if (!GUILD_ID || !BOT_TOKEN) return;
+  if (userId.startsWith("test_")) return;
+  const until = new Date(Date.now() + durationMs).toISOString();
+  const res = await fetch(`${API}/guilds/${GUILD_ID}/members/${userId}`, {
+    method: "PATCH",
+    headers: botHeaders(true),
+    body: JSON.stringify({ communication_disabled_until: until }),
+  });
+  if (!res.ok) console.error(`[timeoutMember] user=${userId} status=${res.status}`, await res.text());
+}
+
+export async function banMember(userId: string): Promise<void> {
+  if (!GUILD_ID || !BOT_TOKEN) return;
+  if (userId.startsWith("test_")) return;
+  const res = await fetch(`${API}/guilds/${GUILD_ID}/bans/${userId}`, {
+    method: "PUT",
+    headers: botHeaders(true),
+    body: JSON.stringify({ delete_message_seconds: 0 }),
+  });
+  if (!res.ok && res.status !== 204) console.error(`[banMember] user=${userId} status=${res.status}`, await res.text());
+}
+
+export async function unbanMember(userId: string): Promise<void> {
+  if (!GUILD_ID || !BOT_TOKEN) return;
+  const res = await fetch(`${API}/guilds/${GUILD_ID}/bans/${userId}`, {
     method: "DELETE",
     headers: botHeaders(),
   });
+  if (!res.ok && res.status !== 404 && res.status !== 204)
+    console.error(`[unbanMember] user=${userId} status=${res.status}`, await res.text());
+}
+
+// Returns the member's current role IDs, or null if they aren't in the guild /
+// the fetch failed. Lets callers remove only roles a member actually has.
+export async function getMemberRoleIds(userId: string, attempt = 0): Promise<string[] | null> {
+  if (!GUILD_ID || !BOT_TOKEN) return null;
+  if (userId.startsWith("test_")) return [];
+  try {
+    const res = await fetch(`${API}/guilds/${GUILD_ID}/members/${userId}`, { headers: botHeaders() });
+    if (res.status === 429) {
+      const data = await res.json().catch(() => ({})) as { retry_after?: number };
+      const retryAfter = data.retry_after ?? 1;
+      if (attempt < 4 && retryAfter <= 15) {
+        await new Promise(r => setTimeout(r, Math.ceil(retryAfter * 1000) + 250));
+        return getMemberRoleIds(userId, attempt + 1);
+      }
+      console.error(`[getMemberRoleIds] user=${userId} rate limited (retry_after: ${retryAfter}s)`);
+      return null;
+    }
+    if (!res.ok) return null;
+    const data = await res.json() as { roles?: string[] };
+    return Array.isArray(data.roles) ? data.roles : [];
+  } catch {
+    return null;
+  }
+}
+
+// Removes the given role IDs from each member, but only the ones they actually
+// have — avoids the no-op calls that trip Discord's rate limiter. Sequential,
+// and removeRoleById backs off on 429.
+export async function stripRoleIdsFromMembers(userIds: string[], roleIds: string[]): Promise<void> {
+  const roleSet = new Set(roleIds.filter(Boolean));
+  if (roleSet.size === 0) return;
+  for (const uid of userIds) {
+    if (!uid || uid.startsWith("test_")) continue;
+    const have = await getMemberRoleIds(uid);
+    if (!have) continue;
+    for (const rid of have) {
+      if (roleSet.has(rid)) await removeRoleById(uid, rid);
+    }
+  }
+}
+
+export async function isGuildMember(userId: string): Promise<boolean> {
+  if (!GUILD_ID || !BOT_TOKEN) return true; // fail open if not configured
+  const res = await fetch(`${API}/guilds/${GUILD_ID}/members/${userId}`, {
+    headers: botHeaders(),
+  });
+  return res.ok;
+}
+
+export async function sendDm(userId: string, content: string): Promise<void> {
+  if (!BOT_TOKEN) return;
+  const dmRes = await fetch(`${API}/users/@me/channels`, {
+    method: "POST",
+    headers: botHeaders(true),
+    body: JSON.stringify({ recipient_id: userId }),
+  });
+  if (!dmRes.ok) {
+    console.error(`[sendDm] user=${userId} failed to open DM channel status=${dmRes.status}`);
+    return;
+  }
+  const { id: channelId } = await dmRes.json() as { id: string };
+  const msgRes = await fetch(`${API}/channels/${channelId}/messages`, {
+    method: "POST",
+    headers: botHeaders(true),
+    body: JSON.stringify({ content }),
+  });
+  if (!msgRes.ok) console.error(`[sendDm] user=${userId} failed to send message status=${msgRes.status}`, await msgRes.text());
 }
 
 export async function sendChannelMessage(channelId: string, content: string): Promise<void> {
@@ -223,15 +339,44 @@ export async function sendChannelMessage(channelId: string, content: string): Pr
     headers: botHeaders(true),
     body: JSON.stringify({ content }),
   });
-  if (!res.ok) console.error("[sendChannelMessage]", await res.text());
+  if (!res.ok) console.error(`[sendChannelMessage] channel=${channelId} status=${res.status}`, await res.text());
 }
 
-export async function deleteChannel(channelId: string): Promise<void> {
-  if (!BOT_TOKEN) return;
-  await fetch(`${API}/channels/${channelId}`, {
-    method: "DELETE",
-    headers: botHeaders(),
+export async function deleteChannel(channelId: string): Promise<boolean> {
+  if (!BOT_TOKEN) return false;
+  try {
+    const res = await fetch(`${API}/channels/${channelId}`, {
+      method: "DELETE",
+      headers: botHeaders(),
+    });
+    if (!res.ok && res.status !== 404) {
+      console.error(`[deleteChannel] channel=${channelId} status=${res.status}`, await res.text());
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error(`[deleteChannel] network error channel=${channelId}`, err);
+    return false;
+  }
+}
+
+// Creates a Discord category channel (type 4). Returns its ID.
+export async function createCategory(
+  name: string,
+): Promise<{ id: string; error?: never } | { id: null; error: string }> {
+  if (!GUILD_ID || !BOT_TOKEN) return { id: null, error: "Bot credentials not configured." };
+  const res = await fetch(`${API}/guilds/${GUILD_ID}/channels`, {
+    method: "POST",
+    headers: botHeaders(true),
+    body: JSON.stringify({ name, type: 4 }),
   });
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("[createCategory]", text);
+    return { id: null, error: `Discord API error ${res.status}` };
+  }
+  const channel: { id: string } = await res.json();
+  return { id: channel.id };
 }
 
 // Fetch or create all named roles in one batch. Returns name → id map.

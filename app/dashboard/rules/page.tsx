@@ -1,6 +1,6 @@
 export default function RulesPage() {
   return (
-    <div className="p-8 max-w-3xl space-y-10 text-zinc-300">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl space-y-10 text-zinc-300">
       <div>
         <h1 className="text-3xl font-bold text-white">CRL West 6mans Summer League</h1>
         <p className="text-xl text-zinc-400 mt-1">2026 Rulebook</p>

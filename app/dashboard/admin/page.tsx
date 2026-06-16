@@ -1,32 +1,70 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
-import { getAllPendingPlayers, getApprovedPlayers, isAdmin } from "@/app/lib/players";
+import { getAllPendingPlayers, isModerator, isDirector, isCEO, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { LeagueControls } from "./league-controls";
+import { AdminNotificationToggles } from "./admin-notification-toggles";
+import { InsightsChart, type InsightsPoint } from "./insights-chart";
 import { FormatEditor, type SeasonFormatConfig } from "../season/format-editor";
 import { CollapsibleSection } from "./collapsible-section";
 import { RegistrationCard } from "./registration-card";
-import { PlayerDataEditor } from "./player-data-editor";
+import { PlayerPanel, type CombinedPlayer } from "./player-panel";
 import { TeamSlotsManager } from "./team-slots-manager";
 import { MatchReporter } from "./match-reporter";
+import { getTier } from "@/app/lib/discord-bot";
+import { DEFAULT_BEST_OF } from "../season/format-editor";
 import { SubRequestCard, type SubRequestCardData } from "./sub-request-card";
+import { PlayerEditRequestCard, type PlayerEditRequestCardData } from "./player-edit-request-card";
+import { TournamentManager } from "./tournament-manager";
+import type { Tournament, Season } from "./tournament-actions";
+import { InitSettingsButton } from "./init-settings-button";
+import { getStaffList } from "./staff-actions";
+import { StaffManager } from "./staff-section";
+
+async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean; userIsDirector: boolean }) {
+  const staff = await getStaffList();
+  return (
+    <CollapsibleSection title="Staff Management" defaultOpen={false}>
+      <StaffManager staff={staff} userIsCEO={userIsCEO} userIsDirector={userIsDirector} />
+    </CollapsibleSection>
+  );
+}
 
 export default async function AdminPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
 
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
+  if (!session?.userId || !(await isModerator(session.userId))) redirect("/dashboard");
 
-  const [pending, approved, { data: settings }, { count: enteredCount }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }] = await Promise.all([
+  const [userIsDirector, userIsCEO] = await Promise.all([
+    isDirector(session.userId),
+    isCEO(session.userId),
+  ]);
+  const testingMode           = userIsDirector && cookieStore.get("testing_mode")?.value === "1";
+  const notificationsEnabled  = cookieStore.get("notifications_disabled")?.value !== "1";
+
+  const [pending, { data: settings }, { count: enteredCount }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allPlayers }] = await Promise.all([
     getAllPendingPlayers(),
-    getApprovedPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, season_active, match_deadline_day, match_play_day, match_play_hour").single(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id").maybeSingle(),
     supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
-    supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
-    supabaseAdmin.from("sub_requests").select("id, team_id, player_out_id, sub_player_id, reason, admin_note, requested_by_discord_id, created_at").eq("status", "pending").order("created_at", { ascending: true }),
+    supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
+    supabaseAdmin.from("sub_requests").select("id, team_id, player_out_id, sub_player_id, sub_player_ids, reason, admin_note, requested_by_discord_id, created_at").eq("status", "escalated").order("created_at", { ascending: true }),
+    supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at").eq("status", "pending").order("created_at", { ascending: true }),
+    supabaseAdmin.from("tournaments").select("*").order("created_at", { ascending: false }),
+    supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
+    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, status, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, ban_reason, kick_reason").in("status", ["approved", "banned"]).order("username"),
   ]);
+
+  // Fetch staff roles for all players to support hierarchy-aware kick/ban buttons
+  const playerDiscordIds = (allPlayers ?? []).map((p: { discord_id: string }) => p.discord_id).filter(Boolean);
+  const { data: staffRows } = playerDiscordIds.length
+    ? await supabaseAdmin.from("staff_roles").select("discord_id, role").in("discord_id", playerDiscordIds)
+    : { data: [] };
+  const staffRoleByDiscordId = Object.fromEntries((staffRows ?? []).map((r: { discord_id: string; role: string }) => [r.discord_id, r.role]));
+
+  const actorRole = userIsCEO ? "ceo" : userIsDirector ? "director" : "moderator";
 
   // Build team name lookup for match reporter
   const matchTeamIds = [...new Set((scheduledMatches ?? []).flatMap(m => [m.home_team_id, m.away_team_id]))];
@@ -34,6 +72,62 @@ export default async function AdminPage() {
     ? await supabaseAdmin.from("teams").select("id, name").in("id", matchTeamIds)
     : { data: [] };
   const teamNameById = Object.fromEntries((matchTeams ?? []).map(t => [t.id, t.name]));
+
+  // Eligible players per match: both team rosters + any approved subs for that match.
+  // Used to scope the replay aka-name dropdown to who could actually be playing.
+  type EligibleOption = { id: string; label: string };
+  const matchIds = (scheduledMatches ?? []).map(m => m.id);
+  const { data: approvedSubsForMatches } = matchIds.length
+    ? await supabaseAdmin
+        .from("sub_requests")
+        .select("match_id, sub_player_id, sub_player_ids")
+        .eq("status", "approved")
+        .in("match_id", matchIds)
+    : { data: [] as { match_id: string; sub_player_id: string | null; sub_player_ids: string[] | null }[] };
+
+  const approvedRoster = (allPlayers ?? []).filter((p: { status: string }) => p.status === "approved");
+  const optionById = new Map<string, EligibleOption>(
+    approvedRoster.map((p: { id: string; username: string; display_name: string | null }) => [
+      p.id,
+      { id: p.id, label: p.display_name ? `${p.display_name} (${p.username})` : p.username },
+    ]),
+  );
+  const optionsByTeam = new Map<string, EligibleOption[]>();
+  for (const p of approvedRoster as { id: string; team_id: string | null }[]) {
+    if (!p.team_id) continue;
+    const opt = optionById.get(p.id);
+    if (!opt) continue;
+    const arr = optionsByTeam.get(p.team_id) ?? [];
+    arr.push(opt);
+    optionsByTeam.set(p.team_id, arr);
+  }
+  const subsByMatch = new Map<string, string[]>();
+  for (const s of approvedSubsForMatches ?? []) {
+    const ids = (s.sub_player_ids as string[] | null) ?? (s.sub_player_id ? [s.sub_player_id] : []);
+    if (!ids.length) continue;
+    subsByMatch.set(s.match_id, [...(subsByMatch.get(s.match_id) ?? []), ...ids]);
+  }
+  function eligiblePlayersForMatch(m: { id: string; home_team_id: string; away_team_id: string }): EligibleOption[] {
+    const set = new Map<string, EligibleOption>();
+    for (const opt of optionsByTeam.get(m.home_team_id) ?? []) set.set(opt.id, opt);
+    for (const opt of optionsByTeam.get(m.away_team_id) ?? []) set.set(opt.id, opt);
+    for (const id of subsByMatch.get(m.id) ?? []) { const opt = optionById.get(id); if (opt) set.set(id, opt); }
+    return [...set.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  // Compute best-of per match from season_format
+  const sfFormat = settings?.season_format as { roundBestOf?: Record<string, number>; best_of?: number } | null;
+  const roundBestOf = sfFormat?.roundBestOf ?? {};
+  const maxRoundByStage: Record<string, number> = {};
+  for (const m of scheduledMatches ?? []) {
+    maxRoundByStage[m.stage] = Math.max(maxRoundByStage[m.stage] ?? 0, m.round);
+  }
+  function matchBestOf(stage: string, round: number): number {
+    if (stage.startsWith("hybrid")) return 7; // hybrid bracket is always BO7
+    const tier = getTier(round, maxRoundByStage[stage] ?? round);
+    return roundBestOf[tier] ?? DEFAULT_BEST_OF[tier as keyof typeof DEFAULT_BEST_OF] ?? sfFormat?.best_of ?? 3;
+  }
+
   const matchRows = (scheduledMatches ?? []).map(m => ({
     id: m.id,
     homeTeamId: m.home_team_id,
@@ -43,20 +137,30 @@ export default async function AdminPage() {
     stage: m.stage,
     round: m.round,
     matchNumber: m.match_number,
+    bestOf: matchBestOf(m.stage, m.round),
     scheduledAt: (m.scheduled_at as string | null) ?? null,
     scheduleAccepted: (m.schedule_accepted as boolean) ?? false,
+    pendingHomeScore: (m.pending_home_score as number | null) ?? null,
+    pendingAwayScore: (m.pending_away_score as number | null) ?? null,
+    scoreConfirmed: (m.score_confirmed as boolean) ?? false,
+    players: eligiblePlayersForMatch(m),
   }));
 
   // Build sub request cards
   type RawSubRequest = {
     id: string; team_id: string; player_out_id: string; sub_player_id: string | null;
+    sub_player_ids: string[] | null;
     reason: string | null; admin_note: string | null; requested_by_discord_id: string; created_at: string;
   };
   const subReqs = (pendingSubRequests ?? []) as RawSubRequest[];
 
   const subTeamIds      = [...new Set(subReqs.map(r => r.team_id))];
   const subOutIds       = [...new Set(subReqs.map(r => r.player_out_id))];
-  const subInIds        = [...new Set(subReqs.map(r => r.sub_player_id).filter((id): id is string => id !== null))];
+  const subInIds        = [...new Set(subReqs.flatMap(r => {
+    if (r.sub_player_ids && r.sub_player_ids.length > 0) return r.sub_player_ids;
+    if (r.sub_player_id) return [r.sub_player_id];
+    return [];
+  }))];
   const subRequesterIds = [...new Set(subReqs.map(r => r.requested_by_discord_id))];
 
   const [
@@ -66,34 +170,74 @@ export default async function AdminPage() {
     { data: subRequesters },
   ] = await Promise.all([
     subTeamIds.length      ? supabaseAdmin.from("teams").select("id, name").in("id", subTeamIds) : { data: [] as { id: string; name: string }[] },
-    subOutIds.length       ? supabaseAdmin.from("players").select("id, username, peak_2v2, peak_3v3").in("id", subOutIds) : { data: [] as { id: string; username: string; peak_2v2: string; peak_3v3: string }[] },
-    subInIds.length        ? supabaseAdmin.from("players").select("id, username, peak_2v2, peak_3v3").in("id", subInIds) : { data: [] as { id: string; username: string; peak_2v2: string; peak_3v3: string }[] },
-    subRequesterIds.length ? supabaseAdmin.from("players").select("discord_id, username").in("discord_id", subRequesterIds) : { data: [] as { discord_id: string; username: string }[] },
+    subOutIds.length       ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3").in("id", subOutIds) : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] },
+    subInIds.length        ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3").in("id", subInIds) : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] },
+    subRequesterIds.length ? supabaseAdmin.from("players").select("discord_id, username, display_name").in("discord_id", subRequesterIds) : { data: [] as { discord_id: string; username: string; display_name: string | null }[] },
   ]);
 
   const subTeamMap      = Object.fromEntries((subTeams      ?? []).map(t => [t.id, t.name]));
   const subOutMap       = Object.fromEntries((subPlayersOut ?? []).map(p => [p.id, p]));
   const subInMap        = Object.fromEntries((subPlayersIn  ?? []).map(p => [p.id, p]));
-  const subRequesterMap = Object.fromEntries((subRequesters ?? []).map(p => [p.discord_id, p.username]));
+  const subRequesterMap = Object.fromEntries((subRequesters ?? []).map(p => [p.discord_id, p]));
 
-  function subPeakMmr(p: { peak_2v2: string; peak_3v3: string }) {
-    return Math.max(Number(p.peak_2v2) || 0, Number(p.peak_3v3) || 0);
+  function subPeakMmr(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }) {
+    return Math.round((Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2);
   }
 
   const subRequestCards: SubRequestCardData[] = subReqs.map(req => {
-    const playerOut = subOutMap[req.player_out_id];
-    const subPlayer = req.sub_player_id ? subInMap[req.sub_player_id] : null;
+    const playerOut    = subOutMap[req.player_out_id];
+    const candidateIds = (req.sub_player_ids && req.sub_player_ids.length > 0)
+      ? req.sub_player_ids
+      : (req.sub_player_id ? [req.sub_player_id] : []);
+    const subCandidates = candidateIds
+      .map(id => subInMap[id])
+      .filter(Boolean)
+      .map(p => ({ username: p.username, displayName: p.display_name ?? null, mmr: subPeakMmr(p) }));
+    const requester = subRequesterMap[req.requested_by_discord_id];
     return {
       id:                   req.id,
       teamName:             subTeamMap[req.team_id] ?? "Unknown",
       playerOutName:        playerOut?.username ?? "Unknown",
+      playerOutDisplay:     playerOut?.display_name ?? null,
       playerOutMmr:         playerOut ? subPeakMmr(playerOut) : 0,
-      subPlayerName:        subPlayer?.username ?? null,
-      subPlayerMmr:         subPlayer ? subPeakMmr(subPlayer) : null,
+      subCandidates,
       reason:               req.reason,
       adminNote:            req.admin_note,
-      requestedByUsername:  subRequesterMap[req.requested_by_discord_id] ?? null,
+      requestedByUsername:  requester?.username ?? null,
+      requestedByDisplay:   requester?.display_name ?? null,
       createdAt:            req.created_at,
+    };
+  });
+
+  // Build player edit request cards (join with live player data)
+  type RawEditRequest = {
+    id: string; player_id: string; username: string;
+    tracker_url: string; peak_3v3: string; current_3v3: string; peak_2v2: string; current_2v2: string;
+    created_at: string;
+  };
+  const editReqs = (pendingEditRequests ?? []) as RawEditRequest[];
+  const editPlayerIds = [...new Set(editReqs.map(r => r.player_id))];
+  const { data: editPlayers } = editPlayerIds.length
+    ? await supabaseAdmin.from("players").select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2").in("id", editPlayerIds)
+    : { data: [] as { id: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null }[] };
+  const editPlayerMap = Object.fromEntries((editPlayers ?? []).map(p => [p.id, p]));
+
+  const playerEditRequestCards: PlayerEditRequestCardData[] = editReqs.map(req => {
+    const live = editPlayerMap[req.player_id];
+    return {
+      id:              req.id,
+      username:        req.username,
+      trackerUrl:      req.tracker_url,
+      peak3v3:         req.peak_3v3,
+      current3v3:      req.current_3v3,
+      peak2v2:         req.peak_2v2,
+      current2v2:      req.current_2v2,
+      liveTrackerUrl:  live?.tracker_url  ?? "",
+      livePeak3v3:     live?.peak_3v3     ?? "",
+      liveCurrent3v3:  live?.current_3v3  ?? "",
+      livePeak2v2:     live?.peak_2v2     ?? "",
+      liveCurrent2v2:  live?.current_2v2  ?? "",
+      createdAt:       req.created_at,
     };
   });
 
@@ -104,8 +248,132 @@ export default async function AdminPage() {
     ? (settings.num_teams as number)
     : Math.floor((enteredCount ?? 0) / 3);
 
+  type RawPlayer = { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null; status: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; ban_reason?: string | null; kick_reason?: string | null };
+  const combinedPlayers: CombinedPlayer[] = ((allPlayers ?? []) as RawPlayer[]).map(p => ({
+    id: p.id,
+    discord_id: p.discord_id,
+    username: p.username,
+    display_name: p.display_name ?? null,
+    avatar: p.avatar,
+    status: p.status as "approved" | "banned",
+    tracker_url: p.tracker_url ?? "",
+    peak_3v3: p.peak_3v3 ?? "0",
+    current_3v3: p.current_3v3 ?? "0",
+    peak_2v2: p.peak_2v2 ?? "0",
+    current_2v2: p.current_2v2 ?? "0",
+    banReason: p.ban_reason ?? null,
+    kickReason: p.kick_reason ?? null,
+    staffRole: (staffRoleByDiscordId[p.discord_id] ?? null) as StaffRole | null,
+  }));
+  const bannedCount = combinedPlayers.filter(p => p.status === "banned").length;
+
+  // ── Insights: visits / registrations / draft joins over the last 52 weeks ──
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysSinceMonday = (todayStart.getDay() + 6) % 7;
+  const currentWeekStart = new Date(todayStart);
+  currentWeekStart.setDate(todayStart.getDate() - daysSinceMonday);
+  const firstWeekStart = new Date(currentWeekStart);
+  firstWeekStart.setDate(currentWeekStart.getDate() - 7 * 51);
+
+  const { data: analyticsRows } = await supabaseAdmin
+    .from("analytics_events")
+    .select("type, created_at")
+    .gte("created_at", firstWeekStart.toISOString());
+
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  const firstWeekMs = firstWeekStart.getTime();
+  const insightsData: InsightsPoint[] = Array.from({ length: 52 }, (_, i) => {
+    const d = new Date(firstWeekMs + i * WEEK_MS);
+    return {
+      label: d.toLocaleString("en-US", { month: "short", day: "numeric" }),
+      visits: 0,
+      registrations: 0,
+      draftJoins: 0,
+    };
+  });
+  for (const e of (analyticsRows ?? []) as { type: string; created_at: string }[]) {
+    const idx = Math.floor((new Date(e.created_at).getTime() - firstWeekMs) / WEEK_MS);
+    if (idx < 0 || idx > 51) continue;
+    const b = insightsData[idx];
+    if (e.type === "visit") b.visits++;
+    else if (e.type === "registration") b.registrations++;
+    else if (e.type === "draft_join") b.draftJoins++;
+  }
+
   return (
-    <div className="p-8 space-y-12">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-12">
+
+      {/* ── Missing settings row warning ── */}
+      {!settings && (
+        <div className="bg-amber-950/40 border border-amber-700/60 rounded-xl px-5 py-4 flex items-start gap-4">
+          <div className="flex-1 space-y-1">
+            <p className="text-sm font-semibold text-amber-300">League settings row is missing</p>
+            <p className="text-xs text-amber-500">
+              The <code className="font-mono">league_settings</code> table has no row. All draft and season controls will silently do nothing until this is fixed.
+            </p>
+          </div>
+          <InitSettingsButton />
+        </div>
+      )}
+
+      {/* ── Insights ── */}
+      <CollapsibleSection title="Insights" defaultOpen={false}>
+        <InsightsChart data={insightsData} />
+      </CollapsibleSection>
+
+      {/* ── Notifications ── */}
+      <CollapsibleSection title="Notifications" defaultOpen={false}>
+        <AdminNotificationToggles
+          initial={(settings?.admin_notification_prefs as Record<string, boolean> | null) ?? {}}
+        />
+      </CollapsibleSection>
+
+      {/* ── Players ── */}
+      <CollapsibleSection title="Players" badge={combinedPlayers.length} defaultOpen={false}>
+        <PlayerPanel players={combinedPlayers} actorRole={actorRole} />
+        {bannedCount > 0 && (
+          <p className="mt-3 text-xs text-red-400/60">{bannedCount} banned player{bannedCount !== 1 ? "s" : ""} shown below active players.</p>
+        )}
+      </CollapsibleSection>
+
+      {/* ── Team Slots (Director+) ── */}
+      {userIsDirector && <CollapsibleSection title="Team Slots" badge={(teamSlots ?? []).length} defaultOpen={false}>
+        <div className="mb-5">
+          <a
+            href="/api/admin/download-logos"
+            download="team-logos.zip"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 text-sm font-medium text-zinc-200 rounded-lg transition-colors"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download All Team Logos
+          </a>
+          <p className="mt-1.5 text-xs text-zinc-600">Downloads a ZIP of every team logo currently uploaded.</p>
+        </div>
+        <TeamSlotsManager teams={(teamSlots ?? []) as { id: string; name: string; discord_role_id: string | null; slot_number: number | null }[]} />
+      </CollapsibleSection>}
+
+      {/* ── Match Reporting ── */}
+      <CollapsibleSection title="Match Reporting" badge={matchRows.length} defaultOpen={false}>
+        <MatchReporter matches={matchRows} />
+      </CollapsibleSection>
+
+      {/* ── Sub Requests ── */}
+      <CollapsibleSection title="Sub Requests" badge={subRequestCards.length} defaultOpen={subRequestCards.length > 0}>
+        {subRequestCards.length === 0 ? (
+          <p className="text-zinc-400 text-sm">No pending sub requests.</p>
+        ) : (
+          <div className="space-y-4">
+            {subRequestCards.map(req => (
+              <SubRequestCard key={req.id} request={req} />
+            ))}
+          </div>
+        )}
+      </CollapsibleSection>
 
       {/* ── Pending Registrations ── */}
       <CollapsibleSection title="Pending Registrations" badge={pending.length} defaultOpen={pending.length > 0}>
@@ -120,18 +388,36 @@ export default async function AdminPage() {
         )}
       </CollapsibleSection>
 
-      {/* ── Player Data ── */}
-      <CollapsibleSection title="Player Data" badge={approved.length} defaultOpen={false}>
-        <PlayerDataEditor players={approved} />
+      {/* ── Profile Change Requests ── */}
+      <CollapsibleSection title="Profile Change Requests" badge={playerEditRequestCards.length} defaultOpen={playerEditRequestCards.length > 0}>
+        {playerEditRequestCards.length === 0 ? (
+          <p className="text-zinc-400 text-sm">No pending profile change requests.</p>
+        ) : (
+          <div className="space-y-4">
+            {playerEditRequestCards.map(req => (
+              <PlayerEditRequestCard key={req.id} request={req} />
+            ))}
+          </div>
+        )}
       </CollapsibleSection>
 
-      {/* ── Team Slots ── */}
-      <CollapsibleSection title="Team Slots" badge={(teamSlots ?? []).length} defaultOpen={false}>
-        <TeamSlotsManager teams={(teamSlots ?? []) as { id: string; name: string; discord_role_id: string | null; slot_number: number | null }[]} />
-      </CollapsibleSection>
+      {/* ── Staff Management ── */}
+      <StaffSection userIsCEO={userIsCEO} userIsDirector={userIsDirector} />
 
-      {/* ── Season Settings ── */}
-      <CollapsibleSection title="Season Settings">
+      {/* ── Tournaments (Director+) ── */}
+      {userIsDirector && (
+        <CollapsibleSection title="Tournaments" badge={(tournaments ?? []).filter((t: Tournament) => t.status === "scheduled" || t.status === "active").length}>
+          <TournamentManager
+            tournaments={(tournaments ?? []) as Tournament[]}
+            seasons={(seasons ?? []) as Season[]}
+            hasActive={!!settings?.active_tournament_id}
+            testingMode={testingMode}
+          />
+        </CollapsibleSection>
+      )}
+
+      {/* ── Season Settings (Director+) ── */}
+      {userIsDirector && <CollapsibleSection title="Season Settings">
         <div className="space-y-6">
           <div>
             <div className="flex items-center gap-3 mb-4">
@@ -150,36 +436,28 @@ export default async function AdminPage() {
             />
           </div>
         </div>
-      </CollapsibleSection>
+      </CollapsibleSection>}
 
-      {/* ── Match Reporting ── */}
-      <CollapsibleSection title="Match Reporting" badge={matchRows.length} defaultOpen={matchRows.length > 0}>
-        <MatchReporter matches={matchRows} />
-      </CollapsibleSection>
-
-      {/* ── Sub Requests ── */}
-      <CollapsibleSection title="Sub Requests" badge={subRequestCards.length} defaultOpen={subRequestCards.length > 0}>
-        {subRequestCards.length === 0 ? (
-          <p className="text-zinc-400 text-sm">No pending sub requests.</p>
-        ) : (
-          <div className="space-y-4">
-            {subRequestCards.map(req => (
-              <SubRequestCard key={req.id} request={req} />
-            ))}
-          </div>
-        )}
-      </CollapsibleSection>
-
-      {/* ── League Controls ── */}
-      <CollapsibleSection title="League Controls">
-        <LeagueControls
-          draftOpen={settings?.draft_open ?? false}
-          currentNumTeams={settings?.num_teams ?? 0}
-          matchDeadlineDay={settings?.match_deadline_day ?? 2}
-          matchPlayDay={settings?.match_play_day ?? 0}
-          matchPlayHour={settings?.match_play_hour ?? 19}
-        />
-      </CollapsibleSection>
+      {/* ── League Controls (Director+) ── */}
+      {userIsDirector && (
+        <CollapsibleSection title="League Controls">
+          <LeagueControls
+            draftOpen={settings?.draft_open ?? false}
+            matchDeadlineDay={settings?.match_deadline_day ?? 2}
+            matchPlayDay={settings?.match_play_day ?? 0}
+            matchPlayHour={settings?.match_play_hour ?? 19}
+            minMmr2v2={(settings?.min_mmr_2v2 as number | null) ?? null}
+            minMmr3v3={(settings?.min_mmr_3v3 as number | null) ?? null}
+            draftActive={settings?.draft_active ?? false}
+            draftPhase={(settings?.draft_phase as string | null) ?? null}
+            hasPickDeadline={!!settings?.pick_deadline}
+            seasonActive={seasonActive}
+            eventActive={seasonActive || !!settings?.active_tournament_id}
+            testingMode={testingMode}
+            notificationsEnabled={notificationsEnabled}
+          />
+        </CollapsibleSection>
+      )}
 
     </div>
   );

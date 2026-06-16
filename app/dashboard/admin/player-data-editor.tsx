@@ -94,7 +94,7 @@ function PlayerRow({ player }: { player: Player }) {
         )}
         <span className="flex-1 text-sm font-medium text-zinc-200 truncate">{username}</span>
         <span className="text-xs text-zinc-500 shrink-0 tabular-nums hidden sm:block">
-          {Math.max(Number(peak3v3)||0, Number(peak2v2)||0).toLocaleString()} peak
+          {Math.round((Number(peak2v2) + Number(curr2v2)) * 0.3 + (Number(peak3v3) + Number(curr3v3)) * 0.2).toLocaleString()} RV
         </span>
         {saved && <span className="text-xs text-emerald-400 shrink-0">Saved</span>}
         <button

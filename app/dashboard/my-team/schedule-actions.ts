@@ -4,40 +4,13 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isAdmin } from "@/app/lib/players";
+import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { getGuildChannels, sendChannelMessage } from "@/app/lib/discord-api";
+import { roleMention, notifyMatchChannel } from "@/app/lib/match-notifications";
 
 async function getSession() {
   const cookieStore = await cookies();
   return decrypt(cookieStore.get("session")?.value);
-}
-
-function slugName(name: string) {
-  return name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-}
-
-async function findMatchChannelId(
-  homeTeamName: string,
-  awayTeamName: string,
-): Promise<string | null> {
-  try {
-    const { data: settings } = await supabaseAdmin
-      .from("league_settings").select("match_category_id").single();
-    const categoryId: string | null = settings?.match_category_id ?? null;
-    const channels = await getGuildChannels();
-    const a = slugName(homeTeamName);
-    const b = slugName(awayTeamName);
-    return (
-      channels.find(
-        (c) =>
-          (c.name === `${a}-vs-${b}` || c.name === `${b}-vs-${a}`) &&
-          (!categoryId || c.parent_id === categoryId),
-      )?.id ?? null
-    );
-  } catch {
-    return null;
-  }
 }
 
 type MatchRow = {
@@ -68,19 +41,17 @@ async function getCaptainContext(matchId: string): Promise<
   if (match.status === "completed")
     return { ok: false, error: "This match is already completed." };
 
-  if (isAdmin(session.userId)) {
+  if (await isModerator(session.userId)) {
     return { ok: true, myTeamId: match.home_team_id as string, match: match as MatchRow };
   }
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("team_id, is_captain")
+    .select("team_id")
     .eq("discord_id", session.userId)
     .single();
 
   if (!player?.team_id) return { ok: false, error: "You are not on a team." };
-  if (!player.is_captain)
-    return { ok: false, error: "Only captains can manage match scheduling." };
   if (player.team_id !== match.home_team_id && player.team_id !== match.away_team_id)
     return { ok: false, error: "You are not in this match." };
 
@@ -111,24 +82,21 @@ export async function proposeMatchTime(
   if (error) return { error: `Failed to save: ${error.message}` };
 
   try {
-    const [{ data: homeTeam }, { data: awayTeam }, { data: myTeam }] = await Promise.all([
-      supabaseAdmin.from("teams").select("name").eq("id", match.home_team_id).single(),
-      supabaseAdmin.from("teams").select("name").eq("id", match.away_team_id).single(),
+    const otherTeamId = myTeamId === match.home_team_id ? match.away_team_id : match.home_team_id;
+    const [{ data: myTeam }, { data: otherTeam }] = await Promise.all([
       supabaseAdmin.from("teams").select("name").eq("id", myTeamId).single(),
+      supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
     ]);
-    const channelId =
-      homeTeam?.name && awayTeam?.name
-        ? await findMatchChannelId(homeTeam.name, awayTeam.name)
-        : null;
-    if (channelId && myTeam?.name) {
+    if (myTeam?.name && otherTeam?.name) {
+      const mention = await roleMention(otherTeam.name);
       const ts = Math.floor(dt.getTime() / 1000);
       const verb = match.scheduled_at ? "proposed a new" : "proposed a";
-      await sendChannelMessage(
-        channelId,
-        `📅 **${myTeam.name}** has ${verb} match time: <t:${ts}:F> (<t:${ts}:R>)\nThe other team must accept on the website.`,
+      await notifyMatchChannel(
+        matchId,
+        `${mention} 📅 **${myTeam.name}** has ${verb} match time: <t:${ts}:F> (<t:${ts}:R>)\nHead to the website to confirm or suggest a different time.`,
       );
     }
-  } catch { /* Discord ping is best-effort */ }
+  } catch { /* best-effort */ }
 
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/admin");
@@ -156,23 +124,20 @@ export async function acceptMatchTime(
   if (error) return { error: `Failed to accept: ${error.message}` };
 
   try {
-    const [{ data: homeTeam }, { data: awayTeam }, { data: myTeam }] = await Promise.all([
-      supabaseAdmin.from("teams").select("name").eq("id", match.home_team_id).single(),
-      supabaseAdmin.from("teams").select("name").eq("id", match.away_team_id).single(),
+    const proposerTeamId = match.schedule_proposed_by_team_id;
+    const [{ data: myTeam }, { data: proposerTeam }] = await Promise.all([
       supabaseAdmin.from("teams").select("name").eq("id", myTeamId).single(),
+      supabaseAdmin.from("teams").select("name").eq("id", proposerTeamId).single(),
     ]);
-    const channelId =
-      homeTeam?.name && awayTeam?.name
-        ? await findMatchChannelId(homeTeam.name, awayTeam.name)
-        : null;
-    if (channelId && myTeam?.name) {
-      const ts = Math.floor(new Date(match.scheduled_at!).getTime() / 1000);
-      await sendChannelMessage(
-        channelId,
-        `✅ **${myTeam.name}** has accepted the match time: <t:${ts}:F>. See you then! 🎮`,
+    if (myTeam?.name && proposerTeam?.name) {
+      const mention = await roleMention(proposerTeam.name);
+      const ts = Math.floor(new Date(match.scheduled_at).getTime() / 1000);
+      await notifyMatchChannel(
+        matchId,
+        `${mention} ✅ **${myTeam.name}** confirmed the match time: <t:${ts}:F>. See you then! 🎮`,
       );
     }
-  } catch { /* Discord ping is best-effort */ }
+  } catch { /* best-effort */ }
 
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/admin");
@@ -184,6 +149,7 @@ export async function withdrawMatchTime(
 ): Promise<{ ok?: boolean; error?: string }> {
   const ctx = await getCaptainContext(matchId);
   if (!ctx.ok) return { error: ctx.error };
+  const { myTeamId, match } = ctx;
 
   const { error } = await supabaseAdmin
     .from("matches")
@@ -195,6 +161,66 @@ export async function withdrawMatchTime(
     .eq("id", matchId);
 
   if (error) return { error: `Failed to withdraw: ${error.message}` };
+
+  try {
+    const otherTeamId = myTeamId === match.home_team_id ? match.away_team_id : match.home_team_id;
+    const [{ data: myTeam }, { data: otherTeam }] = await Promise.all([
+      supabaseAdmin.from("teams").select("name").eq("id", myTeamId).single(),
+      supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
+    ]);
+    if (myTeam?.name && otherTeam?.name) {
+      const mention = await roleMention(otherTeam.name);
+      await notifyMatchChannel(
+        matchId,
+        `${mention} ↩️ **${myTeam.name}** removed the proposed match time.`,
+      );
+    }
+  } catch { /* best-effort */ }
+
+  revalidatePath("/dashboard/my-team");
+  revalidatePath("/dashboard/admin");
+  return { ok: true };
+}
+
+export async function rejectMatchTime(
+  matchId: string,
+): Promise<{ ok?: boolean; error?: string }> {
+  const ctx = await getCaptainContext(matchId);
+  if (!ctx.ok) return { error: ctx.error };
+  const { myTeamId, match } = ctx;
+
+  if (!match.scheduled_at || !match.schedule_proposed_by_team_id)
+    return { error: "No match time has been proposed." };
+  if (myTeamId === match.schedule_proposed_by_team_id)
+    return { error: "You cannot reject your own proposal." };
+
+  const proposedTs = Math.floor(new Date(match.scheduled_at).getTime() / 1000);
+
+  const { error } = await supabaseAdmin
+    .from("matches")
+    .update({
+      scheduled_at: null,
+      schedule_proposed_by_team_id: null,
+      schedule_accepted: false,
+    })
+    .eq("id", matchId);
+
+  if (error) return { error: `Failed to reject: ${error.message}` };
+
+  try {
+    const proposerTeamId = match.schedule_proposed_by_team_id;
+    const [{ data: myTeam }, { data: proposerTeam }] = await Promise.all([
+      supabaseAdmin.from("teams").select("name").eq("id", myTeamId).single(),
+      supabaseAdmin.from("teams").select("name").eq("id", proposerTeamId).single(),
+    ]);
+    if (myTeam?.name && proposerTeam?.name) {
+      const mention = await roleMention(proposerTeam.name);
+      await notifyMatchChannel(
+        matchId,
+        `${mention} ❌ **${myTeam.name}** rejected the proposed match time (<t:${proposedTs}:F>). Please propose a new time.`,
+      );
+    }
+  } catch { /* best-effort */ }
 
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/admin");

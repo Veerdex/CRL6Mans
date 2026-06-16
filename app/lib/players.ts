@@ -1,12 +1,13 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
 
-export type PlayerStatus = "unregistered" | "pending" | "approved" | "rejected";
+export type PlayerStatus = "unregistered" | "pending" | "approved" | "rejected" | "banned";
 
 export type Player = {
   id: string;
   discord_id: string;
   username: string;
+  display_name: string | null;
   avatar: string | null;
   status: PlayerStatus;
   peak_3v3: string;
@@ -31,17 +32,20 @@ export async function getPlayerStatus(discordId: string): Promise<PlayerStatus> 
   return data.status as PlayerStatus;
 }
 
-export async function getPlayerInfo(
-  discordId: string
-): Promise<{ status: PlayerStatus; teamId: string | null }> {
+export async function getPlayerInfo(discordId: string): Promise<{
+  status: PlayerStatus;
+  teamId: string | null;
+  displayName: string | null;
+}> {
   const { data } = await supabaseAdmin
     .from("players")
-    .select("status, team_id")
+    .select("status, team_id, display_name")
     .eq("discord_id", discordId)
     .single();
   return {
     status: (data?.status as PlayerStatus) ?? "unregistered",
     teamId: data?.team_id ?? null,
+    displayName: (data?.display_name as string | null) ?? null,
   };
 }
 
@@ -52,9 +56,9 @@ export async function getApprovedPlayers(): Promise<Player[]> {
     .eq("status", "approved");
 
   return (data ?? []).sort((a, b) => {
-    const aMax = Math.max(Number(a.peak_2v2) || 0, Number(a.peak_3v3) || 0);
-    const bMax = Math.max(Number(b.peak_2v2) || 0, Number(b.peak_3v3) || 0);
-    return bMax - aMax;
+    const aRv = (Number(a.peak_2v2) + Number(a.current_2v2)) * 0.3 + (Number(a.peak_3v3) + Number(a.current_3v3)) * 0.2;
+    const bRv = (Number(b.peak_2v2) + Number(b.current_2v2)) * 0.3 + (Number(b.peak_3v3) + Number(b.current_3v3)) * 0.2;
+    return bRv - aRv;
   });
 }
 
@@ -81,9 +85,30 @@ export async function updatePlayerStatus(
   return { discordId: data?.discord_id ?? null };
 }
 
-export function isAdmin(discordId: string): boolean {
-  const adminIds = process.env.ADMIN_DISCORD_IDS?.split(",").map((id) => id.trim()) ?? [];
-  return adminIds.includes(discordId);
+export type StaffRole = "moderator" | "director" | "ceo";
+
+export async function getStaffRole(discordId: string): Promise<StaffRole | null> {
+  const { data } = await supabaseAdmin
+    .from("staff_roles")
+    .select("role")
+    .eq("discord_id", discordId)
+    .single();
+  return (data?.role as StaffRole) ?? null;
+}
+
+export async function isModerator(discordId: string): Promise<boolean> {
+  const role = await getStaffRole(discordId);
+  return role !== null;
+}
+
+export async function isDirector(discordId: string): Promise<boolean> {
+  const role = await getStaffRole(discordId);
+  return role === "director" || role === "ceo";
+}
+
+export async function isCEO(discordId: string): Promise<boolean> {
+  const role = await getStaffRole(discordId);
+  return role === "ceo";
 }
 
 export { RL_RANKS } from "./ranks";

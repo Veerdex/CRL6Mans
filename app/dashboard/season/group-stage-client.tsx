@@ -23,12 +23,27 @@ interface GroupStageClientProps {
   matches: GroupMatchRow[];
   teams: Record<string, GroupTeam>;
   qualifiersPerGroup: number;
+  topDirectQualifiers: number;
 }
 
-export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup }: GroupStageClientProps) {
+export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup, topDirectQualifiers }: GroupStageClientProps) {
   const [selectedGroup, setSelectedGroup] = useState<number | "all">("all");
   const [search, setSearch] = useState("");
-  const [collapsedRounds, setCollapsedRounds] = useState<Set<number>>(new Set());
+  // Start with fully-played rounds collapsed — but if the whole stage is done,
+  // leave everything expanded.
+  const [collapsedRounds, setCollapsedRounds] = useState<Set<number>>(() => {
+    const allDone = matches.length > 0 && matches.every((m) => m.status === "completed");
+    if (allDone) return new Set<number>();
+    const doneByRound = new Map<number, boolean>();
+    for (const m of matches) {
+      const prev = doneByRound.get(m.round);
+      const isDone = m.status === "completed";
+      doneByRound.set(m.round, prev === undefined ? isDone : prev && isDone);
+    }
+    const initial = new Set<number>();
+    for (const [round, done] of doneByRound) if (done) initial.add(round);
+    return initial;
+  });
 
   const toggleRound = useCallback((round: number) => {
     setCollapsedRounds(prev => {
@@ -77,10 +92,10 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
   const showGroupBadge = selectedGroup === "all";
 
   return (
-    <div className="grid grid-cols-4 gap-6 items-start">
+    <div className="flex flex-col gap-6 lg:grid lg:grid-cols-4 lg:items-start">
 
       {/* ── Left: Standings ──────────────────────────────────────────────── */}
-      <div className="col-span-1 space-y-4">
+      <div className="lg:col-span-1 space-y-4">
         {/* Group filter tabs */}
         <div className="flex flex-wrap gap-1.5">
           <button
@@ -115,14 +130,14 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
               <p className="text-xs font-semibold text-zinc-400">Group {gNum}</p>
             </div>
             <div className="p-3">
-              <StandingsTable standings={standings} teams={teams} qualifiersPerGroup={qualifiersPerGroup} />
+              <StandingsTable standings={standings} teams={teams} qualifiersPerGroup={qualifiersPerGroup} topDirectQualifiers={topDirectQualifiers} />
             </div>
           </div>
         ))}
       </div>
 
       {/* ── Right: Matches ───────────────────────────────────────────────── */}
-      <div className="col-span-3 min-w-0 space-y-4">
+      <div className="lg:col-span-3 min-w-0 space-y-4">
         {/* Search bar */}
         <input
           type="search"
@@ -158,8 +173,8 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
                     key={m.id}
                     className={`flex items-center gap-2 rounded-lg px-3 py-1.5 border text-xs ${
                       idx % 2 === 0
-                        ? "border-zinc-700/40 bg-zinc-800/50"
-                        : "border-zinc-700/20 bg-zinc-900/60"
+                        ? "border-zinc-700 bg-zinc-800"
+                        : "border-zinc-700 bg-zinc-900"
                     }`}
                   >
                     {/* Optional group badge */}
@@ -168,11 +183,14 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
                         G{m.groupNum}
                       </span>
                     )}
-                    <span className={`flex-1 truncate font-medium ${
+                    <div className={`flex-1 min-w-0 flex items-center gap-1 font-medium ${
                       !done ? "text-zinc-300" : homeWon ? "text-emerald-400" : "text-red-400"
                     }`}>
-                      {teams[m.home_team_id ?? ""]?.name ?? "?"}
-                    </span>
+                      {teams[m.home_team_id ?? ""]?.logo_url ? (
+                        <img src={teams[m.home_team_id ?? ""].logo_url!} alt="" className="w-3.5 h-3.5 rounded shrink-0 object-cover" />
+                      ) : null}
+                      <span className="truncate">{teams[m.home_team_id ?? ""]?.name ?? "?"}</span>
+                    </div>
                     {done ? (
                       <span className="shrink-0 font-mono font-bold text-white text-[11px] tabular-nums px-1">
                         {m.home_score} – {m.away_score}
@@ -180,11 +198,14 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
                     ) : (
                       <span className="shrink-0 text-zinc-600 px-2">vs</span>
                     )}
-                    <span className={`flex-1 truncate text-right font-medium ${
+                    <div className={`flex-1 min-w-0 flex items-center justify-end gap-1 font-medium ${
                       !done ? "text-zinc-300" : awayWon ? "text-emerald-400" : "text-red-400"
                     }`}>
-                      {teams[m.away_team_id ?? ""]?.name ?? "?"}
-                    </span>
+                      <span className="truncate">{teams[m.away_team_id ?? ""]?.name ?? "?"}</span>
+                      {teams[m.away_team_id ?? ""]?.logo_url ? (
+                        <img src={teams[m.away_team_id ?? ""].logo_url!} alt="" className="w-3.5 h-3.5 rounded shrink-0 object-cover" />
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}
@@ -200,42 +221,69 @@ function StandingsTable({
   standings,
   teams,
   qualifiersPerGroup,
+  topDirectQualifiers,
 }: {
   standings: GroupStanding[];
   teams: Record<string, GroupTeam>;
   qualifiersPerGroup: number;
+  topDirectQualifiers: number;
 }) {
+  const hasSecondTier = topDirectQualifiers < qualifiersPerGroup;
+
   return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">
-          <th className="text-left pb-1.5 pr-1 w-5">#</th>
-          <th className="text-left pb-1.5">Team</th>
-          <th className="text-right pb-1.5 px-1">W</th>
-          <th className="text-right pb-1.5 px-1">L</th>
-          <th className="text-right pb-1.5 px-1">GD</th>
-          <th className="text-right pb-1.5">GF</th>
-        </tr>
-      </thead>
-      <tbody>
-        {standings.map((s, rank) => {
-          const advances = rank < qualifiersPerGroup;
-          return (
-            <tr key={s.teamId} className="text-zinc-400">
-              <td className="py-0.5 pr-1 text-zinc-600 tabular-nums">{rank + 1}</td>
-              <td className={`py-0.5 font-medium ${advances ? "text-emerald-400" : ""}`}>
-                {teams[s.teamId]?.name ?? "—"}
-              </td>
-              <td className="py-0.5 text-right px-1 tabular-nums text-emerald-400">{s.wins}</td>
-              <td className="py-0.5 text-right px-1 tabular-nums text-red-400">{s.losses}</td>
-              <td className={`py-0.5 text-right px-1 tabular-nums ${s.goalDiff < 0 ? "text-red-400" : s.goalDiff > 0 ? "text-emerald-400" : ""}`}>
-                {s.goalDiff > 0 ? `+${s.goalDiff}` : s.goalDiff}
-              </td>
-              <td className="py-0.5 text-right tabular-nums">{s.goalsFor}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">
+            <th className="text-left pb-1.5 pr-1 w-5">#</th>
+            <th className="text-left pb-1.5">Team</th>
+            <th className="text-right pb-1.5 px-1">W</th>
+            <th className="text-right pb-1.5 px-1">L</th>
+            <th className="text-right pb-1.5 px-1">GD</th>
+            <th className="text-right pb-1.5">GF</th>
+          </tr>
+        </thead>
+        <tbody>
+          {standings.map((s, rank) => {
+            const isDirect = rank < topDirectQualifiers;
+            const isSecond = !isDirect && rank < qualifiersPerGroup;
+            const nameColor = isDirect ? "text-emerald-400" : isSecond ? "text-amber-400" : "";
+            return (
+              <tr key={s.teamId} className="text-zinc-400">
+                <td className="py-0.5 pr-1 text-zinc-600 tabular-nums">{rank + 1}</td>
+                <td className={`py-0.5 font-medium ${nameColor}`}>
+                  <div className="flex items-center gap-1">
+                    {teams[s.teamId]?.logo_url ? (
+                      <img src={teams[s.teamId].logo_url!} alt="" className="w-4 h-4 rounded shrink-0 object-cover" />
+                    ) : (
+                      <div className="w-4 h-4 rounded shrink-0 bg-zinc-800 border border-zinc-700/50" />
+                    )}
+                    <span>{teams[s.teamId]?.name ?? "—"}</span>
+                  </div>
+                </td>
+                <td className="py-0.5 text-right px-1 tabular-nums text-emerald-400">{s.wins}</td>
+                <td className="py-0.5 text-right px-1 tabular-nums text-red-400">{s.losses}</td>
+                <td className={`py-0.5 text-right px-1 tabular-nums ${s.goalDiff < 0 ? "text-red-400" : s.goalDiff > 0 ? "text-emerald-400" : ""}`}>
+                  {s.goalDiff > 0 ? `+${s.goalDiff}` : s.goalDiff}
+                </td>
+                <td className="py-0.5 text-right tabular-nums">{s.goalsFor}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {hasSecondTier && (
+        <div className="flex items-center gap-3 mt-2 pt-2 border-t border-zinc-800">
+          <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+            Advances (direct)
+          </span>
+          <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+            Advances (Swiss)
+          </span>
+        </div>
+      )}
+    </div>
   );
 }

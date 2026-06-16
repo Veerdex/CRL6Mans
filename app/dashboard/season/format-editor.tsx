@@ -11,6 +11,8 @@ export type PresetId =
   | "double_elimination"
   | "group_single_elimination"
   | "group_swiss_single_elimination"
+  | "group_swiss_hybrid"
+  | "group_swiss_hybrid_8"
   | "se_swiss_single_elimination"
   | "de_swiss_single_elimination";
 
@@ -78,6 +80,22 @@ const PRESETS: PresetDef[] = [
     description: "Groups narrow to 16 → Swiss (16→8) → SE finals.",
   },
   {
+    id: "group_swiss_hybrid",
+    name: "Group → Swiss → Hybrid(12)",
+    stageTypes: ["group", "swiss", "double_elimination"],
+    minTeams: 24,
+    maxTeams: 32,
+    description: "4 groups: 1sts → UB, 2nd–5th → Swiss. Swiss top 8 → LB. 12-team hybrid bracket.",
+  },
+  {
+    id: "group_swiss_hybrid_8",
+    name: "Group → Swiss → Hybrid(8)",
+    stageTypes: ["group", "swiss", "double_elimination"],
+    minTeams: 16,
+    maxTeams: 32,
+    description: "4 groups: 1sts → UB, 2nd–3rd → Swiss. Swiss top 4 → LB. 8-team hybrid bracket.",
+  },
+  {
     id: "se_swiss_single_elimination",
     name: "SE Qualifier → Swiss → SE",
     stageTypes: ["single_elimination", "swiss", "single_elimination"],
@@ -92,6 +110,26 @@ const PRESETS: PresetDef[] = [
     description: "DE qualifier narrows to 16 → Swiss (16→8) → SE finals.",
   },
 ];
+
+export const TIER_LABELS: Record<RoundTier, string> = {
+  standard: "Standard Rounds",
+  quarterfinals: "Quarterfinals",
+  semifinals: "Semifinals",
+  finals: "Finals",
+};
+export const BO_OPTIONS: BestOf[] = [1, 3, 5, 7];
+
+export function getNumGroups(teams: number): number {
+  if (teams > 32) return 8;
+  if (teams > 16) return 4;
+  return 2;
+}
+
+export function getDefaultGroupAdvancing(teams: number): number {
+  const ng = getNumGroups(teams);
+  const natural = Math.floor((teams * 3) / 4);
+  return Math.floor(natural / ng) * ng;
+}
 
 const STAGE_COLORS: Record<
   StageType,
@@ -131,45 +169,31 @@ const STAGE_LABELS: Record<StageType, string> = {
 };
 
 export const TIER_ORDER: RoundTier[] = ["standard", "quarterfinals", "semifinals", "finals"];
-const TIER_LABELS: Record<RoundTier, string> = {
-  standard: "Standard Rounds",
-  quarterfinals: "Quarterfinals",
-  semifinals: "Semifinals",
-  finals: "Finals",
-};
-const BO_OPTIONS: BestOf[] = [1, 3, 5, 7];
 export const DEFAULT_BEST_OF: Record<RoundTier, BestOf> = {
   standard: 3, quarterfinals: 3, semifinals: 3, finals: 3,
 };
 
-function applyBestOfCascade(
+export function applyBestOfCascade(
   current: Record<RoundTier, BestOf>,
   changedTier: RoundTier,
   newValue: BestOf
 ): Record<RoundTier, BestOf> {
   const result = { ...current, [changedTier]: newValue };
   const tierIdx = TIER_ORDER.indexOf(changedTier);
+  // Push higher tiers up if they're below the new value
   for (let i = tierIdx + 1; i < TIER_ORDER.length; i++) {
     const tier = TIER_ORDER[i];
     if (result[tier] < newValue) result[tier] = newValue;
+  }
+  // Pull lower tiers down if they're above the new value
+  for (let i = tierIdx - 1; i >= 0; i--) {
+    const tier = TIER_ORDER[i];
+    if (result[tier] > newValue) result[tier] = newValue;
   }
   return result;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-// >16 → 4 groups, >32 → 8 groups, else 2 groups (min 8 teams)
-function getNumGroups(teams: number): number {
-  if (teams > 32) return 8;
-  if (teams > 16) return 4;
-  return 2;
-}
-
-function getDefaultGroupAdvancing(teams: number): number {
-  const ng = getNumGroups(teams);
-  const natural = Math.floor((teams * 3) / 4);
-  return Math.floor(natural / ng) * ng;
-}
 
 function isPowerOf2(n: number): boolean {
   return n > 1 && (n & (n - 1)) === 0;
@@ -241,6 +265,36 @@ function computeStageInfos(
         },
         { type: "swiss", label: "Swiss", start: 16, end: 8 },
         { type: "single_elimination", label: "Single Elimination", start: 8, end: 1 },
+      ];
+    }
+
+    case "group_swiss_hybrid": {
+      const ng = getNumGroups(teams);
+      return [
+        {
+          type: "group",
+          label: "Group Stage",
+          start: teams,
+          end: 20,
+          detail: `${ng} groups · 1st → UB · 2nd–5th → Swiss`,
+        },
+        { type: "swiss", label: "Swiss", start: 16, end: 8, detail: "16 teams → top 8 to LB" },
+        { type: "double_elimination", label: "Hybrid(12)", start: 12, end: 1, detail: "4 UB + 8 LB" },
+      ];
+    }
+
+    case "group_swiss_hybrid_8": {
+      const ng = getNumGroups(teams);
+      return [
+        {
+          type: "group",
+          label: "Group Stage",
+          start: teams,
+          end: 12,
+          detail: `${ng} groups · 1st → UB · 2nd–3rd → Swiss`,
+        },
+        { type: "swiss", label: "Swiss", start: 8, end: 4, detail: "8 teams → top 4 to LB" },
+        { type: "double_elimination", label: "Hybrid(8)", start: 8, end: 1, detail: "4 UB + 4 LB" },
       ];
     }
 
@@ -382,8 +436,8 @@ export function FormatEditor({
 
   const selectedPreset = PRESETS.find((p) => p.id === selected);
   const hasGroupStage =
-    selected === "group_single_elimination" || selected === "group_swiss_single_elimination";
-  const groupAdvancingFixed = selected === "group_swiss_single_elimination";
+    selected === "group_single_elimination" || selected === "group_swiss_single_elimination" || selected === "group_swiss_hybrid" || selected === "group_swiss_hybrid_8";
+  const groupAdvancingFixed = selected === "group_swiss_single_elimination" || selected === "group_swiss_hybrid" || selected === "group_swiss_hybrid_8";
 
   const numGroups = getNumGroups(previewTeams);
   const parsed = maxAdvancingInput.trim() === "" ? null : parseInt(maxAdvancingInput, 10);
@@ -513,7 +567,7 @@ export function FormatEditor({
               className={`text-left p-4 rounded-xl border transition-all ${
                 isSelected
                   ? "border-indigo-500 bg-indigo-950/50 ring-1 ring-indigo-500/50"
-                  : "border-zinc-700 bg-zinc-800/50 hover:border-zinc-500 hover:bg-zinc-800"
+                  : "border-zinc-700 bg-zinc-800 hover:border-zinc-500"
               }`}
             >
               <p className="text-sm font-semibold text-white">{preset.name}</p>
@@ -582,7 +636,13 @@ export function FormatEditor({
               )}
             </div>
           ) : (
-            <p className="text-xs text-zinc-500">Advancing is fixed at 16 to feed the Swiss stage.</p>
+            <p className="text-xs text-zinc-500">
+            {selected === "group_swiss_hybrid"
+              ? "1st → UB (4 teams) · 2nd–5th → Swiss (16 teams). Fixed by format."
+              : selected === "group_swiss_hybrid_8"
+              ? "1st → UB (4 teams) · 2nd–3rd → Swiss (8 teams). Fixed by format."
+              : "Advancing is fixed at 16 to feed the Swiss stage."}
+          </p>
           )}
         </div>
       )}
@@ -593,7 +653,7 @@ export function FormatEditor({
           <p className="text-sm font-medium text-zinc-300">Best Of Settings</p>
           {TIER_ORDER.map((tier) => (
             <div key={tier} className="flex items-center gap-4">
-              <span className="text-xs text-zinc-500 w-36 shrink-0">{TIER_LABELS[tier]}</span>
+              <span className="text-xs text-zinc-500 w-24 sm:w-36 shrink-0">{TIER_LABELS[tier]}</span>
               <div className="flex gap-2">
                 {BO_OPTIONS.map((bo) => (
                   <button
@@ -605,7 +665,8 @@ export function FormatEditor({
                         : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
                     }`}
                   >
-                    BO{bo}
+                    <span className="sm:hidden">{bo}</span>
+                    <span className="hidden sm:inline">BO{bo}</span>
                   </button>
                 ))}
               </div>

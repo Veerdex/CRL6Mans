@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PlayerName } from "@/app/dashboard/player-name";
 
 type Team = {
   id: string;
@@ -14,10 +15,13 @@ type Team = {
 type Player = {
   id: string;
   username: string;
+  display_name: string | null;
   discord_id: string | null;
   avatar: string | null;
   peak_2v2: string;
+  current_2v2: string;
   peak_3v3: string;
+  current_3v3: string;
   tracker_url: string;
   is_captain: boolean | null;
 };
@@ -58,7 +62,8 @@ export function TeamsGrid({ teams, byTeam, avgMmr, myTeamId, initialQuery = "" }
           (t) =>
             re.test(t.name) ||
             (byTeam[t.id] ?? []).some((p) =>
-              p.username.toLowerCase().includes(q.toLowerCase())
+              p.username.toLowerCase().includes(q.toLowerCase()) ||
+              (p.display_name ?? "").toLowerCase().includes(q.toLowerCase())
             )
         );
       })()
@@ -114,7 +119,7 @@ export function TeamsGrid({ teams, byTeam, avgMmr, myTeamId, initialQuery = "" }
                       )}
                     </div>
                     <p className="text-xs text-zinc-500">
-                      avg {(avgMmr[team.id] ?? 0).toLocaleString()} MMR
+                      avg {(avgMmr[team.id] ?? 0).toLocaleString()} RV
                       {team.is_locked && <span className="ml-2 text-amber-400">🔒</span>}
                     </p>
                   </div>
@@ -124,7 +129,7 @@ export function TeamsGrid({ teams, byTeam, avgMmr, myTeamId, initialQuery = "" }
                     <p className="px-5 py-3 text-sm text-zinc-600 italic">No players yet.</p>
                   ) : (
                     roster.map((player) => {
-                      const peak = Math.max(Number(player.peak_2v2) || 0, Number(player.peak_3v3) || 0);
+                      const peak = Math.round((Number(player.peak_2v2) + Number(player.current_2v2)) * 0.3 + (Number(player.peak_3v3) + Number(player.current_3v3)) * 0.2);
                       return (
                         <a
                           key={player.id}
@@ -146,12 +151,12 @@ export function TeamsGrid({ teams, byTeam, avgMmr, myTeamId, initialQuery = "" }
                             <div className="w-7 h-7 rounded-full bg-zinc-700 shrink-0" />
                           )}
                           <span className="flex-1 text-sm text-zinc-200 group-hover:text-white transition-colors truncate">
-                            {player.username}
+                            <PlayerName displayName={player.display_name} username={player.username} />
                             {player.is_captain && (
                               <span className="ml-1.5 text-xs font-semibold text-yellow-400">C</span>
                             )}
                           </span>
-                          <span className="text-xs text-zinc-500 shrink-0">{peak.toLocaleString()}</span>
+                          <span className="text-xs text-zinc-500 shrink-0">{peak.toLocaleString()} <span className="text-zinc-700">RV</span></span>
                         </a>
                       );
                     })

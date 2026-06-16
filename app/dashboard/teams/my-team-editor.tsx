@@ -75,7 +75,7 @@ export function MyTeamEditor({
 
       const result = await updateTeamInfo(fd);
       if ("error" in result) {
-        setFeedback({ msg: result.error, ok: false });
+        setFeedback({ msg: result.error ?? "Something went wrong.", ok: false });
       } else {
         setFeedback({ msg: "Saved!", ok: true });
         setLogoFile(null);
@@ -104,23 +104,19 @@ export function MyTeamEditor({
           {seasonActive && team.is_locked && !isAdmin && (
             <span className="text-xs text-amber-400">🔒 Locked</span>
           )}
-          {isAdmin && seasonActive && (
+          {isAdmin && (
             <button
               onClick={handleLockToggle}
               disabled={isPending}
               className="text-xs px-3 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 rounded-lg transition-colors"
             >
-              {team.is_locked ? "Unlock" : "Lock"}
+              {team.is_locked ? "🔓 Unlock" : "🔒 Lock"}
             </button>
           )}
         </div>
       </div>
 
-      {!canEdit ? (
-        <div className="px-5 py-6 text-sm text-zinc-500">
-          Team info is locked for the season. Ask an admin to unlock it.
-        </div>
-      ) : (
+      {!canEdit ? null : (
         <div className="p-5 space-y-5">
           {/* Team name */}
           <div>
@@ -129,13 +125,35 @@ export function MyTeamEditor({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              maxLength={30}
               className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
 
           {/* Logo upload */}
           <div>
-            <label className="block text-xs text-zinc-500 mb-1.5">Team Logo</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs text-zinc-500">Team Logo</label>
+              <div className="flex items-center gap-2.5 text-[11px]">
+                <a
+                  href="https://liquipedia.net/hub/A_Liquipedia_Guide_to_Copyright"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  Copyright guide
+                </a>
+                <span className="text-zinc-700">·</span>
+                <a
+                  href="https://liquipedia.net/commons/File_Standards_Guide"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  File standards
+                </a>
+              </div>
+            </div>
             <div
               onDrop={(e) => { e.preventDefault(); setIsDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFileSelect(f); }}
               onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}

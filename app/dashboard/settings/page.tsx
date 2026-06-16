@@ -2,7 +2,12 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { SettingsForm } from "./settings-form";
+import { SettingsForm, type PendingRequest } from "./settings-form";
+import { ThemeToggle } from "./theme-toggle";
+import { NavLayoutToggle } from "./nav-layout-toggle";
+import { NotificationButton } from "@/app/dashboard/notification-button";
+import { NotificationPrefsForm } from "./notification-prefs-form";
+import { DisplayNameForm } from "./display-name-form";
 
 export default async function SettingsPage() {
   const cookieStore = await cookies();
@@ -11,26 +16,68 @@ export default async function SettingsPage() {
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, sub_willing")
+    .select("id, status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, sub_willing, theme, nav_layout, display_name, notification_prefs")
     .eq("discord_id", session.userId)
     .single();
 
   if (player?.status !== "approved") redirect("/dashboard");
 
+  const { data: pendingRow } = await supabaseAdmin
+    .from("player_edit_requests")
+    .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at")
+    .eq("player_id", player.id)
+    .eq("status", "pending")
+    .maybeSingle();
+
+  const pending: PendingRequest | null = pendingRow
+    ? {
+        id:          pendingRow.id,
+        tracker_url: pendingRow.tracker_url,
+        peak_3v3:    pendingRow.peak_3v3,
+        current_3v3: pendingRow.current_3v3,
+        peak_2v2:    pendingRow.peak_2v2,
+        current_2v2: pendingRow.current_2v2,
+        created_at:  pendingRow.created_at,
+      }
+    : null;
+
   return (
-    <div className="p-8 max-w-xl">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-xl">
       <h1 className="text-2xl font-bold text-white mb-1">Settings</h1>
       <p className="text-zinc-400 text-sm mb-8">
-        Update your Rocket League profile information.
+        MMR and tracker changes require admin approval. Substitute availability is applied instantly.
       </p>
-      <SettingsForm current={{
-        tracker_url:  player.tracker_url  ?? "",
-        peak_3v3:     player.peak_3v3     ?? "",
-        current_3v3:  player.current_3v3  ?? "",
-        peak_2v2:     player.peak_2v2     ?? "",
-        current_2v2:  player.current_2v2  ?? "",
-        sub_willing:  player.sub_willing  ?? false,
-      }} />
+      <div className="mb-4">
+        <ThemeToggle initial={player.theme === "dark" || player.theme === "light" ? player.theme : "crl6mans"} />
+      </div>
+      <div className="mb-4">
+        <NavLayoutToggle initial={player.nav_layout === "topbar" ? "topbar" : "sidebar"} />
+      </div>
+      <div className="mb-6 space-y-3">
+        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Notifications</p>
+        <NotificationButton />
+        <NotificationPrefsForm
+          initialPrefs={(player.notification_prefs as Record<string, boolean> | null) ?? {}}
+        />
+      </div>
+      <div className="mb-6">
+        <DisplayNameForm
+          current={(player.display_name as string | null) ?? null}
+          discordUsername={session.username ?? ""}
+        />
+      </div>
+
+      <SettingsForm
+        current={{
+          tracker_url: player.tracker_url  ?? "",
+          peak_3v3:    player.peak_3v3     ?? "",
+          current_3v3: player.current_3v3  ?? "",
+          peak_2v2:    player.peak_2v2     ?? "",
+          current_2v2: player.current_2v2  ?? "",
+          sub_willing: player.sub_willing  ?? false,
+        }}
+        pending={pending}
+      />
     </div>
   );
 }

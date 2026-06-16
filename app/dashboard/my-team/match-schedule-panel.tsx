@@ -2,22 +2,40 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { proposeMatchTime, acceptMatchTime, withdrawMatchTime } from "./schedule-actions";
+import { proposeMatchTime, acceptMatchTime, withdrawMatchTime, rejectMatchTime } from "./schedule-actions";
 
 export type SchedulableMatch = {
   id: string;
   opponentName: string;
   opponentId: string | null;
+  opponentLogoUrl: string | null;
   roundLabel: string;
   scheduledAt: string | null;
   proposedByTeamId: string | null;
   scheduleAccepted: boolean;
+  isHome: boolean;
 };
+
+// Deterministic 5-char code derived from a seed, so both teams see the same
+// lobby name/password for a match. Excludes ambiguous characters (0/O/1/I/L).
+function lobbyCode(seed: string): string {
+  const CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  let out = "";
+  for (let i = 0; i < 5; i++) {
+    h = Math.imul(h, 16777619) >>> 0;
+    out += CHARS[h % CHARS.length];
+  }
+  return out;
+}
 
 interface Props {
   matches: SchedulableMatch[];
   teamId: string;
-  isCaptain: boolean;
 }
 
 function formatDateTime(iso: string): string {
@@ -42,17 +60,18 @@ function minDatetimeLocal(): string {
 function MatchScheduleRow({
   match,
   teamId,
-  isCaptain,
 }: {
   match: SchedulableMatch;
   teamId: string;
-  isCaptain: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [showForm, setShowForm] = useState(false);
   const [dtValue, setDtValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  const lobbyName = lobbyCode(`${match.id}:name`);
+  const lobbyPassword = lobbyCode(`${match.id}:pw`);
 
   const weProposed = match.proposedByTeamId === teamId;
   const theyProposed = !!match.proposedByTeamId && !weProposed;
@@ -89,6 +108,15 @@ function MatchScheduleRow({
     });
   }
 
+  function handleReject() {
+    setError(null);
+    startTransition(async () => {
+      const res = await rejectMatchTime(match.id);
+      if (res.error) { setError(res.error); return; }
+      router.refresh();
+    });
+  }
+
   function handleWithdraw() {
     setError(null);
     startTransition(async () => {
@@ -104,9 +132,16 @@ function MatchScheduleRow({
 
       {/* Header row: opponent + status badge */}
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium text-white">vs {match.opponentName}</p>
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{match.roundLabel}</p>
+        <div className="flex items-center gap-3">
+          {match.opponentLogoUrl ? (
+            <img src={match.opponentLogoUrl} alt="" className="w-8 h-8 rounded shrink-0 object-cover" />
+          ) : (
+            <div className="w-8 h-8 rounded shrink-0 bg-zinc-800 border border-zinc-700" />
+          )}
+          <div>
+            <p className="text-sm font-medium text-white">vs {match.opponentName}</p>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{match.roundLabel}</p>
+          </div>
         </div>
         {confirmed && (
           <span className="text-[10px] font-bold text-emerald-400 bg-emerald-400/10 border border-emerald-700/30 px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0">
@@ -133,7 +168,7 @@ function MatchScheduleRow({
       )}
 
       {/* Captain actions (non-form state) */}
-      {isCaptain && !showForm && (
+      {!showForm && (
         <div className="flex items-center gap-3 flex-wrap">
           {!hasTime && (
             <button
@@ -153,6 +188,13 @@ function MatchScheduleRow({
                 className="px-3 py-1 bg-emerald-700/40 hover:bg-emerald-600/40 border border-emerald-700/50 text-emerald-300 text-xs rounded-lg font-medium transition-colors disabled:opacity-50"
               >
                 {isPending ? "Accepting…" : "Accept"}
+              </button>
+              <button
+                onClick={handleReject}
+                disabled={isPending}
+                className="px-3 py-1 bg-red-800/40 hover:bg-red-700/40 border border-red-700/50 text-red-300 text-xs rounded-lg font-medium transition-colors disabled:opacity-50"
+              >
+                {isPending ? "Rejecting…" : "Reject"}
               </button>
               <button
                 onClick={openForm}
@@ -226,18 +268,58 @@ function MatchScheduleRow({
       )}
 
       {error && !showForm && <p className="text-xs text-red-400">{error}</p>}
+
+      {/* Private match lobby — name & password (same for both teams). Away creates it. */}
+      <div
+        className={`border rounded-lg px-3 py-3 space-y-3 ${
+          match.isHome
+            ? "bg-blue-500/15 border-blue-500/30"
+            : "bg-orange-500/15 border-orange-500/30"
+        }`}
+      >
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 text-center">Private Match</p>
+
+        <div className="flex justify-center">
+          <span
+            className={`text-base font-bold px-4 py-1.5 rounded-lg border ${
+              match.isHome
+                ? "bg-sky-900/40 text-sky-100 border-sky-700/50"
+                : "bg-orange-900/40 text-orange-100 border-orange-700/50"
+            }`}
+          >
+            {match.isHome ? "🏠 You're Home" : "✈️ You're Away"}
+          </span>
+        </div>
+
+        <p className="text-sm font-bold text-zinc-100 text-center">
+          {match.isHome
+            ? `${match.opponentName} (Away) creates the lobby — join it with the name and password below.`
+            : "Your team is Away, so you create the lobby in Rocket League with the name and password below."}
+        </p>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-zinc-900/60 rounded-md px-2.5 py-2 text-center">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Name</p>
+            <p className="font-mono text-base font-semibold text-white tracking-widest">{lobbyName}</p>
+          </div>
+          <div className="bg-zinc-900/60 rounded-md px-2.5 py-2 text-center">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Password</p>
+            <p className="font-mono text-base font-semibold text-white tracking-widest">{lobbyPassword}</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-export function MatchSchedulePanel({ matches, teamId, isCaptain }: Props) {
+export function MatchSchedulePanel({ matches, teamId }: Props) {
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
       <div className="px-5 py-3 border-b border-zinc-800">
         <h2 className="text-sm font-semibold text-zinc-300">Match Schedule</h2>
       </div>
       {matches.map((m) => (
-        <MatchScheduleRow key={m.id} match={m} teamId={teamId} isCaptain={isCaptain} />
+        <MatchScheduleRow key={m.id} match={m} teamId={teamId} />
       ))}
     </div>
   );

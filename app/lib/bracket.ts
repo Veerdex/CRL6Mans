@@ -72,14 +72,17 @@ export function roundRobinSchedule(n: number): [number, number][][] {
   return rounds;
 }
 
-// Distribute teams into numGroups using snake draft.
-// teams must already be ordered by desired seeding (index 0 = top seed).
-export function snakeDraftGroups<T>(teams: T[], numGroups: number): T[][] {
+// Distribute teams into numGroups using greedy assignment.
+// Each team (highest value first) is assigned to the group with the lowest
+// current total, minimising spread across groups.
+// value() defaults to 1 (equal weight), producing round-robin distribution.
+export function snakeDraftGroups<T>(teams: T[], numGroups: number, value?: (t: T) => number): T[][] {
   const groups: T[][] = Array.from({ length: numGroups }, () => []);
-  for (let i = 0; i < teams.length; i++) {
-    const row = Math.floor(i / numGroups);
-    const col = row % 2 === 0 ? i % numGroups : numGroups - 1 - (i % numGroups);
-    groups[col].push(teams[i]);
+  const totals: number[] = Array(numGroups).fill(0);
+  for (const t of teams) {
+    const idx = totals.indexOf(Math.min(...totals));
+    groups[idx].push(t);
+    totals[idx] += value ? value(t) : 1;
   }
   return groups;
 }
@@ -183,6 +186,9 @@ export function generateSEQualifierInserts(
 export const SWISS_STAGE = "swiss";
 export const SWISS_ADVANCE_WINS = 3;
 export const SWISS_ELIMINATE_LOSSES = 3;
+// 8-team Swiss (hybrid_8): max 3 series per team → 2-win / 2-loss thresholds
+export const SWISS8_ADVANCE_WINS = 2;
+export const SWISS8_ELIMINATE_LOSSES = 2;
 
 export type SwissRecord = {
   teamId: string;
@@ -216,8 +222,12 @@ export function computeSwissRecords(
 // Pair active teams for the next Swiss round.
 // Teams grouped by W-L record, sorted Buchholz desc, paired top-half vs bottom-half.
 // Rematches avoided by swapping within bucket.
-export function pairSwissRound(records: SwissRecord[]): [string, string][] {
-  const active = records.filter(r => r.wins < SWISS_ADVANCE_WINS && r.losses < SWISS_ELIMINATE_LOSSES);
+export function pairSwissRound(
+  records: SwissRecord[],
+  advanceWins = SWISS_ADVANCE_WINS,
+  eliminateLosses = SWISS_ELIMINATE_LOSSES
+): [string, string][] {
+  const active = records.filter(r => r.wins < advanceWins && r.losses < eliminateLosses);
   const buckets = new Map<string, SwissRecord[]>();
   for (const r of active) {
     const key = `${r.wins}-${r.losses}`;
@@ -235,7 +245,7 @@ export function pairSwissRound(records: SwissRecord[]): [string, string][] {
 function pairBucketSwiss(sorted: SwissRecord[]): [string, string][] {
   const n = sorted.length;
   if (n < 2) return [];
-  const half = n / 2;
+  const half = Math.floor(n / 2);
   // ideal[i] = [top-half index, bottom-half index]
   const ideal: [number, number][] = Array.from({ length: half }, (_, i) => [i, i + half]);
   for (let i = 0; i < half; i++) {
@@ -273,9 +283,11 @@ export function generateSwissR1Inserts(teams: { id: string }[]): BracketMatchIns
 // Generate inserts for the next Swiss round from current records.
 export function generateSwissNextRoundInserts(
   records: SwissRecord[],
-  roundNum: number
+  roundNum: number,
+  advanceWins = SWISS_ADVANCE_WINS,
+  eliminateLosses = SWISS_ELIMINATE_LOSSES
 ): BracketMatchInsert[] {
-  const pairs = pairSwissRound(records);
+  const pairs = pairSwissRound(records, advanceWins, eliminateLosses);
   return pairs.map(([ homeId, awayId ], i) => ({
     round: roundNum,
     match_number: i + 1,
@@ -288,17 +300,15 @@ export function generateSwissNextRoundInserts(
   }));
 }
 
-// Seed Swiss qualifiers (3-0, 3-1, 3-2) into SE.
-// Ordered by record quality then Buchholz within each group.
-export function seedSwissQualifiers(records: SwissRecord[]): { id: string }[] {
-  const advanced = records.filter(r => r.wins === SWISS_ADVANCE_WINS);
-  const byRecord = [
-    advanced.filter(r => r.losses === 0),
-    advanced.filter(r => r.losses === 1),
-    advanced.filter(r => r.losses === 2),
-  ];
+// Seed Swiss qualifiers into SE, ordered by record quality then Buchholz.
+export function seedSwissQualifiers(
+  records: SwissRecord[],
+  advanceWins = SWISS_ADVANCE_WINS
+): { id: string }[] {
+  const advanced = records.filter(r => r.wins === advanceWins);
   const result: { id: string }[] = [];
-  for (const group of byRecord) {
+  for (let l = 0; l < advanceWins; l++) {
+    const group = advanced.filter(r => r.losses === l);
     group.sort((a, b) => b.buchholz - a.buchholz);
     result.push(...group.map(r => ({ id: r.teamId })));
   }
@@ -524,6 +534,147 @@ export type BracketMatchInsert = {
   status: string;
   stage: string;
 };
+
+// ── Hybrid Bracket ─────────────────────────────────────────────────────────────
+// 12-team bracket: 4 UB teams (group 1sts) + 8 LB teams (Swiss top 8).
+//   hybrid_ub  R1: UB QF (4→2, losers drop to LB R3)
+//   hybrid_lb  R1: LB R1 (8→4)
+//              R2: LB R2 (4→2)
+//              R3: LB QF (2 LB R2 winners + 2 UB losers → 2)
+//   hybrid_sf  R1: SF (2 UB winners + 2 LB QF winners → 2)
+//   hybrid_gf  R1: GF (1 match → champion)
+
+export const HYBRID_UB = "hybrid_ub";
+export const HYBRID_LB = "hybrid_lb";
+export const HYBRID_SF = "hybrid_sf";
+export const HYBRID_GF = "hybrid_gf";
+
+// 8-team variant stage names (4 UB + 4 LB)
+export const HYBRID8_UB = "hybrid8_ub";
+export const HYBRID8_LB = "hybrid8_lb";
+export const HYBRID8_SF = "hybrid8_sf";
+export const HYBRID8_GF = "hybrid8_gf";
+
+// Generate all match rows for the hybrid bracket given 4 UB seeds and 8 LB seeds.
+// ubTeams: group 1sts (seeded 1-4), lbTeams: Swiss qualifiers (seeded 1-8).
+export function generateHybridMatchInserts(
+  ubTeams: { id: string }[],
+  lbTeams: { id: string }[],
+): BracketMatchInsert[] {
+  const inserts: BracketMatchInsert[] = [];
+
+  // UB R1: seed order [1,4,2,3] → M1=(1v4), M2=(2v3)
+  const ubOrder = getSeedOrder(4); // [1,4,2,3]
+  for (let i = 0; i < 2; i++) {
+    inserts.push({
+      round: 1, match_number: i + 1, stage: HYBRID_UB,
+      home_team_id: ubTeams[ubOrder[2 * i] - 1].id,
+      away_team_id: ubTeams[ubOrder[2 * i + 1] - 1].id,
+      home_score: null, away_score: null, status: "scheduled",
+    });
+  }
+
+  // LB R1: 4 matches (1v5, 2v6, 3v7, 4v8)
+  for (let i = 0; i < 4; i++) {
+    inserts.push({
+      round: 1, match_number: i + 1, stage: HYBRID_LB,
+      home_team_id: lbTeams[i].id,
+      away_team_id: lbTeams[i + 4].id,
+      home_score: null, away_score: null, status: "scheduled",
+    });
+  }
+
+  // LB R2: 2 matches (pending)
+  for (let m = 1; m <= 2; m++) {
+    inserts.push({
+      round: 2, match_number: m, stage: HYBRID_LB,
+      home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending",
+    });
+  }
+
+  // LB R3 (QF): 2 matches (pending — home from LB R2, away from UB loser)
+  for (let m = 1; m <= 2; m++) {
+    inserts.push({
+      round: 3, match_number: m, stage: HYBRID_LB,
+      home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending",
+    });
+  }
+
+  // SF: 2 matches (pending — home from UB winner, away from LB QF winner)
+  for (let m = 1; m <= 2; m++) {
+    inserts.push({
+      round: 1, match_number: m, stage: HYBRID_SF,
+      home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending",
+    });
+  }
+
+  // GF: 1 match
+  inserts.push({
+    round: 1, match_number: 1, stage: HYBRID_GF,
+    home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending",
+  });
+
+  return inserts;
+}
+
+// 8-team hybrid: 4 UB seeds (group 1sts) + 4 LB seeds (Swiss top 4).
+//   hybrid8_ub  R1: UB QF (4→2, losers drop directly to LB R2 / LB QF)
+//   hybrid8_lb  R1: LB R1 (4→2)
+//              R2: LB QF (2 LB R1 winners + 2 UB losers → 2)
+//   hybrid8_sf  R1: SF (2 UB winners + 2 LB QF winners → 2)
+//   hybrid8_gf  R1: GF
+export function generateHybrid8MatchInserts(
+  ubTeams: { id: string }[],
+  lbTeams: { id: string }[],
+): BracketMatchInsert[] {
+  const inserts: BracketMatchInsert[] = [];
+
+  // UB R1: seed order [1,4,2,3] → M1=(1v4), M2=(2v3)
+  const ubOrder = getSeedOrder(4);
+  for (let i = 0; i < 2; i++) {
+    inserts.push({
+      round: 1, match_number: i + 1, stage: HYBRID8_UB,
+      home_team_id: ubTeams[ubOrder[2 * i] - 1].id,
+      away_team_id: ubTeams[ubOrder[2 * i + 1] - 1].id,
+      home_score: null, away_score: null, status: "scheduled",
+    });
+  }
+
+  // LB R1: seed order [1,4,2,3] → M1=(1v4), M2=(2v3)
+  const lbOrder = getSeedOrder(4);
+  for (let i = 0; i < 2; i++) {
+    inserts.push({
+      round: 1, match_number: i + 1, stage: HYBRID8_LB,
+      home_team_id: lbTeams[lbOrder[2 * i] - 1].id,
+      away_team_id: lbTeams[lbOrder[2 * i + 1] - 1].id,
+      home_score: null, away_score: null, status: "scheduled",
+    });
+  }
+
+  // LB R2 (QF): 2 matches (home from LB R1 winner, away from UB R1 loser)
+  for (let m = 1; m <= 2; m++) {
+    inserts.push({
+      round: 2, match_number: m, stage: HYBRID8_LB,
+      home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending",
+    });
+  }
+
+  // SF: 2 matches (home from UB winner, away from LB QF winner)
+  for (let m = 1; m <= 2; m++) {
+    inserts.push({
+      round: 1, match_number: m, stage: HYBRID8_SF,
+      home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending",
+    });
+  }
+
+  // GF: 1 match
+  inserts.push({
+    round: 1, match_number: 1, stage: HYBRID8_GF,
+    home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending",
+  });
+
+  return inserts;
+}
 
 export function generateSEMatchInserts(
   teams: { id: string }[],

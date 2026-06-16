@@ -7,11 +7,13 @@ import {
   getNumGroups, getGroupStage, parseGroupNum,
   snakeDraftGroups, roundRobinSchedule,
   computeGroupStandings, seedGroupQualifiers,
-  SWISS_STAGE, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES,
+  SWISS_STAGE, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES, SWISS8_ADVANCE_WINS, SWISS8_ELIMINATE_LOSSES,
   computeSwissRecords, generateSwissR1Inserts,
   generateSwissNextRoundInserts, seedSwissQualifiers,
   SE_QUALIFIER, generateSEQualifierInserts,
   DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS, generateDEQualifierInserts,
+  HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, generateHybridMatchInserts,
+  HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF, generateHybrid8MatchInserts,
   type BracketMatchInsert,
 } from "./bracket";
 import type { SeasonFormatConfig } from "@/app/dashboard/season/format-editor";
@@ -21,6 +23,7 @@ import type { SeasonFormatConfig } from "@/app/dashboard/season/format-editor";
 async function buildGroupMatches(
   seeded: { id: string }[],
   format: SeasonFormatConfig,
+  avgMmr?: Record<string, number>,
 ): Promise<{ error?: string; ok?: boolean }> {
   const n = seeded.length;
   const numGroups = getNumGroups(n);
@@ -29,27 +32,51 @@ async function buildGroupMatches(
   const teams = format.groupSeedingMethod === "random"
     ? [...seeded].sort(() => Math.random() - 0.5)
     : seeded;
-  const groups = snakeDraftGroups(teams, numGroups);
+  const groups = snakeDraftGroups(teams, numGroups, avgMmr ? (t) => avgMmr[t.id] ?? 0 : undefined);
 
-  // Generate round-robin matches for each group
+  // Rounds per group size: single round-robin for groups of 6+, padded with
+  // rematch rounds for small groups so they still get enough games. Keyed by the
+  // smallest group so every group plays the same number of rounds.
+  //   3 → 8   4 → 6   5 → 8   6 → 5   7 → 6   8 → 7
+  const ROUNDS_BY_GROUP_SIZE: Record<number, number> = { 3: 8, 4: 6, 5: 8, 6: 5, 7: 6, 8: 7 };
+  const minGroupSize = Math.min(...groups.map(g => g.length));
+  const targetRounds = ROUNDS_BY_GROUP_SIZE[minGroupSize] ?? Math.max(1, minGroupSize - 1);
+  // Round up to a whole number of round-robin passes so byes distribute evenly and
+  // every team in the smallest group plays the same number of games. A pass is
+  // groupSize rounds for odd groups (one bye each round) or groupSize-1 for even.
+  const minPassLen = minGroupSize % 2 === 0 ? minGroupSize - 1 : minGroupSize;
+  const totalRounds = Math.max(1, Math.ceil(targetRounds / minPassLen) * minPassLen);
+
   const inserts: BracketMatchInsert[] = [];
   groups.forEach((groupTeams, gIdx) => {
     const stage = getGroupStage(gIdx + 1);
-    const schedule = roundRobinSchedule(groupTeams.length);
-    schedule.forEach((round, rIdx) => {
-      round.forEach(([homeIdx, awayIdx], mIdx) => {
+    const gSize = groupTeams.length;
+    // A full round-robin pass. For odd groups every round has exactly one bye;
+    // using the complete schedule (not dropping the last round) rotates the bye
+    // evenly across all teams so none plays more games than the others.
+    const roundsPerPass = roundRobinSchedule(gSize);
+    if (roundsPerPass.length === 0) return;
+
+    // Cycle through the round-robin, repeating passes (with home/away swapped on
+    // alternate passes) until we've laid out totalRounds rounds.
+    for (let r = 0; r < totalRounds; r++) {
+      const passIdx = Math.floor(r / roundsPerPass.length);
+      const roundInPass = r % roundsPerPass.length;
+      const swap = passIdx % 2 === 1;
+      roundsPerPass[roundInPass].forEach(([homeIdx, awayIdx], mIdx) => {
+        const [h, a] = swap ? [awayIdx, homeIdx] : [homeIdx, awayIdx];
         inserts.push({
-          round: rIdx + 1,
+          round: r + 1,
           match_number: mIdx + 1,
           stage,
-          home_team_id: groupTeams[homeIdx].id,
-          away_team_id: groupTeams[awayIdx].id,
+          home_team_id: groupTeams[h].id,
+          away_team_id: groupTeams[a].id,
           home_score: null,
           away_score: null,
           status: "scheduled",
         });
       });
-    });
+    }
   });
 
   const { error } = await supabaseAdmin.from("matches").insert(inserts);
@@ -184,13 +211,20 @@ export async function buildAndSaveSwissFromGroups(): Promise<{ error?: string; o
 
 // Build the next Swiss round from existing Swiss match results.
 export async function buildAndSaveNextSwissRound(): Promise<{ error?: string; ok?: boolean }> {
-  const { data: swissMatches } = await supabaseAdmin
-    .from("matches")
-    .select("round, match_number, home_team_id, away_team_id, home_score, away_score, status")
-    .eq("stage", SWISS_STAGE)
-    .order("round").order("match_number");
+  const [{ data: swissMatches }, { data: settings }] = await Promise.all([
+    supabaseAdmin
+      .from("matches")
+      .select("round, match_number, home_team_id, away_team_id, home_score, away_score, status")
+      .eq("stage", SWISS_STAGE)
+      .order("round").order("match_number"),
+    supabaseAdmin.from("league_settings").select("season_format").single(),
+  ]);
 
   if (!swissMatches?.length) return { error: "No Swiss matches found." };
+
+  const isHybrid8 = (settings?.season_format as { preset?: string } | null)?.preset === "group_swiss_hybrid_8";
+  const advanceWins = isHybrid8 ? SWISS8_ADVANCE_WINS : SWISS_ADVANCE_WINS;
+  const eliminateLosses = isHybrid8 ? SWISS8_ELIMINATE_LOSSES : SWISS_ELIMINATE_LOSSES;
 
   const currentRound = Math.max(...swissMatches.map(m => m.round));
   const currentRoundMatches = swissMatches.filter(m => m.round === currentRound);
@@ -203,10 +237,10 @@ export async function buildAndSaveNextSwissRound(): Promise<{ error?: string; ok
   ))];
   const records = computeSwissRecords(swissMatches, teamIds);
 
-  const active = records.filter(r => r.wins < SWISS_ADVANCE_WINS && r.losses < SWISS_ELIMINATE_LOSSES);
+  const active = records.filter(r => r.wins < advanceWins && r.losses < eliminateLosses);
   if (active.length === 0) return { error: "Swiss stage is complete — no active teams." };
 
-  const inserts = generateSwissNextRoundInserts(records, currentRound + 1);
+  const inserts = generateSwissNextRoundInserts(records, currentRound + 1, advanceWins, eliminateLosses);
   if (!inserts.length) return { error: "Could not generate pairings for next round." };
 
   const { error } = await supabaseAdmin.from("matches").insert(inserts);
@@ -351,6 +385,191 @@ export async function buildAndSaveSwissFromDEQualifier(): Promise<{ error?: stri
   return { ok: true };
 }
 
+// ── Hybrid Bracket ─────────────────────────────────────────────────────────────
+
+// Build Swiss R1 for the hybrid format: takes ranks 2-5 from each group (skip 1sts who go to UB).
+export async function buildAndSaveSwissFromGroupsHybrid(): Promise<{ error?: string; ok?: boolean }> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("season_format, num_teams").single();
+  const format = settings?.season_format as SeasonFormatConfig | null;
+  if (!format || format.preset !== "group_swiss_hybrid")
+    return { error: "Format is not Group → Swiss → Hybrid." };
+
+  const n = (settings?.num_teams as number) ?? 0;
+  if (!n) return { error: "No teams in league_settings." };
+
+  const numGroups = getNumGroups(n);
+  const stages = Array.from({ length: numGroups }, (_, i) => getGroupStage(i + 1));
+  const { data: allGroupMatches } = await supabaseAdmin
+    .from("matches")
+    .select("stage, home_team_id, away_team_id, home_score, away_score, status")
+    .in("stage", stages);
+
+  if (!allGroupMatches?.length) return { error: "No group matches found." };
+  const pending = allGroupMatches.filter(m => m.status !== "completed");
+  if (pending.length > 0) return { error: `${pending.length} group match${pending.length === 1 ? "" : "es"} still pending.` };
+
+  const groupStandings = stages.map(stage =>
+    computeGroupStandings(allGroupMatches.filter(m => m.stage === stage))
+  );
+
+  // Take ranks 1-5 (top 5 per group), then skip the first numGroups entries (rank-1 teams = UB seeds)
+  const qualified5 = seedGroupQualifiers(groupStandings, 5);
+  const swissSeeds = qualified5.slice(numGroups); // ranks 2-5 only (16 teams for 4 groups)
+  if (swissSeeds.length !== 16) return { error: `Expected 16 Swiss seeds, got ${swissSeeds.length}.` };
+
+  // Rotate bottom half to cross-group matchups in R1
+  const half = swissSeeds.length / 2;
+  const seeded = [...swissSeeds.slice(0, half), ...swissSeeds.slice(half + 1), swissSeeds[half]];
+
+  const inserts = generateSwissR1Inserts(seeded);
+  const { error } = await supabaseAdmin.from("matches").insert(inserts);
+  if (error) return { error: error.message };
+  return { ok: true };
+}
+
+// Build hybrid bracket from group 1sts (UB seeds) + Swiss top 8 (LB seeds).
+export async function buildAndSaveHybridFromSwiss(): Promise<{ error?: string; ok?: boolean }> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("season_format, num_teams").single();
+  const format = settings?.season_format as SeasonFormatConfig | null;
+  if (!format || format.preset !== "group_swiss_hybrid")
+    return { error: "Format is not Group → Swiss → Hybrid." };
+
+  const n = (settings?.num_teams as number) ?? 0;
+  if (!n) return { error: "No teams in league_settings." };
+
+  // Verify Swiss is complete
+  const { data: swissMatches } = await supabaseAdmin
+    .from("matches")
+    .select("home_team_id, away_team_id, home_score, away_score, status")
+    .eq("stage", SWISS_STAGE);
+
+  if (!swissMatches?.length) return { error: "No Swiss matches found." };
+  const pending = swissMatches.filter(m => m.status !== "completed");
+  if (pending.length > 0) return { error: `${pending.length} Swiss match${pending.length === 1 ? "" : "es"} still pending.` };
+
+  // Swiss top 8 → LB seeds
+  const teamIds = [...new Set(swissMatches.flatMap(m =>
+    [m.home_team_id, m.away_team_id].filter(Boolean) as string[]
+  ))];
+  const records = computeSwissRecords(swissMatches, teamIds);
+  const lbSeeds = seedSwissQualifiers(records);
+  if (lbSeeds.length < 8) return { error: `Expected 8 Swiss qualifiers, got ${lbSeeds.length}.` };
+
+  // Group 1sts → UB seeds
+  const numGroups = getNumGroups(n);
+  const stages = Array.from({ length: numGroups }, (_, i) => getGroupStage(i + 1));
+  const { data: allGroupMatches } = await supabaseAdmin
+    .from("matches")
+    .select("stage, home_team_id, away_team_id, home_score, away_score, status")
+    .in("stage", stages);
+
+  if (!allGroupMatches?.length) return { error: "No group matches found." };
+  const groupStandings = stages.map(stage =>
+    computeGroupStandings(allGroupMatches.filter(m => m.stage === stage))
+  );
+  const ubSeeds = seedGroupQualifiers(groupStandings, 1); // only rank-1 from each group
+  if (ubSeeds.length !== numGroups) return { error: `Expected ${numGroups} UB seeds, got ${ubSeeds.length}.` };
+  if (ubSeeds.length !== 4) return { error: `Hybrid requires exactly 4 UB seeds (got ${ubSeeds.length}). Format requires 4 groups.` };
+
+  const inserts = generateHybridMatchInserts(ubSeeds, lbSeeds.slice(0, 8));
+  const { error } = await supabaseAdmin.from("matches").insert(inserts);
+  if (error) return { error: error.message };
+  return { ok: true };
+}
+
+// Build Swiss R1 for hybrid_8 format: takes ranks 2-3 from each group (skip 1sts).
+export async function buildAndSaveSwissFromGroupsHybrid8(): Promise<{ error?: string; ok?: boolean }> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("season_format, num_teams").single();
+  const format = settings?.season_format as SeasonFormatConfig | null;
+  if (!format || format.preset !== "group_swiss_hybrid_8")
+    return { error: "Format is not Group → Swiss → Hybrid(8)." };
+
+  const n = (settings?.num_teams as number) ?? 0;
+  if (!n) return { error: "No teams in league_settings." };
+
+  const numGroups = getNumGroups(n);
+  const stages = Array.from({ length: numGroups }, (_, i) => getGroupStage(i + 1));
+  const { data: allGroupMatches } = await supabaseAdmin
+    .from("matches")
+    .select("stage, home_team_id, away_team_id, home_score, away_score, status")
+    .in("stage", stages);
+
+  if (!allGroupMatches?.length) return { error: "No group matches found." };
+  const pending = allGroupMatches.filter(m => m.status !== "completed");
+  if (pending.length > 0) return { error: `${pending.length} group match${pending.length === 1 ? "" : "es"} still pending.` };
+
+  const groupStandings = stages.map(stage =>
+    computeGroupStandings(allGroupMatches.filter(m => m.stage === stage))
+  );
+
+  // Take top 3 per group, skip 1sts (UB seeds) → only ranks 2-3 go to Swiss
+  const qualified3 = seedGroupQualifiers(groupStandings, 3);
+  const swissSeeds = qualified3.slice(numGroups); // skip first numGroups (rank-1 teams)
+  if (swissSeeds.length !== 8) return { error: `Expected 8 Swiss seeds, got ${swissSeeds.length}.` };
+
+  // Rotate bottom half to ensure cross-group matchups in R1
+  const half = swissSeeds.length / 2;
+  const seeded = [...swissSeeds.slice(0, half), ...swissSeeds.slice(half + 1), swissSeeds[half]];
+
+  const inserts = generateSwissR1Inserts(seeded);
+  const { error } = await supabaseAdmin.from("matches").insert(inserts);
+  if (error) return { error: error.message };
+  return { ok: true };
+}
+
+// Build the 8-team hybrid bracket from group 1sts (UB) + Swiss top 4 (LB).
+export async function buildAndSaveHybrid8FromSwiss(): Promise<{ error?: string; ok?: boolean }> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("season_format, num_teams").single();
+  const format = settings?.season_format as SeasonFormatConfig | null;
+  if (!format || format.preset !== "group_swiss_hybrid_8")
+    return { error: "Format is not Group → Swiss → Hybrid(8)." };
+
+  const n = (settings?.num_teams as number) ?? 0;
+  if (!n) return { error: "No teams in league_settings." };
+
+  // Verify Swiss complete
+  const { data: swissMatches } = await supabaseAdmin
+    .from("matches")
+    .select("home_team_id, away_team_id, home_score, away_score, status")
+    .eq("stage", SWISS_STAGE);
+
+  if (!swissMatches?.length) return { error: "No Swiss matches found." };
+  const pending = swissMatches.filter(m => m.status !== "completed");
+  if (pending.length > 0) return { error: `${pending.length} Swiss match${pending.length === 1 ? "" : "es"} still pending.` };
+
+  // Swiss top 4 → LB seeds (hybrid_8 uses 2-win threshold)
+  const teamIds = [...new Set(swissMatches.flatMap(m =>
+    [m.home_team_id, m.away_team_id].filter(Boolean) as string[]
+  ))];
+  const records = computeSwissRecords(swissMatches, teamIds);
+  const lbSeeds = seedSwissQualifiers(records, SWISS8_ADVANCE_WINS);
+  if (lbSeeds.length < 4) return { error: `Expected 4 Swiss qualifiers, got ${lbSeeds.length}.` };
+
+  // Group 1sts → UB seeds
+  const numGroups = getNumGroups(n);
+  const stages = Array.from({ length: numGroups }, (_, i) => getGroupStage(i + 1));
+  const { data: allGroupMatches } = await supabaseAdmin
+    .from("matches")
+    .select("stage, home_team_id, away_team_id, home_score, away_score, status")
+    .in("stage", stages);
+
+  if (!allGroupMatches?.length) return { error: "No group matches found." };
+  const groupStandings = stages.map(stage =>
+    computeGroupStandings(allGroupMatches.filter(m => m.stage === stage))
+  );
+  const ubSeeds = seedGroupQualifiers(groupStandings, 1);
+  if (ubSeeds.length !== 4) return { error: `Expected 4 UB seeds (group 1sts), got ${ubSeeds.length}.` };
+
+  const inserts = generateHybrid8MatchInserts(ubSeeds, lbSeeds.slice(0, 4));
+  const { error } = await supabaseAdmin.from("matches").insert(inserts);
+  if (error) return { error: error.message };
+  return { ok: true };
+}
+
 // ── Main bracket builder ───────────────────────────────────────────────────────
 
 export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: boolean }> {
@@ -364,38 +583,40 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
   // Wipe existing bracket matches
   await supabaseAdmin.from("matches").delete().not("stage", "is", null);
 
-  // Seed teams: wins desc, then avg peak MMR desc
-  const { data: teamsRaw } = await supabaseAdmin
-    .from("teams").select("id, name, wins");
-
-  if (!teamsRaw?.length) return { error: "No teams found." };
-  if (teamsRaw.length < 2) return { error: "Need at least 2 teams to generate a bracket." };
-
+  // Only include teams that have at least one player assigned — this prevents
+  // empty slot rows (configured for future seasons) from being seeded into the bracket.
   const { data: players } = await supabaseAdmin
-    .from("players").select("team_id, peak_2v2, peak_3v3").not("team_id", "is", null);
+    .from("players").select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3").not("team_id", "is", null);
+
+  const activeTeamIds = [...new Set((players ?? []).map((p) => p.team_id as string).filter(Boolean))];
+  if (!activeTeamIds.length) return { error: "No teams found." };
+  if (activeTeamIds.length < 2) return { error: "Need at least 2 teams to generate a bracket." };
+
+  const { data: teamsRaw } = await supabaseAdmin
+    .from("teams").select("id, name, wins").in("id", activeTeamIds);
 
   const avgMmr: Record<string, number> = {};
-  teamsRaw.forEach((t) => {
+  (teamsRaw ?? []).forEach((t) => {
     const roster = players?.filter((p) => p.team_id === t.id) ?? [];
     const sum = roster.reduce(
-      (s, p) => s + Math.max(Number(p.peak_2v2) || 0, Number(p.peak_3v3) || 0), 0
+      (s, p) => s + (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2, 0
     );
     avgMmr[t.id] = roster.length ? sum / roster.length : 0;
   });
 
-  const seeded = [...teamsRaw].sort((a, b) => {
+  const seeded = [...(teamsRaw ?? [])].sort((a, b) => {
     const diff = (b.wins ?? 0) - (a.wins ?? 0);
     return diff !== 0 ? diff : (avgMmr[b.id] ?? 0) - (avgMmr[a.id] ?? 0);
   });
 
   const format = settings.season_format as SeasonFormatConfig | null;
-  const isDE         = format?.preset === "double_elimination";
-  const isGroup      = format?.preset === "group_single_elimination" || format?.preset === "group_swiss_single_elimination";
-  const isSESwissSE  = format?.preset === "se_swiss_single_elimination";
-  const isDESwissSE  = format?.preset === "de_swiss_single_elimination";
+  const isDE            = format?.preset === "double_elimination";
+  const isGroup         = format?.preset === "group_single_elimination" || format?.preset === "group_swiss_single_elimination" || format?.preset === "group_swiss_hybrid" || format?.preset === "group_swiss_hybrid_8";
+  const isSESwissSE     = format?.preset === "se_swiss_single_elimination";
+  const isDESwissSE     = format?.preset === "de_swiss_single_elimination";
 
   if (isGroup) {
-    return await buildGroupMatches(seeded, format!);
+    return await buildGroupMatches(seeded, format!, avgMmr);
   }
 
   // SE Qualifier format: generate only enough SE rounds to reach 16 teams.

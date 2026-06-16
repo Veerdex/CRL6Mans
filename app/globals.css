@@ -1,26 +1,510 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
+/* Fonts inline as before */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/*
+ * Theming: Tailwind v4 color utilities compile to var(--color-*), and opacity
+ * variants to color-mix(... var(--color-*) ...) as long as the token resolves to
+ * a var (not a build-time literal). So we point every themed color token at an
+ * indirection var (--c-*) and swap those per data-theme. This themes BOTH solid
+ * and /opacity utilities with no component edits.
+ */
+@theme {
+  --color-background: var(--c-bg);
+  --color-foreground: var(--c-fg);
+  --color-white: var(--c-white);
+
+  --color-zinc-50:  var(--c-zinc-50);
+  --color-zinc-100: var(--c-zinc-100);
+  --color-zinc-200: var(--c-zinc-200);
+  --color-zinc-300: var(--c-zinc-300);
+  --color-zinc-400: var(--c-zinc-400);
+  --color-zinc-500: var(--c-zinc-500);
+  --color-zinc-600: var(--c-zinc-600);
+  --color-zinc-700: var(--c-zinc-700);
+  --color-zinc-800: var(--c-zinc-800);
+  --color-zinc-900: var(--c-zinc-900);
+  --color-zinc-950: var(--c-zinc-950);
+
+  --color-indigo-50:  var(--c-indigo-50);
+  --color-indigo-100: var(--c-indigo-100);
+  --color-indigo-200: var(--c-indigo-200);
+  --color-indigo-300: var(--c-indigo-300);
+  --color-indigo-400: var(--c-indigo-400);
+  --color-indigo-500: var(--c-indigo-500);
+  --color-indigo-600: var(--c-indigo-600);
+  --color-indigo-700: var(--c-indigo-700);
+  --color-indigo-800: var(--c-indigo-800);
+  --color-indigo-900: var(--c-indigo-900);
+  --color-indigo-950: var(--c-indigo-950);
+
+  --color-amber-50:  var(--c-amber-50);
+  --color-amber-100: var(--c-amber-100);
+  --color-amber-200: var(--c-amber-200);
+  --color-amber-300: var(--c-amber-300);
+  --color-amber-400: var(--c-amber-400);
+  --color-amber-500: var(--c-amber-500);
+  --color-amber-600: var(--c-amber-600);
+  --color-amber-700: var(--c-amber-700);
+  --color-amber-800: var(--c-amber-800);
+  --color-amber-900: var(--c-amber-900);
+  --color-amber-950: var(--c-amber-950);
+
+  --color-emerald-50:  var(--c-emerald-50);
+  --color-emerald-100: var(--c-emerald-100);
+  --color-emerald-200: var(--c-emerald-200);
+  --color-emerald-300: var(--c-emerald-300);
+  --color-emerald-400: var(--c-emerald-400);
+  --color-emerald-500: var(--c-emerald-500);
+  --color-emerald-600: var(--c-emerald-600);
+  --color-emerald-700: var(--c-emerald-700);
+  --color-emerald-800: var(--c-emerald-800);
+  --color-emerald-900: var(--c-emerald-900);
+  --color-emerald-950: var(--c-emerald-950);
+
+  --color-red-50:  var(--c-red-50);
+  --color-red-100: var(--c-red-100);
+  --color-red-200: var(--c-red-200);
+  --color-red-300: var(--c-red-300);
+  --color-red-400: var(--c-red-400);
+  --color-red-500: var(--c-red-500);
+  --color-red-600: var(--c-red-600);
+  --color-red-700: var(--c-red-700);
+  --color-red-800: var(--c-red-800);
+  --color-red-900: var(--c-red-900);
+  --color-red-950: var(--c-red-950);
+
+  --color-blue-50:  var(--c-blue-50);
+  --color-blue-100: var(--c-blue-100);
+  --color-blue-200: var(--c-blue-200);
+  --color-blue-300: var(--c-blue-300);
+  --color-blue-400: var(--c-blue-400);
+  --color-blue-500: var(--c-blue-500);
+  --color-blue-600: var(--c-blue-600);
+  --color-blue-700: var(--c-blue-700);
+  --color-blue-800: var(--c-blue-800);
+  --color-blue-900: var(--c-blue-900);
+  --color-blue-950: var(--c-blue-950);
+
+  --color-yellow-50:  var(--c-yellow-50);
+  --color-yellow-100: var(--c-yellow-100);
+  --color-yellow-200: var(--c-yellow-200);
+  --color-yellow-300: var(--c-yellow-300);
+  --color-yellow-400: var(--c-yellow-400);
+  --color-yellow-500: var(--c-yellow-500);
+  --color-yellow-600: var(--c-yellow-600);
+  --color-yellow-700: var(--c-yellow-700);
+  --color-yellow-800: var(--c-yellow-800);
+  --color-yellow-900: var(--c-yellow-900);
+  --color-yellow-950: var(--c-yellow-950);
+}
+
+/* ── LIGHT (clean neutral light) ──────────────────────────────────────────── */
+html[data-theme="light"] {
+  --c-bg: #ffffff;
+  --c-fg: #18181b;
+  --c-white: #18181b; /* "text-white" → ink on light surfaces (on-accent uses .text-on-accent) */
+
+  /* zinc surfaces/text: light surfaces, dark text */
+  --c-zinc-50:  #09090b;
+  --c-zinc-100: #18181b;
+  --c-zinc-200: #27272a;
+  --c-zinc-300: #3f3f46;
+  --c-zinc-400: #52525b;
+  --c-zinc-500: #6b7280;
+  --c-zinc-600: #9ca3af;
+  --c-zinc-700: #d4d4d8;
+  --c-zinc-800: #e4e4e7;
+  --c-zinc-900: #f4f4f6;
+  --c-zinc-950: #ffffff;
+
+  /* indigo → brand #3736ac (mid/dark kept saturated for buttons & logo gradients) */
+  --c-indigo-50:  #eef0fb;
+  --c-indigo-100: #e3e3f4;
+  --c-indigo-200: #c7d2fe;
+  --c-indigo-300: #4b49c4;
+  --c-indigo-400: #3736ac;
+  --c-indigo-500: #4543c0;
+  --c-indigo-600: #3736ac;
+  --c-indigo-700: #2e2d8e;
+  --c-indigo-800: #3730a3;
+  --c-indigo-900: #e3e3f4;
+  --c-indigo-950: #ececf8;
+
+  /* amber → brand orange #e88a24; dark shades used as text on light bg, light tints as chip/banner bg */
+  --c-amber-50:  #fff8f0;
+  --c-amber-100: #fdecd8;
+  --c-amber-200: #fad4aa;
+  --c-amber-300: #c97318;
+  --c-amber-400: #e88a24;
+  --c-amber-500: #e88a24;
+  --c-amber-600: #c97318;
+  --c-amber-700: #a85e10;
+  --c-amber-800: #88490b;
+  --c-amber-900: #fdecd8;
+  --c-amber-950: #fff8f0;
+
+  /* emerald (success): bright shades → readable text; dark shades → light chips */
+  --c-emerald-50:  #ecfdf5;
+  --c-emerald-100: #d1fae5;
+  --c-emerald-200: #a7f3d0;
+  --c-emerald-300: #047857;
+  --c-emerald-400: #059669;
+  --c-emerald-500: #10b981;
+  --c-emerald-600: #059669;
+  --c-emerald-700: #047857;
+  --c-emerald-800: #065f46;
+  --c-emerald-900: #d1f0df;
+  --c-emerald-950: #e9f9f0;
+
+  /* red (danger) */
+  --c-red-50:  #fef2f2;
+  --c-red-100: #fee2e2;
+  --c-red-200: #fecaca;
+  --c-red-300: #b91c1c;
+  --c-red-400: #dc2626;
+  --c-red-500: #ef4444;
+  --c-red-600: #dc2626;
+  --c-red-700: #b91c1c;
+  --c-red-800: #991b1b;
+  --c-red-900: #fbdcdc;
+  --c-red-950: #fef0f0;
+
+  /* blue (info) */
+  --c-blue-50:  #eff6ff;
+  --c-blue-100: #dbeafe;
+  --c-blue-200: #bfdbfe;
+  --c-blue-300: #1d4ed8;
+  --c-blue-400: #2563eb;
+  --c-blue-500: #3b82f6;
+  --c-blue-600: #2563eb;
+  --c-blue-700: #2563eb;
+  --c-blue-800: #1e40af;
+  --c-blue-900: #dbe9fe;
+  --c-blue-950: #eff5ff;
+
+  /* yellow */
+  --c-yellow-50:  #fefce8;
+  --c-yellow-100: #fef9c3;
+  --c-yellow-200: #fef08a;
+  --c-yellow-300: #a16207;
+  --c-yellow-400: #ca8a04;
+  --c-yellow-500: #eab308;
+  --c-yellow-600: #ca8a04;
+  --c-yellow-700: #a16207;
+  --c-yellow-800: #854d0e;
+  --c-yellow-900: #fef9c3;
+  --c-yellow-950: #fefce8;
+}
+
+/* ── DARK (today's look = Tailwind defaults) ──────────────────────────────── */
+html[data-theme="dark"] {
+  --c-bg: #09090b;
+  --c-fg: #ededed;
+  --c-white: #ffffff;
+
+  --c-zinc-50:  #fafafa;
+  --c-zinc-100: #f4f4f5;
+  --c-zinc-200: #e4e4e7;
+  --c-zinc-300: #d4d4d8;
+  --c-zinc-400: #a1a1aa;
+  --c-zinc-500: #71717a;
+  --c-zinc-600: #52525b;
+  --c-zinc-700: #3f3f46;
+  --c-zinc-800: #27272a;
+  --c-zinc-900: #18181b;
+  --c-zinc-950: #09090b;
+
+  --c-indigo-50:  #eef2ff;
+  --c-indigo-100: #e0e7ff;
+  --c-indigo-200: #c7d2fe;
+  --c-indigo-300: #a5b4fc;
+  --c-indigo-400: #818cf8;
+  --c-indigo-500: #6366f1;
+  --c-indigo-600: #4f46e5;
+  --c-indigo-700: #4338ca;
+  --c-indigo-800: #3730a3;
+  --c-indigo-900: #312e81;
+  --c-indigo-950: #1e1b4b;
+
+  --c-amber-50:  #fff8f0;
+  --c-amber-100: #fdecd8;
+  --c-amber-200: #fad4aa;
+  --c-amber-300: #f5b272;
+  --c-amber-400: #e88a24;
+  --c-amber-500: #e88a24;
+  --c-amber-600: #c97318;
+  --c-amber-700: #a85e10;
+  --c-amber-800: #88490b;
+  --c-amber-900: #6b3808;
+  --c-amber-950: #3d1e03;
+
+  --c-emerald-50:  #ecfdf5;
+  --c-emerald-100: #d1fae5;
+  --c-emerald-200: #a7f3d0;
+  --c-emerald-300: #6ee7b7;
+  --c-emerald-400: #34d399;
+  --c-emerald-500: #10b981;
+  --c-emerald-600: #059669;
+  --c-emerald-700: #047857;
+  --c-emerald-800: #065f46;
+  --c-emerald-900: #064e3b;
+  --c-emerald-950: #022c22;
+
+  --c-red-50:  #fef2f2;
+  --c-red-100: #fee2e2;
+  --c-red-200: #fecaca;
+  --c-red-300: #fca5a5;
+  --c-red-400: #f87171;
+  --c-red-500: #ef4444;
+  --c-red-600: #dc2626;
+  --c-red-700: #b91c1c;
+  --c-red-800: #991b1b;
+  --c-red-900: #7f1d1d;
+  --c-red-950: #450a0a;
+
+  --c-blue-50:  #eff6ff;
+  --c-blue-100: #dbeafe;
+  --c-blue-200: #bfdbfe;
+  --c-blue-300: #93c5fd;
+  --c-blue-400: #60a5fa;
+  --c-blue-500: #3b82f6;
+  --c-blue-600: #2563eb;
+  --c-blue-700: #1d4ed8;
+  --c-blue-800: #1e40af;
+  --c-blue-900: #1e3a8a;
+  --c-blue-950: #172554;
+
+  --c-yellow-50:  #fefce8;
+  --c-yellow-100: #fef9c3;
+  --c-yellow-200: #fef08a;
+  --c-yellow-300: #fde047;
+  --c-yellow-400: #facc15;
+  --c-yellow-500: #eab308;
+  --c-yellow-600: #ca8a04;
+  --c-yellow-700: #a16207;
+  --c-yellow-800: #854d0e;
+  --c-yellow-900: #713f12;
+  --c-yellow-950: #422006;
+}
+
+/* ── CRL6Mans (default) — blue (#3736ac) shell + orange (#e88a24) accents ──── */
+:root,
+[data-theme="crl6mans"] {
+  --c-bg: #d5dbf2;        /* clearly blue page */
+  --c-fg: #1e1d44;        /* blue-ink text */
+  --c-white: #1e1d44;     /* primary text → blue-ink on light surfaces */
+
+  /* surfaces: blue page, lighter blue cards, blue-gray lines */
+  --c-zinc-50:  #14132a;
+  --c-zinc-100: #1f1f3d;
+  --c-zinc-200: #2a2a4d;
+  --c-zinc-300: #3a3c66;
+  --c-zinc-400: #565a8c;  /* muted text */
+  --c-zinc-500: #6d72a6;
+  --c-zinc-600: #8f95c4;
+  --c-zinc-700: #aab1de;
+  --c-zinc-800: #c2c9ec;  /* borders / elevated */
+  --c-zinc-900: #f1f3fd;  /* cards (lift off the blue page) */
+  --c-zinc-950: #d5dbf2;  /* page background (blue) */
+
+  /* primary = orange #e88a24 in content (sidebar stays blue via hardcoded overrides) */
+  --c-indigo-50:  #fff8f0;
+  --c-indigo-100: #fdecd8;
+  --c-indigo-200: #fad4aa;
+  --c-indigo-300: #f5b272;
+  --c-indigo-400: #f09535;
+  --c-indigo-500: #f09535;
+  --c-indigo-600: #e88a24;
+  --c-indigo-700: #c97318;
+  --c-indigo-800: #a85e10;
+  --c-indigo-900: #fdecd8;
+  --c-indigo-950: #fff8f0;
+
+  /* secondary/accent = orange #e88a24; same ramp as light (both are light-bg themes) */
+  --c-amber-50:  #fff8f0;
+  --c-amber-100: #fdecd8;
+  --c-amber-200: #fad4aa;
+  --c-amber-300: #c97318;
+  --c-amber-400: #e88a24;
+  --c-amber-500: #e88a24;
+  --c-amber-600: #c97318;
+  --c-amber-700: #a85e10;
+  --c-amber-800: #88490b;
+  --c-amber-900: #fdecd8;
+  --c-amber-950: #fff8f0;
+
+  /* status colors (readable on light) */
+  --c-emerald-50:#ecfdf5; --c-emerald-100:#d1fae5; --c-emerald-200:#a7f3d0;
+  --c-emerald-300:#047857; --c-emerald-400:#059669; --c-emerald-500:#10b981;
+  --c-emerald-600:#059669; --c-emerald-700:#047857; --c-emerald-800:#065f46;
+  --c-emerald-900:#d1f0df; --c-emerald-950:#e9f9f0;
+  --c-red-50:#fef2f2; --c-red-100:#fee2e2; --c-red-200:#fecaca;
+  --c-red-300:#b91c1c; --c-red-400:#dc2626; --c-red-500:#ef4444;
+  --c-red-600:#dc2626; --c-red-700:#b91c1c; --c-red-800:#991b1b;
+  --c-red-900:#fbdcdc; --c-red-950:#fef0f0;
+  --c-blue-50:#eff6ff; --c-blue-100:#dbeafe; --c-blue-200:#bfdbfe;
+  --c-blue-300:#1d4ed8; --c-blue-400:#2563eb; --c-blue-500:#3b82f6;
+  --c-blue-600:#2563eb; --c-blue-700:#2563eb; --c-blue-800:#1e40af;
+  --c-blue-900:#dbe9fe; --c-blue-950:#eff5ff;
+  --c-yellow-50:#fefce8; --c-yellow-100:#fef9c3; --c-yellow-200:#fef08a;
+  --c-yellow-300:#a16207; --c-yellow-400:#ca8a04; --c-yellow-500:#eab308;
+  --c-yellow-600:#ca8a04; --c-yellow-700:#a16207; --c-yellow-800:#854d0e;
+  --c-yellow-900:#fef9c3; --c-yellow-950:#fefce8;
+}
+
+/* CRL6Mans shell: blue sidebar + mobile bottom-nav with light text & orange active.
+   These surfaces share bg-zinc classes with cards, so they're styled by element. */
+[data-theme="crl6mans"] aside {
+  background-color: #3736ac;
+  border-color: #2f2e93;
+}
+[data-theme="crl6mans"] aside span,
+[data-theme="crl6mans"] aside a {
+  color: #d6d7f5;
+}
+/* Brand name in sidebar → orange */
+[data-theme="crl6mans"] aside > div:first-child span {
+  color: #e88a24;
+}
+[data-theme="crl6mans"] aside .border-zinc-800 { border-color: rgba(255,255,255,0.14); }
+[data-theme="crl6mans"] aside a:hover { color: #ffffff; background-color: rgba(255,255,255,0.08); }
+/* active nav link (Tailwind: bg-zinc-800 text-white) → solid orange pill */
+[data-theme="crl6mans"] aside a.bg-zinc-800 {
+  background-color: #e88a24;
+  color: #ffffff;
+}
+
+[data-theme="crl6mans"] nav.fixed.bottom-0 {
+  background-color: #3736ac;
+  border-color: #2f2e93;
+}
+[data-theme="crl6mans"] nav.fixed.bottom-0 .text-zinc-500 { color: rgba(255,255,255,0.6); }
+[data-theme="crl6mans"] nav.fixed.bottom-0 .text-white { color: #e88a24; } /* active tab → brand orange */
+
+/* CRL6Mans top + bottom bar layout: same blue shell as the sidebar. */
+[data-theme="crl6mans"] .app-topbar,
+[data-theme="crl6mans"] .app-bottombar {
+  background-color: #3736ac;
+  border-color: #2f2e93;
+}
+[data-theme="crl6mans"] .app-topbar span,
+[data-theme="crl6mans"] .app-topbar a,
+[data-theme="crl6mans"] .app-bottombar span,
+[data-theme="crl6mans"] .app-bottombar a {
+  color: #d6d7f5;
+}
+/* Brand name in the top bar → orange */
+[data-theme="crl6mans"] .app-topbar > span:first-child { color: #e88a24; }
+[data-theme="crl6mans"] .app-topbar a:hover { color: #ffffff; background-color: rgba(255,255,255,0.08); }
+/* active nav link (Tailwind: bg-zinc-800 text-white) → solid orange pill */
+[data-theme="crl6mans"] .app-topbar a.bg-zinc-800 {
+  background-color: #e88a24;
+  color: #ffffff;
+}
+/* "More" overflow button mirrors the nav link colors */
+[data-theme="crl6mans"] .app-topbar .nav-more { color: #d6d7f5; }
+[data-theme="crl6mans"] .app-topbar .nav-more:hover { color: #ffffff; background-color: rgba(255,255,255,0.08); }
+[data-theme="crl6mans"] .app-topbar .nav-more.bg-zinc-800 { background-color: #e88a24; color: #ffffff; }
+
+/* The overflow dropdown is a normal popover (light surface on this theme), not
+   part of the blue bar — undo the bar's light-text overrides so it stays readable. */
+[data-theme="crl6mans"] .app-topbar .nav-more-menu a { color: var(--color-zinc-400); }
+[data-theme="crl6mans"] .app-topbar .nav-more-menu a:hover {
+  color: var(--color-white);
+  background-color: color-mix(in oklab, var(--color-zinc-800) 60%, transparent);
+}
+[data-theme="crl6mans"] .app-topbar .nav-more-menu a.bg-zinc-800 {
+  color: var(--color-white);
+  background-color: var(--color-zinc-800);
+}
+
+/* Headings carry brand orange in content areas. */
+[data-theme="crl6mans"] main h1,
+[data-theme="crl6mans"] main h2 { color: #e88a24; }
+
+/* Stats page background: solid white on light themes, black on dark. */
+[data-theme="crl6mans"] .stats-bg,
+[data-theme="light"] .stats-bg { background-color: #ffffff; }
+[data-theme="dark"] .stats-bg { background-color: #000000; }
+
+/* White that must stay white regardless of theme (text/badges on colored accents). */
+@utility text-on-accent { color: #ffffff; }
+@utility bg-pure-white { background-color: #ffffff; }
+
+/*
+ * Keep text white when it sits ON a saturated accent background (same element:
+ * buttons, badges, gradient logos). Higher specificity than `.text-white`, and
+ * unlayered so it beats Tailwind's layered utilities. Avoids editing every button.
+ */
+.text-white.bg-indigo-500,
+.text-white.bg-indigo-600,
+.text-white.bg-indigo-700,
+.text-white.bg-emerald-500,
+.text-white.bg-emerald-600,
+.text-white.bg-emerald-700,
+.text-white.bg-red-500,
+.text-white.bg-red-600,
+.text-white.bg-red-700,
+.text-white.bg-blue-500,
+.text-white.bg-blue-600,
+.text-white.bg-amber-500,
+.text-white.bg-amber-600,
+.text-white.bg-gradient-to-br,
+.text-white.bg-gradient-to-r,
+.text-white.bg-gradient-to-b { color: #ffffff; }
+
+/*
+ * Portrait-only on mobile. Hidden everywhere by default; shown to cover the app
+ * when a touch device is held in landscape (small viewport height rules out
+ * tablets/desktops). Blocks scroll behind it.
+ */
+.rotate-overlay { display: none; }
+
+@media (orientation: landscape) and (max-height: 600px) and (pointer: coarse) {
+  .rotate-overlay { display: flex; }
+  body { overflow: hidden; }
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-background);
+  color: var(--color-foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* WebKit/iOS renders datetime-local as a native widget with an intrinsic
+   width and height that ignore CSS sizing — strip the native appearance so it
+   sizes like the text/number inputs (respects width:100%, box-sizing, height). */
+input[type="datetime-local"] {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+}
+input[type="datetime-local"]::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+
+@keyframes confetti-fall {
+  0%   { transform: translateY(0) rotate(0deg) scaleX(1); opacity: 1; }
+  80%  { opacity: 0.8; }
+  100% { transform: translateY(110vh) rotate(800deg) scaleX(0.3); opacity: 0; }
+}
+@keyframes logo-glow-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50%       { opacity: 0.85; transform: scale(1.18); }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes star-twinkle {
+  0%, 100% { opacity: 0.12; transform: scale(0.7); }
+  50%       { opacity: 0.75; transform: scale(1.3); }
 }

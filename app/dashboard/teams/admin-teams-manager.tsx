@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { deleteTeam, removePlayerFromTeam, movePlayerToTeam } from "./actions";
+import { deleteTeam, removePlayerFromTeam, movePlayerToTeam, addPlayerToTeam } from "./actions";
 import { MyTeamEditor } from "./my-team-editor";
+import { PlayerName } from "@/app/dashboard/player-name";
 
 // Isolated per-card toggle so state can never bleed across cards.
 function TeamEditToggleInline({ team }: { team: { id: string; name: string; logo_url: string | null; logo_offset_x: number | null; logo_offset_y: number | null; is_locked: boolean | null } }) {
@@ -34,15 +35,20 @@ type Team = {
   logo_offset_x: number | null; logo_offset_y: number | null; is_locked: boolean | null;
 };
 type Player = {
-  id: string; username: string; discord_id: string | null; avatar: string | null;
-  peak_2v2: string; peak_3v3: string; tracker_url: string;
+  id: string; username: string; display_name: string | null; discord_id: string | null; avatar: string | null;
+  peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; tracker_url: string;
   is_captain: boolean | null; team_id: string | null;
+};
+type AvailablePlayer = {
+  id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+  team_id: string | null;
 };
 
 interface Props {
   teams: Team[];
   byTeam: Record<string, Player[]>;
   avgMmr: Record<string, number>;
+  availablePlayers?: AvailablePlayer[];
   initialQuery?: string;
 }
 
@@ -63,7 +69,7 @@ function DefaultLogo({ name }: { name: string }) {
   );
 }
 
-export function AdminTeamsManager({ teams, byTeam, avgMmr, initialQuery = "" }: Props) {
+export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = [], initialQuery = "" }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmDeleteTeamId, setConfirmDeleteTeamId] = useState<string | null>(null);
@@ -71,6 +77,8 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, initialQuery = "" }: 
   const [dragPlayerId, setDragPlayerId] = useState<string | null>(null);
   const [dragOverTeamId, setDragOverTeamId] = useState<string | null>(null);
   const [query, setQuery] = useState(initialQuery);
+  const [addingToTeamId, setAddingToTeamId] = useState<string | null>(null);
+  const [addPlayerQuery, setAddPlayerQuery] = useState("");
 
   const visibleTeams = query.trim()
     ? (() => {
@@ -80,7 +88,8 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, initialQuery = "" }: 
           (t) =>
             re.test(t.name) ||
             (byTeam[t.id] ?? []).some((p) =>
-              p.username.toLowerCase().includes(q.toLowerCase())
+              p.username.toLowerCase().includes(q.toLowerCase()) ||
+              (p.display_name ?? "").toLowerCase().includes(q.toLowerCase())
             )
         );
       })()
@@ -111,6 +120,25 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, initialQuery = "" }: 
       router.refresh();
     });
   }
+
+  function handleAddPlayer(playerId: string, teamId: string) {
+    startTransition(async () => {
+      await addPlayerToTeam(playerId, teamId);
+      setAddingToTeamId(null);
+      setAddPlayerQuery("");
+      router.refresh();
+    });
+  }
+
+  const queryFilteredPlayers = addPlayerQuery.trim()
+    ? availablePlayers.filter((p) => {
+        const q = addPlayerQuery.toLowerCase();
+        return (
+          (p.display_name ?? p.username).toLowerCase().includes(q) ||
+          p.username.toLowerCase().includes(q)
+        );
+      })
+    : availablePlayers;
 
   return (
     <div className="space-y-4">
@@ -163,7 +191,7 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, initialQuery = "" }: 
               <div className="min-w-0 flex-1">
                 <h2 className="text-base font-bold text-white truncate">{team.name}</h2>
                 <p className="text-xs text-zinc-500">
-                  avg {(avgMmr[team.id] ?? 0).toLocaleString()} MMR
+                  avg {(avgMmr[team.id] ?? 0).toLocaleString()} RV
                   {team.is_locked && <span className="ml-2 text-amber-400">🔒</span>}
                 </p>
               </div>
@@ -205,7 +233,7 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, initialQuery = "" }: 
                 <p className="px-5 py-3 text-sm text-zinc-600 italic">No players yet.</p>
               ) : (
                 roster.map((player) => {
-                  const peak = Math.max(Number(player.peak_2v2) || 0, Number(player.peak_3v3) || 0);
+                  const peak = Math.round((Number(player.peak_2v2) + Number(player.current_2v2)) * 0.3 + (Number(player.peak_3v3) + Number(player.current_3v3)) * 0.2);
                   const isConfirmingPlayerDelete = confirmDeletePlayerId === player.id;
 
                   return (
@@ -239,11 +267,21 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, initialQuery = "" }: 
                         <div className="w-7 h-7 rounded-full bg-zinc-700 shrink-0" />
                       )}
 
-                      <span className="flex-1 text-sm text-zinc-200 truncate">
-                        {player.username}
+                      <span className="flex-1 text-sm text-zinc-200 min-w-0">
+                        <a
+                          href={player.tracker_url || undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          draggable={false}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                          className="hover:text-indigo-400 transition-colors"
+                        >
+                          <PlayerName displayName={player.display_name} username={player.username} />
+                        </a>
                         {player.is_captain && <span className="ml-1.5 text-xs font-semibold text-yellow-400">C</span>}
                       </span>
-                      <span className="text-xs text-zinc-500 shrink-0">{peak.toLocaleString()}</span>
+                      <span className="text-xs text-zinc-500 shrink-0">{peak.toLocaleString()} <span className="text-zinc-700">RV</span></span>
 
                       {/* Delete player */}
                       {isConfirmingPlayerDelete ? (
@@ -278,6 +316,66 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, initialQuery = "" }: 
                 })
               )}
             </div>
+
+            {/* Add Player */}
+            {availablePlayers.length > 0 && roster.length < 3 && (() => {
+              const addableForTeam = queryFilteredPlayers.filter((p) => p.team_id !== team.id);
+              const unfiltered = availablePlayers.filter((p) => p.team_id !== team.id);
+              return (
+                <div className="border-t border-zinc-800">
+                  {addingToTeamId !== team.id ? (
+                    <button
+                      onClick={() => { setAddingToTeamId(team.id); setAddPlayerQuery(""); }}
+                      className="w-full px-5 py-2.5 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors text-left"
+                    >
+                      + Add Player
+                    </button>
+                  ) : (
+                    <div className="px-4 py-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Add Player</span>
+                        <button
+                          onClick={() => setAddingToTeamId(null)}
+                          className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Search…"
+                        value={addPlayerQuery}
+                        onChange={(e) => setAddPlayerQuery(e.target.value)}
+                        autoFocus
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <div className="max-h-44 overflow-y-auto rounded-lg border border-zinc-800 divide-y divide-zinc-800">
+                        {unfiltered.length === 0 ? (
+                          <p className="px-3 py-2 text-xs text-zinc-600">All participants are already on this team.</p>
+                        ) : addableForTeam.length === 0 ? (
+                          <p className="px-3 py-2 text-xs text-zinc-600">No matching players.</p>
+                        ) : (
+                          addableForTeam.map((p) => {
+                            const mmr = Math.round((Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2);
+                            return (
+                              <button
+                                key={p.id}
+                                onClick={() => handleAddPlayer(p.id, team.id)}
+                                disabled={isPending}
+                                className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-zinc-800 text-zinc-300 hover:text-white transition-colors disabled:opacity-50 text-left"
+                              >
+                                <span>{p.display_name ?? p.username}</span>
+                                <span className="text-zinc-500 ml-2 shrink-0">{mmr.toLocaleString()}</span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Edit team info toggle — per-card state, isolated from other cards */}
             <TeamEditToggleInline team={team} />

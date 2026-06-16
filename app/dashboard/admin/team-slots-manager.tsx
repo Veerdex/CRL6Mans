@@ -13,8 +13,8 @@ export function TeamSlotsManager({ teams: initialTeams }: { teams: TeamSlot[] })
   const [editValue, setEditValue] = useState("");
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
 
-  const showFeedback = (msg: string, ok: boolean) => {
-    setFeedback({ msg, ok });
+  const showFeedback = (msg: string | undefined, ok: boolean) => {
+    setFeedback({ msg: msg ?? "", ok });
     setTimeout(() => setFeedback(null), 4000);
   };
 
@@ -71,7 +71,7 @@ export function TeamSlotsManager({ teams: initialTeams }: { teams: TeamSlot[] })
             </button>
           </div>
           {sorted.map(team => (
-            <div key={team.id} className="flex items-center gap-3 bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2">
+            <div key={team.id} className="flex items-center gap-3 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2">
               <span className="text-xs font-mono text-zinc-500 w-6 shrink-0 text-right">
                 {team.slot_number ?? "—"}
               </span>

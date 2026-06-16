@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isAdmin } from "@/app/lib/players";
+import { isDirector } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import type { SeasonFormatConfig } from "./format-editor";
 import {
@@ -15,12 +15,32 @@ import {
   buildAndSaveSEFromSwiss,
   buildAndSaveSwissFromSEQualifier,
   buildAndSaveSwissFromDEQualifier,
+  buildAndSaveSwissFromGroupsHybrid,
+  buildAndSaveHybridFromSwiss,
+  buildAndSaveSwissFromGroupsHybrid8,
+  buildAndSaveHybrid8FromSwiss,
 } from "@/app/lib/bracket-server";
+import { openReadyMatchChannels } from "@/app/lib/discord-bot";
+
+// Director-gated stage/round advance: runs the bracket-server builder, then opens
+// Discord channels for any newly-ready matches (so rounds flow without /openround).
+async function runStageAdvance(
+  fn: () => Promise<{ error?: string; ok?: boolean }>,
+): Promise<{ error?: string; ok?: boolean }> {
+  const cookieStore = await cookies();
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId || !(await isDirector(session.userId))) redirect("/dashboard");
+
+  const result = await fn();
+  if (result.ok) await openReadyMatchChannels();
+  revalidatePath("/dashboard/season");
+  return result;
+}
 
 export async function saveSeasonFormat(config: SeasonFormatConfig): Promise<{ error?: string; ok?: boolean }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
+  if (!session?.userId || !(await isDirector(session.userId))) redirect("/dashboard");
 
   if (!config?.preset) return { error: "Select a format preset." };
 
@@ -59,69 +79,20 @@ export async function saveSeasonFormat(config: SeasonFormatConfig): Promise<{ er
 export async function generateBracketForSeason(): Promise<{ error?: string; ok?: boolean }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
+  if (!session?.userId || !(await isDirector(session.userId))) redirect("/dashboard");
 
   const result = await buildAndSaveBracket();
   revalidatePath("/dashboard/season");
   return result;
 }
 
-export async function advanceGroupsToSE(): Promise<{ error?: string; ok?: boolean }> {
-  const cookieStore = await cookies();
-  const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
-
-  const result = await buildAndSaveSEFromGroups();
-  revalidatePath("/dashboard/season");
-  return result;
-}
-
-export async function advanceGroupsToSwiss(): Promise<{ error?: string; ok?: boolean }> {
-  const cookieStore = await cookies();
-  const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
-
-  const result = await buildAndSaveSwissFromGroups();
-  revalidatePath("/dashboard/season");
-  return result;
-}
-
-export async function advanceSwissRound(): Promise<{ error?: string; ok?: boolean }> {
-  const cookieStore = await cookies();
-  const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
-
-  const result = await buildAndSaveNextSwissRound();
-  revalidatePath("/dashboard/season");
-  return result;
-}
-
-export async function advanceSEQualifierToSwiss(): Promise<{ error?: string; ok?: boolean }> {
-  const cookieStore = await cookies();
-  const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
-
-  const result = await buildAndSaveSwissFromSEQualifier();
-  revalidatePath("/dashboard/season");
-  return result;
-}
-
-export async function advanceSwissToSE(): Promise<{ error?: string; ok?: boolean }> {
-  const cookieStore = await cookies();
-  const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
-
-  const result = await buildAndSaveSEFromSwiss();
-  revalidatePath("/dashboard/season");
-  return result;
-}
-
-export async function advanceDEQualifierToSwiss(): Promise<{ error?: string; ok?: boolean }> {
-  const cookieStore = await cookies();
-  const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
-
-  const result = await buildAndSaveSwissFromDEQualifier();
-  revalidatePath("/dashboard/season");
-  return result;
-}
+export async function advanceGroupsToSE() { return runStageAdvance(buildAndSaveSEFromGroups); }
+export async function advanceGroupsToSwiss() { return runStageAdvance(buildAndSaveSwissFromGroups); }
+export async function advanceSwissRound() { return runStageAdvance(buildAndSaveNextSwissRound); }
+export async function advanceSEQualifierToSwiss() { return runStageAdvance(buildAndSaveSwissFromSEQualifier); }
+export async function advanceSwissToSE() { return runStageAdvance(buildAndSaveSEFromSwiss); }
+export async function advanceDEQualifierToSwiss() { return runStageAdvance(buildAndSaveSwissFromDEQualifier); }
+export async function advanceGroupsToSwissHybrid() { return runStageAdvance(buildAndSaveSwissFromGroupsHybrid); }
+export async function advanceSwissToHybrid() { return runStageAdvance(buildAndSaveHybridFromSwiss); }
+export async function advanceGroupsToSwissHybrid8() { return runStageAdvance(buildAndSaveSwissFromGroupsHybrid8); }
+export async function advanceSwissToHybrid8() { return runStageAdvance(buildAndSaveHybrid8FromSwiss); }

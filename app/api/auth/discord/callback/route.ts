@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createSession } from "@/app/lib/session";
+import { supabaseAdmin } from "@/app/lib/supabase";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -70,8 +71,28 @@ export async function GET(request: NextRequest) {
 
     await createSession(user.id, user.username, user.avatar ?? null);
 
+    // Keep avatar in sync on every login.
+    await supabaseAdmin
+      .from("players")
+      .update({ avatar: user.avatar ?? null, updated_at: new Date().toISOString() })
+      .eq("discord_id", user.id);
+
+    // Mirror the player's saved theme + nav layout into cookies for no-flash SSR.
+    const { data: player } = await supabaseAdmin
+      .from("players").select("theme, nav_layout").eq("discord_id", user.id).single();
+    const saved = player?.theme;
+    const theme = saved === "dark" || saved === "light" || saved === "crl6mans" ? saved : "crl6mans";
+    cookieStore.set("theme", theme, {
+      path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax",
+    });
+    const navLayout = player?.nav_layout === "topbar" ? "topbar" : "sidebar";
+    cookieStore.set("nav_layout", navLayout, {
+      path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax",
+    });
+
     return NextResponse.redirect(new URL("/dashboard", request.url));
-  } catch {
+  } catch (err) {
+    console.error("[discord/callback] unexpected error", err);
     return NextResponse.redirect(new URL("/login?error=auth_failed", request.url));
   }
 }

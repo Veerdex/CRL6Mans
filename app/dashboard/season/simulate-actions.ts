@@ -4,9 +4,9 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isAdmin } from "@/app/lib/players";
+import { isDirector } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { getGuildChannels, deleteChannel } from "@/app/lib/discord-api";
+import { cleanupStageCategoryIfComplete, openReadyMatchChannels } from "@/app/lib/discord-bot";
 import {
   DE_WINNERS, DE_LOSERS, DE_GF,
   getDEWBRounds, getDELBRounds,
@@ -16,12 +16,14 @@ import {
   SWISS_STAGE,
   SE_QUALIFIER,
   DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS,
+  HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF,
+  HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF,
 } from "@/app/lib/bracket";
 
 async function verifyAdmin() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
+  if (!session?.userId || !(await isDirector(session.userId))) redirect("/dashboard");
 }
 
 async function simulateSingleMatch(match: {
@@ -264,6 +266,95 @@ async function simulateDEQualifierSingleMatch(
   // Last LB round: winner is a qualifier survivor, no further routing
 }
 
+// ── Hybrid helpers ────────────────────────────────────────────────────────────
+
+async function getReadyHybridMatches(stage: string) {
+  const { data } = await supabaseAdmin
+    .from("matches")
+    .select("id, round, match_number, home_team_id, away_team_id, stage")
+    .eq("stage", stage)
+    .not("home_team_id", "is", null)
+    .not("away_team_id", "is", null)
+    .is("home_score", null)
+    .order("round", { ascending: true })
+    .order("match_number", { ascending: true });
+  return data ?? [];
+}
+
+async function simulateHybridSingleMatch(match: {
+  id: string; round: number; match_number: number; stage: string;
+  home_team_id: string; away_team_id: string;
+}) {
+  const homeWins  = Math.random() > 0.5;
+  const winScore  = 4; // hybrid is BO7 — winner needs exactly 4
+  const loseScore = Math.floor(Math.random() * 4);
+
+  await supabaseAdmin.from("matches")
+    .update({
+      home_score: homeWins ? winScore : loseScore,
+      away_score: homeWins ? loseScore : winScore,
+      status: "completed",
+    })
+    .eq("id", match.id);
+
+  const winnerId = homeWins ? match.home_team_id : match.away_team_id;
+  const loserId  = homeWins ? match.away_team_id : match.home_team_id;
+
+  if (match.stage === HYBRID_UB) {
+    // Winner → SF home; loser → LB R3 away
+    await setMatchSlot(HYBRID_SF, 1, match.match_number, "home_team_id", winnerId);
+    await setMatchSlot(HYBRID_LB, 3, match.match_number, "away_team_id", loserId);
+  } else if (match.stage === HYBRID_LB) {
+    if (match.round === 1) {
+      const nm   = Math.ceil(match.match_number / 2);
+      const slot = match.match_number % 2 === 1 ? "home_team_id" : "away_team_id";
+      await setMatchSlot(HYBRID_LB, 2, nm, slot, winnerId);
+    } else if (match.round === 2) {
+      await setMatchSlot(HYBRID_LB, 3, match.match_number, "home_team_id", winnerId);
+    } else if (match.round === 3) {
+      await setMatchSlot(HYBRID_SF, 1, match.match_number, "away_team_id", winnerId);
+    }
+  } else if (match.stage === HYBRID_SF) {
+    const slot = match.match_number === 1 ? "home_team_id" : "away_team_id";
+    await setMatchSlot(HYBRID_GF, 1, 1, slot, winnerId);
+  }
+  // HYBRID_GF: winner is champion, no further routing
+}
+
+async function simulateHybrid8SingleMatch(match: {
+  id: string; round: number; match_number: number; stage: string;
+  home_team_id: string; away_team_id: string;
+}) {
+  const homeWins  = Math.random() > 0.5;
+  const winScore  = 4; // hybrid is BO7 — winner needs exactly 4
+  const loseScore = Math.floor(Math.random() * 4);
+
+  await supabaseAdmin.from("matches")
+    .update({
+      home_score: homeWins ? winScore : loseScore,
+      away_score: homeWins ? loseScore : winScore,
+      status: "completed",
+    })
+    .eq("id", match.id);
+
+  const winnerId = homeWins ? match.home_team_id : match.away_team_id;
+  const loserId  = homeWins ? match.away_team_id : match.home_team_id;
+
+  if (match.stage === HYBRID8_UB) {
+    await setMatchSlot(HYBRID8_SF, 1, match.match_number, "home_team_id", winnerId);
+    await setMatchSlot(HYBRID8_LB, 2, match.match_number, "away_team_id", loserId);
+  } else if (match.stage === HYBRID8_LB) {
+    if (match.round === 1) {
+      await setMatchSlot(HYBRID8_LB, 2, match.match_number, "home_team_id", winnerId);
+    } else if (match.round === 2) {
+      await setMatchSlot(HYBRID8_SF, 1, match.match_number, "away_team_id", winnerId);
+    }
+  } else if (match.stage === HYBRID8_SF) {
+    const slot = match.match_number === 1 ? "home_team_id" : "away_team_id";
+    await setMatchSlot(HYBRID8_GF, 1, 1, slot, winnerId);
+  }
+}
+
 // ── SE helper ─────────────────────────────────────────────────────────────────
 
 async function getReadyMatches() {
@@ -444,108 +535,130 @@ async function getReadyDEMatches(stage: string) {
 
 export async function simulateMatch(): Promise<{ error?: string; ok?: boolean }> {
   await verifyAdmin();
+  let simulatedId: string | null = null;
 
   // Group stage first
-  const groupReady = await getReadyGroupMatches();
-  if (groupReady.length) {
-    await simulateGroupSingleMatch(groupReady[0] as Parameters<typeof simulateGroupSingleMatch>[0]);
-    revalidatePath("/dashboard/season");
-    return { ok: true };
+  if (!simulatedId) {
+    const groupReady = await getReadyGroupMatches();
+    if (groupReady.length) {
+      await simulateGroupSingleMatch(groupReady[0] as Parameters<typeof simulateGroupSingleMatch>[0]);
+      simulatedId = groupReady[0].id;
+    }
   }
 
   // SE Qualifier (before Swiss)
-  const seqReady = await getReadySEQualifierMatches();
-  if (seqReady.length) {
-    await simulateSingleMatch(seqReady[0] as Parameters<typeof simulateSingleMatch>[0]);
-    revalidatePath("/dashboard/season");
-    return { ok: true };
+  if (!simulatedId) {
+    const seqReady = await getReadySEQualifierMatches();
+    if (seqReady.length) {
+      await simulateSingleMatch(seqReady[0] as Parameters<typeof simulateSingleMatch>[0]);
+      simulatedId = seqReady[0].id;
+    }
   }
 
   // DE Qualifier (before Swiss)
-  const deqSizes = await getDEQSizes();
-  if (deqSizes) {
-    for (const stage of [DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS]) {
-      const ready = await getReadyDEQualifierMatches(stage);
-      if (ready.length) {
-        await simulateDEQualifierSingleMatch(
-          ready[0] as Parameters<typeof simulateDEQualifierSingleMatch>[0], deqSizes
-        );
-        revalidatePath("/dashboard/season");
-        return { ok: true };
+  if (!simulatedId) {
+    const deqSizes = await getDEQSizes();
+    if (deqSizes) {
+      for (const stage of [DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS]) {
+        const ready = await getReadyDEQualifierMatches(stage);
+        if (ready.length) {
+          await simulateDEQualifierSingleMatch(ready[0] as Parameters<typeof simulateDEQualifierSingleMatch>[0], deqSizes);
+          simulatedId = ready[0].id;
+          break;
+        }
       }
     }
   }
 
   // Swiss
-  const swissReady = await getReadySwissMatches();
-  if (swissReady.length) {
-    await simulateSwissSingleMatch(swissReady[0] as Parameters<typeof simulateSwissSingleMatch>[0]);
-    revalidatePath("/dashboard/season");
-    return { ok: true };
+  if (!simulatedId) {
+    const swissReady = await getReadySwissMatches();
+    if (swissReady.length) {
+      await simulateSwissSingleMatch(swissReady[0] as Parameters<typeof simulateSwissSingleMatch>[0]);
+      simulatedId = swissReady[0].id;
+    }
   }
 
-  // SE
-  const seReady = await getReadyMatches();
-  if (seReady.length) {
-    await simulateSingleMatch(seReady[0] as Parameters<typeof simulateSingleMatch>[0]);
-    revalidatePath("/dashboard/season");
-    return { ok: true };
-  }
-
-  // DE (WB → LB → GF order)
-  const sizes = await getDESizes();
-  if (sizes) {
-    for (const stage of [DE_WINNERS, DE_LOSERS, DE_GF]) {
-      const ready = await getReadyDEMatches(stage);
+  // Hybrid (UB → LB → SF → GF order)
+  if (!simulatedId) {
+    for (const stage of [HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF]) {
+      const ready = await getReadyHybridMatches(stage);
       if (ready.length) {
-        await simulateDESingleMatch(ready[0] as Parameters<typeof simulateDESingleMatch>[0], sizes);
-        revalidatePath("/dashboard/season");
-        return { ok: true };
+        await simulateHybridSingleMatch(ready[0] as Parameters<typeof simulateHybridSingleMatch>[0]);
+        simulatedId = ready[0].id;
+        break;
       }
     }
   }
 
-  return { error: "No matches ready to simulate." };
+  // Hybrid8 (UB → LB → SF → GF order)
+  if (!simulatedId) {
+    for (const stage of [HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF]) {
+      const ready = await getReadyHybridMatches(stage);
+      if (ready.length) {
+        await simulateHybrid8SingleMatch(ready[0] as Parameters<typeof simulateHybrid8SingleMatch>[0]);
+        simulatedId = ready[0].id;
+        break;
+      }
+    }
+  }
+
+  // SE
+  if (!simulatedId) {
+    const seReady = await getReadyMatches();
+    if (seReady.length) {
+      await simulateSingleMatch(seReady[0] as Parameters<typeof simulateSingleMatch>[0]);
+      simulatedId = seReady[0].id;
+    }
+  }
+
+  // DE (WB → LB → GF order)
+  if (!simulatedId) {
+    const sizes = await getDESizes();
+    if (sizes) {
+      for (const stage of [DE_WINNERS, DE_LOSERS, DE_GF]) {
+        const ready = await getReadyDEMatches(stage);
+        if (ready.length) {
+          await simulateDESingleMatch(ready[0] as Parameters<typeof simulateDESingleMatch>[0], sizes);
+          simulatedId = ready[0].id;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!simulatedId) return { error: "No matches ready to simulate." };
+
+  await deleteChannelsForBatch([simulatedId]);
+  revalidatePath("/dashboard/season");
+  return { ok: true };
 }
 
+// After simulating matches, reconcile Discord the same way a real report does (minus
+// the result messages and push notifications): delete the category + channels for any
+// round that just completed, then open channels for the next ready matches.
 async function deleteChannelsForBatch(matchIds: string[]): Promise<void> {
-  if (!matchIds.length) return;
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings").select("match_category_id").single();
-  const categoryId = settings?.match_category_id;
-  if (!categoryId) return;
-
-  const [{ data: matches }, channels] = await Promise.all([
-    supabaseAdmin.from("matches").select("home_team_id, away_team_id").in("id", matchIds),
-    getGuildChannels(),
-  ]);
-  if (!matches?.length) return;
-
-  const teamIds = [...new Set(matches.flatMap(m => [m.home_team_id, m.away_team_id].filter(Boolean) as string[]))];
-  const { data: teams } = await supabaseAdmin.from("teams").select("id, name").in("id", teamIds);
-  const nameById: Record<string, string> = {};
-  teams?.forEach(t => { nameById[t.id] = t.name; });
-
-  for (const m of matches) {
-    const home = nameById[m.home_team_id];
-    const away = nameById[m.away_team_id];
-    if (!home || !away) continue;
-    const channelName = `${home}-vs-${away}`
-      .toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 100);
-    const ch = channels.find(c => c.name === channelName && c.parent_id === categoryId);
-    if (ch) await deleteChannel(ch.id);
+  if (matchIds.length) {
+    const { data: ms } = await supabaseAdmin
+      .from("matches").select("stage, round").in("id", matchIds);
+    const pairs = new Set((ms ?? []).map((m) => `${m.stage} ${m.round}`));
+    for (const p of pairs) {
+      const [stage, round] = p.split(" ");
+      await cleanupStageCategoryIfComplete(stage, Number(round));
+    }
   }
+  await openReadyMatchChannels();
 }
 
 export async function simulateRound(): Promise<{ error?: string; ok?: boolean }> {
   await verifyAdmin();
 
-  // Group stage: simulate all matches in the current round across all groups
+  // Group stage: simulate the current round across ALL groups at once
   const groupReady = await getReadyGroupMatches();
   if (groupReady.length) {
-    const { stage: fStage, round: fRound } = groupReady[0];
-    const batch = groupReady.filter((m) => m.stage === fStage && m.round === fRound);
-    await Promise.all(batch.map((m) => simulateGroupSingleMatch(m as Parameters<typeof simulateGroupSingleMatch>[0])));
+    const minRound = Math.min(...groupReady.map(m => m.round));
+    const batch = groupReady.filter((m) => m.round === minRound);
+    for (const m of batch) await simulateGroupSingleMatch(m as Parameters<typeof simulateGroupSingleMatch>[0]);
     await deleteChannelsForBatch(batch.map(m => m.id));
     revalidatePath("/dashboard/season");
     return { ok: true };
@@ -556,7 +669,7 @@ export async function simulateRound(): Promise<{ error?: string; ok?: boolean }>
   if (seqReady2.length) {
     const currentRound = seqReady2[0].round;
     const batch = seqReady2.filter(m => m.round === currentRound);
-    await Promise.all(batch.map(m => simulateSingleMatch(m as Parameters<typeof simulateSingleMatch>[0])));
+    for (const m of batch) await simulateSingleMatch(m as Parameters<typeof simulateSingleMatch>[0]);
     await deleteChannelsForBatch(batch.map(m => m.id));
     revalidatePath("/dashboard/season");
     return { ok: true };
@@ -588,10 +701,40 @@ export async function simulateRound(): Promise<{ error?: string; ok?: boolean }>
   if (swissReady2.length) {
     const currentRound = swissReady2[0].round;
     const batch = swissReady2.filter(m => m.round === currentRound);
-    await Promise.all(batch.map(m => simulateSwissSingleMatch(m as Parameters<typeof simulateSwissSingleMatch>[0])));
+    for (const m of batch) await simulateSwissSingleMatch(m as Parameters<typeof simulateSwissSingleMatch>[0]);
     await deleteChannelsForBatch(batch.map(m => m.id));
     revalidatePath("/dashboard/season");
     return { ok: true };
+  }
+
+  // Hybrid: simulate one stage's current round per call
+  for (const stage of [HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF]) {
+    const ready = await getReadyHybridMatches(stage);
+    if (ready.length) {
+      const round = ready[0].round;
+      const batch = ready.filter(m => m.round === round);
+      for (const match of batch) {
+        await simulateHybridSingleMatch(match as Parameters<typeof simulateHybridSingleMatch>[0]);
+      }
+      await deleteChannelsForBatch(batch.map(m => m.id));
+      revalidatePath("/dashboard/season");
+      return { ok: true };
+    }
+  }
+
+  // Hybrid8: simulate one stage's current round per call
+  for (const stage of [HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF]) {
+    const ready = await getReadyHybridMatches(stage);
+    if (ready.length) {
+      const round = ready[0].round;
+      const batch = ready.filter(m => m.round === round);
+      for (const match of batch) {
+        await simulateHybrid8SingleMatch(match as Parameters<typeof simulateHybrid8SingleMatch>[0]);
+      }
+      await deleteChannelsForBatch(batch.map(m => m.id));
+      revalidatePath("/dashboard/season");
+      return { ok: true };
+    }
   }
 
   // SE

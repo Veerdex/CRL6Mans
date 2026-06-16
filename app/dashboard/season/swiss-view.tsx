@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { SWISS_STAGE } from "@/app/lib/bracket";
+import { SWISS_STAGE, SWISS_ADVANCE_WINS, SWISS8_ADVANCE_WINS } from "@/app/lib/bracket";
 import { BracketCanvas } from "./bracket-canvas";
 
 // ── Layout constants ───────────────────────────────────────────────────────────
@@ -17,76 +17,144 @@ const TH = 36;   // top header row height (round labels)
 const UNIT = MW + CG;  // 258 — one round-column + connector gap
 const BCOL = BW + BG;  // 176 — one badge column + gap
 
-// X positions keyed by round number
-const RX: Record<number, number> = {
+// group height given n matches
+function gH(n: number) { return GH + 2 * GP + n * MH + Math.max(0, n - 1) * MG; }
+
+// ── Connector transition type ──────────────────────────────────────────────────
+
+type Trans = {
+  sR: number; sW: number; sL: number;
+  dR: number; dW: number; dL: number;
+  kind: "winner" | "loser";
+  badge: boolean;
+};
+
+// ── Per-variant layout (16-team 3W/3L Swiss vs 8-team 2W/2L Swiss) ──────────────
+
+type SwissLayout = {
+  threshold: number;                 // wins to qualify / losses to eliminate
+  rounds: number[];                  // round columns to label
+  RX: Record<number, number>;        // X by round
+  BX: Record<number, number>;        // X of badge column by "after round R"
+  GCNT: Record<string, number>;      // match count per "round-w-l"
+  GROUP_CY: Record<string, number>;  // group center-Y by "w-l"
+  BADGE_CY: Record<string, number>;  // badge center-Y by "w-l"
+  TRANS: Trans[];
+  CW: number;
+  CH: number;
+};
+
+// 16-team Swiss: 3 wins qualify, 3 losses eliminate. R1–R5, badges after R3/R4/R5.
+const RX16: Record<number, number> = {
   1: 0,
   2: UNIT,
   3: 2 * UNIT,
   4: 3 * UNIT + BCOL,
   5: 3 * UNIT + BCOL + UNIT + BCOL,
 };
-
-// X positions of badge columns (keyed by "after round R")
-const BX: Record<number, number> = {
+const BX16: Record<number, number> = {
   3: 3 * UNIT,
-  4: RX[4] + MW + CG,
-  5: RX[5] + MW + CG,
+  4: RX16[4] + MW + CG,
+  5: RX16[5] + MW + CG,
+};
+const LAYOUT_16: SwissLayout = {
+  threshold: SWISS_ADVANCE_WINS,
+  rounds: [1, 2, 3, 4, 5],
+  RX: RX16,
+  BX: BX16,
+  GCNT: {
+    "1-0-0": 8,
+    "2-1-0": 4, "2-0-1": 4,
+    "3-2-0": 2, "3-1-1": 4, "3-0-2": 2,
+    "4-2-1": 3, "4-1-2": 3,
+    "5-2-2": 3,
+  },
+  GROUP_CY: {
+    "0-0": 240,
+    "1-0": 158, "0-1": 322,
+    "2-0": 104, "1-1": 240, "0-2": 376,
+    "2-1": 172, "1-2": 308,
+    "2-2": 240,
+  },
+  BADGE_CY: {
+    "3-0":  85, "0-3": 395,
+    "3-1": 147, "1-3": 333,
+    "3-2": 178, "2-3": 302,
+  },
+  TRANS: [
+    { sR:1,sW:0,sL:0, dR:2,dW:1,dL:0, kind:"winner", badge:false },
+    { sR:1,sW:0,sL:0, dR:2,dW:0,dL:1, kind:"loser",  badge:false },
+    { sR:2,sW:1,sL:0, dR:3,dW:2,dL:0, kind:"winner", badge:false },
+    { sR:2,sW:1,sL:0, dR:3,dW:1,dL:1, kind:"loser",  badge:false },
+    { sR:2,sW:0,sL:1, dR:3,dW:1,dL:1, kind:"winner", badge:false },
+    { sR:2,sW:0,sL:1, dR:3,dW:0,dL:2, kind:"loser",  badge:false },
+    { sR:3,sW:2,sL:0, dR:3,dW:3,dL:0, kind:"winner", badge:true  },
+    { sR:3,sW:2,sL:0, dR:4,dW:2,dL:1, kind:"loser",  badge:false },
+    { sR:3,sW:1,sL:1, dR:4,dW:2,dL:1, kind:"winner", badge:false },
+    { sR:3,sW:1,sL:1, dR:4,dW:1,dL:2, kind:"loser",  badge:false },
+    { sR:3,sW:0,sL:2, dR:4,dW:1,dL:2, kind:"winner", badge:false },
+    { sR:3,sW:0,sL:2, dR:3,dW:0,dL:3, kind:"loser",  badge:true  },
+    { sR:4,sW:2,sL:1, dR:4,dW:3,dL:1, kind:"winner", badge:true  },
+    { sR:4,sW:2,sL:1, dR:5,dW:2,dL:2, kind:"loser",  badge:false },
+    { sR:4,sW:1,sL:2, dR:5,dW:2,dL:2, kind:"winner", badge:false },
+    { sR:4,sW:1,sL:2, dR:4,dW:1,dL:3, kind:"loser",  badge:true  },
+    { sR:5,sW:2,sL:2, dR:5,dW:3,dL:2, kind:"winner", badge:true  },
+    { sR:5,sW:2,sL:2, dR:5,dW:2,dL:3, kind:"loser",  badge:true  },
+  ],
+  CW: BX16[5] + BW + 20,
+  CH: 460,
 };
 
-const CW = BX[5] + BW + 20;  // canvas width
-
-// group height given n matches
-function gH(n: number) { return GH + 2 * GP + n * MH + Math.max(0, n - 1) * MG; }
-
-// pre-defined match counts per group key "round-w-l"
-const GCNT: Record<string, number> = {
-  "1-0-0": 8,
-  "2-1-0": 4, "2-0-1": 4,
-  "3-2-0": 2, "3-1-1": 4, "3-0-2": 2,
-  "4-2-1": 3, "4-1-2": 3,
-  "5-2-2": 3,
+// 8-team Swiss (hybrid_8): 2 wins qualify, 2 losses eliminate. R1–R3, badges after R2/R3.
+const RX8: Record<number, number> = {
+  1: 0,
+  2: UNIT,
+  3: 2 * UNIT + BCOL,
 };
-function gMatchCnt(r: number, w: number, l: number) { return GCNT[`${r}-${w}-${l}`] ?? 4; }
-
-// ── Compact vertical positions ─────────────────────────────────────────────────
-//
-// gH(n) = 40 + 28n  →  gH(2)=96  gH(3)=124  gH(4)=152  gH(8)=264
-//
-// R3 is the anchor column, packed with 12px gaps and 20px top padding:
-//   (2,0) top=56 → CY=104   (1,1) top=164 → CY=240   (0,2) top=328 → CY=376
-//
-// R2/R1 are tree-centered on their R3 children; minimum gH(4)+12=164 separation
-// enforced by pushing groups 14px each away from the ideal midpoint.
-// R4/R5 are midpoints of their R3/R4 parents (naturally gap-safe for gH(3)).
-
-const GROUP_CY: Record<string, number> = {
-  "0-0": 240,
-  "1-0": 158, "0-1": 322,
-  "2-0": 104, "1-1": 240, "0-2": 376,
-  "2-1": 172, "1-2": 308,
-  "2-2": 240,
+const BX8: Record<number, number> = {
+  2: 2 * UNIT,
+  3: RX8[3] + MW + CG,
 };
-
-// Badge CYs = source group CY ± gH(n)*0.2  (exit-point alignment)
-// (3,2)/(2,3) spread an extra 37px each to avoid overlapping badge boxes
-const BADGE_CY: Record<string, number> = {
-  "3-0":  85, "0-3": 395,
-  "3-1": 147, "1-3": 333,
-  "3-2": 178, "2-3": 302,
+const LAYOUT_8: SwissLayout = {
+  threshold: SWISS8_ADVANCE_WINS,
+  rounds: [1, 2, 3],
+  RX: RX8,
+  BX: BX8,
+  GCNT: {
+    "1-0-0": 4,
+    "2-1-0": 2, "2-0-1": 2,
+    "3-1-1": 2,
+  },
+  GROUP_CY: {
+    "0-0": 200,
+    "1-0": 110, "0-1": 290,
+    "1-1": 200,
+  },
+  BADGE_CY: {
+    "2-0": 85, "0-2": 315,
+    "2-1": 140, "1-2": 260,
+  },
+  TRANS: [
+    { sR:1,sW:0,sL:0, dR:2,dW:1,dL:0, kind:"winner", badge:false },
+    { sR:1,sW:0,sL:0, dR:2,dW:0,dL:1, kind:"loser",  badge:false },
+    { sR:2,sW:1,sL:0, dR:2,dW:2,dL:0, kind:"winner", badge:true  },
+    { sR:2,sW:1,sL:0, dR:3,dW:1,dL:1, kind:"loser",  badge:false },
+    { sR:2,sW:0,sL:1, dR:3,dW:1,dL:1, kind:"winner", badge:false },
+    { sR:2,sW:0,sL:1, dR:2,dW:0,dL:2, kind:"loser",  badge:true  },
+    { sR:3,sW:1,sL:1, dR:3,dW:2,dL:1, kind:"winner", badge:true  },
+    { sR:3,sW:1,sL:1, dR:3,dW:1,dL:2, kind:"loser",  badge:true  },
+  ],
+  CW: BX8[3] + BW + 20,
+  CH: 400,
 };
-
-function gCY(w: number, l: number): number  { return GROUP_CY[`${w}-${l}`] ?? 240; }
-function badgeCY(w: number, l: number): number { return BADGE_CY[`${w}-${l}`] ?? 240; }
-
-const CH = 460; // canvas height
 
 // ── Colours ────────────────────────────────────────────────────────────────────
 
 function gColors(w: number, l: number) {
-  if (w > l)   return { border: "border-emerald-700", bg: "bg-emerald-950/60", lbl: "text-emerald-300" };
-  if (l > w)   return { border: "border-red-800",     bg: "bg-red-950/50",     lbl: "text-red-300"     };
-  if (w === 0) return { border: "border-indigo-700",  bg: "bg-indigo-950/60",  lbl: "text-indigo-300"  };
-  return         { border: "border-zinc-600",         bg: "bg-zinc-800/60",    lbl: "text-zinc-300"    };
+  if (w > l)   return { border: "border-emerald-700", bg: "bg-emerald-950", lbl: "text-emerald-300" };
+  if (l > w)   return { border: "border-red-800",     bg: "bg-red-950",     lbl: "text-red-300"     };
+  if (w === 0) return { border: "border-indigo-700",  bg: "bg-indigo-950",  lbl: "text-indigo-300"  };
+  return         { border: "border-zinc-600",         bg: "bg-zinc-800",    lbl: "text-zinc-300"    };
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -117,54 +185,27 @@ function preRecord(teamId: string, round: number, ms: DBMatch[]) {
   return { wins, losses };
 }
 
-// ── Connector transition table ─────────────────────────────────────────────────
-
-type Trans = {
-  sR: number; sW: number; sL: number;
-  dR: number; dW: number; dL: number;
-  kind: "winner" | "loser";
-  badge: boolean;
-};
-
-const TRANS: Trans[] = [
-  // R1
-  { sR:1,sW:0,sL:0, dR:2,dW:1,dL:0, kind:"winner", badge:false },
-  { sR:1,sW:0,sL:0, dR:2,dW:0,dL:1, kind:"loser",  badge:false },
-  // R2
-  { sR:2,sW:1,sL:0, dR:3,dW:2,dL:0, kind:"winner", badge:false },
-  { sR:2,sW:1,sL:0, dR:3,dW:1,dL:1, kind:"loser",  badge:false },
-  { sR:2,sW:0,sL:1, dR:3,dW:1,dL:1, kind:"winner", badge:false },
-  { sR:2,sW:0,sL:1, dR:3,dW:0,dL:2, kind:"loser",  badge:false },
-  // R3 → badge or R4
-  { sR:3,sW:2,sL:0, dR:3,dW:3,dL:0, kind:"winner", badge:true  },
-  { sR:3,sW:2,sL:0, dR:4,dW:2,dL:1, kind:"loser",  badge:false },
-  { sR:3,sW:1,sL:1, dR:4,dW:2,dL:1, kind:"winner", badge:false },
-  { sR:3,sW:1,sL:1, dR:4,dW:1,dL:2, kind:"loser",  badge:false },
-  { sR:3,sW:0,sL:2, dR:4,dW:1,dL:2, kind:"winner", badge:false },
-  { sR:3,sW:0,sL:2, dR:3,dW:0,dL:3, kind:"loser",  badge:true  },
-  // R4 → badge or R5
-  { sR:4,sW:2,sL:1, dR:4,dW:3,dL:1, kind:"winner", badge:true  },
-  { sR:4,sW:2,sL:1, dR:5,dW:2,dL:2, kind:"loser",  badge:false },
-  { sR:4,sW:1,sL:2, dR:5,dW:2,dL:2, kind:"winner", badge:false },
-  { sR:4,sW:1,sL:2, dR:4,dW:1,dL:3, kind:"loser",  badge:true  },
-  // R5 → badges
-  { sR:5,sW:2,sL:2, dR:5,dW:3,dL:2, kind:"winner", badge:true  },
-  { sR:5,sW:2,sL:2, dR:5,dW:2,dL:3, kind:"loser",  badge:true  },
-];
-
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export async function SwissBracketView() {
-  const [{ data: raw }, { data: teamsRaw }] = await Promise.all([
+  const [{ data: raw }, { data: teamsRaw }, { data: settings }] = await Promise.all([
     supabaseAdmin
       .from("matches")
       .select("id,round,match_number,stage,status,home_team_id,away_team_id,home_score,away_score")
       .eq("stage", SWISS_STAGE)
       .order("round").order("match_number"),
     supabaseAdmin.from("teams").select("id,name,logo_url"),
+    supabaseAdmin.from("league_settings").select("season_format").single(),
   ]);
 
   if (!raw?.length) return <p className="text-zinc-500 text-sm">No Swiss matches found.</p>;
+
+  const isHybrid8 = (settings?.season_format as { preset?: string } | null)?.preset === "group_swiss_hybrid_8";
+  const L = isHybrid8 ? LAYOUT_8 : LAYOUT_16;
+  const { RX, BX, TRANS, CW, CH } = L;
+  const gMatchCnt = (r: number, w: number, l: number) => L.GCNT[`${r}-${w}-${l}`] ?? 4;
+  const gCY = (w: number, l: number) => L.GROUP_CY[`${w}-${l}`] ?? L.CH / 2;
+  const badgeCY = (w: number, l: number) => L.BADGE_CY[`${w}-${l}`] ?? L.CH / 2;
 
   const teams: Record<string, Team> = {};
   teamsRaw?.forEach(t => { teams[t.id] = t; });
@@ -200,10 +241,10 @@ export async function SwissBracketView() {
       const homeWon = (m.home_score ?? 0) > (m.away_score ?? 0);
       if ((isHome && homeWon) || (!isHome && !homeWon)) w++; else l++;
       finalR = m.round;
-      if (w >= 3 || l >= 3) break;
+      if (w >= L.threshold || l >= L.threshold) break;
     }
-    if (w < 3 && l < 3) continue;
-    const type = w >= 3 ? "qualified" : "eliminated";
+    if (w < L.threshold && l < L.threshold) continue;
+    const type = w >= L.threshold ? "qualified" : "eliminated";
     const key  = `${finalR}-${w}-${l}`;
     if (!badgeMap.has(key)) badgeMap.set(key, { afterRound: finalR, w, l, type, teamIds: [] });
     badgeMap.get(key)!.teamIds.push(tid);
@@ -216,10 +257,10 @@ export async function SwissBracketView() {
 
   // ── Legend ────────────────────────────────────────────────────────────────
   const legendItems = [
-    { cls: "border-emerald-700 bg-emerald-950/60", label: "Winning record" },
-    { cls: "border-red-800 bg-red-950/50",         label: "Losing record"  },
-    { cls: "border-indigo-700 bg-indigo-950/60",   label: "0 – 0"          },
-    { cls: "border-zinc-600 bg-zinc-800/60",       label: "Even record"    },
+    { cls: "border-emerald-700 bg-emerald-950", label: "Winning record" },
+    { cls: "border-red-800 bg-red-950",         label: "Losing record"  },
+    { cls: "border-indigo-700 bg-indigo-950",   label: "0 – 0"          },
+    { cls: "border-zinc-600 bg-zinc-800",       label: "Even record"    },
   ];
 
   return (
@@ -282,7 +323,7 @@ export async function SwissBracketView() {
           </svg>
 
           {/* ── Round labels ───────────────────────────────────────────────── */}
-          {([1, 2, 3, 4, 5] as const).map(r =>
+          {L.rounds.map(r =>
             groups.some(g => g.round === r) ? (
               <div key={r}
                 style={{ position: "absolute", top: 0, left: RX[r], width: MW, height: TH }}
@@ -335,17 +376,23 @@ export async function SwissBracketView() {
                         {idx > 0 && <div className="h-px bg-zinc-700/25 mx-2" />}
                         <div style={{ height: MH }} className="flex items-center gap-1 px-2">
                           {/* Home */}
-                          <span className={`flex-1 text-xs truncate min-w-0 ${homeWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
-                            {hn}
-                          </span>
+                          <div className={`flex-1 min-w-0 flex items-center gap-1 text-xs ${homeWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
+                            {m.home_team_id && teams[m.home_team_id]?.logo_url ? (
+                              <img src={teams[m.home_team_id].logo_url!} alt="" className="w-3.5 h-3.5 rounded shrink-0 object-cover" />
+                            ) : null}
+                            <span className="truncate">{hn}</span>
+                          </div>
                           {/* Series score / vs */}
                           <span className={`shrink-0 text-[11px] font-mono tabular-nums w-10 text-center ${done ? "font-bold text-white" : "text-zinc-600"}`}>
                             {done ? `${m.home_score} – ${m.away_score}` : "vs"}
                           </span>
                           {/* Away */}
-                          <span className={`flex-1 text-xs truncate text-right min-w-0 ${awayWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
-                            {an}
-                          </span>
+                          <div className={`flex-1 min-w-0 flex items-center justify-end gap-1 text-xs ${awayWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
+                            <span className="truncate">{an}</span>
+                            {m.away_team_id && teams[m.away_team_id]?.logo_url ? (
+                              <img src={teams[m.away_team_id].logo_url!} alt="" className="w-3.5 h-3.5 rounded shrink-0 object-cover" />
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     );
@@ -375,11 +422,15 @@ export async function SwissBracketView() {
                 <div className="pb-2 px-2 pt-1.5 space-y-0.5">
                   {b.teamIds.map(id => (
                     <div key={id} className="flex items-center gap-1.5 px-1 py-0.5 rounded text-xs">
-                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isQual ? "bg-emerald-400" : "bg-red-400"}`} />
-                      <span className={`truncate flex-1 ${isQual ? "text-emerald-200" : "text-red-300"}`}>
+                      {teams[id]?.logo_url ? (
+                        <img src={teams[id].logo_url!} alt="" className="w-4 h-4 rounded shrink-0 object-cover" />
+                      ) : (
+                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isQual ? "bg-emerald-400" : "bg-red-400"}`} />
+                      )}
+                      <span className="truncate flex-1 font-medium text-black">
                         {teams[id]?.name ?? "?"}
                       </span>
-                      <span className="text-[10px] text-zinc-600 shrink-0 ml-1">{b.w}–{b.l}</span>
+                      <span className="text-[10px] shrink-0 ml-1 text-black/60">{b.w}–{b.l}</span>
                     </div>
                   ))}
                 </div>

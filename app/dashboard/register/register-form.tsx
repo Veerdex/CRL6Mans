@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { registerPlayer } from "./actions";
 
 export type ExistingPlayerData = {
@@ -19,7 +20,12 @@ interface Props {
 }
 
 export function RegisterForm({ isResubmit, existing }: Props) {
+  const router = useRouter();
   const [state, action, pending] = useActionState(registerPlayer, { error: "" });
+
+  useEffect(() => {
+    if ((state as { success?: boolean }).success) router.push("/dashboard");
+  }, [state, router]);
 
   return (
     <form action={action} className="space-y-6">
@@ -39,10 +45,10 @@ export function RegisterForm({ isResubmit, existing }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <MMRInput name="peak_3v3"    label="Peak 3v3 MMR"    defaultValue={existing?.peak_3v3} />
-        <MMRInput name="current_3v3" label="Current 3v3 MMR" defaultValue={existing?.current_3v3} />
-        <MMRInput name="peak_2v2"    label="Peak 2v2 MMR"    defaultValue={existing?.peak_2v2} />
-        <MMRInput name="current_2v2" label="Current 2v2 MMR" defaultValue={existing?.current_2v2} />
+        <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={existing?.peak_3v3} />
+        <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={existing?.current_3v3} />
+        <MMRInput name="peak_2v2"    label="All Time Peak 2v2" defaultValue={existing?.peak_2v2} />
+        <MMRInput name="current_2v2" label="Season Peak 2v2"   defaultValue={existing?.current_2v2} />
       </div>
 
       <div className="space-y-1">
@@ -52,9 +58,12 @@ export function RegisterForm({ isResubmit, existing }: Props) {
             <span className="ml-2 text-xs font-normal text-zinc-500">(optional — keep existing or upload new)</span>
           )}
         </label>
-        <p className="text-xs text-zinc-500 mb-2">
+        <p className="text-xs text-zinc-500 mb-1">
           Upload a photo of your student ID, schedule, or any document showing
           you currently attend college.
+        </p>
+        <p className="text-xs text-amber-600/80 mb-2">
+          Tip: blur or cover any sensitive information before uploading — student ID numbers, SSN, date of birth, or home address are not needed for verification.
         </p>
 
         {isResubmit && existing?.college_image_url && (
@@ -80,16 +89,16 @@ export function RegisterForm({ isResubmit, existing }: Props) {
         />
       </div>
 
-      <div className="flex items-center justify-between p-4 bg-zinc-800/50 border border-zinc-700/50 rounded-lg">
+      <div className="flex items-center justify-between p-4 bg-zinc-800 border border-zinc-700 rounded-lg">
         <div>
           <p className="text-sm font-medium text-zinc-300">Substitute availability</p>
           <p className="text-xs text-zinc-500 mt-0.5">
-            If you don&apos;t make the draft cutoff, would you like to be available as a substitute?
+            Would you like to be available as a substitute if needed?
           </p>
         </div>
         <label className="relative inline-flex items-center cursor-pointer ml-4 shrink-0">
           <input type="checkbox" name="sub_willing" defaultChecked={existing?.sub_willing ?? false} className="sr-only peer" />
-          <div className="w-11 h-6 bg-zinc-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600" />
+          <div className="w-11 h-6 bg-zinc-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-pure-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600" />
         </label>
       </div>
 
@@ -125,6 +134,7 @@ function MMRInput({
         name={name}
         type="number"
         min={0}
+        max={3000}
         required
         defaultValue={defaultValue ?? ""}
         placeholder="e.g. 1420"

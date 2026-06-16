@@ -76,6 +76,19 @@ const STATE_LABELS: Record<MatchState, string> = {
   completed: "FINAL",
 };
 
+// Small logo (or fallback dot) placed at the start of a team slot row.
+function TeamLogo({ team, faded }: { team: Team | null; faded: boolean }) {
+  if (!team) return <div className="w-2 h-2 rounded-full shrink-0 bg-zinc-700" />;
+  if (!team.logo_url) return <div className="w-2 h-2 rounded-full shrink-0 bg-zinc-400" />;
+  return (
+    <img
+      src={team.logo_url}
+      alt=""
+      className={`w-4 h-4 rounded shrink-0 object-cover ${faded ? "opacity-40" : ""}`}
+    />
+  );
+}
+
 // Renders a slot that has no team set.
 // "Winner of X" / "Loser of X" labels become clickable with data-goto for canvas navigation.
 function SlotText({ label, faded }: { label: string; faded: boolean }) {
@@ -123,9 +136,9 @@ function MatchBox({ match, teams, numR1, matchId }: { match: DBMatch; teams: Rec
     >
       {/* Home row */}
       <div className={`flex items-center gap-2 px-2 py-0.5 ${homeWon ? "bg-white/5 rounded mx-1" : ""}`} style={{ height: 33 }}>
-        <div className={`w-2 h-2 rounded-full shrink-0 ${match.home_team_id ? "bg-zinc-400" : "bg-zinc-700"}`} />
+        <TeamLogo team={match.home_team_id ? teams[match.home_team_id] : null} faded={homeFaded} />
         {match.home_team_id ? (
-          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.home_team_id]?.name ?? "")}`}
+          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.home_team_id]?.name ?? "")}&from=season`}
             className={`flex-1 text-xs truncate hover:underline ${homeWon ? "text-white font-semibold" : "text-zinc-300"}`}>
             {homeLabel}
           </a>
@@ -137,9 +150,9 @@ function MatchBox({ match, teams, numR1, matchId }: { match: DBMatch; teams: Rec
       <div className="h-px bg-zinc-700/50 mx-2" />
       {/* Away row */}
       <div className={`flex items-center gap-2 px-2 py-0.5 ${awayWon ? "bg-white/5 rounded mx-1" : ""}`} style={{ height: 33 }}>
-        <div className={`w-2 h-2 rounded-full shrink-0 ${match.away_team_id ? "bg-zinc-400" : "bg-zinc-700"}`} />
+        <TeamLogo team={match.away_team_id ? teams[match.away_team_id] : null} faded={awayFaded} />
         {match.away_team_id ? (
-          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.away_team_id]?.name ?? "")}`}
+          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.away_team_id]?.name ?? "")}&from=season`}
             className={`flex-1 text-xs truncate hover:underline ${awayWon ? "text-white font-semibold" : "text-zinc-300"}`}>
             {awayLabel}
           </a>
@@ -368,9 +381,9 @@ function DEMatchBox({
     <div className={`rounded-lg overflow-hidden border ${cardClass}`} style={{ width: MATCH_W, height: MATCH_H }}
       data-match-id={matchId}>
       <div className={`flex items-center gap-2 px-2 py-0.5 ${homeWon ? "bg-white/5 rounded mx-1" : ""}`} style={{ height: 33 }}>
-        <div className={`w-2 h-2 rounded-full shrink-0 ${match.home_team_id ? "bg-zinc-400" : "bg-zinc-700"}`} />
+        <TeamLogo team={match.home_team_id ? teams[match.home_team_id] : null} faded={homeFaded} />
         {match.home_team_id ? (
-          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.home_team_id]?.name ?? "")}`}
+          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.home_team_id]?.name ?? "")}&from=season`}
             className={`flex-1 text-xs truncate hover:underline ${homeWon ? "text-white font-semibold" : "text-zinc-300"}`}>
             {homeLabel}
           </a>
@@ -381,9 +394,9 @@ function DEMatchBox({
       </div>
       <div className="h-px bg-zinc-700/50 mx-2" />
       <div className={`flex items-center gap-2 px-2 py-0.5 ${awayWon ? "bg-white/5 rounded mx-1" : ""}`} style={{ height: 33 }}>
-        <div className={`w-2 h-2 rounded-full shrink-0 ${match.away_team_id ? "bg-zinc-400" : "bg-zinc-700"}`} />
+        <TeamLogo team={match.away_team_id ? teams[match.away_team_id] : null} faded={awayFaded} />
         {match.away_team_id ? (
-          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.away_team_id]?.name ?? "")}`}
+          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.away_team_id]?.name ?? "")}&from=season`}
             className={`flex-1 text-xs truncate hover:underline ${awayWon ? "text-white font-semibold" : "text-zinc-300"}`}>
             {awayLabel}
           </a>
@@ -737,7 +750,7 @@ export async function DEQualifierBracketView() {
 
 // ── Group Bracket View ────────────────────────────────────────────────────────
 
-export async function GroupBracketView({ qualifiersPerGroup }: { qualifiersPerGroup: number }) {
+export async function GroupBracketView({ qualifiersPerGroup, topDirectQualifiers }: { qualifiersPerGroup: number; topDirectQualifiers?: number }) {
   const [{ data: matchesRaw }, { data: teamsRaw }] = await Promise.all([
     supabaseAdmin
       .from("matches")
@@ -765,6 +778,7 @@ export async function GroupBracketView({ qualifiersPerGroup }: { qualifiersPerGr
       matches={matches}
       teams={teams}
       qualifiersPerGroup={qualifiersPerGroup}
+      topDirectQualifiers={topDirectQualifiers ?? qualifiersPerGroup}
     />
   );
 }

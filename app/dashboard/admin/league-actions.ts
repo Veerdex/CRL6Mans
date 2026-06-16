@@ -4,9 +4,11 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isAdmin } from "@/app/lib/players";
-import { execStartDraft, execEndDraft, execStartSeason, deleteMatchChannels, execSyncRoles } from "@/app/lib/discord-bot";
-import { editRole, getGuildRoles, removeRoleById } from "@/app/lib/discord-api";
+import { isDirector } from "@/app/lib/players";
+import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, deleteMatchChannels, execSyncRoles } from "@/app/lib/discord-bot";
+import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app/lib/discord-api";
+import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
+import { APP_NAME } from "@/app/lib/constants";
 
 const TEAM_ROLE_COLOR = 0x3498db; // blue
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -110,7 +112,23 @@ export async function generateTestTeams() {
     })
     .map((t, i) => ({ ...t, num: t.slot_number ?? (i + 1) }));
 
-  const numTeams = Math.min(sortedTeams.length, Math.floor(players.length / 3));
+  // Honor the admin's configured team count. Only fall back to the physical max
+  // (slots / players) when the admin hasn't set a value yet.
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("num_teams").single();
+  const configured = (settings?.num_teams as number) ?? 0;
+  const maxFeasible = Math.min(sortedTeams.length, Math.floor(players.length / 3));
+
+  let numTeams: number;
+  if (configured > 0) {
+    if (configured > sortedTeams.length)
+      return { error: `Configured for ${configured} teams but only ${sortedTeams.length} team slot${sortedTeams.length === 1 ? "" : "s"} exist. Add more slots or lower the team count.` };
+    if (configured * 3 > players.length)
+      return { error: `${configured} teams requires ${configured * 3} players in the draft pool (currently ${players.length}).` };
+    numTeams = configured;
+  } else {
+    numTeams = maxFeasible;
+  }
   if (numTeams < 1) return { error: "Need at least 3 players in the draft pool." };
 
   const teamsToUse = sortedTeams.slice(0, numTeams);
@@ -196,7 +214,8 @@ export async function generateTestTeams() {
   );
 
   await supabaseAdmin.from("league_settings").update({
-    num_teams: numTeams,
+    // Preserve the admin's configured count; only write when we auto-computed it.
+    ...(configured > 0 ? {} : { num_teams: numTeams }),
     draft_active: false,
     updated_at: new Date().toISOString(),
   }).not("id", "is", null);
@@ -212,6 +231,54 @@ export async function generateTestTeams() {
   const missingRoleIds = teamsToUse.filter(t => !t.discord_role_id).length;
   const roleWarning = missingRoleIds > 0 ? ` ⚠ ${missingRoleIds} team${missingRoleIds > 1 ? "s" : ""} missing role ID — Discord roles not assigned for those.` : "";
   return { ok: true, message: `Generated ${numTeams} teams (${assigned} players assigned${skipped > 0 ? `, ${skipped} unassigned` : ""}).${roleWarning}` };
+}
+
+export async function addBulkTournamentTestUsers(tournamentId: string, count = 32) {
+  await verifyAdmin();
+
+  const { data: t } = await supabaseAdmin
+    .from("tournaments")
+    .select("join_mode")
+    .eq("id", tournamentId)
+    .single();
+  if (!t) return { error: "Tournament not found." };
+  if (t.join_mode !== "players") return { error: "Only player-signup tournaments support test users." };
+
+  const now = Date.now();
+  const rows = Array.from({ length: count }, (_, i) => {
+    const name = NAMES_A[rand(0, NAMES_A.length - 1)] + NAMES_B[rand(0, NAMES_B.length - 1)];
+    const suffix = Math.random().toString(36).slice(2, 6);
+    const peak3v3 = rand(800, 1500);
+    const peak2v2 = rand(800, 1500);
+    return {
+      discord_id: `test_${now}_${i}_${suffix}`,
+      username: `${name}_${suffix}`,
+      avatar: null,
+      status: "approved",
+      draft_entered: false,
+      tracker_url: "https://rocketleague.tracker.network",
+      peak_3v3: String(peak3v3),
+      current_3v3: String(peak3v3 - rand(0, 150)),
+      peak_2v2: String(peak2v2),
+      current_2v2: String(peak2v2 - rand(0, 150)),
+      college_image_url: "",
+      updated_at: new Date().toISOString(),
+    };
+  });
+
+  const { data: inserted, error } = await supabaseAdmin.from("players").insert(rows).select("id");
+  if (error || !inserted) return { error: error?.message ?? "Failed to create players." };
+
+  const entries = inserted.map((p: { id: string }) => ({
+    tournament_id: tournamentId,
+    player_id: p.id,
+  }));
+  const { error: entryError } = await supabaseAdmin.from("tournament_entries").insert(entries);
+  if (entryError) return { error: entryError.message };
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/tournament");
+  return { ok: true, message: `Added ${count} test players to this tournament.` };
 }
 
 export async function removeTestUsers() {
@@ -231,7 +298,7 @@ export async function removeTestUsers() {
 async function verifyAdmin() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !isAdmin(session.userId)) redirect("/dashboard");
+  if (!session?.userId || !(await isDirector(session.userId))) redirect("/dashboard");
   return session;
 }
 
@@ -242,6 +309,31 @@ export async function adminStartDraft(code: string) {
   if (result.ok) {
     revalidatePath("/dashboard/teams");
     revalidatePath("/dashboard/draft");
+    pushToEnteredDraft({
+      title: "Draft Starting!",
+      body: `The ${APP_NAME} draft is now live. Head to the draft page to watch your team get picked.`,
+      url: "/dashboard/draft",
+      tag: "draft-start",
+      category: "draft",
+    }).catch(() => {});
+    pushToAdmins({
+      title: "Draft Starting!",
+      body: "The draft is now live.",
+      url: "/dashboard/draft",
+      tag: "draft-start-admin",
+    }).catch(() => {});
+  }
+  return result;
+}
+
+export async function adminAutoBalance(code: string) {
+  await verifyAdmin();
+  if (code !== "AUTO DRAFT") return { error: "Type exactly: AUTO DRAFT" };
+  const result = await execAutoBalanceTeams();
+  if (result.ok) {
+    revalidatePath("/dashboard/teams");
+    revalidatePath("/dashboard/players");
+    revalidatePath("/dashboard/draft");
   }
   return result;
 }
@@ -250,7 +342,22 @@ export async function adminEndDraft(code: string) {
   await verifyAdmin();
   if (code !== "END DRAFT") return { error: 'Type exactly: END DRAFT' };
   const result = await execEndDraft();
-  if (result.ok) revalidatePath("/dashboard/teams");
+  if (result.ok) {
+    revalidatePath("/dashboard/teams");
+    pushToEnteredDraft({
+      title: "Draft Complete",
+      body: "Teams have been finalized. Check your team on the My Team page.",
+      url: "/dashboard/my-team",
+      tag: "draft-end",
+      category: "draft",
+    }).catch(() => {});
+    pushToAdmins({
+      title: "Draft Complete",
+      body: "Teams have been finalized.",
+      url: "/dashboard/teams",
+      tag: "draft-end-admin",
+    }).catch(() => {});
+  }
   return result;
 }
 
@@ -258,6 +365,15 @@ export async function adminStartSeason(code: string) {
   await verifyAdmin();
   if (code !== "START SEASON") return { error: 'Type exactly: START SEASON' };
   const result = await execStartSeason();
+  if (result.ok) {
+    pushToAllApproved({
+      title: "Season Started!",
+      body: `The ${APP_NAME} season is now live. Check the schedule for your upcoming matches.`,
+      url: "/dashboard/season",
+      tag: "season-start",
+      category: "season",
+    }).catch(() => {});
+  }
   return result;
 }
 
@@ -282,6 +398,15 @@ export async function openDraftSignups() {
   }).not("id", "is", null);
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
+
+  pushToAllApproved({
+    title: "Season Signups Open",
+    body: `${APP_NAME} season signups are now open. Head to the dashboard to enter the pool.`,
+    url: "/dashboard",
+    tag: "signups-open",
+    category: "tournament",
+  }).catch(() => {});
+
   return { ok: true, message: "Draft signups are now open. Players can enter the draft pool." };
 }
 
@@ -293,7 +418,61 @@ export async function closeDraftSignups() {
   }).not("id", "is", null);
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
+
+  pushToEnteredDraft({
+    title: "Season Signups Closed",
+    body: "Season signups have closed. The draft will begin soon.",
+    url: "/dashboard",
+    tag: "signups-closed",
+    category: "tournament",
+  }).catch(() => {});
+  pushToAdmins({
+    title: "Season Signups Closed",
+    body: "Season signups have closed.",
+    url: "/dashboard/admin",
+    tag: "signups-closed-admin",
+  }).catch(() => {});
+
   return { ok: true, message: "Draft signups closed." };
+}
+
+/**
+ * Force every player who joined the active event (rostered players, the draft
+ * pool, and any requested subs) to re-verify their tracker before their next
+ * replay submission. The flag is cleared when a player re-confirms/updates their
+ * tracker, or automatically when the event ends (resetSeason).
+ */
+export async function forceTrackerUpdate(): Promise<{ ok?: boolean; error?: string; message?: string }> {
+  await verifyAdmin();
+
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("season_active, active_tournament_id").single();
+  const eventActive = (settings?.season_active ?? false) || !!settings?.active_tournament_id;
+  if (!eventActive) return { error: "No active tournament or season — nothing to do." };
+
+  const [{ data: rostered }, { data: subReqs }] = await Promise.all([
+    supabaseAdmin.from("players").select("id").eq("status", "approved").or("team_id.not.is.null,draft_entered.eq.true"),
+    supabaseAdmin.from("sub_requests").select("sub_player_id, sub_player_ids").neq("status", "rejected"),
+  ]);
+
+  const ids = new Set<string>();
+  for (const p of rostered ?? []) ids.add(p.id);
+  for (const r of subReqs ?? []) {
+    if (r.sub_player_id) ids.add(r.sub_player_id as string);
+    for (const sid of ((r.sub_player_ids as string[] | null) ?? [])) ids.add(sid);
+  }
+
+  if (ids.size === 0) return { error: "No active players found to flag." };
+
+  const { error } = await supabaseAdmin
+    .from("players")
+    .update({ must_update_tracker: true, updated_at: new Date().toISOString() })
+    .in("id", [...ids]);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/my-team");
+  return { ok: true, message: `Flagged ${ids.size} player${ids.size === 1 ? "" : "s"} to re-verify their tracker.` };
 }
 
 export async function resetSeason() {
@@ -303,43 +482,24 @@ export async function resetSeason() {
   await deleteMatchChannels();
 
   // Delete matches and reset team stats — team slots (name, discord_role_id) are preserved
+  await supabaseAdmin.from("sub_requests").delete().not("id", "is", null);
   await supabaseAdmin.from("matches").delete().not("id", "is", null);
   await supabaseAdmin.from("teams").update({ wins: 0, losses: 0, is_locked: false }).not("id", "is", null);
 
   // Reset all player assignments and draft entries
   await supabaseAdmin
     .from("players")
-    .update({ team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null, in_active_draft: false })
+    .update({ team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null, in_active_draft: false, must_update_tracker: false })
     .not("id", "is", null);
 
-  // Strip Discord roles (Drafted, Captain, all team roles) from real players
-  const { data: allApprovedPlayers } = await supabaseAdmin
-    .from("players").select("discord_id").eq("status", "approved").not("discord_id", "is", null);
-  const realDiscordIds = (allApprovedPlayers ?? [])
-    .map(p => p.discord_id as string)
-    .filter(id => id && !id.startsWith("test_"));
-  if (realDiscordIds.length > 0) {
-    const { data: allTeams } = await supabaseAdmin.from("teams").select("discord_role_id");
-    const guildRoles = await getGuildRoles();
-    const roleIdsToStrip = [
-      ...guildRoles.filter(r => r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft").map(r => r.id),
-      ...(allTeams ?? []).map(t => t.discord_role_id).filter((id): id is string => !!id),
-    ];
-    if (roleIdsToStrip.length > 0) {
-      const BATCH = 5;
-      for (let i = 0; i < realDiscordIds.length; i += BATCH) {
-        await Promise.all(
-          realDiscordIds.slice(i, i + BATCH).flatMap(uid =>
-            roleIdsToStrip.map(rid => removeRoleById(uid, rid))
-          )
-        );
-      }
-    }
-  }
+  // Strip all team-related Discord roles from every real player so nobody keeps
+  // a team role after the reset. (Only removes roles each member actually has.)
+  await stripTeamRolesFromPlayers();
 
   // Reset ALL draft/season state so nothing looks active or in-progress
   await supabaseAdmin.from("league_settings").update({
     draft_open: false,
+    draft_signups_closed: false,
     draft_active: false,
     season_active: false,
     num_teams: 0,
@@ -360,6 +520,89 @@ export async function resetSeason() {
   return { ok: true, message: "Season reset. Players unassigned, draft cleared." };
 }
 
+/**
+ * End a manual season: snapshot final standings into the `seasons` archive
+ * (mirrors completeTournament's summary), then reset the league. The archive
+ * row is the permanent record once the live data is wiped.
+ */
+export async function completeSeason(): Promise<{ ok?: boolean; error?: string; message?: string }> {
+  await verifyAdmin();
+
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("season_active, season_format").single();
+  if (!settings?.season_active) return { error: "No active season to complete." };
+
+  // Snapshot standings, logos, and rosters BEFORE resetSeason wipes matches/teams.
+  const [{ data: allTeams }, { data: completedMatches }] = await Promise.all([
+    supabaseAdmin.from("teams").select("id, name, logo_url"),
+    supabaseAdmin
+      .from("matches")
+      .select("home_team_id, away_team_id, home_score, away_score")
+      .eq("status", "completed")
+      .not("home_score", "is", null)
+      .not("away_score", "is", null)
+      .not("home_team_id", "is", null)
+      .not("away_team_id", "is", null),
+  ]);
+
+  const records: Record<string, { wins: number; losses: number }> = {};
+  for (const m of completedMatches ?? []) {
+    if (!m.home_team_id || !m.away_team_id) continue;
+    records[m.home_team_id] ??= { wins: 0, losses: 0 };
+    records[m.away_team_id] ??= { wins: 0, losses: 0 };
+    if ((m.home_score ?? 0) > (m.away_score ?? 0)) {
+      records[m.home_team_id].wins++;
+      records[m.away_team_id].losses++;
+    } else {
+      records[m.away_team_id].wins++;
+      records[m.home_team_id].losses++;
+    }
+  }
+
+  const finalStandings = (allTeams ?? [])
+    .map((t) => ({ name: t.name, wins: records[t.id]?.wins ?? 0, losses: records[t.id]?.losses ?? 0 }))
+    .filter((t) => t.wins + t.losses > 0)
+    .sort((a, b) => b.wins - a.wins || a.losses - b.losses || a.name.localeCompare(b.name));
+
+  const championTeam = (allTeams ?? []).find((t) => t.name === finalStandings[0]?.name) ?? null;
+  const runnerUpTeam = (allTeams ?? []).find((t) => t.name === finalStandings[1]?.name) ?? null;
+  const topIds = [championTeam?.id, runnerUpTeam?.id].filter((id): id is string => !!id);
+  const { data: rosterPlayers } = topIds.length
+    ? await supabaseAdmin.from("players").select("username, display_name, team_id").in("team_id", topIds)
+    : { data: [] as { username: string; display_name: string | null; team_id: string }[] };
+
+  const byTeam = (id: string | undefined) =>
+    (rosterPlayers ?? [])
+      .filter((p) => p.team_id === id)
+      .map((p) => ({ username: p.username, displayName: p.display_name ?? null }));
+
+  const year = new Date().getFullYear();
+  const name = `${APP_NAME} Season ${year}`;
+
+  const { error: archiveError } = await supabaseAdmin.from("seasons").insert({
+    name,
+    year,
+    season_format: settings.season_format ?? null,
+    team_count: finalStandings.length,
+    summary: {
+      champion: finalStandings[0]?.name ?? null,
+      runnerUp: finalStandings[1]?.name ?? null,
+      finalStandings,
+      championLogoUrl: (championTeam?.logo_url as string | null) ?? null,
+      runnerUpLogoUrl: (runnerUpTeam?.logo_url as string | null) ?? null,
+      championPlayers: byTeam(championTeam?.id),
+      runnerUpPlayers: byTeam(runnerUpTeam?.id),
+    },
+    ended_at: new Date().toISOString(),
+  });
+  if (archiveError) return { error: `Failed to archive season: ${archiveError.message}` };
+
+  // Only wipe once the archive is safely written.
+  await resetSeason();
+
+  return { ok: true, message: `Season archived as "${name}".` };
+}
+
 export async function addTeamSlot(discordRoleId: string) {
   await verifyAdmin();
   if (!discordRoleId.trim()) return { error: "A Discord role ID is required." };
@@ -369,7 +612,7 @@ export async function addTeamSlot(discordRoleId: string) {
   const { data: newTeam, error } = await supabaseAdmin
     .from("teams")
     .insert({ name: `Team ${next}`, discord_role_id: discordRoleId, is_locked: false, slot_number: next })
-    .select("id, name, discord_role_id")
+    .select("id, name, discord_role_id, slot_number")
     .single();
   if (error || !newTeam) return { error: error?.message ?? "Failed to create team." };
   const canonicalName = `Team ${next}`;
@@ -384,7 +627,7 @@ export async function addTeamSlot(discordRoleId: string) {
   }
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/teams");
-  return { ok: true, team: newTeam as { id: string; name: string; discord_role_id: string | null } };
+  return { ok: true, team: newTeam as { id: string; name: string; discord_role_id: string | null; slot_number: number | null } };
 }
 
 export async function updateTeamRoleId(teamId: string, discordRoleId: string) {
@@ -441,6 +684,47 @@ export async function deleteLastTeamSlot() {
   return { ok: true, message: `Team ${last.num} deleted.` };
 }
 
+export async function initLeagueSettings(): Promise<{ ok?: boolean; error?: string }> {
+  await verifyAdmin();
+  const { data: existing } = await supabaseAdmin
+    .from("league_settings").select("id").maybeSingle();
+  if (existing) return { ok: true };
+  const { error } = await supabaseAdmin.from("league_settings").insert({
+    draft_open: false,
+    draft_active: false,
+    season_active: false,
+    num_teams: 0,
+    current_pick: 0,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+export async function forceResetDraftState(): Promise<{ ok?: boolean; error?: string }> {
+  await verifyAdmin();
+  const [{ error: settingsErr }, { error: playersErr }] = await Promise.all([
+    supabaseAdmin.from("league_settings").update({
+      draft_active: false,
+      draft_phase: null,
+      pick_deadline: null,
+      current_pick: 0,
+      updated_at: new Date().toISOString(),
+    }).not("id", "is", null),
+    supabaseAdmin.from("players")
+      .update({ in_active_draft: false })
+      .eq("status", "approved"),
+  ]);
+  if (settingsErr) return { error: settingsErr.message };
+  if (playersErr) return { error: playersErr.message };
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/draft");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
 export async function saveMatchSettings(deadlineDay: number, playDay: number, playHour: number) {
   await verifyAdmin();
   if (!Number.isInteger(deadlineDay) || deadlineDay < 0 || deadlineDay > 6)
@@ -457,6 +741,112 @@ export async function saveMatchSettings(deadlineDay: number, playDay: number, pl
   }).not("id", "is", null);
   revalidatePath("/dashboard/admin");
   return { ok: true, message: "Match schedule settings saved." };
+}
+
+const ADMIN_NOTIFICATION_CATEGORIES = ["match_reporting", "sub_requests", "registrations", "profile_changes"];
+
+export async function setAdminNotificationPref(category: string, enabled: boolean) {
+  await verifyAdmin();
+  if (!ADMIN_NOTIFICATION_CATEGORIES.includes(category))
+    return { ok: false, message: "Invalid category." };
+
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("admin_notification_prefs").maybeSingle();
+  const prefs = (settings?.admin_notification_prefs as Record<string, boolean> | null) ?? {};
+  prefs[category] = enabled;
+
+  await supabaseAdmin
+    .from("league_settings")
+    .update({ admin_notification_prefs: prefs, updated_at: new Date().toISOString() })
+    .not("id", "is", null);
+
+  revalidatePath("/dashboard/admin");
+  return { ok: true };
+}
+
+// Removes all team-related Discord roles from every real player. Fetches each
+// member's current roles first so it only deletes roles they actually have
+// (avoids hundreds of no-op calls that trip Discord's rate limiter). Sequential
+// + removeRoleById's 429 backoff keeps it under the limit.
+async function stripTeamRolesFromPlayers(): Promise<{
+  ok: number;
+  removed: number;
+  byStatus: Map<number, { count: number; message?: string }>;
+  players: number;
+}> {
+  const byStatus = new Map<number, { count: number; message?: string }>();
+
+  const { data: allDbPlayers } = await supabaseAdmin
+    .from("players").select("discord_id").not("discord_id", "is", null);
+  const realDiscordIds = (allDbPlayers ?? [])
+    .map(p => p.discord_id as string)
+    .filter(id => id && !id.startsWith("test_"));
+  if (realDiscordIds.length === 0) return { ok: 0, removed: 0, byStatus, players: 0 };
+
+  const { data: allTeams } = await supabaseAdmin.from("teams").select("name, discord_role_id");
+  const guildRoles = await getGuildRoles();
+  const teamNames = new Set(
+    (allTeams ?? []).map(t => (t.name as string | null) ?? "").filter(Boolean)
+  );
+  const roleIds = new Set<string>([
+    ...guildRoles.filter(r => r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft").map(r => r.id),
+    ...(allTeams ?? []).map(t => t.discord_role_id).filter((id): id is string => !!id),
+    ...guildRoles.filter(r => teamNames.has(r.name) || /^Team \d+$/.test(r.name)).map(r => r.id),
+  ]);
+  if (roleIds.size === 0) return { ok: 0, removed: 0, byStatus, players: realDiscordIds.length };
+
+  let ok = 0;
+  for (const uid of realDiscordIds) {
+    const have = await getMemberRoleIds(uid);
+    if (!have) continue; // not in the guild / fetch failed — nothing to remove
+    for (const rid of have.filter(id => roleIds.has(id))) {
+      const r = await removeRoleById(uid, rid);
+      if (r.ok) { ok++; continue; }
+      const entry = byStatus.get(r.status) ?? { count: 0, message: r.message };
+      entry.count++;
+      if (!entry.message && r.message) entry.message = r.message;
+      byStatus.set(r.status, entry);
+    }
+  }
+  return { ok, removed: ok, byStatus, players: realDiscordIds.length };
+}
+
+// Testing helper: strip team roles without touching season/draft state.
+export async function stripTeamDiscordRoles(): Promise<{ ok?: boolean; error?: string; message?: string }> {
+  await verifyAdmin();
+  const { ok, byStatus, players } = await stripTeamRolesFromPlayers();
+  const failed = [...byStatus.values()].reduce((s, e) => s + e.count, 0);
+  if (failed > 0) {
+    const reasons = [...byStatus.entries()]
+      .sort((a, b) => b[1].count - a[1].count)
+      .map(([status, e]) => `${e.count}× ${status}${e.message ? ` ${e.message}` : ""}`)
+      .join(", ");
+    return { ok: false, message: `${failed} removal(s) failed (${ok} ok). Reasons: ${reasons}` };
+  }
+  return { ok: true, message: `Removed ${ok} role(s) across ${players} player(s) — all succeeded.` };
+}
+
+export async function saveMinMmr(min2v2: number | null, min3v3: number | null) {
+  await verifyAdmin();
+  // 0 / null / empty → no minimum. Otherwise must be a whole number 1–3000.
+  const norm = (v: number | null): number | null | undefined => {
+    if (v === null || Number.isNaN(v) || v === 0) return null;
+    if (!Number.isInteger(v) || v < 0 || v > 3000) return undefined;
+    return v;
+  };
+  const a = norm(min2v2);
+  const b = norm(min3v3);
+  if (a === undefined || b === undefined)
+    return { ok: false, message: "Minimum MMR must be a whole number between 0 and 3000." };
+
+  await supabaseAdmin.from("league_settings").update({
+    min_mmr_2v2: a,
+    min_mmr_3v3: b,
+    updated_at: new Date().toISOString(),
+  }).not("id", "is", null);
+
+  revalidatePath("/dashboard/admin");
+  return { ok: true, message: "Minimum MMR saved." };
 }
 
 export async function adminSetNumTeams(count: string) {
@@ -486,4 +876,24 @@ export async function adminSetNumTeams(count: string) {
     .update({ num_teams: numTeams, updated_at: new Date().toISOString() }).not("id", "is", null);
 
   return { ok: true, message: `Teams set to ${numTeams}.` };
+}
+
+export async function setTestingMode(enabled: boolean) {
+  await verifyAdmin();
+  const cookieStore = await cookies();
+  if (enabled) {
+    cookieStore.set("testing_mode", "1", { httpOnly: true, path: "/", sameSite: "lax" });
+  } else {
+    cookieStore.delete("testing_mode");
+  }
+}
+
+export async function setNotificationsEnabled(enabled: boolean) {
+  await verifyAdmin();
+  const cookieStore = await cookies();
+  if (enabled) {
+    cookieStore.delete("notifications_disabled");
+  } else {
+    cookieStore.set("notifications_disabled", "1", { httpOnly: true, path: "/", sameSite: "lax" });
+  }
 }
