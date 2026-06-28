@@ -15,7 +15,7 @@ export default async function DashboardPage() {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const [playerRes, settingsRes, draftQueueRes, tournamentsRes, seasonsRes] = await Promise.all([
+  const [playerRes, settingsRes, draftQueueRes, tournamentsRes, seasonsRes, matchStagesRes] = await Promise.all([
     supabaseAdmin
       .from("players")
       .select("id, status, draft_entered, display_name, must_update_tracker")
@@ -37,6 +37,9 @@ export default async function DashboardPage() {
       .from("seasons")
       .select("id, name, season_format, team_count, summary, ended_at, created_at, hidden_from_home")
       .order("ended_at", { ascending: false }),
+    supabaseAdmin
+      .from("matches")
+      .select("stage, round, status"),
   ]);
 
   const player = playerRes.data;
@@ -127,6 +130,12 @@ export default async function DashboardPage() {
   const signupsOpen = (settings?.draft_open ?? false) && !(settings?.draft_active ?? false) && !(settings?.season_active ?? false);
   const inDraft = player?.draft_entered ?? false;
 
+  // Compute current season stage label from active matches.
+  const allMatchStages = matchStagesRes.data ?? [];
+  const seasonActive = settings?.season_active ?? false;
+  const currentSeasonLabel = seasonActive ? computeSeasonStageLabel(allMatchStages) : null;
+  const seasonEventName = activeTournament?.name ?? "Season";
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto space-y-8">
       <div>
@@ -143,10 +152,14 @@ export default async function DashboardPage() {
             <p className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">Active Tournament</p>
           </div>
           <h2 className="text-xl font-bold text-white mt-1">{activeTournament.name}</h2>
-          <div className="text-xs text-zinc-400 mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
-            {activeTournament.draft_start_at && <span>Draft: <LocalTime iso={activeTournament.draft_start_at} /></span>}
-            {activeTournament.season_start_at && <span>Season: <LocalTime iso={activeTournament.season_start_at} /></span>}
-          </div>
+          {seasonActive && currentSeasonLabel ? (
+            <p className="text-sm text-indigo-300 mt-1">{currentSeasonLabel}</p>
+          ) : (
+            <div className="text-xs text-zinc-400 mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+              {activeTournament.draft_start_at && <span>Draft: <LocalTime iso={activeTournament.draft_start_at} /></span>}
+              {activeTournament.season_start_at && <span>Tournament: <LocalTime iso={activeTournament.season_start_at} /></span>}
+            </div>
+          )}
         </div>
       )}
 
@@ -154,14 +167,29 @@ export default async function DashboardPage() {
       {isApproved && activeTournament?.join_mode !== "teams" && (
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-zinc-300">Season</h2>
-          <DraftCard
-            inDraft={inDraft}
-            draftCount={draftCount}
-            signupsOpen={signupsOpen}
-            draftActive={settings?.draft_active ?? false}
-            seasonActive={settings?.season_active ?? false}
-          />
-          <Stat label="Draft pool" value={draftCount} />
+          {seasonActive ? (
+            <div className="bg-gradient-to-br from-indigo-950/40 to-zinc-900 border border-indigo-800/40 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <p className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">Season Active</p>
+              </div>
+              <h2 className="text-xl font-bold text-white">{seasonEventName}</h2>
+              {currentSeasonLabel && (
+                <p className="text-sm text-indigo-300 mt-1">{currentSeasonLabel}</p>
+              )}
+            </div>
+          ) : (
+            <>
+              <DraftCard
+                inDraft={inDraft}
+                draftCount={draftCount}
+                signupsOpen={signupsOpen}
+                draftActive={settings?.draft_active ?? false}
+                seasonActive={false}
+              />
+              <Stat label="Draft pool" value={draftCount} />
+            </>
+          )}
         </div>
       )}
 
@@ -253,4 +281,52 @@ function Stat({ label, value }: { label: string; value: number }) {
       <p className="text-2xl font-bold text-white mt-1">{value}</p>
     </div>
   );
+}
+
+type MatchStageRow = { stage: string | null; round: number | null; status: string | null };
+
+function computeSeasonStageLabel(matches: MatchStageRow[]): string | null {
+  if (!matches.length) return null;
+
+  // Prefer scheduled matches; fall back to completed to show the last active stage.
+  const scheduled = matches.filter((m) => m.status === "scheduled" && m.stage && m.round != null);
+  const pool = scheduled.length ? scheduled : matches.filter((m) => m.stage && m.round != null);
+  if (!pool.length) return null;
+
+  // Current stage = the one with the most matches in the pool.
+  const stageCounts: Record<string, number> = {};
+  for (const m of pool) if (m.stage) stageCounts[m.stage] = (stageCounts[m.stage] ?? 0) + 1;
+  const currentStage = Object.entries(stageCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (!currentStage) return null;
+
+  const stageMatches = pool.filter((m) => m.stage === currentStage);
+  const currentRound = Math.max(...stageMatches.map((m) => m.round ?? 0));
+
+  // Max round ever seen for this stage (for SE tier labeling).
+  const allForStage = matches.filter((m) => m.stage === currentStage);
+  const maxRound = Math.max(...allForStage.map((m) => m.round ?? 0));
+
+  return stageLabel(currentStage, currentRound, maxRound);
+}
+
+function stageLabel(stage: string, round: number, maxRound: number): string {
+  if (stage.startsWith("group_")) return `Group Stage, Round ${round}`;
+  if (stage === "swiss") return `Swiss, Round ${round}`;
+  if (stage === "single_elimination") return `Single Elimination — ${seTierLabel(round, maxRound)}`;
+  if (stage === "de_winners") return `Winners Bracket, Round ${round}`;
+  if (stage === "de_losers") return `Losers Bracket, Round ${round}`;
+  if (stage === "de_grand_final") return "Grand Final";
+  if (stage === "hybrid_ub" || stage === "hybrid8_ub") return `Upper Bracket, Round ${round}`;
+  if (stage === "hybrid_lb" || stage === "hybrid8_lb") return `Lower Bracket, Round ${round}`;
+  if (stage === "hybrid_sf" || stage === "hybrid8_sf") return "Semi Finals";
+  if (stage === "hybrid_gf" || stage === "hybrid8_gf") return "Grand Final";
+  return stage.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function seTierLabel(round: number, maxRound: number): string {
+  const fromFinal = maxRound - round;
+  if (fromFinal === 0) return "Finals";
+  if (fromFinal === 1) return "Semi Finals";
+  if (fromFinal === 2) return "Quarter Finals";
+  return `Round ${round}`;
 }

@@ -245,24 +245,35 @@ export function pairSwissRound(
 function pairBucketSwiss(sorted: SwissRecord[]): [string, string][] {
   const n = sorted.length;
   if (n < 2) return [];
-  const half = Math.floor(n / 2);
-  // ideal[i] = [top-half index, bottom-half index]
-  const ideal: [number, number][] = Array.from({ length: half }, (_, i) => [i, i + half]);
-  for (let i = 0; i < half; i++) {
-    const [ti, bi] = ideal[i];
-    if (sorted[ti].opponents.includes(sorted[bi].teamId)) {
-      for (let j = i + 1; j < half; j++) {
-        const [, bj] = ideal[j];
-        if (!sorted[ti].opponents.includes(sorted[bj].teamId) &&
-            !sorted[ideal[j][0]].opponents.includes(sorted[bi].teamId)) {
-          ideal[i][1] = bj;
-          ideal[j][1] = bi;
-          break;
-        }
-      }
+
+  // Pre-build a set of canonical "A:B" keys (lexicographic) for every past matchup.
+  const played = new Set<string>();
+  for (const r of sorted) {
+    for (const opp of r.opponents) {
+      played.add(r.teamId < opp ? `${r.teamId}:${opp}` : `${opp}:${r.teamId}`);
     }
   }
-  return ideal.map(([i, j]) => [sorted[i].teamId, sorted[j].teamId]);
+  const hasPlayed = (a: string, b: string) =>
+    played.has(a < b ? `${a}:${b}` : `${b}:${a}`);
+
+  // Backtrack over index lists, pairing the first unpaired team with each candidate
+  // in Buchholz order. Returns null when no valid completion exists.
+  function backtrack(remaining: number[], allowRematches: boolean): [number, number][] | null {
+    if (remaining.length === 0) return [];
+    const [first, ...rest] = remaining;
+    for (let i = 0; i < rest.length; i++) {
+      if (allowRematches || !hasPlayed(sorted[first].teamId, sorted[rest[i]].teamId)) {
+        const sub = backtrack([...rest.slice(0, i), ...rest.slice(i + 1)], allowRematches);
+        if (sub !== null) return [[first, rest[i]], ...sub];
+      }
+    }
+    return null;
+  }
+
+  const indices = Array.from({ length: n }, (_, i) => i);
+  // Try a perfect no-rematch pairing first; only allow rematches if truly unavoidable.
+  const result = backtrack(indices, false) ?? backtrack(indices, true)!;
+  return result.map(([i, j]) => [sorted[i].teamId, sorted[j].teamId]);
 }
 
 // R1: pair seed 1 vs 9, 2 vs 10, ..., 8 vs 16.

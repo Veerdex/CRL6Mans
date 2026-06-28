@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
-import { execStartDraft, execAutoBalanceTeams, execStartSeason, execFinalizeTeamSignups } from "@/app/lib/discord-bot";
+import { execStartDraft, execAutoBalanceTeams, execStartSeason, execFinalizeTeamSignups, processExpiredCheckIns, processExpiredScoreConfirmations, openReadyMatchChannels } from "@/app/lib/discord-bot";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 
 export const runtime = "nodejs";
@@ -23,6 +23,12 @@ export async function GET(request: Request) {
   const now = Date.now();
   const fired: string[] = [];
   const passed = (iso: string | null | undefined) => !!iso && new Date(iso).getTime() <= now;
+
+  // Auto-finalize series results unconfirmed past the 5-minute window. Applies to
+  // seasons and tournaments alike, so it runs before any active-tournament gating.
+  try {
+    await processExpiredScoreConfirmations();
+  } catch { /* best-effort */ }
 
   // ── 1. Open/close sign-ups for every scheduled tournament (no runtime impact) ──
   const { data: scheduled } = await supabaseAdmin
@@ -66,9 +72,10 @@ export async function GET(request: Request) {
   // ── 2. Activation: promote a due tournament to the single live one ──
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("active_tournament_id, draft_active, season_active")
+    .select("active_tournament_id, draft_active, season_active, last_coin_grant_at, is_test_season")
     .single();
   let activeId = settings?.active_tournament_id as string | null | undefined;
+  let lastCoinGrantAt = (settings?.last_coin_grant_at as string | null | undefined) ?? null;
 
   if (!activeId && !settings?.draft_active && !settings?.season_active) {
     const due = (scheduled ?? []).find((t) =>
@@ -77,7 +84,35 @@ export async function GET(request: Request) {
     if (due) {
       const res = await activateTournamentRuntime(due.id);
       if (res.ok) { activeId = due.id; fired.push(`activated:${due.name}`); }
-      else fired.push(`activate_failed:${res.error}`);
+      else {
+        fired.push(`activate_failed:${res.error}`);
+        pushToAdmins({
+          title: "Tournament activation failed",
+          body: `Could not activate ${due.name}: ${res.error}`,
+          url: "/dashboard/admin",
+          tag: "autostart-failed",
+        }).catch(() => {});
+      }
+    }
+  }
+
+  // Weekly 1000-coin pending grant during a manual season (no active tournament).
+  // Tournaments only get the one-time start grant — no weekly coins.
+  // Skipped entirely for test seasons.
+  if (settings?.season_active && !activeId && !settings?.is_test_season) {
+    const lastGrantTime = lastCoinGrantAt ? new Date(lastCoinGrantAt).getTime() : 0;
+    if (now - lastGrantTime >= 7 * 24 * 60 * 60 * 1000) {
+      try {
+        await supabaseAdmin
+          .from("players")
+          .update({ coin_grant_pending_weekly: true })
+          .eq("status", "approved");
+        await supabaseAdmin
+          .from("league_settings")
+          .update({ last_coin_grant_at: new Date().toISOString() })
+          .not("id", "is", null);
+        fired.push("weekly_coins_pending");
+      } catch { /* best-effort */ }
     }
   }
 
@@ -92,18 +127,37 @@ export async function GET(request: Request) {
   const draftActive = live?.draft_active ?? false;
   const seasonActive = live?.season_active ?? false;
 
-  const { count: rosterCount } = await supabaseAdmin
-    .from("players").select("*", { count: "exact", head: true }).not("team_id", "is", null);
-  const teamsFormed = (rosterCount ?? 0) > 0;
+  // For teams-mode: check if any player has a team_id (teams already formed).
+  // For players-mode: check if a draft is already underway by checking draft_active
+  // directly rather than team_id — leftover team_ids from a previous season would
+  // otherwise prevent the new draft from ever auto-starting.
+  const teamsFormedCheck = async () => {
+    const { count } = await supabaseAdmin
+      .from("players").select("*", { count: "exact", head: true }).not("team_id", "is", null);
+    return (count ?? 0) > 0;
+  };
 
   if (t.join_mode === "teams") {
+    const teamsFormed = await teamsFormedCheck();
     if (passed(t.draft_close_at) && !seasonActive && !teamsFormed) {
       const res = await execFinalizeTeamSignups();
       fired.push(res.ok ? "teams_finalized" : `teams_finalize_failed:${res.message}`);
+      if (!res.ok) {
+        pushToAdmins({
+          title: "Tournament auto-start failed",
+          body: `Could not finalize teams: ${res.message}`,
+          url: "/dashboard/admin",
+          tag: "autostart-failed",
+        }).catch(() => {});
+      }
     }
   } else {
-    // player-signup: form teams via snake draft or auto-balance
-    if (passed(t.draft_start_at) && !draftActive && !seasonActive && !teamsFormed) {
+    // player-signup: form teams via snake draft or auto-balance.
+    // Guard: don't re-run if a draft is actively in progress or season has started.
+    // We intentionally do NOT gate on team_id here — execStartDraft clears all team
+    // assignments before forming new ones, and leftover ids from a past season would
+    // permanently block the auto-start.
+    if (passed(t.draft_start_at) && !draftActive && !seasonActive) {
       const res = t.team_assignment === "auto_balance"
         ? await execAutoBalanceTeams()
         : await execStartDraft();
@@ -122,6 +176,13 @@ export async function GET(request: Request) {
           url: "/dashboard/draft",
           tag: "draft-start-admin",
         }).catch(() => {});
+      } else {
+        pushToAdmins({
+          title: "Tournament auto-start failed",
+          body: `Could not start draft: ${res.message}`,
+          url: "/dashboard/admin",
+          tag: "autostart-failed",
+        }).catch(() => {});
       }
     }
   }
@@ -130,6 +191,35 @@ export async function GET(request: Request) {
     const res = await execStartSeason();
     fired.push(res.ok ? "season_started" : `season_start_failed:${res.message}`);
     if (res.ok) {
+      // Set pending start-grant flag on all approved players.
+      // Amount = 100 × participants (approved players currently on a team).
+      // Skipped entirely for test tournaments.
+      if (!t.is_test) {
+        try {
+          const { count: participantCount } = await supabaseAdmin
+            .from("players")
+            .select("*", { count: "exact", head: true })
+            .eq("status", "approved")
+            .not("team_id", "is", null);
+          const grant = (participantCount ?? 0) * 100;
+          await Promise.all([
+            supabaseAdmin
+              .from("players")
+              .update({ coin_grant_pending_start: true })
+              .eq("status", "approved"),
+            supabaseAdmin
+              .from("league_settings")
+              .update({ pending_start_coin_amount: grant })
+              .not("id", "is", null),
+          ]);
+          lastCoinGrantAt = new Date().toISOString();
+          await supabaseAdmin
+            .from("league_settings")
+            .update({ last_coin_grant_at: lastCoinGrantAt })
+            .not("id", "is", null);
+          fired.push(`initial_coins_pending:${grant}`);
+        } catch { /* best-effort */ }
+      }
       pushToAllApproved({
         title: "Season Started!",
         body: "The season is now live. Check the schedule for your upcoming matches.",
@@ -138,6 +228,15 @@ export async function GET(request: Request) {
         category: "season",
       }).catch(() => {});
     }
+  }
+
+  // ── 4. Tournament check-in: DQ expired windows + open ready channels ──
+  if (seasonActive) {
+    try {
+      await processExpiredCheckIns();
+      await openReadyMatchChannels();
+      fired.push("checkins_processed");
+    } catch { /* best-effort */ }
   }
 
   return NextResponse.json({ ok: true, fired });

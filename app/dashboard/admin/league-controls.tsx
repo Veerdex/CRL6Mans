@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate } from "./league-actions";
+import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate, setIsTestSeason } from "./league-actions";
+import { auditMatchChannels, applyChannelChanges, type ChannelAuditItem, type ChannelAuditResult } from "./channel-debug-actions";
 import { ExportAndResetSeasonButton } from "./export-pdf-button";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -26,6 +27,10 @@ interface LeagueControlsProps {
   eventActive: boolean;
   testingMode: boolean;
   notificationsEnabled: boolean;
+  draftCurrentMax: number;
+  draftFormatMax: number | null;
+  isTestSeason: boolean;
+  isCEO: boolean;
 }
 
 const COMMANDS: Record<ActionKey, { label: string; code: string; description: string }> = {
@@ -51,10 +56,11 @@ const COMMANDS: Record<ActionKey, { label: string; code: string; description: st
   },
 };
 
-export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled }: LeagueControlsProps) {
+export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, draftFormatMax, isTestSeason, isCEO }: LeagueControlsProps) {
   const [isPending, startTransition] = useTransition();
   const [active, setActive] = useState<ActionKey | null>(null);
   const [codeInput, setCodeInput] = useState("");
+  const [maxTeamsInput, setMaxTeamsInput] = useState("");
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
   const [localDraftOpen, setLocalDraftOpen] = useState(draftOpen);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -64,8 +70,13 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
   const [confirmForceReset, setConfirmForceReset] = useState(false);
   const [testingEnabled, setTestingEnabled] = useState(testingMode);
   const [notifsEnabled, setNotifsEnabled]   = useState(notificationsEnabled);
+  const [localIsTestSeason, setLocalIsTestSeason] = useState(isTestSeason);
   const [showTestingWarning, setShowTestingWarning] = useState(false);
   const [showTrackerForce, setShowTrackerForce] = useState(false);
+  const [showDebugChannels, setShowDebugChannels] = useState(false);
+  const [channelAudit, setChannelAudit] = useState<ChannelAuditResult | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [applyResult, setApplyResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [deadlineDay, setDeadlineDay] = useState(matchDeadlineDay);
   const [playDay, setPlayDay] = useState(matchPlayDay);
   const [playHour, setPlayHour] = useState(matchPlayHour);
@@ -80,19 +91,21 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
   const openConfirm = (key: ActionKey) => {
     setActive(key);
     setCodeInput("");
+    setMaxTeamsInput("");
   };
 
   const handleConfirm = () => {
     if (!active) return;
     startTransition(async () => {
       let result: { ok?: boolean; message?: string; error?: string };
-      if (active === "startdraft") result = await adminStartDraft(codeInput);
-      else if (active === "autodraft") result = await adminAutoBalance(codeInput);
+      if (active === "startdraft") result = await adminStartDraft(codeInput, maxTeamsInput);
+      else if (active === "autodraft") result = await adminAutoBalance(codeInput, maxTeamsInput);
       else if (active === "enddraft") result = await adminEndDraft(codeInput);
       else result = await adminStartSeason(codeInput);
 
       setActive(null);
       setCodeInput("");
+      setMaxTeamsInput("");
       if (result.error) showFeedback(result.error, false);
       else showFeedback(result.message ?? "Done.", result.ok ?? true);
     });
@@ -144,7 +157,7 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
             </select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-zinc-500">Default Play Time (PT)</label>
+            <label className="text-xs text-zinc-500">Default Play Time (your local time)</label>
             <select
               value={playHour}
               onChange={e => setPlayHour(Number(e.target.value))}
@@ -165,7 +178,7 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
           </div>
         </div>
         <p className="text-xs text-zinc-500">
-          Deadline is always 11:59 pm PT on the selected day. Use <span className="font-mono text-zinc-400">/setmatchcategory</span> and <span className="font-mono text-zinc-400">/setruleschannel</span> in Discord for the remaining settings.
+          Deadline is always 11:59 pm (your local time) on the selected day. Use <span className="font-mono text-zinc-400">/setmatchcategory</span> and <span className="font-mono text-zinc-400">/setruleschannel</span> in Discord for the remaining settings.
         </p>
         <button
           onClick={() => startTransition(async () => {
@@ -233,13 +246,36 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {(Object.entries(COMMANDS) as [ActionKey, typeof COMMANDS[ActionKey]][]).map(([key, cmd]) => (
           <div key={key} className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
-            <div>
-              <p className="text-sm font-medium text-white">{cmd.label}</p>
-              <p className="text-xs text-zinc-500 mt-0.5">{cmd.description}</p>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium text-white">{cmd.label}</p>
+                <p className="text-xs text-zinc-500 mt-0.5">{cmd.description}</p>
+              </div>
+              {(key === "startdraft" || key === "autodraft") && (
+                <span className="text-xs text-zinc-400 whitespace-nowrap shrink-0">{draftCurrentMax} teams</span>
+              )}
             </div>
 
             {active === key ? (
               <div className="space-y-2">
+                {(key === "startdraft" || key === "autodraft") && (
+                  <div className="space-y-1">
+                    <label className="block text-xs text-zinc-400">Max teams</label>
+                    <input
+                      type="number"
+                      min={2}
+                      value={maxTeamsInput}
+                      onChange={(e) => setMaxTeamsInput(e.target.value)}
+                      placeholder={`Max (${draftFormatMax ?? draftCurrentMax})`}
+                      className="w-full bg-zinc-900 border border-zinc-600 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <p className="text-[11px] text-zinc-500">
+                      {draftFormatMax != null
+                        ? `Leave blank to use the format max (${draftFormatMax} team${draftFormatMax === 1 ? "" : "s"}).`
+                        : `Leave blank to make the maximum (${draftCurrentMax} team${draftCurrentMax === 1 ? "" : "s"}) from the current pool.`}
+                    </p>
+                  </div>
+                )}
                 <p className="text-xs text-zinc-400">
                   Type <span className="font-mono text-white">{cmd.code}</span> to confirm:
                 </p>
@@ -301,6 +337,44 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
         >
           Force Tracker Update
         </button>
+      </div>
+
+      {/* Test Season toggle */}
+      <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0 pr-4">
+            <p className="text-sm font-medium text-white">Test Season</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {seasonActive
+                ? "Cannot change while a season is active."
+                : localIsTestSeason
+                  ? "ON — this season will be discarded on completion (no records saved, no Westside Wages)"
+                  : "OFF — this season is real and will be archived when completed"}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              if (seasonActive) return;
+              const next = !localIsTestSeason;
+              setLocalIsTestSeason(next);
+              startTransition(async () => {
+                const result = await setIsTestSeason(next);
+                if (result && "error" in result) {
+                  setLocalIsTestSeason(!next);
+                  showFeedback(result.error ?? "Failed to update.", false);
+                }
+              });
+            }}
+            disabled={isPending || seasonActive}
+            className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 transition-colors duration-200 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+              localIsTestSeason ? "bg-amber-600 border-amber-600" : "bg-zinc-700 border-zinc-700"
+            }`}
+            role="switch"
+            aria-checked={localIsTestSeason}
+          >
+            <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${localIsTestSeason ? "translate-x-4" : "translate-x-0"}`} />
+          </button>
+        </div>
       </div>
 
       {/* End of season — export report, then reset */}
@@ -632,6 +706,143 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
           </button>
         )}
       </div>
+
+      {/* Debug Channels — CEO only */}
+      {isCEO && (
+        <div className="border-t border-zinc-700 pt-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-zinc-300">Debug Channels</h3>
+            <button
+              onClick={async () => {
+                if (showDebugChannels) {
+                  setShowDebugChannels(false);
+                  setChannelAudit(null);
+                  setApplyResult(null);
+                  return;
+                }
+                setShowDebugChannels(true);
+                setApplyResult(null);
+                setAuditLoading(true);
+                setChannelAudit(null);
+                const result = await auditMatchChannels();
+                setChannelAudit(result);
+                setAuditLoading(false);
+              }}
+              disabled={isPending}
+              className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 text-xs font-medium rounded-lg transition-colors"
+            >
+              {showDebugChannels ? "Close" : "Debug Channels"}
+            </button>
+          </div>
+
+          {showDebugChannels && (
+            <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-4 space-y-4">
+              {auditLoading && (
+                <p className="text-xs text-zinc-400">Scanning Discord channels…</p>
+              )}
+
+              {channelAudit?.error && (
+                <p className="text-xs text-red-400">{channelAudit.error}</p>
+              )}
+
+              {channelAudit && !channelAudit.error && (
+                <>
+                  {channelAudit.items.length === 0 ? (
+                    <p className="text-xs text-zinc-400">No match channels found to audit.</p>
+                  ) : (
+                    <ul className="space-y-1.5 max-h-64 overflow-y-auto">
+                      {channelAudit.items
+                        .slice()
+                        .sort((a, b) => {
+                          const order = { ok: 0, missing_tracked: 1, missing_untracked: 2, extra: 3 };
+                          return order[a.status] - order[b.status];
+                        })
+                        .map((item, i) => {
+                          const isOk = item.status === "ok";
+                          const isExtra = item.status === "extra";
+                          const label = isOk
+                            ? "✓"
+                            : isExtra
+                              ? "✗ extra"
+                              : item.status === "missing_untracked"
+                                ? "✗ never created"
+                                : "✗ missing";
+                          const cls = isOk
+                            ? "text-emerald-400"
+                            : "text-red-400";
+                          const stagePart =
+                            item.stage && item.round != null
+                              ? ` — ${item.stage.replace(/_/g, " ")} r${item.round}`
+                              : "";
+                          return (
+                            <li key={i} className="flex items-start gap-2 text-xs font-mono">
+                              <span className={`shrink-0 font-bold ${cls}`}>{label}</span>
+                              <span className="text-zinc-300">
+                                #{item.channelName}
+                                <span className="text-zinc-500 font-sans">{stagePart}</span>
+                              </span>
+                            </li>
+                          );
+                        })}
+                    </ul>
+                  )}
+
+                  {(() => {
+                    const needsAction = channelAudit.items.some(
+                      (i) => i.status !== "ok",
+                    );
+                    if (!needsAction) {
+                      return (
+                        <p className="text-xs text-emerald-400">All channels are in sync.</p>
+                      );
+                    }
+                    const missingCount = channelAudit.items.filter(
+                      (i) => i.status === "missing_tracked" || i.status === "missing_untracked",
+                    ).length;
+                    const extraCount = channelAudit.items.filter(
+                      (i) => i.status === "extra",
+                    ).length;
+                    return (
+                      <div className="space-y-2">
+                        <p className="text-xs text-zinc-400">
+                          {missingCount > 0 && `${missingCount} channel${missingCount !== 1 ? "s" : ""} will be created.`}
+                          {missingCount > 0 && extraCount > 0 && " "}
+                          {extraCount > 0 && `${extraCount} channel${extraCount !== 1 ? "s" : ""} will be deleted.`}
+                        </p>
+                        <button
+                          onClick={() => {
+                            setApplyResult(null);
+                            startTransition(async () => {
+                              const res = await applyChannelChanges();
+                              setApplyResult({ ok: res.ok, message: res.message });
+                              // Re-audit after applying
+                              setAuditLoading(true);
+                              setChannelAudit(null);
+                              const fresh = await auditMatchChannels();
+                              setChannelAudit(fresh);
+                              setAuditLoading(false);
+                            });
+                          }}
+                          disabled={isPending}
+                          className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                        >
+                          {isPending ? "Applying…" : "Confirm Changes"}
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  {applyResult && (
+                    <p className={`text-xs ${applyResult.ok ? "text-emerald-400" : "text-red-400"}`}>
+                      {applyResult.message}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {feedback && (
         <p className={`text-sm ${feedback.ok ? "text-green-400" : "text-red-400"}`}>

@@ -474,6 +474,7 @@ function DESectionView({
                 </div>
               </div>
               {drawConnectors ? (
+                // Even LB round: pairs of matches consolidate → draw bracket-style connectors.
                 <svg className="shrink-0" width={CONN_W} height={bracketH} style={{ marginTop: 36 }}>
                   {roundMatches
                     .filter((m) => m.match_number % 2 === 1)
@@ -493,6 +494,18 @@ function DESectionView({
                         </g>
                       );
                     })}
+                </svg>
+              ) : !isLast && sectionType === "losers" ? (
+                // Odd LB round: WB losers drop into same-count next round at identical y positions →
+                // draw a straight horizontal line per match so the output isn't visually disconnected.
+                <svg className="shrink-0" width={CONN_W} height={bracketH} style={{ marginTop: 36 }}>
+                  {roundMatches.map((m) => {
+                    const y = centerFn(m.round, m.match_number);
+                    return (
+                      <line key={m.match_number} x1={0} y1={y} x2={CONN_W} y2={y}
+                        stroke="#3f3f46" strokeWidth="1.5" />
+                    );
+                  })}
                 </svg>
               ) : (
                 !isLast && <div style={{ width: CONN_W }} className="shrink-0" />
@@ -767,6 +780,25 @@ export async function GroupBracketView({ qualifiersPerGroup, topDirectQualifiers
   const teams: Record<string, { id: string; name: string; logo_url: string | null }> = {};
   teamsRaw?.forEach((t) => { teams[t.id] = t; });
 
+  const groupTeamIds = [...new Set(matchesRaw.flatMap(m => [m.home_team_id, m.away_team_id].filter(Boolean) as string[]))];
+  const teamTitles: Record<string, string> = {};
+  if (groupTeamIds.length) {
+    const { data: groupPlayers } = await supabaseAdmin
+      .from("players")
+      .select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3")
+      .in("team_id", groupTeamIds);
+    const rvOf = (p: { peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null }) =>
+      Math.round((Number(p.peak_2v2 ?? 0) + Number(p.current_2v2 ?? 0)) * 0.3 + (Number(p.peak_3v3 ?? 0) + Number(p.current_3v3 ?? 0)) * 0.2);
+    const byTeam: Record<string, { display_name: string | null; username: string; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null }[]> = {};
+    for (const p of (groupPlayers ?? [])) {
+      if (!p.team_id) continue;
+      (byTeam[p.team_id] ??= []).push(p as never);
+    }
+    for (const [tid, roster] of Object.entries(byTeam)) {
+      teamTitles[tid] = roster.sort((a, b) => rvOf(b) - rvOf(a)).map(p => `${p.display_name ?? p.username} (${rvOf(p)})`).join("\n");
+    }
+  }
+
   const groupNums = [...new Set(matchesRaw.map((m) => parseGroupNum(m.stage)!))].sort((a, b) => a - b);
 
   // Attach groupNum to each match so the client component doesn't need to re-parse stage strings
@@ -779,6 +811,7 @@ export async function GroupBracketView({ qualifiersPerGroup, topDirectQualifiers
       teams={teams}
       qualifiersPerGroup={qualifiersPerGroup}
       topDirectQualifiers={topDirectQualifiers ?? qualifiersPerGroup}
+      teamTitles={teamTitles}
     />
   );
 }

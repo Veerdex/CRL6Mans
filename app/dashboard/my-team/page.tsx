@@ -12,6 +12,7 @@ import {
   GROUP_STAGE_PREFIX, parseGroupNum,
 } from "@/app/lib/bracket";
 import { getBestOfForMatch } from "@/app/lib/discord-bot";
+import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { MyTeamEditor } from "@/app/dashboard/teams/my-team-editor";
 import {
   SubRequestPanel,
@@ -53,6 +54,7 @@ type BracketMatch = {
   pending_away_score: number | null;
   score_submitted_by_team_id: string | null;
   score_confirmed: boolean;
+  score_submitted_at: string | null;
 };
 
 type TeamRow = {
@@ -203,6 +205,7 @@ export default async function MyTeamPage() {
   const team = teamRaw as TeamRow | null;
   if (!team) redirect("/dashboard");
 
+  const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
   const seasonActive = settings?.season_active ?? false;
   const preset       = (settings?.season_format as { preset?: string })?.preset ?? "single_elimination";
   // isDE covers all formats that use a double-elimination bracket (full or qualifier)
@@ -231,7 +234,7 @@ export default async function MyTeamPage() {
     ] = await Promise.all([
       supabaseAdmin
         .from("matches")
-        .select("id, round, match_number, stage, home_team_id, away_team_id, home_score, away_score, status, scheduled_at, pending_home_score, pending_away_score, score_submitted_by_team_id, score_confirmed")
+        .select("id, round, match_number, stage, home_team_id, away_team_id, home_score, away_score, status, scheduled_at, pending_home_score, pending_away_score, score_submitted_by_team_id, score_confirmed, score_submitted_at")
         .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`),
       // Primary bracket R1 count: deq_winners for DE qualifier formats, de_winners
       // for full DE, single_elimination for pure SE / group formats.
@@ -269,7 +272,7 @@ export default async function MyTeamPage() {
 
   // Fetch schedule proposal state separately so a missing-column error never
   // breaks the main match display (Next Match, Recent Results).
-  type ScheduleRow = { id: string; schedule_proposed_by_team_id: string | null; schedule_accepted: boolean };
+  type ScheduleRow = { id: string; schedule_proposed_by_team_id: string | null; schedule_accepted: boolean; schedule_admin_required: boolean; admin_scheduled: boolean; home_checked_in: boolean; away_checked_in: boolean; checkin_deadline: string | null };
   const scheduleMap: Record<string, ScheduleRow> = {};
   const upcomingIds = myMatches
     .filter(m => m.home_score === null && m.home_team_id && m.away_team_id)
@@ -277,7 +280,7 @@ export default async function MyTeamPage() {
   if (upcomingIds.length > 0) {
     const { data: scheduleRows } = await supabaseAdmin
       .from("matches")
-      .select("id, schedule_proposed_by_team_id, schedule_accepted")
+      .select("id, schedule_proposed_by_team_id, schedule_accepted, schedule_admin_required, admin_scheduled, home_checked_in, away_checked_in, checkin_deadline")
       .in("id", upcomingIds);
     (scheduleRows ?? []).forEach((r: ScheduleRow) => { scheduleMap[r.id] = r; });
   }
@@ -437,6 +440,21 @@ export default async function MyTeamPage() {
     return Math.round((Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2);
   }
 
+  // Admin-set round schedules define the allowed scheduling window per round.
+  const { data: roundScheduleRows } = seasonActive
+    ? await (activeTournamentId
+        ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at").eq("tournament_id", activeTournamentId)
+        : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at").is("tournament_id", null))
+    : { data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string }[] };
+  const adminScheduleByRound: Record<string, { type: string; playAt: string; deadlineAt: string }> = {};
+  for (const s of roundScheduleRows ?? []) {
+    adminScheduleByRound[`${s.stage}:${s.round}`] = {
+      type: s.schedule_type as string,
+      playAt: s.play_at as string,
+      deadlineAt: s.deadline_at as string,
+    };
+  }
+
   const schedulableMatches: SchedulableMatch[] = seasonActive
     ? myMatches
         .filter((m) => m.home_score === null && m.home_team_id && m.away_team_id)
@@ -457,6 +475,8 @@ export default async function MyTeamPage() {
             roundLabel = getRoundName(totalRoundsSE, m.round) || `Round ${m.round}`;
           }
           const sd = scheduleMap[m.id];
+          const adminSched = adminScheduleByRound[`${canonicalStage(m.stage)}:${m.round}`] ?? null;
+          const isHome = m.home_team_id === teamId;
           return {
             id:              m.id,
             opponentName:    opponent?.name ?? "TBD",
@@ -466,7 +486,16 @@ export default async function MyTeamPage() {
             scheduledAt:     m.scheduled_at,
             proposedByTeamId: sd?.schedule_proposed_by_team_id ?? null,
             scheduleAccepted: sd?.schedule_accepted ?? false,
-            isHome:          m.home_team_id === teamId,
+            scheduleAdminRequired: sd?.schedule_admin_required ?? false,
+            adminPinned:     sd?.admin_scheduled ?? false,
+            adminScheduleType: (adminSched?.type as "weekly" | "daily" | "specific" | undefined) ?? null,
+            adminPlayAt:     adminSched?.playAt ?? null,
+            adminDeadlineAt: adminSched?.deadlineAt ?? null,
+            isTournament:    !!activeTournamentId,
+            checkinDeadline: sd?.checkin_deadline ?? null,
+            iCheckedIn:      isHome ? !!sd?.home_checked_in : !!sd?.away_checked_in,
+            oppCheckedIn:    isHome ? !!sd?.away_checked_in : !!sd?.home_checked_in,
+            isHome,
           };
         })
     : [];
@@ -509,7 +538,7 @@ export default async function MyTeamPage() {
   // Incoming sub requests: pending requests from our upcoming opponent (we accept/reject).
   const myMatchIds = myMatches.map((m) => m.id);
   let incomingSubRequests: IncomingSubRequest[] = [];
-  if (myMatchIds.length > 0) {
+  if (!activeTournamentId && myMatchIds.length > 0) {
     const { data: incomingRaw } = await supabaseAdmin
       .from("sub_requests")
       .select("id, team_id, match_id, player_out_id, sub_player_id, reason, created_at")
@@ -552,32 +581,19 @@ export default async function MyTeamPage() {
     });
   }
 
-  // Eligible subs: sub_willing approved players who participated in this tournament/season,
-  // excluding own team and opponent.
-  const activeTournamentId   = (settings?.active_tournament_id as string | null) ?? null;
   const nextMatchOpponentId  = nextMatch
     ? (nextMatch.home_team_id === teamId ? nextMatch.away_team_id : nextMatch.home_team_id)
     : null;
 
   let availableSubs: AvailableSub[] = [];
-  {
+  if (!activeTournamentId) {
     const { data: subsRaw } = await supabaseAdmin
       .from("players")
       .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, team_id, draft_entered")
       .eq("status", "approved")
       .eq("sub_willing", true);
 
-    // Build the set of tournament participants so we only show players who signed up
-    // for the current season — not arbitrary approved players from prior seasons.
-    let participantIds: Set<string> | null = null;
-    if (activeTournamentId) {
-      const { data: entries } = await supabaseAdmin
-        .from("tournament_entries")
-        .select("player_id")
-        .eq("tournament_id", activeTournamentId);
-      participantIds = new Set((entries ?? []).map((e: { player_id: string }) => e.player_id));
-    }
-
+    // Must have entered the draft OR be on a team this season.
     availableSubs = (
       (subsRaw ?? []) as {
         id: string; username: string; display_name: string | null;
@@ -587,12 +603,6 @@ export default async function MyTeamPage() {
       .filter((p) => {
         if (p.team_id === teamId) return false;
         if (nextMatchOpponentId && p.team_id === nextMatchOpponentId) return false;
-        // Must be a participant in this season.
-        // A player is considered a participant if they signed up for the tournament
-        // OR if they're on a team (covers eliminated teams and team-mode tournaments
-        // where players aren't in tournament_entries).
-        if (participantIds) return participantIds.has(p.id) || p.team_id !== null;
-        // Legacy (no tournament): entered the draft OR is on a team this season
         return p.draft_entered || p.team_id !== null;
       })
       .map(({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3 }) => ({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3 }));
@@ -795,17 +805,19 @@ export default async function MyTeamPage() {
             })()}
           </Card>
 
-          {/* Incoming sub requests from our opponent */}
-          <OpposingSubRequestPanel requests={incomingSubRequests} />
-
-          {/* Sub Requests — only when you have an upcoming match and aren't waiting on the opponent */}
-          {nextMatch && !opponentNotReady && (
-            <SubRequestPanel
-              teamId={teamId}
-              roster={subRoster}
-              availableSubs={availableSubs}
-              existingRequests={existingSubRequests}
-            />
+          {/* Sub panels are season-only — tournaments don't allow substitutions */}
+          {!activeTournamentId && (
+            <>
+              <OpposingSubRequestPanel requests={incomingSubRequests} />
+              {nextMatch && (
+                <SubRequestPanel
+                  teamId={teamId}
+                  roster={subRoster}
+                  availableSubs={availableSubs}
+                  existingRequests={existingSubRequests}
+                />
+              )}
+            </>
           )}
 
         </div>
@@ -823,6 +835,7 @@ export default async function MyTeamPage() {
           pendingAwayScore={nextMatch?.pending_away_score ?? null}
           scoreSubmittedByTeamId={nextMatch?.score_submitted_by_team_id ?? null}
           scoreConfirmed={nextMatch?.score_confirmed ?? false}
+          scoreSubmittedAt={nextMatch?.score_submitted_at ?? null}
           opponentNotReady={opponentNotReady}
           opponentName={opponentName}
         />

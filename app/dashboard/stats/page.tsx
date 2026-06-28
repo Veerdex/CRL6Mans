@@ -67,7 +67,6 @@ export default async function StatsPage() {
       </p>
       <StatsTable rows={rows} />
       <p className="mt-3 text-xs text-zinc-700">
-        Demos not tracked — not stored in replay headers.
         MVP = ((G+A+Sv+Sh÷10)÷(GP×4)) + Sc÷1000
       </p>
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useTransition } from "react";
-import { requestProfileChange, cancelProfileRequest } from "./actions";
+import { requestProfileChange, cancelProfileRequest, dismissRejectedRequest } from "./actions";
 
 export type PlayerSettings = {
   tracker_url: string;
@@ -22,15 +22,23 @@ export type PendingRequest = {
   created_at: string;
 };
 
+export type RejectedRequest = {
+  id: string;
+  adminNote: string | null;
+};
+
 export function SettingsForm({
   current,
   pending,
+  rejected,
 }: {
   current: PlayerSettings;
   pending: PendingRequest | null;
+  rejected: RejectedRequest | null;
 }) {
   const [state, action, submitting] = useActionState(requestProfileChange, {});
   const [cancelling, startCancel] = useTransition();
+  const [dismissing, startDismiss] = useTransition();
 
   // Pre-fill with pending values if a request is waiting — lets the player
   // see and edit what they submitted before the admin reviews it.
@@ -40,6 +48,13 @@ export function SettingsForm({
     if (!pending) return;
     startCancel(async () => {
       await cancelProfileRequest(pending.id);
+    });
+  }
+
+  function handleDismiss() {
+    if (!rejected) return;
+    startDismiss(async () => {
+      await dismissRejectedRequest(rejected.id);
     });
   }
 
@@ -82,10 +97,10 @@ export function SettingsForm({
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={fill.peak_3v3}    current={current.peak_3v3}    isPending={!!pending} />
-          <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={fill.current_3v3} current={current.current_3v3} isPending={!!pending} />
           <MMRInput name="peak_2v2"    label="All Time Peak 2v2" defaultValue={fill.peak_2v2}    current={current.peak_2v2}    isPending={!!pending} />
           <MMRInput name="current_2v2" label="Season Peak 2v2"   defaultValue={fill.current_2v2} current={current.current_2v2} isPending={!!pending} />
+          <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={fill.peak_3v3}    current={current.peak_3v3}    isPending={!!pending} />
+          <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={fill.current_3v3} current={current.current_3v3} isPending={!!pending} />
         </div>
 
         <div className="flex items-center justify-between p-4 bg-zinc-800 border border-zinc-700 rounded-lg">
@@ -116,6 +131,26 @@ export function SettingsForm({
           {submitting ? "Submitting…" : pending ? "Update Request" : "Request Changes"}
         </button>
       </form>
+
+      {rejected && (
+        <div className="flex items-start justify-between gap-4 bg-red-950/40 border border-red-700/50 rounded-xl px-4 py-3">
+          <div className="space-y-0.5">
+            <p className="text-sm font-semibold text-red-300">Change request rejected</p>
+            {rejected.adminNote ? (
+              <p className="text-xs text-red-400/80">Reason: {rejected.adminNote}</p>
+            ) : (
+              <p className="text-xs text-red-400/80">No reason provided. Contact an admin if you have questions.</p>
+            )}
+          </div>
+          <button
+            onClick={handleDismiss}
+            disabled={dismissing}
+            className="shrink-0 text-xs text-red-400 hover:text-red-300 underline transition-colors disabled:opacity-50"
+          >
+            {dismissing ? "Dismissing…" : "Dismiss"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

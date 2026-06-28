@@ -8,6 +8,7 @@ const ITEMS: { key: string; label: string; desc: string }[] = [
   { key: "sub_requests",    label: "Sub Requests",             desc: "When a team requests a substitute." },
   { key: "registrations",   label: "Pending Registrations",    desc: "When a new player submits a registration." },
   { key: "profile_changes", label: "Profile Change Requests",  desc: "When a player requests an MMR / tracker change." },
+  { key: "schedule_approvals", label: "Schedule Approvals",    desc: "When two teams agree on a time outside the scheduled window." },
 ];
 
 export function AdminNotificationToggles({ initial }: { initial: Record<string, boolean> }) {

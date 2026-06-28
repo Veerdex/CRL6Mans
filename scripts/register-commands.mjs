@@ -53,6 +53,22 @@ const commands = [
     description: "Diagnose why your Discord roles may not be assigned (admin only)",
   },
   {
+    name: "assignrole",
+    description: "Assign a Discord role to a user (admin only)",
+    options: [
+      { name: "user", description: "The user to assign the role to", type: 6, required: true },
+      { name: "role", description: "The role to assign", type: 8, required: true },
+    ],
+  },
+  {
+    name: "removerole",
+    description: "Remove a Discord role from a user (admin only)",
+    options: [
+      { name: "user", description: "The user to remove the role from", type: 6, required: true },
+      { name: "role", description: "The role to remove", type: 8, required: true },
+    ],
+  },
+  {
     name: "setmoderatorid",
     description: "Set the Discord role used as Moderator, for staff pings (admin only)",
     options: [{ name: "role", description: "The Moderator role", type: 8, required: true }],

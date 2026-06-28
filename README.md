@@ -2,6 +2,22 @@
 
 Web platform and Discord bot for the CRL West 6mans competitive Rocket League league.
 
+## Overview
+
+CRL West 6Mans is a competitive collegiate Rocket League pickup league. Players sign in with Discord, and the platform runs the full season lifecycle:
+
+1. **Register** — players sign in via Discord OAuth and submit their Rocket League ranks + tracker; an admin approves them.
+2. **Draft** — approved players enter the draft pool and are placed onto teams (live snake draft, or auto-balance by Rank Value).
+3. **Season** — teams play a group / Swiss / bracket format; each match gets its own private Discord channel, and captains report scores by uploading replays.
+4. **Playoffs & podium** — the bracket resolves to a champion, archived on the Podium.
+
+There are **two surfaces**:
+
+- **Web dashboard** (Next.js) — where players register, browse teams/players/stats/schedule, manage their own team, and submit results. Staff run the league from the **Admin** panel here (start drafts, set the season format, report matches, moderate players, link team roles). The Admin dashboard — not the bot — is the primary control surface.
+- **Discord bot** — a handful of slash commands plus automatic management of roles, per-match channels, and notifications (see [Discord Bot](#discord-bot--what-it-does-permissions--setup) below).
+
+Staff have three tiers — **Moderator → Director → CEO** — each able to act on the tiers below it.
+
 ## Rank Value (RV)
 
 Players are ranked by **Rank Value**, which weighs both 2v2 and 3v3 performance:
@@ -174,9 +190,41 @@ DISCORD_PUBLIC_KEY=
 DISCORD_BOT_TOKEN=
 DISCORD_GUILD_ID=
 
-# Admin Discord user IDs (comma-separated) — used for director-level web dashboard access
+# Admin Discord user IDs (comma-separated) — superuser fallback for staff actions
 ADMIN_DISCORD_IDS=
+
+# Discord server invite link — shown to users who must join the server before
+# entering a draft/tournament. Set both to the same invite URL.
+DISCORD_INVITE_URL=
+NEXT_PUBLIC_DISCORD_INVITE_URL=
+
+# Web push notifications (VAPID) — generate a key pair with:
+#   npx web-push generate-vapid-keys
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_EMAIL=admin@example.com
+
+# Cron auth — shared secret the external pinger sends as
+# "Authorization: Bearer <CRON_SECRET>" to the /api/cron/* endpoints
+CRON_SECRET=
 ```
+
+> **Vercel deployment:** All of these variables must also be added to your Vercel project under **Settings → Environment Variables** — `.env.local` is only used for local development and is never deployed. Set the scope to **Production** (and Preview/Development as needed).
+>
+> Note: the production build evaluates the push module at build time, so the
+> `VAPID_*` keys must be present in the build environment (Vercel) or the build
+> fails with `No key set vapidDetails.publicKey`.
+
+### Database setup
+
+The app stores everything in Supabase (Postgres) and uses the **service-role** key for all server access, so make sure `SUPABASE_SERVICE_ROLE_KEY` is set.
+
+In the Supabase **SQL editor**, set up the schema:
+
+1. Run **`scripts/schema.sql`** — creates all the tables.
+2. Run each **`scripts/*-migration.sql`** file. These add columns/constraints that were introduced over time and are idempotent (`add column if not exists`, `drop constraint if exists`), so it's safe to run them all — on a fresh database or an existing one.
+
+> If a feature ever errors with "column … does not exist," a migration hasn't been applied — re-run the `scripts/*-migration.sql` files.
 
 ### Running Locally
 

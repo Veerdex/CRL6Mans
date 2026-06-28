@@ -11,6 +11,7 @@ import { ServiceWorkerRegistrar } from "./sw-register";
 import { NotificationButton } from "./notification-button";
 import { PullToRefresh } from "./pull-to-refresh";
 import { PwaDesktopHint } from "./pwa-desktop-hint";
+import { CoinGrantToast } from "./coin-grant-toast";
 
 type NavItem = { href: string; label: string; icon: React.ReactNode };
 
@@ -96,6 +97,11 @@ const ALL_NAV: Record<string, NavItem> = {
     label: "About",
     icon: icon("M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"),
   },
+  wagers: {
+    href: "/dashboard/wagers",
+    label: "Wagers",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/><path d="M8 14h.01M16 14h.01"/></svg>,
+  },
   game: {
     href: "/dashboard/game",
     label: "Game",
@@ -128,6 +134,44 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ? getPlayerInfo(session.userId)
     : Promise.resolve({ status: "unregistered" as const, teamId: null, displayName: null }));
   if (playerInfo.status === "banned") redirect("/login");
+
+  // ── Claim pending coin grants on visit ────────────────────────────────────
+  let coinGrantStart = 0;
+  let coinGrantWeekly = 0;
+  if (playerInfo.status === "approved" && session?.userId) {
+    const { data: playerCoins } = await supabaseAdmin
+      .from("players")
+      .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly")
+      .eq("discord_id", session.userId)
+      .single();
+
+    const pendingStart = playerCoins?.coin_grant_pending_start ?? false;
+    const pendingWeekly = playerCoins?.coin_grant_pending_weekly ?? false;
+
+    if ((pendingStart || pendingWeekly) && playerCoins) {
+      const { data: ls } = await supabaseAdmin
+        .from("league_settings")
+        .select("pending_start_coin_amount")
+        .single();
+
+      const startAmount = pendingStart ? ((ls?.pending_start_coin_amount as number | null) ?? 0) : 0;
+      const weeklyAmount = pendingWeekly ? 1000 : 0;
+      const total = startAmount + weeklyAmount;
+
+      if (total > 0) {
+        await supabaseAdmin
+          .from("players")
+          .update({
+            crl_coins: (playerCoins.crl_coins ?? 0) + total,
+            coin_grant_pending_start: false,
+            coin_grant_pending_weekly: false,
+          })
+          .eq("id", playerCoins.id);
+        coinGrantStart = startAmount;
+        coinGrantWeekly = weeklyAmount;
+      }
+    }
+  }
 
   const { status, teamId } = playerInfo;
   const [settingsRes, playersCountRes] = await Promise.all([
@@ -221,7 +265,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
       ...(hasPodium ? ["podium"] : []),
       ...(draftActive ? ["draft"] : []),
       ...(seasonActive ? ["season"] : []),
-      ...(hasJoined && hasActiveContent ? ["schedule"] : []),
+      ...(hasActiveContent ? ["schedule"] : []),
+      "wagers", // always visible — Westside Wages standings persist between events
       "settings", "game",
     ];
   } else if (status === "pending") {
@@ -268,6 +313,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <main className="flex-1 overflow-hidden">
           <PullToRefresh>{children}</PullToRefresh>
         </main>
+        <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
 
         {/* Bottom bar — desktop only */}
         <footer className="app-bottombar hidden md:flex items-center justify-between gap-4 px-4 h-12 bg-zinc-900 border-t border-zinc-800 shrink-0">
@@ -366,6 +412,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <main className="flex-1 overflow-hidden">
         <PullToRefresh>{children}</PullToRefresh>
       </main>
+      <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
 
       <MobileNav items={navItems} username={session?.username ?? "Unknown"} displayName={playerInfo.displayName} avatarUrl={avatarUrl} status={status} priorityHrefs={priorityHrefs} />
     </div>

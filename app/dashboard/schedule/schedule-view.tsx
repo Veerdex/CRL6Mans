@@ -6,7 +6,7 @@ export type ScheduleMatch = {
   round: number;
   match_number: number;
   scheduled_at: string | null;
-  schedule_accepted: boolean;
+  confirmed: boolean; // time is locked in (computed server-side)
   home_team_name: string;
   away_team_name: string;
 };
@@ -108,8 +108,8 @@ function MatchCard({
 }
 
 export function ScheduleView({ matches }: { matches: ScheduleMatch[] }) {
-  const confirmed = matches.filter((m) => m.scheduled_at && m.schedule_accepted);
-  const pending   = matches.filter((m) => m.scheduled_at && !m.schedule_accepted);
+  const confirmed = matches.filter((m) => m.confirmed);
+  const pending   = matches.filter((m) => m.scheduled_at && !m.confirmed);
   const none      = matches.filter((m) => !m.scheduled_at);
 
   // Group confirmed matches by calendar day (in the user's local timezone)

@@ -333,9 +333,15 @@ function getPresetSaveError(preset: PresetDef, actualTeams: number): string | nu
   if (actualTeams <= 0) return null;
   if (actualTeams < preset.minTeams)
     return `Requires ≥ ${preset.minTeams} teams (current: ${actualTeams})`;
-  if (preset.maxTeams !== undefined && actualTeams > preset.maxTeams)
-    return `Max ${preset.maxTeams} teams for this format (current: ${actualTeams})`;
   return null;
+}
+
+// Over the format's max isn't a hard block — the season still starts, but only the
+// top-seeded teams play. This message warns the admin that the rest are cut.
+function getPresetCutoffNotice(preset: PresetDef, actualTeams: number): string | null {
+  if (preset.maxTeams === undefined || actualTeams <= preset.maxTeams) return null;
+  const cut = actualTeams - preset.maxTeams;
+  return `This format plays at most ${preset.maxTeams} teams. With ${actualTeams} in the pool, the lowest-Rank-Value ${cut} team${cut === 1 ? "" : "s"} won't participate when the season starts.`;
 }
 
 // ── Stage flow visualization ───────────────────────────────────────────────────
@@ -467,6 +473,10 @@ export function FormatEditor({
 
   const saveBlockReason: string | null = selectedPreset
     ? getPresetSaveError(selectedPreset, actualTeams)
+    : null;
+
+  const cutoffNotice: string | null = selectedPreset
+    ? getPresetCutoffNotice(selectedPreset, actualTeams)
     : null;
 
   const canSave =
@@ -698,6 +708,9 @@ export function FormatEditor({
         )}
         {saveBlockReason && (
           <p className="text-sm text-amber-400">⚠ {saveBlockReason} — season start will be blocked until this is met.</p>
+        )}
+        {cutoffNotice && (
+          <p className="text-sm text-amber-400">⚠ {cutoffNotice}</p>
         )}
         {saved && <p className="text-sm text-green-400">Saved!</p>}
         {saveError && <p className="text-sm text-red-400">{saveError}</p>}

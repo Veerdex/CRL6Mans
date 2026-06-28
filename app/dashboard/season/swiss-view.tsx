@@ -154,7 +154,7 @@ function gColors(w: number, l: number) {
   if (w > l)   return { border: "border-emerald-700", bg: "bg-emerald-950", lbl: "text-emerald-300" };
   if (l > w)   return { border: "border-red-800",     bg: "bg-red-950",     lbl: "text-red-300"     };
   if (w === 0) return { border: "border-indigo-700",  bg: "bg-indigo-950",  lbl: "text-indigo-300"  };
-  return         { border: "border-zinc-600",         bg: "bg-zinc-800",    lbl: "text-zinc-300"    };
+  return         { border: "border-amber-600",        bg: "bg-amber-950",   lbl: "text-amber-300"   };
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -210,6 +210,25 @@ export async function SwissBracketView() {
   const teams: Record<string, Team> = {};
   teamsRaw?.forEach(t => { teams[t.id] = t; });
 
+  const teamTitles: Record<string, string> = {};
+  const swissTeamIds = [...new Set((raw ?? []).flatMap(m => [m.home_team_id, m.away_team_id].filter(Boolean) as string[]))];
+  if (swissTeamIds.length) {
+    const { data: swissPlayers } = await supabaseAdmin
+      .from("players")
+      .select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3")
+      .in("team_id", swissTeamIds);
+    const rvOf = (p: { peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null }) =>
+      Math.round((Number(p.peak_2v2 ?? 0) + Number(p.current_2v2 ?? 0)) * 0.3 + (Number(p.peak_3v3 ?? 0) + Number(p.current_3v3 ?? 0)) * 0.2);
+    const byTeam: Record<string, { display_name: string | null; username: string; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null }[]> = {};
+    for (const p of (swissPlayers ?? [])) {
+      if (!p.team_id) continue;
+      (byTeam[p.team_id] ??= []).push(p as never);
+    }
+    for (const [tid, roster] of Object.entries(byTeam)) {
+      teamTitles[tid] = roster.sort((a, b) => rvOf(b) - rvOf(a)).map(p => `${p.display_name ?? p.username} (${rvOf(p)})`).join("\n");
+    }
+  }
+
   // ── Group matches by (round, pre-round W, pre-round L) ────────────────────
   const gMap = new Map<string, GMatch[]>();
   for (const m of raw) {
@@ -260,7 +279,7 @@ export async function SwissBracketView() {
     { cls: "border-emerald-700 bg-emerald-950", label: "Winning record" },
     { cls: "border-red-800 bg-red-950",         label: "Losing record"  },
     { cls: "border-indigo-700 bg-indigo-950",   label: "0 – 0"          },
-    { cls: "border-zinc-600 bg-zinc-800",       label: "Even record"    },
+    { cls: "border-amber-600 bg-amber-950",      label: "Even record"    },
   ];
 
   return (
@@ -380,7 +399,11 @@ export async function SwissBracketView() {
                             {m.home_team_id && teams[m.home_team_id]?.logo_url ? (
                               <img src={teams[m.home_team_id].logo_url!} alt="" className="w-3.5 h-3.5 rounded shrink-0 object-cover" />
                             ) : null}
-                            <span className="truncate">{hn}</span>
+                            {m.home_team_id ? (
+                              <a href={`/dashboard/teams?search=${encodeURIComponent(hn)}&from=season`} title={teamTitles[m.home_team_id]} className="truncate hover:underline">{hn}</a>
+                            ) : (
+                              <span className="truncate">{hn}</span>
+                            )}
                           </div>
                           {/* Series score / vs */}
                           <span className={`shrink-0 text-[11px] font-mono tabular-nums w-10 text-center ${done ? "font-bold text-white" : "text-zinc-600"}`}>
@@ -388,7 +411,11 @@ export async function SwissBracketView() {
                           </span>
                           {/* Away */}
                           <div className={`flex-1 min-w-0 flex items-center justify-end gap-1 text-xs ${awayWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
-                            <span className="truncate">{an}</span>
+                            {m.away_team_id ? (
+                              <a href={`/dashboard/teams?search=${encodeURIComponent(an)}&from=season`} title={teamTitles[m.away_team_id]} className="truncate hover:underline">{an}</a>
+                            ) : (
+                              <span className="truncate">{an}</span>
+                            )}
                             {m.away_team_id && teams[m.away_team_id]?.logo_url ? (
                               <img src={teams[m.away_team_id].logo_url!} alt="" className="w-3.5 h-3.5 rounded shrink-0 object-cover" />
                             ) : null}

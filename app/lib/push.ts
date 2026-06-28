@@ -58,7 +58,8 @@ export type AdminNotificationCategory =
   | "match_reporting"
   | "sub_requests"
   | "registrations"
-  | "profile_changes";
+  | "profile_changes"
+  | "schedule_approvals";
 
 export async function pushToAdmins(payload: PushPayload, adminCategory?: AdminNotificationCategory) {
   if (!(await notificationsEnabled())) return;

@@ -31,6 +31,7 @@ export type TournamentInput = {
   match_play_hour: number | null;
   min_mmr_2v2: number | null;
   min_mmr_3v3: number | null;
+  is_test?: boolean;
 };
 
 export type Tournament = TournamentInput & {
@@ -43,6 +44,7 @@ export type Tournament = TournamentInput & {
   created_at: string;
   updated_at: string;
   hidden_from_home: boolean;
+  is_test: boolean;
 };
 
 export type Season = {
@@ -149,6 +151,7 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
       match_play_hour: null,
       min_mmr_2v2: min2v2 || null,
       min_mmr_3v3: min3v3 || null,
+      is_test: input.is_test ?? false,
     },
   };
 }
@@ -418,18 +421,34 @@ export async function completeTournament() {
   const activeId = settings?.active_tournament_id as string | null | undefined;
   if (!activeId) return { error: "No active tournament to complete." };
 
-  // Snapshot the summary BEFORE resetSeason wipes the matches/teams.
-  const summary = await computeSummary();
+  const { data: tournament } = await supabaseAdmin
+    .from("tournaments").select("is_test").eq("id", activeId).single();
+  const isTest = tournament?.is_test ?? false;
 
-  await supabaseAdmin
-    .from("tournaments")
-    .update({
-      status: "completed",
-      summary,
-      ended_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", activeId);
+  if (isTest) {
+    // Test tournaments are discarded: no summary saved, hidden from all public views.
+    await supabaseAdmin
+      .from("tournaments")
+      .update({
+        status: "completed",
+        hidden_from_home: true,
+        ended_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", activeId);
+  } else {
+    // Snapshot the summary BEFORE resetSeason wipes the matches/teams.
+    const summary = await computeSummary();
+    await supabaseAdmin
+      .from("tournaments")
+      .update({
+        status: "completed",
+        summary,
+        ended_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", activeId);
+  }
 
   // Reuse the existing season-reset (wipes matches, unassigns players, strips roles).
   await resetSeason();
@@ -441,12 +460,8 @@ export async function completeTournament() {
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
-  return {
-    ok: true,
-    message: summary.champion
-      ? `Tournament completed. Champion: ${summary.champion}.`
-      : "Tournament completed.",
-  };
+  if (isTest) return { ok: true, message: "Test tournament discarded. No records saved." };
+  return { ok: true, message: "Tournament completed." };
 }
 
 export async function deleteEvent(

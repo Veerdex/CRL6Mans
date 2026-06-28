@@ -18,6 +18,57 @@ import {
 } from "./bracket";
 import type { SeasonFormatConfig } from "@/app/dashboard/season/format-editor";
 
+// Pair seeds for a cross-group Swiss R1. Each entry carries a groupIdx so the
+// algorithm can enforce different-group matchups. Tries top-half vs bottom-half
+// first (best seed-quality spread), then backtracks to find any cross-group
+// pairing, and only allows same-group as a true last resort.
+function pairCrossGroupR1(
+  seeds: { id: string; groupIdx: number }[]
+): { homeId: string; awayId: string }[] {
+  const n = seeds.length;
+  if (n < 2) return [];
+  const sameGroup = (i: number, j: number) => seeds[i].groupIdx === seeds[j].groupIdx;
+  const half = Math.floor(n / 2);
+
+  const ideal: [number, number][] = Array.from({ length: half }, (_, i) => [i, i + half]);
+  if (ideal.every(([i, j]) => !sameGroup(i, j)))
+    return ideal.map(([i, j]) => ({ homeId: seeds[i].id, awayId: seeds[j].id }));
+
+  function backtrack(rem: number[], allowSame: boolean): [number, number][] | null {
+    if (rem.length === 0) return [];
+    const [first, ...rest] = rem;
+    for (let k = 0; k < rest.length; k++) {
+      if (allowSame || !sameGroup(first, rest[k])) {
+        const sub = backtrack([...rest.slice(0, k), ...rest.slice(k + 1)], allowSame);
+        if (sub !== null) return [[first, rest[k]], ...sub];
+      }
+    }
+    return null;
+  }
+
+  const idx = Array.from({ length: n }, (_, i) => i);
+  const result = backtrack(idx, false) ?? backtrack(idx, true)!;
+  return result.map(([i, j]) => ({ homeId: seeds[i].id, awayId: seeds[j].id }));
+}
+
+function makeSwissR1Inserts(pairs: { homeId: string; awayId: string }[]): BracketMatchInsert[] {
+  return pairs.map((p, i) => ({
+    round: 1, match_number: i + 1, stage: SWISS_STAGE,
+    home_team_id: p.homeId, away_team_id: p.awayId,
+    home_score: null, away_score: null, status: "scheduled",
+  }));
+}
+
+// Per-format ceiling on participating teams. When the pool exceeds this, only the
+// top seeds (by season standing, then Rank Value) play; the rest are left out.
+// Mirrors the maxTeams values in format-editor.tsx. Presets absent here are uncapped.
+const PRESET_MAX_TEAMS: Record<string, number> = {
+  group_single_elimination: 64,
+  group_swiss_single_elimination: 64,
+  group_swiss_hybrid: 32,
+  group_swiss_hybrid_8: 32,
+};
+
 // ── Group Stage ────────────────────────────────────────────────────────────────
 
 async function buildGroupMatches(
@@ -192,18 +243,11 @@ export async function buildAndSaveSwissFromGroups(): Promise<{ error?: string; o
   const qualified = seedGroupQualifiers(groupStandings, qualifiersPerGroup);
   if (qualified.length !== 16) return { error: `Expected 16 qualifiers, got ${qualified.length}.` };
 
-  // Rotate the bottom half left by 1 to prevent same-group R1 matchups.
-  // seedGroupQualifiers produces [all rank-1s, all rank-2s, ...] in group order, so
-  // both halves share the same group pattern. One left-rotation staggers them so every
-  // R1 pair is cross-group (e.g. G1-winner vs G2-5th, not G1-winner vs G1-5th).
-  const half = qualified.length / 2;
-  const seeded = [
-    ...qualified.slice(0, half),
-    ...qualified.slice(half + 1),
-    qualified[half],
-  ];
-
-  const inserts = generateSwissR1Inserts(seeded);
+  // seedGroupQualifiers cycles through groups: [G0R1, G1R1, ..., G0R2, G1R2, ...]
+  // so position i belongs to group i % numGroups. Tag each seed then pair cross-group.
+  const seededWithGroup = qualified.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
+  const pairs = pairCrossGroupR1(seededWithGroup);
+  const inserts = makeSwissR1Inserts(pairs);
   const { error } = await supabaseAdmin.from("matches").insert(inserts);
   if (error) return { error: error.message };
   return { ok: true };
@@ -418,11 +462,10 @@ export async function buildAndSaveSwissFromGroupsHybrid(): Promise<{ error?: str
   const swissSeeds = qualified5.slice(numGroups); // ranks 2-5 only (16 teams for 4 groups)
   if (swissSeeds.length !== 16) return { error: `Expected 16 Swiss seeds, got ${swissSeeds.length}.` };
 
-  // Rotate bottom half to cross-group matchups in R1
-  const half = swissSeeds.length / 2;
-  const seeded = [...swissSeeds.slice(0, half), ...swissSeeds.slice(half + 1), swissSeeds[half]];
-
-  const inserts = generateSwissR1Inserts(seeded);
+  // After slicing out rank-1s, position i in swissSeeds still cycles groups with period numGroups.
+  const seededWithGroup = swissSeeds.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
+  const pairs = pairCrossGroupR1(seededWithGroup);
+  const inserts = makeSwissR1Inserts(pairs);
   const { error } = await supabaseAdmin.from("matches").insert(inserts);
   if (error) return { error: error.message };
   return { ok: true };
@@ -510,11 +553,9 @@ export async function buildAndSaveSwissFromGroupsHybrid8(): Promise<{ error?: st
   const swissSeeds = qualified3.slice(numGroups); // skip first numGroups (rank-1 teams)
   if (swissSeeds.length !== 8) return { error: `Expected 8 Swiss seeds, got ${swissSeeds.length}.` };
 
-  // Rotate bottom half to ensure cross-group matchups in R1
-  const half = swissSeeds.length / 2;
-  const seeded = [...swissSeeds.slice(0, half), ...swissSeeds.slice(half + 1), swissSeeds[half]];
-
-  const inserts = generateSwissR1Inserts(seeded);
+  const seededWithGroup = swissSeeds.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
+  const pairs = pairCrossGroupR1(seededWithGroup);
+  const inserts = makeSwissR1Inserts(pairs);
   const { error } = await supabaseAdmin.from("matches").insert(inserts);
   if (error) return { error: error.message };
   return { ok: true };
@@ -572,7 +613,7 @@ export async function buildAndSaveHybrid8FromSwiss(): Promise<{ error?: string; 
 
 // ── Main bracket builder ───────────────────────────────────────────────────────
 
-export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: boolean }> {
+export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: boolean; cutTeams?: number }> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
     .select("season_format")
@@ -604,19 +645,34 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
     avgMmr[t.id] = roster.length ? sum / roster.length : 0;
   });
 
-  const seeded = [...(teamsRaw ?? [])].sort((a, b) => {
+  let seeded = [...(teamsRaw ?? [])].sort((a, b) => {
     const diff = (b.wins ?? 0) - (a.wins ?? 0);
     return diff !== 0 ? diff : (avgMmr[b.id] ?? 0) - (avgMmr[a.id] ?? 0);
   });
 
   const format = settings.season_format as SeasonFormatConfig | null;
+
+  // Enforce the format's team ceiling: keep the top seeds, drop the rest. The cut
+  // teams keep their rosters but play no matches. num_teams is realigned so the
+  // later-stage builders (which read it back) size their brackets to the survivors.
+  let cutTeams = 0;
+  const maxTeams = format?.preset ? PRESET_MAX_TEAMS[format.preset] : undefined;
+  if (maxTeams !== undefined && seeded.length > maxTeams) {
+    cutTeams = seeded.length - maxTeams;
+    seeded = seeded.slice(0, maxTeams);
+    await supabaseAdmin.from("league_settings")
+      .update({ num_teams: maxTeams, updated_at: new Date().toISOString() })
+      .not("id", "is", null);
+  }
+
   const isDE            = format?.preset === "double_elimination";
   const isGroup         = format?.preset === "group_single_elimination" || format?.preset === "group_swiss_single_elimination" || format?.preset === "group_swiss_hybrid" || format?.preset === "group_swiss_hybrid_8";
   const isSESwissSE     = format?.preset === "se_swiss_single_elimination";
   const isDESwissSE     = format?.preset === "de_swiss_single_elimination";
 
   if (isGroup) {
-    return await buildGroupMatches(seeded, format!, avgMmr);
+    const groupResult = await buildGroupMatches(seeded, format!, avgMmr);
+    return groupResult.ok ? { ok: true, cutTeams } : groupResult;
   }
 
   // SE Qualifier format: generate only enough SE rounds to reach 16 teams.
@@ -641,7 +697,7 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
           .update({ [slot]: bye.home_team_id, status: "scheduled" }).eq("id", next.id);
       }
     }
-    return { ok: true };
+    return { ok: true, cutTeams };
   }
 
   // DE Qualifier format: truncated DE that narrows to 16 survivors (8 WB + 8 LB).
@@ -685,7 +741,7 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
       }
     }
 
-    return { ok: true };
+    return { ok: true, cutTeams };
   }
 
   const inserts = isDE ? generateDEMatchInserts(seeded) : generateSEMatchInserts(seeded);
@@ -755,5 +811,5 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
     }
   }
 
-  return { ok: true };
+  return { ok: true, cutTeams };
 }

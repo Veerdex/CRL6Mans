@@ -7,8 +7,35 @@ import {
   confirmSeriesResult,
   cancelSeriesSubmission,
   uploadGameReplay,
+  processScoreConfirmationsNow,
 } from "./series-actions";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
+
+const SCORE_CONFIRM_WINDOW_MS = 5 * 60 * 1000;
+
+// Ticks every second; when the 5-minute confirm window elapses it asks the server to
+// auto-finalize. Returns remaining ms (null when no pending submission).
+function useConfirmCountdown(scoreSubmittedAt: string | null): number | null {
+  const router = useRouter();
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const deadline = scoreSubmittedAt ? new Date(scoreSubmittedAt).getTime() + SCORE_CONFIRM_WINDOW_MS : null;
+  useEffect(() => {
+    if (deadline === null) return;
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [deadline]);
+  useEffect(() => {
+    if (deadline !== null && nowMs > deadline) {
+      processScoreConfirmationsNow().then(() => router.refresh()).catch(() => {});
+    }
+  }, [nowMs, deadline, router]);
+  return deadline !== null ? Math.max(0, deadline - nowMs) : null;
+}
+
+function fmtCountdown(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
 
 export type SeriesTeamInfo = {
   id: string;
@@ -36,6 +63,7 @@ interface Props {
   pendingAwayScore: number | null;
   scoreSubmittedByTeamId: string | null;
   scoreConfirmed: boolean;
+  scoreSubmittedAt?: string | null;
   opponentNotReady?: boolean;
   opponentName?: string | null;
 }
@@ -139,17 +167,19 @@ function ConfirmedView({
 // ── Pending-confirmation view (shown to whichever captain submitted) ───────────
 
 function WaitingView({
-  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, matchId,
+  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, matchId, scoreSubmittedAt,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
   pendingHomeScore: number;
   pendingAwayScore: number;
   matchId: string;
+  scoreSubmittedAt: string | null;
 }) {
   const router = useRouter();
   const [cancelling, startCancel] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const remaining = useConfirmCountdown(scoreSubmittedAt);
 
   function handleCancel() {
     setError(null);
@@ -173,7 +203,11 @@ function WaitingView({
       </div>
       <div className="bg-amber-950/40 border border-amber-700/40 rounded-lg px-4 py-3 space-y-2">
         <p className="text-sm font-semibold text-amber-300">Result submitted — awaiting opponent confirmation</p>
-        <p className="text-xs text-amber-500">The opposing captain must confirm before the admin can finalise this match.</p>
+        <p className="text-xs text-amber-500">
+          {remaining !== null && remaining > 0
+            ? <>Auto-submits in <span className="font-mono font-semibold text-amber-300">{fmtCountdown(remaining)}</span> if your opponent doesn&apos;t confirm.</>
+            : "Finalising…"}
+        </p>
         <div className="flex items-center gap-3 pt-1">
           <button
             onClick={handleCancel}
@@ -263,7 +297,7 @@ function ConfirmResultModal({
 // ── Opponent-submitted view (shown to the confirming captain) ─────────────────
 
 function OpponentSubmittedView({
-  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, submitterTeamName, matchId, myTeamId,
+  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, submitterTeamName, matchId, myTeamId, scoreSubmittedAt,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
@@ -272,12 +306,14 @@ function OpponentSubmittedView({
   submitterTeamName: string;
   matchId: string;
   myTeamId: string;
+  scoreSubmittedAt: string | null;
 }) {
   const router = useRouter();
   const [confirming, startConfirm] = useTransition();
   const [disputing, startDispute] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const remaining = useConfirmCountdown(scoreSubmittedAt);
 
   const iAmHome = myTeamId === homeTeam?.id;
   const myWins = iAmHome ? pendingHomeScore : pendingAwayScore;
@@ -321,6 +357,11 @@ function OpponentSubmittedView({
           <p className="text-xs text-indigo-500 mt-0.5">
             Confirm if the score is correct, or dispute to start over.
           </p>
+          <p className="text-xs text-amber-400 mt-1">
+            {remaining !== null && remaining > 0
+              ? <>Auto-submits in <span className="font-mono font-semibold">{fmtCountdown(remaining)}</span> if you don&apos;t respond.</>
+              : "Finalising…"}
+          </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <button
@@ -363,6 +404,7 @@ function OpponentSubmittedView({
 export function SeriesReplayPanel({
   matchId, homeTeam, awayTeam, bestOf,
   myTeamId, pendingHomeScore, pendingAwayScore, scoreSubmittedByTeamId, scoreConfirmed,
+  scoreSubmittedAt = null,
   opponentNotReady = false, opponentName = null,
 }: Props) {
   const router = useRouter();
@@ -540,6 +582,7 @@ export function SeriesReplayPanel({
           pendingHomeScore={pendingHomeScore}
           pendingAwayScore={pendingAwayScore}
           matchId={matchId}
+          scoreSubmittedAt={scoreSubmittedAt ?? null}
         />
       </div>
     );
@@ -560,6 +603,7 @@ export function SeriesReplayPanel({
           submitterTeamName={submitterTeam.name}
           matchId={matchId}
           myTeamId={myTeamId}
+          scoreSubmittedAt={scoreSubmittedAt ?? null}
         />
       </div>
     );

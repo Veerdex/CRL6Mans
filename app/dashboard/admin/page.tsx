@@ -21,6 +21,9 @@ import type { Tournament, Season } from "./tournament-actions";
 import { InitSettingsButton } from "./init-settings-button";
 import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
+import { RoundScheduler, type ScheduleSection, type RoundMatchInfo } from "./round-scheduler";
+import { ScheduleOverrideCard, type ScheduleOverrideCardData } from "./schedule-override-card";
+import { canonicalStage, stageName, STAGE_ORDER, expectedStageRounds, type RoundScheduleRow } from "./schedule-utils";
 
 async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean; userIsDirector: boolean }) {
   const staff = await getStaffList();
@@ -44,17 +47,18 @@ export default async function AdminPage() {
   const testingMode           = userIsDirector && cookieStore.get("testing_mode")?.value === "1";
   const notificationsEnabled  = cookieStore.get("notifications_disabled")?.value !== "1";
 
-  const [pending, { data: settings }, { count: enteredCount }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allPlayers }] = await Promise.all([
+  const [pending, { data: settings }, { count: enteredCount }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allPlayers }, { data: allMatchStages }] = await Promise.all([
     getAllPendingPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id").maybeSingle(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id").maybeSingle(),
     supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
-    supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
+    supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
     supabaseAdmin.from("sub_requests").select("id, team_id, player_out_id, sub_player_id, sub_player_ids, reason, admin_note, requested_by_discord_id, created_at").eq("status", "escalated").order("created_at", { ascending: true }),
     supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at").eq("status", "pending").order("created_at", { ascending: true }),
     supabaseAdmin.from("tournaments").select("*").order("created_at", { ascending: false }),
     supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
     supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, status, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, ban_reason, kick_reason").in("status", ["approved", "banned"]).order("username"),
+    supabaseAdmin.from("matches").select("stage, round, discord_channel_id"),
   ]);
 
   // Fetch staff roles for all players to support hierarchy-aware kick/ban buttons
@@ -119,7 +123,7 @@ export default async function AdminPage() {
   const sfFormat = settings?.season_format as { roundBestOf?: Record<string, number>; best_of?: number } | null;
   const roundBestOf = sfFormat?.roundBestOf ?? {};
   const maxRoundByStage: Record<string, number> = {};
-  for (const m of scheduledMatches ?? []) {
+  for (const m of allMatchStages ?? []) {
     maxRoundByStage[m.stage] = Math.max(maxRoundByStage[m.stage] ?? 0, m.round);
   }
   function matchBestOf(stage: string, round: number): number {
@@ -241,12 +245,146 @@ export default async function AdminPage() {
     };
   });
 
+  // ── Scheduling section data ────────────────────────────────────────────────
+  const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
+  const { data: roundScheduleRows } = settings?.season_active
+    ? await (activeTournamentId
+        ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at").eq("tournament_id", activeTournamentId)
+        : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at").is("tournament_id", null))
+    : { data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string }[] };
+
+  type MatchStageRow = { stage: string; round: number; discord_channel_id: string | null };
+  const matchStageRows = (allMatchStages ?? []) as MatchStageRow[];
+
+  // Build canonical (stage, round) sections from all matches
+  const canonRoundSets = new Map<string, Set<number>>();
+  const lockedRoundKeys = new Set<string>();
+  for (const m of matchStageRows) {
+    const cs = canonicalStage(m.stage);
+    if (!canonRoundSets.has(cs)) canonRoundSets.set(cs, new Set());
+    canonRoundSets.get(cs)!.add(m.round);
+    if (m.discord_channel_id) lockedRoundKeys.add(`${cs}:${m.round}`);
+  }
+
+  // Predict all format stages + their round counts so the scheduler shows every
+  // stage up front, before its bracket is generated. Real matches take precedence.
+  const sf = settings?.season_format as { preset?: string; groupMaxAdvancing?: number | null } | null;
+  const schedulingTeams = settings?.num_teams
+    ? (settings.num_teams as number)
+    : Math.floor((enteredCount ?? 0) / 3);
+  if (sf?.preset) {
+    for (const { stage, rounds } of expectedStageRounds(sf.preset, schedulingTeams, sf.groupMaxAdvancing ?? null)) {
+      if (canonRoundSets.has(stage) || rounds <= 0) continue;
+      const set = new Set<number>();
+      for (let r = 1; r <= rounds; r++) set.add(r);
+      canonRoundSets.set(stage, set);
+    }
+  }
+
+  const schedulingSections: ScheduleSection[] = [...canonRoundSets.entries()]
+    .sort(([a], [b]) => {
+      const ai = STAGE_ORDER.indexOf(a);
+      const bi = STAGE_ORDER.indexOf(b);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    })
+    .map(([stage, roundSet]) => {
+      const rounds = [...roundSet].sort((a, b) => a - b);
+      return { stage, rounds, maxRound: Math.max(...rounds) };
+    });
+
+  const scheduledRoundKeys = new Set(
+    (roundScheduleRows ?? []).map((s) => `${s.stage}:${s.round}`),
+  );
+  const schedulingUnscheduledCount = schedulingSections.reduce(
+    (sum, sec) => sum + sec.rounds.filter((r) => !scheduledRoundKeys.has(`${sec.stage}:${r}`)).length,
+    0,
+  );
+
+  const schedulingSchedules: RoundScheduleRow[] = (roundScheduleRows ?? []).map((s) => ({
+    stage: s.stage,
+    round: s.round,
+    scheduleType: s.schedule_type as RoundScheduleRow["scheduleType"],
+    playAt: s.play_at,
+    deadlineAt: s.deadline_at,
+  }));
+
+  // Per-round match rows (incl. TBD-team future rounds) for the expand/per-match
+  // scheduling UI. Keyed by canonical "stage:round".
+  const { data: schedulerMatchRows } = settings?.season_active
+    ? await supabaseAdmin
+        .from("matches")
+        .select("id, stage, round, match_number, home_team_id, away_team_id, scheduled_at, admin_scheduled, schedule_proposed_by_team_id, discord_channel_id")
+        .neq("status", "completed")
+        .order("stage").order("round").order("match_number")
+    : { data: [] as { id: string; stage: string; round: number; match_number: number; home_team_id: string | null; away_team_id: string | null; scheduled_at: string | null; admin_scheduled: boolean; schedule_proposed_by_team_id: string | null; discord_channel_id: string | null }[] };
+
+  const matchesByRound: Record<string, RoundMatchInfo[]> = {};
+  for (const m of schedulerMatchRows ?? []) {
+    const cs = canonicalStage(m.stage);
+    const key = `${cs}:${m.round}`;
+    const gm = m.stage.match(/^group_(\d+)$/);
+    (matchesByRound[key] ??= []).push({
+      id: m.id,
+      matchNumber: m.match_number,
+      groupNum: gm ? Number(gm[1]) : null,
+      homeName: m.home_team_id ? (teamNameById[m.home_team_id] ?? "TBD") : "TBD",
+      awayName: m.away_team_id ? (teamNameById[m.away_team_id] ?? "TBD") : "TBD",
+      scheduledAt: m.scheduled_at,
+      adminScheduled: !!m.admin_scheduled,
+      hasProposal: !!m.schedule_proposed_by_team_id,
+      hasChannel: !!m.discord_channel_id,
+    });
+  }
+  for (const key of Object.keys(matchesByRound)) {
+    matchesByRound[key].sort((a, b) => (a.groupNum ?? 0) - (b.groupNum ?? 0) || a.matchNumber - b.matchNumber);
+  }
+
+  const schedulingIsDE =
+    schedulingSections.some((s) => s.stage === "de_winners" || s.stage === "de_losers");
+
+  // Out-of-window times both teams agreed on, awaiting admin approval.
+  const scheduleOverrideCards: ScheduleOverrideCardData[] = (scheduledMatches ?? [])
+    .filter((m) => m.schedule_admin_required && m.schedule_accepted && m.scheduled_at)
+    .map((m) => {
+      const cs = canonicalStage(m.stage);
+      const sched = (roundScheduleRows ?? []).find((s) => s.stage === cs && s.round === m.round);
+      const windowNote = sched
+        ? sched.schedule_type === "daily" ? "must be on the scheduled day"
+          : sched.schedule_type === "weekly" ? "must be within the scheduled week"
+          : "a specific time was set"
+        : null;
+      return {
+        matchId: m.id,
+        homeTeam: teamNameById[m.home_team_id] ?? m.home_team_id,
+        awayTeam: teamNameById[m.away_team_id] ?? m.away_team_id,
+        roundLabel: `${stageName(cs)} · R${m.round}`,
+        requestedAt: m.scheduled_at as string,
+        windowNote,
+      };
+    });
+
   const seasonActive = settings?.season_active ?? false;
   const seasonFormat = (settings?.season_format as SeasonFormatConfig) ?? null;
   const seasonParticipants = (settings?.season_participants as number) ?? 16;
   const actualTeams: number = settings?.num_teams
     ? (settings.num_teams as number)
     : Math.floor((enteredCount ?? 0) / 3);
+
+  // Actual feasible max teams from the player pool alone (slot count is a separate concern).
+  // Shown in the top-right of the Start Draft / Auto Draft cards.
+  const teamSlotCount = (teamSlots ?? []).filter((t) => t.slot_number != null).length;
+  const draftCurrentMax = Math.floor((enteredCount ?? 0) / 3);
+
+  // The selected format's team ceiling (e.g. 32 for hybrid, 64 for group, null for SE/DE).
+  // Shown as the blank-input default in the max-teams field.
+  const FORMAT_MAX_TEAMS: Record<string, number> = {
+    group_single_elimination: 64,
+    group_swiss_single_elimination: 64,
+    group_swiss_hybrid: 32,
+    group_swiss_hybrid_8: 32,
+  };
+  const currentPreset = (seasonFormat as { preset?: string } | null)?.preset;
+  const draftFormatMax = currentPreset ? (FORMAT_MAX_TEAMS[currentPreset] ?? null) : null;
 
   type RawPlayer = { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null; status: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; ban_reason?: string | null; kick_reason?: string | null };
   const combinedPlayers: CombinedPlayer[] = ((allPlayers ?? []) as RawPlayer[]).map(p => ({
@@ -401,8 +539,48 @@ export default async function AdminPage() {
         )}
       </CollapsibleSection>
 
+      {/* ── Schedule Approvals ── */}
+      <CollapsibleSection title="Schedule Approvals" badge={scheduleOverrideCards.length} defaultOpen={scheduleOverrideCards.length > 0}>
+        {scheduleOverrideCards.length === 0 ? (
+          <p className="text-zinc-400 text-sm">No match times awaiting approval.</p>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-zinc-500">
+              Both teams agreed on a time outside the scheduled window. Approve to lock it in, or reject to send them back.
+            </p>
+            {scheduleOverrideCards.map((c) => (
+              <ScheduleOverrideCard key={c.matchId} data={c} />
+            ))}
+          </div>
+        )}
+      </CollapsibleSection>
+
       {/* ── Staff Management ── */}
       <StaffSection userIsCEO={userIsCEO} userIsDirector={userIsDirector} />
+
+      {/* ── Scheduling (Director+, visible whenever a season is active) ── */}
+      {userIsDirector && seasonActive && (
+        <CollapsibleSection
+          title="Scheduling"
+          badge={schedulingUnscheduledCount || undefined}
+          defaultOpen={schedulingUnscheduledCount > 0}
+        >
+          {schedulingSections.length === 0 ? (
+            <p className="text-sm text-zinc-500">No rounds found. Start the season to generate the bracket.</p>
+          ) : (
+            <RoundScheduler
+              tournamentId={activeTournamentId}
+              sections={schedulingSections}
+              schedules={schedulingSchedules}
+              lockedRounds={[...lockedRoundKeys]}
+              matchesByRound={matchesByRound}
+              playHour={(settings?.match_play_hour as number | null) ?? 19}
+              deadlineDay={(settings?.match_deadline_day as number | null) ?? 2}
+              isDE={schedulingIsDE}
+            />
+          )}
+        </CollapsibleSection>
+      )}
 
       {/* ── Tournaments (Director+) ── */}
       {userIsDirector && (
@@ -455,6 +633,10 @@ export default async function AdminPage() {
             eventActive={seasonActive || !!settings?.active_tournament_id}
             testingMode={testingMode}
             notificationsEnabled={notificationsEnabled}
+            draftCurrentMax={draftCurrentMax}
+            draftFormatMax={draftFormatMax}
+            isTestSeason={(settings?.is_test_season as boolean | null) ?? false}
+            isCEO={userIsCEO}
           />
         </CollapsibleSection>
       )}

@@ -26,7 +26,7 @@ export default async function SeasonPage() {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("season_format, season_participants, season_active, num_teams")
+    .select("season_format, season_participants, season_active, num_teams, active_tournament_id")
     .single();
 
   const format = (settings?.season_format as SeasonFormatConfig) ?? null;
@@ -65,7 +65,7 @@ export default async function SeasonPage() {
   let standingsRows: StandingsRow[] = [];
 
   if (seasonActive) {
-    const [{ data: allTeams }, { data: completedMatches }] = await Promise.all([
+    const [{ data: allTeams }, { data: completedMatches }, { data: bracketTeamRefs }] = await Promise.all([
       supabaseAdmin.from("teams").select("id, name, logo_url"),
       supabaseAdmin
         .from("matches")
@@ -75,9 +75,21 @@ export default async function SeasonPage() {
         .not("away_score", "is", null)
         .not("home_team_id", "is", null)
         .not("away_team_id", "is", null),
+      supabaseAdmin.from("matches").select("home_team_id, away_team_id"),
     ]);
 
-    if (allTeams?.length) {
+    // Teams that were cut at season start (over the format's max) have no matches,
+    // so exclude any team that isn't referenced by the bracket from standings.
+    const participatingIds = new Set<string>();
+    for (const m of bracketTeamRefs ?? []) {
+      if (m.home_team_id) participatingIds.add(m.home_team_id as string);
+      if (m.away_team_id) participatingIds.add(m.away_team_id as string);
+    }
+    const seasonTeams = participatingIds.size
+      ? (allTeams ?? []).filter((t) => participatingIds.has(t.id))
+      : (allTeams ?? []);
+
+    if (seasonTeams.length) {
       const records: Record<string, { wins: number; losses: number }> = {};
       for (const m of completedMatches ?? []) {
         if (!m.home_team_id || !m.away_team_id) continue;
@@ -91,7 +103,7 @@ export default async function SeasonPage() {
           records[m.home_team_id].losses++;
         }
       }
-      standingsRows = allTeams
+      standingsRows = seasonTeams
         .map((t) => ({
           id: t.id,
           name: t.name,
@@ -400,3 +412,4 @@ export default async function SeasonPage() {
     </div>
   );
 }
+

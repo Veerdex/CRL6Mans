@@ -5,12 +5,21 @@ import { PlayerName } from "@/app/dashboard/player-name";
 
 export type StatAgg = {
   games: number;
-  goals: number;
-  assists: number;
-  saves: number;
-  shots: number;
-  score: number;
+  totalGoals: number;
+  totalAssists: number;
+  totalSaves: number;
+  totalShots: number;
+  totalScore: number;
 };
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-zinc-800/40 border border-zinc-800 rounded-lg px-3 py-2">
+      <p className="text-[11px] text-zinc-500">{label}</p>
+      <p className="text-sm font-mono font-semibold text-zinc-200">{value}</p>
+    </div>
+  );
+}
 
 export function PlayerStatsModal({
   player,
@@ -24,21 +33,13 @@ export function PlayerStatsModal({
   teamName: string | null;
   rvRank: number;
   totalPlayers: number;
-  stats: StatAgg | undefined;
+  stats?: StatAgg | null;
   onClose: () => void;
 }) {
   const rv = Math.round(
     (Number(player.peak_2v2) + Number(player.current_2v2)) * 0.3 +
       (Number(player.peak_3v3) + Number(player.current_3v3)) * 0.2,
   );
-
-  const games = stats?.games ?? 0;
-  const perGame = (n: number) => (games ? n / games : 0);
-  const shootingPct = stats && stats.shots > 0 ? (stats.goals / stats.shots) * 100 : null;
-  const mvp =
-    stats && games
-      ? (stats.goals + stats.assists + stats.saves + stats.shots / 10) / (games * 4) + stats.score / 1000
-      : 0;
 
   const avatarUrl = player.avatar
     ? `https://cdn.discordapp.com/avatars/${player.discord_id}/${player.avatar}.png`
@@ -50,16 +51,6 @@ export function PlayerStatsModal({
     { label: "All Time Peak 3v3", value: Number(player.peak_3v3) },
     { label: "Season Peak 3v3", value: Number(player.current_3v3) },
   ];
-
-  const statRows = stats
-    ? [
-        { label: "Goals", total: stats.goals },
-        { label: "Assists", total: stats.assists },
-        { label: "Saves", total: stats.saves },
-        { label: "Shots", total: stats.shots },
-        { label: "Score", total: stats.score },
-      ]
-    : [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
@@ -114,59 +105,40 @@ export function PlayerStatsModal({
           </section>
 
           {/* Performance */}
-          <section className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Performance — This Event</h3>
-            {games === 0 ? (
-              <p className="text-sm text-zinc-500 bg-zinc-800/40 border border-zinc-800 rounded-lg px-4 py-6 text-center">
-                No replay stats recorded yet.
-              </p>
-            ) : (
-              <>
-                <div className="grid grid-cols-3 gap-2">
-                  <StatCard label="Games" value={String(games)} />
-                  <StatCard label="MVP Rating" value={mvp.toFixed(3)} accent />
-                  <StatCard label="Shooting %" value={shootingPct === null ? "—" : `${shootingPct.toFixed(1)}%`} />
+          {stats && stats.games > 0 && (() => {
+            const g = stats.games;
+            const perGame = (n: number) => (n / g).toFixed(2);
+            const shootingPct = stats.totalShots > 0
+              ? ((stats.totalGoals / stats.totalShots) * 100).toFixed(1) + "%"
+              : "—";
+            const mvp = (
+              (stats.totalGoals + stats.totalAssists + stats.totalSaves + stats.totalShots / 10) / (g * 4) +
+              stats.totalScore / 1000
+            ).toFixed(3);
+            const statRows = [
+              { label: "Goals / Game",   value: perGame(stats.totalGoals) },
+              { label: "Assists / Game", value: perGame(stats.totalAssists) },
+              { label: "Saves / Game",   value: perGame(stats.totalSaves) },
+              { label: "Shots / Game",   value: perGame(stats.totalShots) },
+              { label: "Shooting %",     value: shootingPct },
+              { label: "MVP Rating",     value: mvp },
+            ];
+            return (
+              <section className="space-y-3">
+                <div className="flex items-baseline gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Performance — This Event</h3>
+                  <span className="text-[11px] text-zinc-600">{g} game{g !== 1 ? "s" : ""}</span>
                 </div>
-                <div className="rounded-xl border border-zinc-800 overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-zinc-500 text-left border-b border-zinc-800 bg-zinc-800/40">
-                        <th className="px-4 py-2 font-medium">Stat</th>
-                        <th className="px-4 py-2 font-medium text-right">Total</th>
-                        <th className="px-4 py-2 font-medium text-right">Per Game</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {statRows.map((row) => (
-                        <tr key={row.label} className="border-b border-zinc-800 last:border-0">
-                          <td className="px-4 py-2 text-zinc-300">{row.label}</td>
-                          <td className="px-4 py-2 text-right font-mono text-white">{row.total.toLocaleString()}</td>
-                          <td className="px-4 py-2 text-right font-mono text-zinc-400">{perGame(row.total).toFixed(2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="grid grid-cols-2 gap-2">
+                  {statRows.map((s) => <StatCard key={s.label} label={s.label} value={s.value} />)}
                 </div>
-              </>
-            )}
-          </section>
+              </section>
+            );
+          })()}
 
-          <p className="text-[11px] text-zinc-600">Performance reflects the current event. Demos aren&apos;t tracked.</p>
         </div>
       </div>
     </div>
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <div
-      className={`rounded-xl px-3 py-2.5 border text-center ${
-        accent ? "bg-amber-950/30 border-amber-700/40" : "bg-zinc-800/60 border-zinc-700"
-      }`}
-    >
-      <p className="text-[11px] uppercase tracking-wider text-zinc-500">{label}</p>
-      <p className={`text-lg font-bold font-mono mt-0.5 ${accent ? "text-amber-300" : "text-white"}`}>{value}</p>
-    </div>
-  );
-}

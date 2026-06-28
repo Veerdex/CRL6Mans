@@ -16,7 +16,8 @@ export type PlayerStatRow = {
   totalScore: number;
 };
 
-type SortKey = "mvp" | "goals" | "assists" | "saves" | "score" | "shots" | "shootingPct";
+type SortKey = "mvp" | "goals" | "assists" | "saves" | "score" | "shots" | "shootingPct"
+             | "totalGoals" | "totalAssists" | "totalSaves" | "totalScore" | "totalShots";
 type SortDir = "desc" | "asc";
 
 function mvpScore(row: PlayerStatRow): number {
@@ -36,24 +37,34 @@ function shootingPct(row: PlayerStatRow): number {
 function sortValue(row: PlayerStatRow, key: SortKey): number {
   const g = row.games;
   switch (key) {
-    case "mvp":         return mvpScore(row);
-    case "goals":       return g > 0 ? row.totalGoals / g : 0;
-    case "assists":     return g > 0 ? row.totalAssists / g : 0;
-    case "saves":       return g > 0 ? row.totalSaves / g : 0;
-    case "score":       return g > 0 ? row.totalScore / g : 0;
-    case "shots":       return g > 0 ? row.totalShots / g : 0;
-    case "shootingPct": return shootingPct(row);
+    case "mvp":          return mvpScore(row);
+    case "goals":        return g > 0 ? row.totalGoals / g : 0;
+    case "assists":      return g > 0 ? row.totalAssists / g : 0;
+    case "saves":        return g > 0 ? row.totalSaves / g : 0;
+    case "score":        return g > 0 ? row.totalScore / g : 0;
+    case "shots":        return g > 0 ? row.totalShots / g : 0;
+    case "shootingPct":  return shootingPct(row);
+    case "totalGoals":   return row.totalGoals;
+    case "totalAssists": return row.totalAssists;
+    case "totalSaves":   return row.totalSaves;
+    case "totalScore":   return row.totalScore;
+    case "totalShots":   return row.totalShots;
   }
 }
 
-const COLS: { key: SortKey; label: string; title: string; decimals: number; suffix?: string }[] = [
-  { key: "mvp",         label: "MVP",   title: "MVP score — composite performance metric",   decimals: 3 },
-  { key: "goals",       label: "G/G",   title: "Goals per game",                             decimals: 2 },
-  { key: "assists",     label: "A/G",   title: "Assists per game",                           decimals: 2 },
-  { key: "saves",       label: "Sv/G",  title: "Saves per game",                             decimals: 2 },
-  { key: "score",       label: "Sc/G",  title: "Score per game",                             decimals: 0 },
-  { key: "shots",       label: "Sh/G",  title: "Shots per game",                             decimals: 2 },
-  { key: "shootingPct", label: "Sh%",   title: "Shooting percentage (goals / shots)",        decimals: 1, suffix: "%" },
+const COLS: { key: SortKey; label: string; title: string; decimals: number; suffix?: string; group?: string }[] = [
+  { key: "mvp",          label: "MVP",   title: "MVP score — composite performance metric",    decimals: 3,                group: "avg" },
+  { key: "goals",        label: "G/G",   title: "Goals per game",                             decimals: 2,                group: "avg" },
+  { key: "assists",      label: "A/G",   title: "Assists per game",                           decimals: 2,                group: "avg" },
+  { key: "saves",        label: "Sv/G",  title: "Saves per game",                             decimals: 2,                group: "avg" },
+  { key: "score",        label: "Sc/G",  title: "Score per game",                             decimals: 0,                group: "avg" },
+  { key: "shots",        label: "Sh/G",  title: "Shots per game",                             decimals: 2,                group: "avg" },
+  { key: "shootingPct",  label: "Sh%",   title: "Shooting percentage (goals / shots)",        decimals: 1, suffix: "%",   group: "avg" },
+  { key: "totalGoals",   label: "Gls",   title: "Total goals",                                decimals: 0,                group: "tot" },
+  { key: "totalAssists", label: "Ast",   title: "Total assists",                              decimals: 0,                group: "tot" },
+  { key: "totalSaves",   label: "Sv",    title: "Total saves",                                decimals: 0,                group: "tot" },
+  { key: "totalScore",   label: "Score", title: "Total score",                                decimals: 0,                group: "tot" },
+  { key: "totalShots",   label: "Sh",    title: "Total shots",                                decimals: 0,                group: "tot" },
 ];
 
 export function StatsTable({ rows }: { rows: PlayerStatRow[] }) {
@@ -91,25 +102,27 @@ export function StatsTable({ rows }: { rows: PlayerStatRow[] }) {
             <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Player</th>
             <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Team</th>
             <th className="px-4 py-3 text-right text-xs font-semibold text-zinc-400 whitespace-nowrap">GP</th>
-            {COLS.map((col) => (
-              <th
-                key={col.key}
-                onClick={() => handleSort(col.key)}
-                title={col.title}
-                className={[
-                  "px-4 py-3 text-right text-xs font-semibold cursor-pointer select-none whitespace-nowrap transition-colors",
-                  sortKey === col.key ? "text-amber-400" : "text-zinc-400 hover:text-zinc-200",
-                ].join(" ")}
-              >
-                {col.label}
-                {sortKey === col.key && (
-                  <span className="ml-0.5 text-[10px]">{sortDir === "desc" ? " ▼" : " ▲"}</span>
-                )}
-              </th>
-            ))}
-            <th className="px-4 py-3 text-right text-xs font-semibold text-zinc-400 whitespace-nowrap" title="Demos per game (not tracked in replay headers)">
-              D/G
-            </th>
+            {COLS.map((col, i) => {
+              const prevGroup = i > 0 ? COLS[i - 1].group : col.group;
+              const groupBorder = col.group !== prevGroup ? "border-l border-zinc-700" : "";
+              return (
+                <th
+                  key={col.key}
+                  onClick={() => handleSort(col.key)}
+                  title={col.title}
+                  className={[
+                    "px-4 py-3 text-right text-xs font-semibold cursor-pointer select-none whitespace-nowrap transition-colors",
+                    groupBorder,
+                    sortKey === col.key ? "text-amber-400" : "text-zinc-400 hover:text-zinc-200",
+                  ].join(" ")}
+                >
+                  {col.label}
+                  {sortKey === col.key && (
+                    <span className="ml-0.5 text-[10px]">{sortDir === "desc" ? " ▼" : " ▲"}</span>
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -121,14 +134,17 @@ export function StatsTable({ rows }: { rows: PlayerStatRow[] }) {
               </td>
               <td className="px-4 py-3 text-zinc-400 text-xs whitespace-nowrap">{row.teamName ?? "—"}</td>
               <td className="px-4 py-3 text-right text-zinc-400 tabular-nums">{row.games}</td>
-              {COLS.map((col) => {
+              {COLS.map((col, i) => {
                 const v = sortValue(row, col.key);
                 const display = v.toFixed(col.decimals) + (col.suffix ?? "");
+                const prevGroup = i > 0 ? COLS[i - 1].group : col.group;
+                const groupBorder = col.group !== prevGroup ? "border-l border-zinc-800" : "";
                 return (
                   <td
                     key={col.key}
                     className={[
                       "px-4 py-3 text-right tabular-nums",
+                      groupBorder,
                       sortKey === col.key ? "text-amber-300 font-medium" : "text-zinc-300",
                     ].join(" ")}
                   >
@@ -136,7 +152,6 @@ export function StatsTable({ rows }: { rows: PlayerStatRow[] }) {
                   </td>
                 );
               })}
-              <td className="px-4 py-3 text-right text-zinc-600 tabular-nums">—</td>
             </tr>
           ))}
         </tbody>

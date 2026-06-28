@@ -302,10 +302,23 @@ async function verifyAdmin() {
   return session;
 }
 
-export async function adminStartDraft(code: string) {
+// Blank → "max" (build as many teams as the pool/slots allow). A positive integer
+// caps the team count. Anything else is rejected.
+function parseMaxTeams(raw?: string): number | "max" | "invalid" {
+  const trimmed = (raw ?? "").trim();
+  if (trimmed === "") return "max";
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 1) return "invalid";
+  return n;
+}
+
+export async function adminStartDraft(code: string, maxTeamsRaw?: string) {
   await verifyAdmin();
   if (code !== "CONFIRM DRAFT") return { error: 'Type exactly: CONFIRM DRAFT' };
-  const result = await execStartDraft();
+  const maxTeams = parseMaxTeams(maxTeamsRaw);
+  if (maxTeams === "invalid")
+    return { error: "Enter a whole number ≥ 1 for max teams, or leave it blank for the maximum." };
+  const result = await execStartDraft(maxTeams);
   if (result.ok) {
     revalidatePath("/dashboard/teams");
     revalidatePath("/dashboard/draft");
@@ -326,10 +339,13 @@ export async function adminStartDraft(code: string) {
   return result;
 }
 
-export async function adminAutoBalance(code: string) {
+export async function adminAutoBalance(code: string, maxTeamsRaw?: string) {
   await verifyAdmin();
   if (code !== "AUTO DRAFT") return { error: "Type exactly: AUTO DRAFT" };
-  const result = await execAutoBalanceTeams();
+  const maxTeams = parseMaxTeams(maxTeamsRaw);
+  if (maxTeams === "invalid")
+    return { error: "Enter a whole number ≥ 1 for max teams, or leave it blank for the maximum." };
+  const result = await execAutoBalanceTeams(maxTeams);
   if (result.ok) {
     revalidatePath("/dashboard/teams");
     revalidatePath("/dashboard/players");
@@ -486,10 +502,10 @@ export async function resetSeason() {
   await supabaseAdmin.from("matches").delete().not("id", "is", null);
   await supabaseAdmin.from("teams").update({ wins: 0, losses: 0, is_locked: false }).not("id", "is", null);
 
-  // Reset all player assignments and draft entries
+  // Reset all player assignments, draft entries, and pending coin grants
   await supabaseAdmin
     .from("players")
-    .update({ team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null, in_active_draft: false, must_update_tracker: false })
+    .update({ team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null, in_active_draft: false, must_update_tracker: false, coin_grant_pending_start: false, coin_grant_pending_weekly: false })
     .not("id", "is", null);
 
   // Strip all team-related Discord roles from every real player so nobody keeps
@@ -502,6 +518,7 @@ export async function resetSeason() {
     draft_signups_closed: false,
     draft_active: false,
     season_active: false,
+    is_test_season: false,
     num_teams: 0,
     current_pick: 0,
     draft_phase: null,
@@ -510,6 +527,7 @@ export async function resetSeason() {
     current_bid_team_id: null,
     current_bid_time: null,
     pick_deadline: null,
+    pending_start_coin_amount: 0,
     updated_at: new Date().toISOString(),
   }).not("id", "is", null);
 
@@ -529,7 +547,7 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
   await verifyAdmin();
 
   const { data: settings } = await supabaseAdmin
-    .from("league_settings").select("season_active, season_format").single();
+    .from("league_settings").select("season_active, season_format, is_test_season").single();
   if (!settings?.season_active) return { error: "No active season to complete." };
 
   // Snapshot standings, logos, and rosters BEFORE resetSeason wipes matches/teams.
@@ -578,6 +596,12 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
 
   const year = new Date().getFullYear();
   const name = `${APP_NAME} Season ${year}`;
+
+  if (settings.is_test_season) {
+    // Test season: skip archive, just wipe.
+    await resetSeason();
+    return { ok: true, message: "Test season discarded. No records saved." };
+  }
 
   const { error: archiveError } = await supabaseAdmin.from("seasons").insert({
     name,
@@ -743,7 +767,7 @@ export async function saveMatchSettings(deadlineDay: number, playDay: number, pl
   return { ok: true, message: "Match schedule settings saved." };
 }
 
-const ADMIN_NOTIFICATION_CATEGORIES = ["match_reporting", "sub_requests", "registrations", "profile_changes"];
+const ADMIN_NOTIFICATION_CATEGORIES = ["match_reporting", "sub_requests", "registrations", "profile_changes", "schedule_approvals"];
 
 export async function setAdminNotificationPref(category: string, enabled: boolean) {
   await verifyAdmin();
@@ -896,4 +920,24 @@ export async function setNotificationsEnabled(enabled: boolean) {
   } else {
     cookieStore.set("notifications_disabled", "1", { httpOnly: true, path: "/", sameSite: "lax" });
   }
+}
+
+export async function setIsTestSeason(value: boolean) {
+  await verifyAdmin();
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("season_active").single();
+  if (settings?.season_active && !value) {
+    // Prevent turning OFF test mode once a real (non-test) season is active.
+    // (Turning it ON while active is also blocked by the UI, but guard here too.)
+    return { error: "Cannot change test mode while a season is active." };
+  }
+  if (settings?.season_active && value) {
+    return { error: "Cannot change test mode while a season is active." };
+  }
+  await supabaseAdmin
+    .from("league_settings")
+    .update({ is_test_season: value, updated_at: new Date().toISOString() })
+    .not("id", "is", null);
+  revalidatePath("/dashboard/admin");
+  return { ok: true };
 }

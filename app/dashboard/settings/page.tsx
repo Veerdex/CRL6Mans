@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { SettingsForm, type PendingRequest } from "./settings-form";
+import { SettingsForm, type PendingRequest, type RejectedRequest } from "./settings-form";
 import { ThemeToggle } from "./theme-toggle";
 import { NavLayoutToggle } from "./nav-layout-toggle";
 import { NotificationButton } from "@/app/dashboard/notification-button";
@@ -22,12 +22,22 @@ export default async function SettingsPage() {
 
   if (player?.status !== "approved") redirect("/dashboard");
 
-  const { data: pendingRow } = await supabaseAdmin
-    .from("player_edit_requests")
-    .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at")
-    .eq("player_id", player.id)
-    .eq("status", "pending")
-    .maybeSingle();
+  const [{ data: pendingRow }, { data: rejectedRow }] = await Promise.all([
+    supabaseAdmin
+      .from("player_edit_requests")
+      .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at")
+      .eq("player_id", player.id)
+      .eq("status", "pending")
+      .maybeSingle(),
+    supabaseAdmin
+      .from("player_edit_requests")
+      .select("id, admin_note")
+      .eq("player_id", player.id)
+      .eq("status", "rejected")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   const pending: PendingRequest | null = pendingRow
     ? {
@@ -40,6 +50,8 @@ export default async function SettingsPage() {
         created_at:  pendingRow.created_at,
       }
     : null;
+
+  const rejected = rejectedRow ? { id: rejectedRow.id, adminNote: rejectedRow.admin_note as string | null } : null;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-xl">
@@ -77,6 +89,7 @@ export default async function SettingsPage() {
           sub_willing: player.sub_willing  ?? false,
         }}
         pending={pending}
+        rejected={rejected}
       />
     </div>
   );

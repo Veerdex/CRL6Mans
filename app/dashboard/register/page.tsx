@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { isGuildMember } from "@/app/lib/discord-api";
 import { RegisterForm, type ExistingPlayerData } from "./register-form";
 
 export default async function RegisterPage() {
@@ -16,6 +17,31 @@ export default async function RegisterPage() {
     .single();
 
   if (existing?.status === "approved") redirect("/dashboard");
+
+  const inServer = await isGuildMember(session.userId);
+  if (!inServer) {
+    const inviteUrl = process.env.NEXT_PUBLIC_DISCORD_INVITE_URL ?? process.env.DISCORD_INVITE_URL ?? null;
+    return (
+      <div className="p-8 max-w-xl">
+        <h1 className="text-2xl font-bold text-white mb-2">Join the Discord First</h1>
+        <p className="text-zinc-400 text-sm mb-4">
+          You must be a member of the CRL Discord server before you can register.
+          Join the server, then come back to this page.
+        </p>
+        {inviteUrl && (
+          <a
+            href={inviteUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            Join the Discord Server
+          </a>
+        )}
+      </div>
+    );
+  }
+
   if (existing?.status === "pending") {
     return (
       <div className="p-8 max-w-xl">

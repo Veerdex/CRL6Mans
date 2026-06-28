@@ -62,10 +62,10 @@ export function RegistrationCard({ player }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Username" value={username} onChange={setUsername} />
         <Field label="Tracker URL" value={trackerUrl} onChange={setTrackerUrl} />
-        <Field label="Peak 3v3" value={peak3v3} onChange={setPeak3v3} type="number" />
-        <Field label="Current 3v3" value={curr3v3} onChange={setCurr3v3} type="number" />
-        <Field label="Peak 2v2" value={peak2v2} onChange={setPeak2v2} type="number" />
-        <Field label="Current 2v2" value={curr2v2} onChange={setCurr2v2} type="number" />
+        <Field label="All Time Peak 2v2" value={peak2v2} onChange={setPeak2v2} type="number" />
+        <Field label="Season Peak 2v2"   value={curr2v2} onChange={setCurr2v2} type="number" />
+        <Field label="All Time Peak 3v3" value={peak3v3} onChange={setPeak3v3} type="number" />
+        <Field label="Season Peak 3v3"   value={curr3v3} onChange={setCurr3v3} type="number" />
       </div>
 
       {/* Links */}

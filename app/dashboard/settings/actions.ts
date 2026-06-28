@@ -143,6 +143,28 @@ export async function saveNotificationPrefs(
   return { ok: true };
 }
 
+export async function dismissRejectedRequest(
+  requestId: string
+): Promise<{ error?: string; ok?: boolean }> {
+  const cookieStore = await cookies();
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId) redirect("/login");
+
+  const { data: player } = await supabaseAdmin
+    .from("players").select("id").eq("discord_id", session.userId).single();
+  if (!player) return { error: "Player not found." };
+
+  await supabaseAdmin
+    .from("player_edit_requests")
+    .delete()
+    .eq("id", requestId)
+    .eq("player_id", player.id)
+    .eq("status", "rejected");
+
+  revalidatePath("/dashboard/settings");
+  return { ok: true };
+}
+
 export async function cancelProfileRequest(
   requestId: string
 ): Promise<{ error?: string; ok?: boolean }> {

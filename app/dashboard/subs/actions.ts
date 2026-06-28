@@ -144,9 +144,14 @@ export async function submitSubRequest(
     return { error: `${sub.username} did not enter the draft.` };
   }
 
-  if (peakMmr(sub) > peakMmr(playerOut)) {
+  // Sub eligibility depends on the player being replaced. If they're below 1400 rating,
+  // subs can go up to +100 of that rating. Otherwise, subs must be <= player's rating.
+  const playerOutMmr = peakMmr(playerOut);
+  const subMmr = peakMmr(sub);
+  const mmrLimit = playerOutMmr < 1400 ? playerOutMmr + 100 : playerOutMmr;
+  if (subMmr > mmrLimit) {
     return {
-      error: `${sub.username}'s Rank Value (${Math.round(peakMmr(sub)).toLocaleString()}) exceeds the replaced player's (${Math.round(peakMmr(playerOut)).toLocaleString()}).`,
+      error: `${sub.username}'s Rank Value (${Math.round(subMmr).toLocaleString()}) is too high for this substitution. Maximum allowed: ${Math.round(mmrLimit).toLocaleString()}.`,
     };
   }
 

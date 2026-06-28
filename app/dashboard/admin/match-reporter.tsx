@@ -185,6 +185,16 @@ function ReplaySection({
     }));
   }
 
+  function removeSlot(slotIndex: number) {
+    setSlots((prev) => {
+      const next = [...prev];
+      next[slotIndex] = { status: "idle" };
+      for (let j = slotIndex + 1; j < next.length; j++) next[j] = { status: "locked" };
+      return next;
+    });
+    setAkaNames((prev) => { const next = { ...prev }; delete next[slotIndex]; return next; });
+  }
+
   const homeWins = slots.filter((s) => s.status === "done" && s.homeTeamWon).length;
   const awayWins = slots.filter((s) => s.status === "done" && !s.homeTeamWon).length;
 
@@ -268,14 +278,30 @@ function ReplaySection({
                   >
                     {slot.homeTeamWon ? "Home" : "Away"}
                   </span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeSlot(i); }}
+                    className="shrink-0 text-[10px] text-zinc-500 hover:text-red-400 transition-colors ml-1"
+                    title="Remove replay"
+                  >
+                    ✕
+                  </button>
                 </>
               )}
 
               {slot.status === "unmatched" && (
-                <span className="text-amber-400">
-                  {slot.unmatchedNames.length} unrecognized player
-                  {slot.unmatchedNames.length !== 1 ? "s" : ""} — set aka names below
-                </span>
+                <>
+                  <span className="flex-1 text-amber-400">
+                    {slot.unmatchedNames.length} unrecognized player
+                    {slot.unmatchedNames.length !== 1 ? "s" : ""} — set aka names below
+                  </span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeSlot(i); }}
+                    className="shrink-0 text-[10px] text-zinc-500 hover:text-red-400 transition-colors ml-1"
+                    title="Remove replay"
+                  >
+                    ✕
+                  </button>
+                </>
               )}
 
               {slot.status === "error" && (

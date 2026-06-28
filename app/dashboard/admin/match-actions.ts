@@ -90,6 +90,9 @@ export async function adminAnalyzeGameReplay(
   if (replayData.team0Score === replayData.team1Score)
     return { error: "Replay shows a tied game — please check the file" };
 
+  // Casters appear in the replay with 0 score — exclude them before any validation.
+  const activePlayers = replayData.players.filter((p) => p.score > 0);
+
   // Reject duplicate uploads of the same replay (anywhere except this exact slot,
   // which is allowed so admins can re-upload a game with corrected aka mappings).
   if (replayData.replayId) {
@@ -122,7 +125,7 @@ export async function adminAnalyzeGameReplay(
 
   const { data: roster } = await supabaseAdmin
     .from("players")
-    .select("id, username, tracker_url, team_id")
+    .select("id, username, display_name, tracker_url, team_id")
     .in("team_id", [match.home_team_id, match.away_team_id])
     .eq("status", "approved");
 
@@ -137,10 +140,21 @@ export async function adminAnalyzeGameReplay(
   const homeTrackerNames = new Set<string>();
   const playerTeamById = new Map<string, string>();
 
+  // Pass 1: tracker names (highest priority).
   for (const p of resolved) {
     playerTeamById.set(p.id, p.team_id);
     if (p.trackerName) {
       const norm = normalizeName(p.trackerName);
+      nameToId.set(norm, p.id);
+      if (p.team_id === match.home_team_id) homeTrackerNames.add(norm);
+    }
+  }
+  // Pass 2: username and display_name fallbacks (only if tracker didn't already match).
+  for (const p of resolved) {
+    for (const name of [p.username, p.display_name as string | null | undefined]) {
+      if (!name) continue;
+      const norm = normalizeName(name);
+      if (nameToId.has(norm)) continue;
       nameToId.set(norm, p.id);
       if (p.team_id === match.home_team_id) homeTrackerNames.add(norm);
     }
@@ -197,17 +211,17 @@ export async function adminAnalyzeGameReplay(
     else homeTrackerNames.delete(norm);
   }
 
-  const unmatched = replayData.players.filter(
+  const unmatched = activePlayers.filter(
     (p) => !nameToId.has(normalizeName(p.name)),
   );
   if (unmatched.length > 0) {
     return { unmatched: unmatched.map((p) => p.name) };
   }
 
-  const team0Hits = replayData.players.filter(
+  const team0Hits = activePlayers.filter(
     (p) => p.team === 0 && homeTrackerNames.has(normalizeName(p.name)),
   ).length;
-  const team1Hits = replayData.players.filter(
+  const team1Hits = activePlayers.filter(
     (p) => p.team === 1 && homeTrackerNames.has(normalizeName(p.name)),
   ).length;
   const blueIsHome = team0Hits >= team1Hits;
@@ -217,13 +231,13 @@ export async function adminAnalyzeGameReplay(
     : replayData.team1Score > replayData.team0Score;
 
   // Each replay player must resolve to a distinct registered player.
-  const resolvedIds = replayData.players
+  const resolvedIds = activePlayers
     .map((p) => nameToId.get(normalizeName(p.name)))
     .filter((id): id is string => !!id);
   if (new Set(resolvedIds).size !== resolvedIds.length)
     return { error: "Two players in this replay map to the same person — each must map to a different player." };
 
-  const stats: AnalyzedGameStat[] = replayData.players.map((p) => ({
+  const stats: AnalyzedGameStat[] = activePlayers.map((p) => ({
     player_id: nameToId.get(normalizeName(p.name)) ?? null,
     replay_name: p.name,
     goals: p.goals,
@@ -265,7 +279,30 @@ export async function reportMatchResult(
       return { ok: false, message: "One of these replays was already uploaded for another match." };
   }
 
-  const result = await execReportMatchResult(matchId, homeScore, awayScore);
+  // Compute goal differential from submitted replay stats when available.
+  let goalDiff = 0;
+  if (games.length > 0) {
+    const allPlayerIds = [...new Set(
+      games.flatMap((g) => g.stats.map((s) => s.player_id).filter((id): id is string => !!id))
+    )];
+    if (allPlayerIds.length > 0) {
+      const [{ data: matchData }, { data: playerRows }] = await Promise.all([
+        supabaseAdmin.from("matches").select("home_team_id, away_team_id").eq("id", matchId).single(),
+        supabaseAdmin.from("players").select("id, team_id").in("id", allPlayerIds),
+      ]);
+      const teamOf = new Map((playerRows ?? []).map((p) => [p.id, p.team_id]));
+      for (const game of games) {
+        for (const stat of game.stats) {
+          if (!stat.player_id) continue;
+          const teamId = teamOf.get(stat.player_id);
+          if (teamId === matchData?.home_team_id) goalDiff += stat.goals;
+          else if (teamId === matchData?.away_team_id) goalDiff -= stat.goals;
+        }
+      }
+    }
+  }
+
+  const result = await execReportMatchResult(matchId, homeScore, awayScore, goalDiff);
   if (!result.ok) return result;
 
   // Persist replay stats now that the match is submitted (replace any prior set).

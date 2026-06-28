@@ -143,7 +143,7 @@ function SlotText({ feeder }: { feeder?: string }) {
   return <span className="flex-1 truncate text-xs text-zinc-600 italic">{feeder ?? "TBD"}</span>;
 }
 
-function MatchCard({ node, match, teams }: { node: Node; match: MatchRow | undefined; teams: TeamMap }) {
+function MatchCard({ node, match, teams, teamTitles, isLeft }: { node: Node; match: MatchRow | undefined; teams: TeamMap; teamTitles: Record<string, string>; isLeft: boolean }) {
   const home = match?.home_team_id ? teams[match.home_team_id] : null;
   const away = match?.away_team_id ? teams[match.away_team_id] : null;
   const done = match?.status === "completed";
@@ -152,8 +152,8 @@ function MatchCard({ node, match, teams }: { node: Node; match: MatchRow | undef
   const { border, tag, label } = statusStyle(match?.status ?? "pending", !!(home && away));
 
   const rows = [
-    { team: home, score: match?.home_score ?? null, won: homeWon, feeder: node.homeFeeder },
-    { team: away, score: match?.away_score ?? null, won: awayWon, feeder: node.awayFeeder },
+    { teamId: match?.home_team_id ?? null, team: home, score: match?.home_score ?? null, won: homeWon, feeder: node.homeFeeder },
+    { teamId: match?.away_team_id ?? null, team: away, score: match?.away_score ?? null, won: awayWon, feeder: node.awayFeeder },
   ];
 
   return (
@@ -166,7 +166,7 @@ function MatchCard({ node, match, teams }: { node: Node; match: MatchRow | undef
         <span className="text-[10px] font-bold text-zinc-400 tracking-wide">{node.badge}</span>
         <span className={`text-[9px] font-semibold uppercase tracking-widest ${tag}`}>{label}</span>
       </div>
-      {rows.map(({ team, score, won, feeder }, i) => (
+      {rows.map(({ teamId, team, score, won, feeder }, i) => (
         <div
           key={i}
           className={`flex items-center gap-2 px-2.5 ${won ? "bg-white/5" : ""}`}
@@ -178,9 +178,13 @@ function MatchCard({ node, match, teams }: { node: Node; match: MatchRow | undef
             <div className={`w-2 h-2 rounded-full shrink-0 ${team ? "bg-zinc-400" : "bg-zinc-700"}`} />
           )}
           {team ? (
-            <span className={`flex-1 truncate text-xs ${won ? "text-white font-semibold" : "text-zinc-300"}`}>
+            <a
+              href={`/dashboard/teams?search=${encodeURIComponent(team.name)}&from=season`}
+              title={teamId ? teamTitles[teamId] : undefined}
+              className={`flex-1 truncate text-xs hover:underline ${won ? "text-white font-semibold" : "text-zinc-300"}`}
+            >
               {team.name}
-            </span>
+            </a>
           ) : (
             <SlotText feeder={feeder} />
           )}
@@ -218,10 +222,23 @@ export async function HybridBracketView({ variant = "12" }: { variant?: "12" | "
     matches.flatMap(m => [m.home_team_id, m.away_team_id].filter(Boolean) as string[])
   )];
   const teams: TeamMap = {};
+  const teamTitles: Record<string, string> = {};
   if (teamIds.length) {
-    const { data: teamsData } = await supabaseAdmin
-      .from("teams").select("id, name, logo_url").in("id", teamIds);
+    const [{ data: teamsData }, { data: playersData }] = await Promise.all([
+      supabaseAdmin.from("teams").select("id, name, logo_url").in("id", teamIds),
+      supabaseAdmin.from("players").select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3").in("team_id", teamIds),
+    ]);
     (teamsData ?? []).forEach(t => { teams[t.id] = { name: t.name, logo_url: (t as { logo_url?: string | null }).logo_url ?? null }; });
+    const rvOf = (p: { peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null }) =>
+      Math.round((Number(p.peak_2v2 ?? 0) + Number(p.current_2v2 ?? 0)) * 0.3 + (Number(p.peak_3v3 ?? 0) + Number(p.current_3v3 ?? 0)) * 0.2);
+    const byTeam: Record<string, { display_name: string | null; username: string; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null }[]> = {};
+    for (const p of (playersData ?? [])) {
+      if (!p.team_id) continue;
+      (byTeam[p.team_id] ??= []).push(p as never);
+    }
+    for (const [tid, roster] of Object.entries(byTeam)) {
+      teamTitles[tid] = roster.sort((a, b) => rvOf(b) - rvOf(a)).map(p => `${p.display_name ?? p.username} (${rvOf(p)})`).join("\n");
+    }
   }
 
   const [UB, LB, SF, GF] = stages;
@@ -290,7 +307,7 @@ export async function HybridBracketView({ variant = "12" }: { variant?: "12" | "
 
           {/* Match cards */}
           {nodes.map(n => (
-            <MatchCard key={n.key} node={n} match={matchByKey.get(n.key)} teams={teams} />
+            <MatchCard key={n.key} node={n} match={matchByKey.get(n.key)} teams={teams} teamTitles={teamTitles} isLeft={n.x === 0} />
           ))}
 
         </div>

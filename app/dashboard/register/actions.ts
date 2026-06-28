@@ -7,7 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { pushToAdmins } from "@/app/lib/push";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
-import { sendDm } from "@/app/lib/discord-api";
+import { sendDm, isGuildMember } from "@/app/lib/discord-api";
 import { APP_NAME } from "@/app/lib/constants";
 import { validateImageUpload } from "@/app/lib/uploads";
 
@@ -24,6 +24,16 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
   const current2v2  = formData.get("current_2v2")  as string;
   const subWilling  = formData.get("sub_willing") === "on";
   const file        = formData.get("college_image") as File;
+
+  const inServer = await isGuildMember(session.userId);
+  if (!inServer) {
+    const inviteUrl = process.env.NEXT_PUBLIC_DISCORD_INVITE_URL ?? process.env.DISCORD_INVITE_URL;
+    return {
+      error: inviteUrl
+        ? `You must join the Discord server before registering. Join here: ${inviteUrl}`
+        : "You must join the Discord server before registering.",
+    };
+  }
 
   if (!trackerUrl || !peak3v3 || !current3v3 || !peak2v2 || !current2v2) {
     return { error: "All fields are required." };

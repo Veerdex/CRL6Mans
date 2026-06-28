@@ -36,7 +36,9 @@ export default async function DraftPage() {
   // Teams with roster sizes
   const { data: teamsRaw } = await supabaseAdmin
     .from("teams").select("id, name").ilike("name", "Team %").order("name");
-  const teams = (teamsRaw ?? []).filter(t => /^Team \d+$/.test(t.name));
+  const teams = (teamsRaw ?? [])
+    .filter(t => /^Team \d+$/.test(t.name))
+    .filter(t => parseInt(t.name.replace("Team ", "")) <= numTeams);
 
   const { data: drafted } = await supabaseAdmin
     .from("players").select("team_id").eq("status", "approved").not("team_id", "is", null);

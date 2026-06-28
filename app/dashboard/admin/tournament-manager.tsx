@@ -241,6 +241,7 @@ type FormState = {
   draftStartAt: string;
   stageStarts: string[];
   previewTeams: string;
+  isTest: boolean;
 };
 
 const EMPTY_FORM: FormState = {
@@ -260,6 +261,7 @@ const EMPTY_FORM: FormState = {
   draftStartAt: "",
   stageStarts: [""],
   previewTeams: "",
+  isTest: false,
 };
 
 const inputCls =
@@ -351,6 +353,7 @@ export function TournamentManager({
       match_play_hour: null,
       min_mmr_2v2: form.minMmr2v2 ? parseInt(form.minMmr2v2) || null : null,
       min_mmr_3v3: form.minMmr3v3 ? parseInt(form.minMmr3v3) || null : null,
+      is_test: form.isTest,
     };
   };
 
@@ -440,6 +443,7 @@ export function TournamentManager({
       previewTeams: "",
       minMmr2v2: t.min_mmr_2v2 ? String(t.min_mmr_2v2) : "",
       minMmr3v3: t.min_mmr_3v3 ? String(t.min_mmr_3v3) : "",
+      isTest: t.is_test ?? false,
     });
     setFeedback(null);
   };
@@ -476,6 +480,30 @@ export function TournamentManager({
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Summer League 2026"
             />
+          </div>
+
+          <div className="sm:col-span-2">
+            <div className="flex items-center justify-between bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2.5">
+              <div>
+                <p className="text-xs font-medium text-zinc-300">Test Tournament</p>
+                <p className="text-[11px] text-zinc-500 mt-0.5">
+                  {form.isTest
+                    ? "ON — discarded on completion, no records saved, no Westside Wages"
+                    : "OFF — real tournament, results archived and Westside Wages awarded"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, isTest: !form.isTest })}
+                className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 transition-colors duration-200 focus:outline-none ${
+                  form.isTest ? "bg-amber-600 border-amber-600" : "bg-zinc-700 border-zinc-700"
+                }`}
+                role="switch"
+                aria-checked={form.isTest}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${form.isTest ? "translate-x-4" : "translate-x-0"}`} />
+              </button>
+            </div>
           </div>
 
           <div>
@@ -882,12 +910,17 @@ export function TournamentManager({
             <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_STYLES[t.status]}`}>
               {t.status}
             </span>
+            {t.is_test && (
+              <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-amber-900/30 border-amber-700/40 text-amber-300">
+                test
+              </span>
+            )}
             {t.status === "scheduled" && t.signups_open && (
               <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-emerald-900/30 border-emerald-700/40 text-emerald-300">
                 sign-ups open
               </span>
             )}
-            {t.status === "completed" && t.hidden_from_home && hiddenBadge}
+            {t.status === "completed" && t.hidden_from_home && !t.is_test && hiddenBadge}
           </div>
         );
 

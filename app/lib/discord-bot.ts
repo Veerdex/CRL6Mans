@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "./supabase";
 import { isModerator } from "./players";
-import { pushToAllApproved } from "./push";
+import { pushToAllApproved, pushToTeam } from "./push";
+import { ptDate, ptWallToUtc } from "./pt-time";
 import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
@@ -80,20 +81,23 @@ async function setStaffRoleId(userId: string, roleId: string, tier: "moderator" 
 // Returns a Unix timestamp (seconds) for the next occurrence of targetDay at hour:minute PT.
 // Approximates PT as UTC-7 (PDT). Off by 1h during PST but acceptable for scheduling.
 function nextWeekdayTimestamp(targetDay: number, hourPT: number, minutePT: number): number {
-  const PT_OFFSET_MS = 7 * 60 * 60 * 1000;
-  const nowPTMs = Date.now() - PT_OFFSET_MS;
-  const nowPT = new Date(nowPTMs);
-  const currentDay = nowPT.getUTCDay();
+  return weekdayTimestampFrom(Date.now(), targetDay, hourPT, minutePT);
+}
+
+// Same as nextWeekdayTimestamp but anchored from a caller-supplied base time (ms).
+// Used when a match has a known scheduled_at so the play/deadline times are always
+// computed relative to the intended schedule rather than the current wall clock.
+function weekdayTimestampFrom(baseMs: number, targetDay: number, hourPT: number, minutePT: number): number {
+  const basePT = ptDate(baseMs);
+  const currentDay = basePT.getUTCDay();
   let daysAhead = (targetDay - currentDay + 7) % 7;
   if (daysAhead === 0) {
-    const past = nowPT.getUTCHours() > hourPT ||
-      (nowPT.getUTCHours() === hourPT && nowPT.getUTCMinutes() >= minutePT);
+    const past = basePT.getUTCHours() > hourPT ||
+      (basePT.getUTCHours() === hourPT && basePT.getUTCMinutes() >= minutePT);
     if (past) daysAhead = 7;
   }
-  const target = new Date(nowPTMs);
-  target.setUTCDate(nowPT.getUTCDate() + daysAhead);
-  target.setUTCHours(hourPT, minutePT, 0, 0);
-  return Math.floor((target.getTime() + PT_OFFSET_MS) / 1000);
+  const utcMs = ptWallToUtc(basePT.getUTCFullYear(), basePT.getUTCMonth(), basePT.getUTCDate() + daysAhead, hourPT, minutePT);
+  return Math.floor(utcMs / 1000);
 }
 
 type ChannelResult = { created: true } | { created: false; skipped?: true; error?: string };
@@ -141,7 +145,37 @@ type MatchChannelContext = {
   guildRoles: Array<{ id: string; name: string }>;
   roundBestOf: Record<string, number>;
   maxRoundByStage: Record<string, number>;
+  staffRoleIds: string[]; // moderator/director/ceo Discord role IDs — can view all match channels
+  isTournament: boolean;
 };
+
+// Same deterministic 5-char code as match-schedule-panel.tsx — both sides see the same lobby credentials.
+function lobbyCode(seed: string): string {
+  const CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  let out = "";
+  for (let i = 0; i < 5; i++) {
+    h = Math.imul(h, 16777619) >>> 0;
+    out += CHARS[h % CHARS.length];
+  }
+  return out;
+}
+
+async function getStaffRoleIds(): Promise<string[]> {
+  const { data } = await supabaseAdmin
+    .from("league_settings")
+    .select("moderator_role_id, director_role_id, ceo_role_id")
+    .single();
+  return [
+    data?.moderator_role_id as string | null,
+    data?.director_role_id  as string | null,
+    data?.ceo_role_id       as string | null,
+  ].filter((id): id is string => !!id);
+}
 
 // ─── Dynamic category management ──────────────────────────────────────────────
 
@@ -212,6 +246,26 @@ function computeCategoryInfo(
     else if (fromEnd === 1) name = "Qualifier Losers Semifinals";
     else                    name = `Qualifier Losers Round ${round}`;
     return { label: name, bucket: null, categoryRound: round };
+  }
+
+  // Hybrid upper bracket — always one round
+  if (stage === HYBRID_UB || stage === HYBRID8_UB) {
+    return { label: "Upper Bracket", bucket: null, categoryRound: round };
+  }
+
+  // Hybrid lower bracket — round number determines the label
+  if (stage === HYBRID_LB || stage === HYBRID8_LB) {
+    return { label: `Lower Bracket R${round}`, bucket: null, categoryRound: round };
+  }
+
+  // Hybrid semifinals
+  if (stage === HYBRID_SF || stage === HYBRID8_SF) {
+    return { label: "Semifinals", bucket: null, categoryRound: null };
+  }
+
+  // Hybrid grand final
+  if (stage === HYBRID_GF || stage === HYBRID8_GF) {
+    return { label: "Grand Final", bucket: null, categoryRound: null };
   }
 
   // SE Qualifier
@@ -349,7 +403,7 @@ export async function createMatchChannel(
   awayTeamName: string,
   weekNum: number,
   ctx?: MatchChannelContext,
-  matchInfo?: { round: number; stage: string; homeTeamId?: string; awayTeamId?: string; matchId?: string },
+  matchInfo?: { round: number; stage: string; homeTeamId?: string; awayTeamId?: string; matchId?: string; scheduledAt?: string | null; adminScheduled?: boolean },
 ): Promise<ChannelResult> {
   let resolvedCtx: MatchChannelContext;
 
@@ -358,13 +412,14 @@ export async function createMatchChannel(
   } else {
     const { data: settings } = await supabaseAdmin
       .from("league_settings")
-      .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format")
+      .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format, active_tournament_id")
       .single();
     const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
-    const [existingChannels, guildRoles, allMatches] = await Promise.all([
+    const [existingChannels, guildRoles, allMatches, staffRoleIds] = await Promise.all([
       getGuildChannels(),
       getGuildRoles(),
       supabaseAdmin.from("matches").select("stage, round").then(r => r.data ?? []),
+      getStaffRoleIds(),
     ]);
     const maxRoundByStage: Record<string, number> = {};
     allMatches.forEach(m => {
@@ -380,10 +435,12 @@ export async function createMatchChannel(
       guildRoles,
       roundBestOf: format?.roundBestOf ?? {},
       maxRoundByStage,
+      staffRoleIds,
+      isTournament: !!(settings?.active_tournament_id as string | null | undefined),
     };
   }
 
-  const { categoryCache, deadlineDay, playDay, playHour, rulesChannelId, existingChannels, guildRoles, roundBestOf, maxRoundByStage } = resolvedCtx;
+  const { categoryCache, deadlineDay, playDay, playHour, rulesChannelId, existingChannels, guildRoles, roundBestOf, maxRoundByStage, staffRoleIds, isTournament } = resolvedCtx;
 
   // Determine which Discord category this match belongs to
   let categoryId: string | null = null;
@@ -417,7 +474,7 @@ export async function createMatchChannel(
     homeRole = refreshed.find(r => r.name === homeTeamName);
     awayRole = refreshed.find(r => r.name === awayTeamName);
   }
-  const allowedRoleIds = [homeRole?.id, awayRole?.id].filter(Boolean) as string[];
+  const allowedRoleIds = [homeRole?.id, awayRole?.id, ...staffRoleIds].filter(Boolean) as string[];
 
   const result = await createTextChannel(channelName, categoryId, allowedRoleIds);
   if (!result.id) return { created: false, error: result.error };
@@ -429,8 +486,17 @@ export async function createMatchChannel(
       .eq("id", matchInfo.matchId);
   }
 
-  const deadlineTs = nextWeekdayTimestamp(deadlineDay, 23, 59);
-  const playTs     = nextWeekdayTimestamp(playDay, playHour, 0);
+  // Use the match's scheduled_at when it's set and in the future so that early
+  // completions in prior rounds don't pull next-round timestamps into the same week.
+  const scheduledMs = matchInfo?.scheduledAt ? new Date(matchInfo.scheduledAt).getTime() : 0;
+  const useScheduled = scheduledMs > Date.now();
+  const playTs = useScheduled
+    ? Math.floor(scheduledMs / 1000)
+    : nextWeekdayTimestamp(playDay, playHour, 0);
+  const baseMs = useScheduled ? scheduledMs : Date.now();
+  let deadlineTs = weekdayTimestampFrom(baseMs, deadlineDay, 23, 59);
+  // If the deadline landed before the play time (weekday wrap-around), push it one week forward.
+  if (deadlineTs < playTs) deadlineTs += 7 * 24 * 3600;
 
   // Home/Away match the match record (home_team_id = the seeded/scheduled home team).
   const homePing = homeRole ? `<@&${homeRole.id}>` : `**${homeTeamName}**`;
@@ -448,17 +514,70 @@ export async function createMatchChannel(
     }
   }
 
-  const message =
-    `## Welcome to Round ${weekNum}! ##\n\n` +
-    `Match: ${homePing} 🏠 **Home**  vs  ${awayPing} ✈️ **Away**\n` +
-    `Scheduled for: <t:${playTs}:F>\n` +
-    `Match Deadline: <t:${deadlineTs}:F>\n` +
-    `Format: **Best of ${bestOf}**\n\n` +
-    `- In the event a team can't make this time, please discuss an alternative.\n` +
-    `- If a sub is needed, please follow what is listed in the rulebook located in ${rulesRef}. ` +
-    `If these procedures are not followed, a match played with the illegal sub will be forfeited.\n` +
-    `- **To report a match**: Tag an admin/moderator, list the teams and respective scores, and __upload replays__. ` +
-    `The admin will remove the channel manually. Need more info?`;
+  // For standalone seasons, look up this round's admin schedule so the message matches
+  // the schedule type (weekly/daily/specific) and uses its real deadline.
+  let scheduleType: string | null = null;
+  let realPlayTs = playTs;
+  let realDeadlineTs = deadlineTs;
+  if (matchInfo && !isTournament) {
+    const cs = matchInfo.stage.startsWith("group_") ? "group" : matchInfo.stage;
+    const { data: sched } = await supabaseAdmin
+      .from("round_schedules")
+      .select("schedule_type, play_at, deadline_at")
+      .is("tournament_id", null)
+      .eq("stage", cs)
+      .eq("round", matchInfo.round)
+      .maybeSingle();
+    if (sched) {
+      scheduleType = sched.schedule_type as string;
+      realPlayTs = Math.floor(new Date(sched.play_at as string).getTime() / 1000);
+      realDeadlineTs = Math.floor(new Date(sched.deadline_at as string).getTime() / 1000);
+    }
+    // An admin-pinned individual match overrides the round window with its fixed time.
+    if (matchInfo.adminScheduled && matchInfo.scheduledAt) {
+      scheduleType = "specific";
+      realPlayTs = Math.floor(new Date(matchInfo.scheduledAt).getTime() / 1000);
+      realDeadlineTs = realPlayTs;
+    }
+  }
+
+  let message: string;
+  if (isTournament && matchInfo?.matchId) {
+    const lobbyName = lobbyCode(`${matchInfo.matchId}:name`);
+    const lobbyPw   = lobbyCode(`${matchInfo.matchId}:pw`);
+    message =
+      `## Welcome! ##\n\n` +
+      `Match: ${homePing} 🏠 **Home**  vs  ${awayPing} ✈️ **Away**\n` +
+      `Format: **Best of ${bestOf}**\n\n` +
+      `**Private Match Lobby** — ${awayPing} (Away) creates the lobby:\n` +
+      `> Room Name: \`${lobbyName}\`\n` +
+      `> Password: \`${lobbyPw}\`\n\n` +
+      `- **To report a match**: Head to the website and submit your result under My Team.`;
+  } else {
+    let scheduleLines: string;
+    let coordinateLine: string;
+    if (scheduleType === "specific") {
+      scheduleLines = `Scheduled for: <t:${realPlayTs}:F>`;
+      coordinateLine = `- This is a fixed time set by the admins — please be ready to play then.`;
+    } else if (scheduleType === "daily") {
+      scheduleLines = `Play any time on: <t:${realPlayTs}:D>\nMatch Deadline (end of day): <t:${realDeadlineTs}:F>`;
+      coordinateLine = `- This match must be played on this day — coordinate a time that works for both teams.`;
+    } else {
+      // weekly / fallback
+      scheduleLines = `Play any time this week, before the deadline.\nMatch Deadline: <t:${realDeadlineTs}:F>`;
+      coordinateLine = `- Coordinate a time that works for both teams before the match deadline.`;
+    }
+
+    message =
+      `## Welcome to Round ${weekNum}! ##\n\n` +
+      `Match: ${homePing} 🏠 **Home**  vs  ${awayPing} ✈️ **Away**\n` +
+      `${scheduleLines}\n` +
+      `Format: **Best of ${bestOf}**\n\n` +
+      `${coordinateLine}\n` +
+      `- If a sub is needed, please follow what is listed in the rulebook located in ${rulesRef}. ` +
+      `If these procedures are not followed, a match played with the illegal sub will be forfeited.\n` +
+      `- **To report a match**: Head to the website and submit your result under My Team.`;
+  }
 
   await sendChannelMessage(result.id, message);
   return { created: true };
@@ -513,6 +632,112 @@ function rankValue(p: { peak_2v2: string; current_2v2: string; peak_3v3: string;
   ) / 4;
 }
 
+// ── Season rating calculator ──────────────────────────────────────────────────
+// Full spec: rating-system-explained-v2.txt
+// Constants (tunable):
+const RATING_K              = 67;
+const SERIES_BASE_SCALE     = 220;
+const EDGE_STRENGTH         = 1.5;
+const GAP_SOFTNESS          = 30;
+const GD_SENSITIVITY        = 1.0;
+const SWEEP_GD_REFERENCE    = 3;
+const SWEEP_GD_BONUS_SCALE  = 0.12;
+
+function rvToTeamPower(rv: number): number {
+  return 1000 / (1 + Math.exp(-(rv - 1200) / 220));
+}
+
+// Lazy-initialises a team's season_rating from its current roster RVs.
+async function initTeamSeasonRating(teamId: string): Promise<number> {
+  const { data: players } = await supabaseAdmin
+    .from("players")
+    .select("peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .eq("team_id", teamId)
+    .eq("status", "approved");
+  const rvs = (players ?? []).map((p) => rankValue(p as Parameters<typeof rankValue>[0]));
+  if (!rvs.length) return 500;
+  const avg = rvs.reduce((s, v) => s + v, 0) / rvs.length;
+  while (rvs.length < 3) rvs.push(avg);
+  return (rvToTeamPower(rvs[0]) + rvToTeamPower(rvs[1]) + rvToTeamPower(rvs[2])) / 3;
+}
+
+// Series-level expected win probability (Part Three, section 6).
+// Uses a steeper edge-aware curve vs the per-game predictor; gap softness
+// prevents extreme rating gaps from producing near-100% certainty.
+function seriesExpected(ratingA: number, ratingB: number): number {
+  const diff = ratingA - ratingB;
+  const effectiveScale = SERIES_BASE_SCALE + GAP_SOFTNESS * Math.abs(diff) / SERIES_BASE_SCALE;
+  return 1 / (1 + Math.pow(10, -(diff * EDGE_STRENGTH) / effectiveScale));
+}
+
+// Actual score for one team (Part Three, sections 7-8).
+// wins/losses are from that team's perspective; gdPerGame is positive when GD
+// favours this team, negative when it favours the opponent.
+function computeActualScore(wins: number, losses: number, gdPerGame: number): number {
+  const totalGames = wins + losses;
+  if (totalGames === 0) return 0.5;
+  const winRatio = wins / totalGames;
+  const absGd = Math.abs(gdPerGame);
+  const gdBoost = Math.tanh(absGd / GD_SENSITIVITY);
+  const decisiveness = Math.abs(winRatio - 0.5) / 0.5;
+  const gdPower = 0.1 + 0.9 * decisiveness;
+  const sign = gdPerGame >= 0 ? 1 : -1;
+
+  let actual = 0.5 + (winRatio - 0.5)
+    + sign * gdBoost * (0.5 - Math.abs(winRatio - 0.5)) * gdPower;
+
+  // Sweep bonus: extra credit for dominant blowout sweeps (section 8).
+  if (losses === 0 && absGd > SWEEP_GD_REFERENCE) {
+    const excessGd = absGd - SWEEP_GD_REFERENCE;
+    actual += sign * SWEEP_GD_BONUS_SCALE * Math.log(1 + excessGd);
+  }
+
+  return Math.max(-0.5, Math.min(1.5, actual));
+}
+
+// Applies the full rating update to both teams after a result is recorded.
+// goalDiff = home_goals - away_goals; pass 0 when goal data is unavailable.
+async function applySeasonRatingUpdate(
+  homeTeamId: string,
+  awayTeamId: string,
+  homeRatingRaw: number | null,
+  awayRatingRaw: number | null,
+  homeScore: number,
+  awayScore: number,
+  goalDiff: number,
+): Promise<void> {
+  const [hRating, aRating] = await Promise.all([
+    homeRatingRaw != null ? Promise.resolve(Number(homeRatingRaw)) : initTeamSeasonRating(homeTeamId),
+    awayRatingRaw != null ? Promise.resolve(Number(awayRatingRaw)) : initTeamSeasonRating(awayTeamId),
+  ]);
+
+  const totalGames = homeScore + awayScore;
+  const gdPerGame = totalGames > 0 ? goalDiff / totalGames : 0;
+
+  const expectedHome = seriesExpected(hRating, aRating);
+  const expectedAway = 1 - expectedHome;
+
+  const homeActual = computeActualScore(homeScore, awayScore, gdPerGame);
+  const awayActual = computeActualScore(awayScore, homeScore, -gdPerGame);
+
+  const deltaHome = homeActual - expectedHome;
+  const deltaAway = awayActual - expectedAway;
+
+  const avgRating = (hRating + aRating) / 2;
+  const slopeMultiplier = avgRating * (1000 - avgRating) / 250000;
+
+  const homeBoundary = deltaHome >= 0 ? (1000 - hRating) / 1000 : hRating / 1000;
+  const awayBoundary = deltaAway >= 0 ? (1000 - aRating) / 1000 : aRating / 1000;
+
+  const newHome = Math.max(10, Math.min(990, hRating + RATING_K * deltaHome * homeBoundary * slopeMultiplier));
+  const newAway = Math.max(10, Math.min(990, aRating + RATING_K * deltaAway * awayBoundary * slopeMultiplier));
+
+  await Promise.all([
+    supabaseAdmin.from("teams").update({ season_rating: newHome }).eq("id", homeTeamId),
+    supabaseAdmin.from("teams").update({ season_rating: newAway }).eq("id", awayTeamId),
+  ]);
+}
+
 async function getTeamByPosition(position: number, fields = "id"): Promise<Record<string, unknown> | null> {
   const { data } = await supabaseAdmin.from("teams")
     .select(fields).not("slot_number", "is", null).order("slot_number");
@@ -530,7 +755,7 @@ async function getCaptainPing(teamNum: number): Promise<string> {
 
 // ─── Exported core execution functions (no admin check, used from web admin too) ─
 
-export async function execStartDraft(): Promise<{ ok: boolean; message: string }> {
+export async function execStartDraft(maxTeams?: number | "max" | null): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
   if (!settings?.draft_channel_id)
     return { ok: false, message: "Set a draft channel first with `/setdraftchannel`." };
@@ -548,9 +773,31 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
 
   if (!enteredAll?.length) return { ok: false, message: "No players have entered the draft." };
 
-  const numTeams: number = (settings?.num_teams as number | null) || Math.floor(enteredAll.length / 3);
+  // Validate pre-created team slots (identified by slot_number, not current name)
+  const { data: allPreTeams } = await supabaseAdmin
+    .from("teams").select("id, name, discord_role_id, slot_number").not("slot_number", "is", null).order("slot_number");
+  const numberedTeams = (allPreTeams ?? [])
+    .filter((t): t is typeof t & { slot_number: number } => typeof t.slot_number === "number")
+    .map(t => ({ ...t, num: t.slot_number }))
+    .sort((a, b) => a.num - b.num);
+
+  // numTeams resolution:
+  //  • a positive number caps the team count (admin-specified max),
+  //  • "max" builds as many as the pool (3 per team) and slots allow,
+  //  • null/undefined (cron/tournament) respects the configured num_teams, else max.
+  const feasibleByPlayers = Math.floor(enteredAll.length / 3);
+  const slotCappedMax = Math.min(feasibleByPlayers, numberedTeams.length);
+  const storedNum = (settings?.num_teams as number | null) ?? 0;
+  const numTeams: number =
+    typeof maxTeams === "number" && maxTeams > 0 ? Math.min(maxTeams, feasibleByPlayers)
+    : maxTeams === "max"                         ? slotCappedMax
+    : storedNum > 0                              ? Math.min(storedNum, feasibleByPlayers)
+    :                                              slotCappedMax;
   if (numTeams < 2)
     return { ok: false, message: "Not enough players to form teams (need at least 6 in the pool)." };
+
+  if (numberedTeams.length < numTeams)
+    return { ok: false, message: `Need ${numTeams} team slots but only ${numberedTeams.length} exist. Add them in the admin panel first.` };
 
   // Apply cutoff: first numTeams × 3 by sign-up time
   const entered = enteredAll.slice(0, numTeams * 3);
@@ -560,17 +807,6 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
   // Mark only cutoff players as active; clear any previous active flags first
   await supabaseAdmin.from("players").update({ in_active_draft: false }).eq("status", "approved");
   await supabaseAdmin.from("players").update({ in_active_draft: true }).in("id", entered.map(p => p.id));
-
-  // Validate pre-created team slots (identified by slot_number, not current name)
-  const { data: allPreTeams } = await supabaseAdmin
-    .from("teams").select("id, name, discord_role_id, slot_number").not("slot_number", "is", null).order("slot_number");
-  const numberedTeams = (allPreTeams ?? [])
-    .filter((t): t is typeof t & { slot_number: number } => typeof t.slot_number === "number")
-    .map(t => ({ ...t, num: t.slot_number }))
-    .sort((a, b) => a.num - b.num);
-
-  if (numberedTeams.length < numTeams)
-    return { ok: false, message: `Need ${numTeams} team slots but only ${numberedTeams.length} exist. Add them in the admin panel first.` };
 
   const teamsToUse = numberedTeams.slice(0, numTeams);
   const missingRoleIds = teamsToUse.filter(t => !t.discord_role_id).map(t => `Team ${t.num}`);
@@ -585,12 +821,16 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
   // Do this before any Discord calls so a slow/rate-limited Discord API
   // can't prevent draft_active from being set.
 
+  // Highest-RV captain gets the highest team number, which picks first in round 1
+  // of the snake draft (getTeamNumberForPick returns numTeams for pick 0).
+  const captainTeams = [...teamsToUse].reverse();
+
   // Build captain assignments before any awaits
   const captainLines: string[] = [];
   const captains: Array<{ discordId: string | null; teamRoleId?: string }> = [];
   for (let i = 0; i < numTeams; i++) {
-    captainLines.push(`Team ${teamsToUse[i].num}: **${sorted[i].username}** (RV: ${rankValue(sorted[i]).toFixed(0)})`);
-    captains.push({ discordId: sorted[i].discord_id ?? null, teamRoleId: teamsToUse[i].discord_role_id ?? undefined });
+    captainLines.push(`Team ${captainTeams[i].num}: **${sorted[i].username}** (RV: ${rankValue(sorted[i]).toFixed(0)})`);
+    captains.push({ discordId: sorted[i].discord_id ?? null, teamRoleId: captainTeams[i].discord_role_id ?? undefined });
   }
 
   // All DB writes in one parallel batch, then immediately mark draft active
@@ -603,7 +843,7 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
     ),
     ...sorted.slice(0, numTeams).map((captain, i) =>
       supabaseAdmin.from("players")
-        .update({ team_id: teamsToUse[i].id, is_captain: true, updated_at: new Date().toISOString() })
+        .update({ team_id: captainTeams[i].id, is_captain: true, updated_at: new Date().toISOString() })
         .eq("id", captain.id)
     ),
   ]);
@@ -677,7 +917,7 @@ export async function execStartDraft(): Promise<{ ok: boolean; message: string }
  * Auto-balance the draft pool into even teams by Rank Value (snake distribution),
  * with no live draft. Mirrors execStartDraft's DB-then-Discord ordering.
  */
-export async function execAutoBalanceTeams(): Promise<{ ok: boolean; message: string }> {
+export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
   if (settings.draft_active)
     return { ok: false, message: "❌ A draft is in progress. End it before auto-balancing." };
@@ -693,14 +933,6 @@ export async function execAutoBalanceTeams(): Promise<{ ok: boolean; message: st
 
   if (!enteredAll?.length) return { ok: false, message: "No players have entered the pool." };
 
-  const numTeams: number = (settings?.num_teams as number | null) || Math.floor(enteredAll.length / 3);
-  if (numTeams < 2)
-    return { ok: false, message: "Not enough players to form teams (need at least 6 in the pool)." };
-
-  const entered = enteredAll.slice(0, numTeams * 3);
-  if (entered.length < numTeams * 3)
-    return { ok: false, message: `Need ${numTeams * 3} players to fill ${numTeams} teams (have ${entered.length}).` };
-
   // Validate pre-created team slots + role IDs (same checks as the snake draft)
   const { data: allPreTeams } = await supabaseAdmin
     .from("teams").select("id, name, discord_role_id, slot_number").not("slot_number", "is", null).order("slot_number");
@@ -708,8 +940,28 @@ export async function execAutoBalanceTeams(): Promise<{ ok: boolean; message: st
     .filter((t): t is typeof t & { slot_number: number } => typeof t.slot_number === "number")
     .map(t => ({ ...t, num: t.slot_number }))
     .sort((a, b) => a.num - b.num);
+
+  // numTeams resolution:
+  //  • a positive number caps the team count (admin-specified max),
+  //  • "max" builds as many as the pool (3 per team) and slots allow,
+  //  • null/undefined (cron/tournament) respects the configured num_teams, else max.
+  const feasibleByPlayers = Math.floor(enteredAll.length / 3);
+  const slotCappedMax = Math.min(feasibleByPlayers, numberedTeams.length);
+  const storedNum = (settings?.num_teams as number | null) ?? 0;
+  const numTeams: number =
+    typeof maxTeams === "number" && maxTeams > 0 ? Math.min(maxTeams, feasibleByPlayers)
+    : maxTeams === "max"                         ? slotCappedMax
+    : storedNum > 0                              ? Math.min(storedNum, feasibleByPlayers)
+    :                                              slotCappedMax;
+  if (numTeams < 2)
+    return { ok: false, message: "Not enough players to form teams (need at least 6 in the pool)." };
+
   if (numberedTeams.length < numTeams)
     return { ok: false, message: `Need ${numTeams} team slots but only ${numberedTeams.length} exist.` };
+
+  const entered = enteredAll.slice(0, numTeams * 3);
+  if (entered.length < numTeams * 3)
+    return { ok: false, message: `Need ${numTeams * 3} players to fill ${numTeams} teams (have ${entered.length}).` };
 
   const teamsToUse = numberedTeams.slice(0, numTeams);
   const missingRoleIds = teamsToUse.filter(t => !t.discord_role_id).map(t => `Team ${t.num}`);
@@ -1025,51 +1277,8 @@ const GROUP_PRESETS = new Set(["group_single_elimination", "group_swiss_single_e
 /**
  * Default-schedule all scheduled matches off the active tournament's season start.
  * "Gap between rounds": every match in round R starts at season_start + (R-1) × gap,
- * where gap = match_spacing_min override, else round(bestOf × 7 / 5) × 5 minutes.
- * No-op if there's no active tournament or no season_start_at (teams propose times).
+ * replaced by the admin Scheduling panel (round_schedules table).
  */
-async function scheduleMatchTimes(): Promise<void> {
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings")
-    .select("active_tournament_id, season_format")
-    .single();
-  const tid = settings?.active_tournament_id as string | null | undefined;
-  if (!tid) return;
-
-  const { data: t } = await supabaseAdmin
-    .from("tournaments")
-    .select("season_start_at, match_spacing_min, season_format, stage_starts")
-    .eq("id", tid)
-    .single();
-
-  const start = t?.season_start_at ? new Date(t.season_start_at) : null;
-  if (!start || isNaN(start.getTime())) return;
-
-  const format = (t?.season_format ?? settings?.season_format) as
-    | { roundBestOf?: Record<string, number>; best_of?: number }
-    | null;
-  const bestOf = format?.roundBestOf?.standard ?? format?.roundBestOf?.finals ?? format?.best_of ?? 5;
-  const gapMin = t?.match_spacing_min ?? Math.ceil((8 * bestOf) / 5) * 5;
-  const stageStarts = (t?.stage_starts ?? null) as Record<string, string> | null;
-
-  const { data: matches } = await supabaseAdmin
-    .from("matches")
-    .select("id, round, stage")
-    .eq("status", "scheduled");
-  if (!matches?.length) return;
-
-  await Promise.all(
-    matches.map((m) => {
-      const round = Math.max(1, (m.round as number) ?? 1);
-      const stageKey = (m.stage as string | null) ?? null;
-      const stageBase = stageKey && stageStarts?.[stageKey]
-        ? new Date(stageStarts[stageKey])
-        : start;
-      const when = new Date(stageBase.getTime() + (round - 1) * gapMin * 60_000).toISOString();
-      return supabaseAdmin.from("matches").update({ scheduled_at: when }).eq("id", m.id);
-    })
-  );
-}
 
 export async function execStartSeason(): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin
@@ -1098,6 +1307,11 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
     return { ok: false, message: `❌ Group stage formats support a maximum of **64 teams** (current: ${numTeams}).` };
   }
 
+  // Clear any stale round schedules left over from a previous season; otherwise the
+  // channel gate sees old (past-deadline) entries and opens every channel instantly,
+  // before the admin can set new times.
+  await supabaseAdmin.from("round_schedules").delete().not("id", "is", null);
+
   await supabaseAdmin.from("league_settings")
     .update({ season_active: true, updated_at: new Date().toISOString() })
     .not("id", "is", null);
@@ -1110,9 +1324,6 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
       .not("id", "is", null);
     return { ok: false, message: `❌ Season start failed: bracket generation error — ${bracketResult.error}` };
   }
-
-  // Default-schedule match times off the tournament's season start (admin can override per-match).
-  await scheduleMatchTimes();
 
   // Rename each Discord role to match the team's current name (set by captains pre-season).
   const { data: teamsToRename } = await supabaseAdmin
@@ -1129,7 +1340,13 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   // later rounds open automatically as matches are reported (no /openround needed).
   await openReadyMatchChannels();
 
-  return { ok: true, message: `🏆 **Season has officially started!** ${numTeams} teams · ${format.preset.replace(/_/g, " ")} · Bracket generated.` };
+  const cut = bracketResult.cutTeams ?? 0;
+  const playing = numTeams - cut;
+  const base = `🏆 **Season has officially started!** ${playing} teams · ${format.preset.replace(/_/g, " ")} · Bracket generated.`;
+  const cutoffNote = cut > 0
+    ? ` ⚠ ${cut} team${cut === 1 ? "" : "s"} exceeded this format's team limit and were left out (lowest Rank Value) — those players won't participate this season.`
+    : "";
+  return { ok: true, message: base + cutoffNote };
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
@@ -1223,7 +1440,7 @@ async function openRound(userId: string, roundOverride?: number) {
   // Only consider matches that don't have a channel yet
   const { data: pending } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, round, stage")
+    .select("id, home_team_id, away_team_id, round, stage, scheduled_at")
     .eq("status", "scheduled")
     .is("discord_channel_id", null)
     .not("home_team_id", "is", null)
@@ -1244,7 +1461,7 @@ async function openRound(userId: string, roundOverride?: number) {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format")
+    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format, active_tournament_id")
     .single();
 
   const allTeamNames = [...new Set(
@@ -1253,10 +1470,11 @@ async function openRound(userId: string, roundOverride?: number) {
   await ensureRoles(allTeamNames);
 
   const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
-  const [existingChannels, guildRoles, allMatchRows] = await Promise.all([
+  const [existingChannels, guildRoles, allMatchRows, staffRoleIds] = await Promise.all([
     getGuildChannels(),
     getGuildRoles(),
     supabaseAdmin.from("matches").select("stage, round").then(r => r.data ?? []),
+    getStaffRoleIds(),
   ]);
   const maxRoundByStage: Record<string, number> = {};
   allMatchRows.forEach((m: { stage: string; round: number }) => {
@@ -1272,6 +1490,8 @@ async function openRound(userId: string, roundOverride?: number) {
     guildRoles,
     roundBestOf: format?.roundBestOf ?? {},
     maxRoundByStage,
+    staffRoleIds,
+    isTournament: !!(settings?.active_tournament_id as string | null | undefined),
   };
 
   let created = 0;
@@ -1284,6 +1504,7 @@ async function openRound(userId: string, roundOverride?: number) {
     const result = await createMatchChannel(h, a, targetRound, ctx, {
       round: m.round, stage: m.stage,
       homeTeamId: m.home_team_id!, awayTeamId: m.away_team_id!, matchId: m.id,
+      scheduledAt: (m as { scheduled_at?: string | null }).scheduled_at ?? null,
     });
     if (result.created) {
       created++;
@@ -1314,19 +1535,69 @@ async function openRound(userId: string, roundOverride?: number) {
 export async function openReadyMatchChannels(): Promise<void> {
   const { data: allMatches } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, round, match_number, stage, status, discord_channel_id");
+    .select("id, home_team_id, away_team_id, round, match_number, stage, status, discord_channel_id, scheduled_at, admin_scheduled, home_checked_in, away_checked_in, checkin_deadline");
   if (!allMatches?.length) return;
+
+  // Load round schedules. Always gate channels on schedule + previous deadline.
+  // Works for both tournament-based seasons (keyed by tournament_id) and standalone
+  // seasons (tournament_id IS NULL).
+  const { data: ls } = await supabaseAdmin
+    .from("league_settings")
+    .select("active_tournament_id")
+    .single();
+  const activeTournamentId = (ls?.active_tournament_id as string | null) ?? null;
+
+  const scheduleMap = new Map<string, { play_at: string; deadline_at: string }>();
+  {
+    const schedQuery = activeTournamentId
+      ? supabaseAdmin.from("round_schedules").select("stage, round, play_at, deadline_at").eq("tournament_id", activeTournamentId)
+      : supabaseAdmin.from("round_schedules").select("stage, round, play_at, deadline_at").is("tournament_id", null);
+    const { data: schedules } = await schedQuery;
+    for (const s of schedules ?? []) {
+      scheduleMap.set(`${s.stage}:${s.round}`, {
+        play_at: s.play_at as string,
+        deadline_at: s.deadline_at as string,
+      });
+    }
+  }
+
+  const now = Date.now();
+  const isTournamentMode = !!activeTournamentId;
+
+  const blockedByEarlierRound = (m: (typeof allMatches)[number]) => {
+    const check = (teamId: string) =>
+      allMatches.some((x) =>
+        x.stage === m.stage && x.round < m.round && x.status === "scheduled" &&
+        (x.home_team_id === teamId || x.away_team_id === teamId),
+      );
+    return check(m.home_team_id!) || check(m.away_team_id!);
+  };
+
+  // Tournament check-in: open a 10-minute window for each newly-ready match.
+  // Channels are then created (below) only once both teams have checked in.
+  if (isTournamentMode) {
+    for (const m of allMatches) {
+      if (m.status !== "scheduled" || m.discord_channel_id || !m.home_team_id || !m.away_team_id) continue;
+      if (m.checkin_deadline) continue;
+      if (blockedByEarlierRound(m)) continue;
+      await openCheckInForMatch(m.id, m.stage, m.round);
+    }
+  }
 
   const ready = allMatches.filter((m) => {
     if (m.status !== "scheduled" || m.discord_channel_id || !m.home_team_id || !m.away_team_id) return false;
-    const blockedByEarlierRound = (teamId: string) =>
-      allMatches.some((x) =>
-        x.stage === m.stage &&
-        x.round < m.round &&
-        x.status === "scheduled" &&
-        (x.home_team_id === teamId || x.away_team_id === teamId),
-      );
-    return !blockedByEarlierRound(m.home_team_id) && !blockedByEarlierRound(m.away_team_id);
+    if (blockedByEarlierRound(m)) return false;
+
+    // Tournaments: channel opens only once BOTH teams check in.
+    if (isTournamentMode) return !!m.home_checked_in && !!m.away_checked_in;
+
+    const cs = (m.stage as string).startsWith("group_") ? "group" : (m.stage as string);
+    if (!scheduleMap.has(`${cs}:${m.round}`)) return false;
+    if ((m.round as number) > 1) {
+      const prev = scheduleMap.get(`${cs}:${(m.round as number) - 1}`);
+      if (prev && new Date(prev.deadline_at).getTime() > now) return false;
+    }
+    return true;
   });
   if (!ready.length) return;
 
@@ -1339,13 +1610,15 @@ export async function openReadyMatchChannels(): Promise<void> {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format")
+    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format, active_tournament_id")
     .single();
   const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
+  const isTournament = !!(settings?.active_tournament_id as string | null | undefined);
 
-  const [existingChannels, guildRoles] = await Promise.all([
+  const [existingChannels, guildRoles, staffRoleIds] = await Promise.all([
     getGuildChannels(),
     getGuildRoles(),
+    getStaffRoleIds(),
   ]);
   const maxRoundByStage: Record<string, number> = {};
   allMatches.forEach((m) => {
@@ -1361,18 +1634,196 @@ export async function openReadyMatchChannels(): Promise<void> {
     guildRoles,
     roundBestOf: format?.roundBestOf ?? {},
     maxRoundByStage,
+    staffRoleIds,
+    isTournament,
   };
 
   for (const m of ready) {
     const h = teamNameById[m.home_team_id!];
     const a = teamNameById[m.away_team_id!];
     if (!h || !a) continue;
+    const cs = (m.stage as string).startsWith("group_") ? "group" : (m.stage as string);
+    const schedEntry = scheduleMap.get(`${cs}:${m.round}`);
+    const pinned = !!(m as { admin_scheduled?: boolean }).admin_scheduled;
+    const matchScheduledAt = (m as { scheduled_at?: string | null }).scheduled_at ?? null;
     const r = await createMatchChannel(h, a, m.round, ctx, {
       round: m.round, stage: m.stage,
       homeTeamId: m.home_team_id!, awayTeamId: m.away_team_id!, matchId: m.id,
+      // A pinned match uses its own fixed time; otherwise the round window start.
+      scheduledAt: pinned && matchScheduledAt ? matchScheduledAt : (schedEntry?.play_at ?? matchScheduledAt),
+      adminScheduled: pinned,
     });
     if (!r.created && r.error) console.error("[openReadyMatchChannels]", r.error);
+    if (r.created && isTournament) {
+      // Notify both teams that their match is now ready to play.
+      const notifBase = { url: "/dashboard/my-team", tag: "match-ready", category: "tournament" as const };
+      pushToTeam(m.home_team_id!, { ...notifBase, title: "Match Ready!", body: `Your match vs ${a} is ready. Head to My Team to get started.` }).catch(() => {});
+      pushToTeam(m.away_team_id!, { ...notifBase, title: "Match Ready!", body: `Your match vs ${h} is ready. Head to My Team to get started.` }).catch(() => {});
+    }
     await sleep(DISCORD_PACE_MS);
+  }
+}
+
+// ─── Tournament check-in ────────────────────────────────────────────────────────
+
+const CHECKIN_WINDOW_MS = 10 * 60 * 1000;
+
+async function isTournamentActive(): Promise<boolean> {
+  const { data } = await supabaseAdmin.from("league_settings").select("active_tournament_id").maybeSingle();
+  return !!(data?.active_tournament_id as string | null | undefined);
+}
+
+// Scheduled start time of a stage (round 1's play time), if an admin set one.
+async function stageStartPlayAt(stage: string): Promise<string | null> {
+  const { data: ls } = await supabaseAdmin.from("league_settings").select("active_tournament_id").maybeSingle();
+  const tid = (ls?.active_tournament_id as string | null) ?? null;
+  const cs = stage.startsWith("group_") ? "group" : stage;
+  const q = tid
+    ? supabaseAdmin.from("round_schedules").select("play_at").eq("tournament_id", tid).eq("stage", cs).eq("round", 1).maybeSingle()
+    : supabaseAdmin.from("round_schedules").select("play_at").is("tournament_id", null).eq("stage", cs).eq("round", 1).maybeSingle();
+  const { data } = await q;
+  return (data?.play_at as string | undefined) ?? null;
+}
+
+// Opens a 10-minute check-in window for a tournament match if one isn't open yet.
+// First round of a stage opens at the stage's scheduled start; later rounds open now.
+async function openCheckInForMatch(matchId: string, stage: string, round: number): Promise<void> {
+  const { data: m } = await supabaseAdmin.from("matches").select("checkin_deadline, home_team_id, away_team_id").eq("id", matchId).maybeSingle();
+  if (!m || m.checkin_deadline) return;
+  let deadlineMs = Date.now() + CHECKIN_WINDOW_MS;
+  if (round === 1) {
+    // The first round of a stage starts at its scheduled time. If the admin hasn't
+    // scheduled it yet, do NOT open a window — otherwise every team would be DQ'd
+    // 10 minutes after the bracket is generated. Scheduling the stage re-runs this.
+    const start = await stageStartPlayAt(stage);
+    if (!start) return;
+    deadlineMs = new Date(start).getTime() + CHECKIN_WINDOW_MS;
+  }
+  // Later rounds open immediately, so notify now and mark notified. Round 1 opens at
+  // the scheduled stage start — processExpiredCheckIns notifies when that arrives.
+  const immediate = deadlineMs - CHECKIN_WINDOW_MS <= Date.now();
+  await supabaseAdmin.from("matches")
+    .update({ checkin_deadline: new Date(deadlineMs).toISOString(), checkin_notified: immediate })
+    .eq("id", matchId);
+
+  if (immediate && m.home_team_id && m.away_team_id) {
+    const payload = { title: "Check in now!", body: "Your match is ready — check in within 10 minutes or forfeit.", url: "/dashboard/my-team", tag: "checkin", category: "tournament" as const };
+    pushToTeam(m.home_team_id, payload).catch(() => {});
+    pushToTeam(m.away_team_id, payload).catch(() => {});
+  }
+}
+
+// Creates the match's Discord channel once both teams have checked in.
+export async function createChannelIfCheckedIn(matchId: string): Promise<void> {
+  const { data: m } = await supabaseAdmin.from("matches")
+    .select("id, home_team_id, away_team_id, home_checked_in, away_checked_in, discord_channel_id, stage, round, scheduled_at")
+    .eq("id", matchId).maybeSingle();
+  if (!m || m.discord_channel_id || !m.home_team_id || !m.away_team_id) return;
+  if (!m.home_checked_in || !m.away_checked_in) return;
+  const [{ data: hTeam }, { data: aTeam }] = await Promise.all([
+    supabaseAdmin.from("teams").select("name").eq("id", m.home_team_id).single(),
+    supabaseAdmin.from("teams").select("name").eq("id", m.away_team_id).single(),
+  ]);
+  if (!hTeam || !aTeam) return;
+  const r = await createMatchChannel(hTeam.name, aTeam.name, m.round, undefined, {
+    round: m.round, stage: m.stage,
+    homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, matchId: m.id,
+    scheduledAt: (m as { scheduled_at?: string | null }).scheduled_at ?? null,
+  });
+  if (!r.created && r.error) console.error("[createChannelIfCheckedIn]", r.error);
+}
+
+// Notifies teams when a check-in window opens (covers round 1 opening at stage start),
+// and DQs matches whose window expired without both teams checking in. The team that
+// checked in advances by forfeit; if neither did, the higher seed (home) advances.
+export async function processExpiredCheckIns(): Promise<void> {
+  if (!(await isTournamentActive())) return;
+  const now = Date.now();
+  const { data: matches } = await supabaseAdmin.from("matches")
+    .select("id, home_checked_in, away_checked_in, checkin_deadline, checkin_notified, discord_channel_id, status, home_team_id, away_team_id")
+    .eq("status", "scheduled")
+    .not("checkin_deadline", "is", null)
+    .not("home_team_id", "is", null)
+    .not("away_team_id", "is", null);
+  for (const m of matches ?? []) {
+    if (m.discord_channel_id) continue;
+    if (m.home_checked_in && m.away_checked_in) continue;
+
+    const deadline = new Date(m.checkin_deadline as string).getTime();
+    const opensAt = deadline - CHECKIN_WINDOW_MS;
+
+    // Window just opened (e.g. round 1 reaching its stage start) — notify both teams.
+    if (now >= opensAt && now <= deadline && !m.checkin_notified) {
+      await supabaseAdmin.from("matches").update({ checkin_notified: true }).eq("id", m.id);
+      const payload = { title: "Check in now!", body: "Your match is ready — check in within 10 minutes or forfeit.", url: "/dashboard/my-team", tag: "checkin", category: "tournament" as const };
+      if (m.home_team_id) pushToTeam(m.home_team_id, payload).catch(() => {});
+      if (m.away_team_id) pushToTeam(m.away_team_id, payload).catch(() => {});
+      continue;
+    }
+
+    if (deadline > now) continue; // still counting down
+
+    // Expired — forfeit. Winner = the team that checked in (home if neither).
+    const neither = !m.home_checked_in && !m.away_checked_in;
+    const winnerIsHome = m.home_checked_in || neither;
+    await execReportMatchResult(m.id, winnerIsHome ? 1 : 0, winnerIsHome ? 0 : 1, 0, true);
+
+    const winnerTeam = winnerIsHome ? m.home_team_id : m.away_team_id;
+    const loserTeam = winnerIsHome ? m.away_team_id : m.home_team_id;
+    if (loserTeam) pushToTeam(loserTeam, {
+      title: "Match forfeited",
+      body: neither
+        ? "Neither team checked in within 10 minutes — your team was disqualified."
+        : "Your team missed the 10-minute check-in and forfeited the match.",
+      url: "/dashboard/my-team", tag: "checkin-dq", category: "tournament",
+    }).catch(() => {});
+    if (winnerTeam) pushToTeam(winnerTeam, {
+      title: neither ? "Match forfeited" : "Opponent no-show — you advance!",
+      body: neither
+        ? "Neither team checked in. You advance as the higher seed."
+        : "Your opponent missed check-in. You advance by forfeit.",
+      url: "/dashboard/my-team", tag: "checkin-advance", category: "tournament",
+    }).catch(() => {});
+  }
+}
+
+// ─── Score auto-confirm ─────────────────────────────────────────────────────────
+
+const SCORE_CONFIRM_WINDOW_MS = 5 * 60 * 1000;
+
+// Auto-finalizes submitted series results the opposing team hasn't confirmed within
+// 5 minutes. Same outcome as a manual confirm — the submitted score stands.
+export async function processExpiredScoreConfirmations(): Promise<void> {
+  const cutoff = new Date(Date.now() - SCORE_CONFIRM_WINDOW_MS).toISOString();
+  const { data: matches } = await supabaseAdmin
+    .from("matches")
+    .select("id, pending_home_score, pending_away_score, home_team_id, away_team_id, score_submitted_by_team_id")
+    .not("pending_home_score", "is", null)
+    .is("home_score", null)
+    .eq("score_confirmed", false)
+    .not("score_submitted_at", "is", null)
+    .lte("score_submitted_at", cutoff);
+  for (const m of matches ?? []) {
+    // Atomic claim: only the caller that flips score_confirmed false→true proceeds,
+    // so a concurrent cron + client trigger can't both finalize the same match.
+    const { data: claimed } = await supabaseAdmin
+      .from("matches")
+      .update({ score_confirmed: true })
+      .eq("id", m.id)
+      .eq("score_confirmed", false)
+      .select("id");
+    if (!claimed || claimed.length === 0) continue;
+    try {
+      await execReportMatchResult(m.id, m.pending_home_score as number, m.pending_away_score as number);
+    } catch { /* admin can finalize manually */ }
+
+    // Let the team that didn't confirm know the result was auto-submitted.
+    const otherTeam = m.score_submitted_by_team_id === m.home_team_id ? m.away_team_id : m.home_team_id;
+    if (otherTeam) pushToTeam(otherTeam as string, {
+      title: "Result auto-submitted",
+      body: "You didn't confirm the reported score within 5 minutes, so it was finalized automatically.",
+      url: "/dashboard/my-team", tag: "score-auto",
+    }).catch(() => {});
   }
 }
 
@@ -1549,6 +2000,79 @@ async function setMatchSlot(stage: string, round: number, matchNum: number, slot
     .eq("id", m.id);
 }
 
+// After every WB or LB match result, scan for LB matches that are indefinitely
+// waiting for a team that will never arrive (because its source was a bye).
+// Returns true if any byes were resolved (caller should loop until false).
+async function resolveDeByeMatches(): Promise<boolean> {
+  const { data: lbMatches } = await supabaseAdmin
+    .from("matches")
+    .select("id, round, match_number, home_team_id, away_team_id")
+    .eq("stage", DE_LOSERS)
+    .neq("status", "completed");
+
+  let resolved = false;
+
+  for (const m of lbMatches ?? []) {
+    const hasHome = !!m.home_team_id;
+    const hasAway = !!m.away_team_id;
+    if (hasHome === hasAway) continue; // both teams present, or neither — skip
+
+    const presentTeamId: string = hasHome ? m.home_team_id : m.away_team_id;
+
+    // Determine which match should have produced the missing team.
+    // LB round topology:
+    //   R1 (odd):  home ← WB R1 match (2M-1) loser,  away ← WB R1 match (2M) loser
+    //   even R:    home ← LB (R-1) match M winner,    away ← WB R(R/2+1) match M loser
+    //   odd R > 1: home ← LB (R-1) match (2M-1) win, away ← LB (R-1) match (2M) win
+    let sourceStage: string;
+    let sourceRound: number;
+    let sourceMatchNum: number;
+
+    if (!hasHome) {
+      if (m.round === 1) {
+        sourceStage = DE_WINNERS; sourceRound = 1; sourceMatchNum = 2 * m.match_number - 1;
+      } else if (m.round % 2 === 0) {
+        sourceStage = DE_LOSERS; sourceRound = m.round - 1; sourceMatchNum = m.match_number;
+      } else {
+        sourceStage = DE_LOSERS; sourceRound = m.round - 1; sourceMatchNum = 2 * m.match_number - 1;
+      }
+    } else {
+      if (m.round === 1) {
+        sourceStage = DE_WINNERS; sourceRound = 1; sourceMatchNum = 2 * m.match_number;
+      } else if (m.round % 2 === 0) {
+        sourceStage = DE_WINNERS; sourceRound = m.round / 2 + 1; sourceMatchNum = m.match_number;
+      } else {
+        sourceStage = DE_LOSERS; sourceRound = m.round - 1; sourceMatchNum = 2 * m.match_number;
+      }
+    }
+
+    const { data: sourceMatch } = await supabaseAdmin
+      .from("matches")
+      .select("status")
+      .eq("stage", sourceStage)
+      .eq("round", sourceRound)
+      .eq("match_number", sourceMatchNum)
+      .maybeSingle();
+
+    if (sourceMatch?.status !== "completed") continue;
+
+    // Source is done and the slot is still empty — the missing team will never arrive.
+    // Auto-complete as a bye win for the present team.
+    const homeScore = hasHome ? 1 : 0;
+    const awayScore = hasHome ? 0 : 1;
+    await supabaseAdmin.from("matches")
+      .update({ home_score: homeScore, away_score: awayScore, status: "completed" })
+      .eq("id", m.id);
+    await advanceBracketWinner(
+      { round: m.round, match_number: m.match_number, stage: DE_LOSERS },
+      presentTeamId,
+    );
+    resolved = true;
+  }
+
+  return resolved;
+}
+
 async function getDEBracketSizes() {
   const [{ data: wbRows }, { data: lbRows }] = await Promise.all([
     supabaseAdmin.from("matches").select("round").eq("stage", DE_WINNERS),
@@ -1577,10 +2101,18 @@ async function maybeCreateChannelForMatch(
 ): Promise<void> {
   const { data: m } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id")
+    .select("id, home_team_id, away_team_id, scheduled_at")
     .eq("stage", stage).eq("round", round).eq("match_number", matchNum)
     .maybeSingle();
   if (!m?.home_team_id || !m?.away_team_id) return;
+
+  // Tournaments gate the channel behind a check-in window instead of opening it now.
+  if (await isTournamentActive()) {
+    await openCheckInForMatch(m.id, stage, round);
+    await createChannelIfCheckedIn(m.id);
+    return;
+  }
+
   const [{ data: hTeam }, { data: aTeam }] = await Promise.all([
     supabaseAdmin.from("teams").select("name").eq("id", m.home_team_id).single(),
     supabaseAdmin.from("teams").select("name").eq("id", m.away_team_id).single(),
@@ -1589,6 +2121,7 @@ async function maybeCreateChannelForMatch(
   const r = await createMatchChannel(hTeam.name, aTeam.name, round, undefined, {
     round, stage,
     homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, matchId: m.id,
+    scheduledAt: (m as { scheduled_at?: string | null }).scheduled_at ?? null,
   });
   if (!r.created && r.error) console.error("[createMatchChannel]", r.error);
 }
@@ -1693,12 +2226,15 @@ async function advanceBracketWinner(
 
   // ── Hybrid UB ─────────────────────────────────────────────────────────────
   if (stage === HYBRID_UB) {
-    // UB QF winner → SF home slot (match_number preserved); loser → LB R3 away slot
+    // UB QF winner → SF home slot (match_number preserved).
+    // Loser cross-routes to the OPPOSITE LB R3 slot so the same two teams
+    // cannot meet again in the SF (UB M1 loser → LB R3 M2, M2 loser → M1).
     await setMatchSlot(HYBRID_SF, 1, match_number, "home_team_id", winnerId);
     await maybeCreateChannelForMatch(HYBRID_SF, 1, match_number);
     if (loserId) {
-      await setMatchSlot(HYBRID_LB, 3, match_number, "away_team_id", loserId);
-      await maybeCreateChannelForMatch(HYBRID_LB, 3, match_number);
+      const lbMatchNum = match_number === 1 ? 2 : 1;
+      await setMatchSlot(HYBRID_LB, 3, lbMatchNum, "away_team_id", loserId);
+      await maybeCreateChannelForMatch(HYBRID_LB, 3, lbMatchNum);
     }
     return;
   }
@@ -1736,12 +2272,14 @@ async function advanceBracketWinner(
 
   // ── Hybrid8 UB ────────────────────────────────────────────────────────────
   if (stage === HYBRID8_UB) {
-    // UB winner → SF home; loser → LB R2 away (straight into LB QF)
+    // UB winner → SF home; loser cross-routes to the OPPOSITE LB R2 slot
+    // (UB M1 loser → LB R2 M2, M2 loser → M1) so the pair cannot rematch in the SF.
     await setMatchSlot(HYBRID8_SF, 1, match_number, "home_team_id", winnerId);
     await maybeCreateChannelForMatch(HYBRID8_SF, 1, match_number);
     if (loserId) {
-      await setMatchSlot(HYBRID8_LB, 2, match_number, "away_team_id", loserId);
-      await maybeCreateChannelForMatch(HYBRID8_LB, 2, match_number);
+      const lbMatchNum = match_number === 1 ? 2 : 1;
+      await setMatchSlot(HYBRID8_LB, 2, lbMatchNum, "away_team_id", loserId);
+      await maybeCreateChannelForMatch(HYBRID8_LB, 2, lbMatchNum);
     }
     return;
   }
@@ -1782,7 +2320,7 @@ async function advanceBracketWinner(
   const slot = nextSlot(match_number);
   const { data: nextMatch } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id")
+    .select("id, home_team_id, away_team_id, scheduled_at")
     .eq("stage", stage).eq("round", nr).eq("match_number", nm)
     .maybeSingle();
   if (!nextMatch) return;
@@ -1790,27 +2328,17 @@ async function advanceBracketWinner(
     .update({ [slot === "home" ? "home_team_id" : "away_team_id"]: winnerId, status: "scheduled" })
     .eq("id", nextMatch.id);
 
-  const otherId = slot === "home" ? nextMatch.away_team_id : nextMatch.home_team_id;
-  if (otherId) {
-    const [homeId, awayId] = slot === "home" ? [winnerId, otherId] : [otherId, winnerId];
-    const [{ data: hTeam }, { data: aTeam }] = await Promise.all([
-      supabaseAdmin.from("teams").select("name").eq("id", homeId).single(),
-      supabaseAdmin.from("teams").select("name").eq("id", awayId).single(),
-    ]);
-    if (hTeam && aTeam) {
-      const r = await createMatchChannel(hTeam.name, aTeam.name, nr, undefined, {
-        round: nr, stage,
-        homeTeamId: homeId, awayTeamId: awayId, matchId: nextMatch.id,
-      });
-      if (!r.created && r.error) console.error("[createMatchChannel]", r.error);
-    }
-  }
+  // Routes through maybeCreateChannelForMatch so tournaments open a check-in window
+  // instead of creating the channel immediately.
+  await maybeCreateChannelForMatch(stage, nr, nm);
 }
 
 export async function execReportMatchResult(
   matchId: string,
   homeScore: number,
   awayScore: number,
+  goalDiff = 0,
+  forfeit = false,
 ): Promise<{ ok: boolean; message: string }> {
   const { data: match } = await supabaseAdmin
     .from("matches")
@@ -1820,8 +2348,8 @@ export async function execReportMatchResult(
   if (match.status === "completed") return { ok: false, message: "Match already reported." };
 
   const [{ data: homeTeam }, { data: awayTeam }] = await Promise.all([
-    supabaseAdmin.from("teams").select("id, name, wins, losses").eq("id", match.home_team_id).single(),
-    supabaseAdmin.from("teams").select("id, name, wins, losses").eq("id", match.away_team_id).single(),
+    supabaseAdmin.from("teams").select("id, name, wins, losses, season_rating").eq("id", match.home_team_id).single(),
+    supabaseAdmin.from("teams").select("id, name, wins, losses, season_rating").eq("id", match.away_team_id).single(),
   ]);
   if (!homeTeam || !awayTeam) return { ok: false, message: "Team not found." };
 
@@ -1842,6 +2370,15 @@ export async function execReportMatchResult(
       supabaseAdmin.from("teams").update({ wins: (winner.wins ?? 0) + 1 }).eq("id", winner.id),
       supabaseAdmin.from("teams").update({ losses: (loser.losses ?? 0) + 1 }).eq("id", loser.id),
     ]);
+
+    // Update season ratings. Lazy-init from roster RVs on first match.
+    applySeasonRatingUpdate(
+      homeTeam.id, awayTeam.id,
+      homeTeam.season_rating as number | null,
+      awayTeam.season_rating as number | null,
+      homeScore, awayScore, goalDiff,
+    ).catch(() => {});
+
     if (match.stage) {
       await advanceBracketWinner(
         { round: match.round, match_number: match.match_number, stage: match.stage },
@@ -1856,6 +2393,15 @@ export async function execReportMatchResult(
   // group/Swiss pairing finishing the round). Format-agnostic; idempotent.
   await openReadyMatchChannels();
 
+  // Auto-advance DE lower-bracket teams whose source slot was a bye. Loop until
+  // stable because one resolved bye may unblock another dependent bye.
+  if (match.stage === DE_WINNERS || match.stage === DE_LOSERS) {
+    // eslint-disable-next-line no-await-in-loop
+    while (await resolveDeByeMatches()) {
+      await openReadyMatchChannels();
+    }
+  }
+
   const winnerName = homeScore > awayScore ? homeTeam.name : awayScore > homeScore ? awayTeam.name : null;
 
   if (match.discord_channel_id) {
@@ -1869,6 +2415,10 @@ export async function execReportMatchResult(
         `${homeMention} ${awayMention}\n📊 **Match result: ${homeTeam.name} ${homeScore}–${awayScore} ${awayTeam.name}**\n${resultLine}`,
       );
     } catch { /* best-effort */ }
+    // Delete the channel now that the result has been posted — don't wait for the
+    // whole round to finish.
+    await deleteChannel(match.discord_channel_id);
+    await supabaseAdmin.from("matches").update({ discord_channel_id: null }).eq("id", matchId);
   }
 
   // Fire a completion notification when the championship-deciding match is
@@ -1918,10 +2468,148 @@ export async function execReportMatchResult(
     }
   } catch { /* best-effort — never block the match report */ }
 
+  // Resolve wagers for this match
+  // A forfeit didn't actually play out, so refund all wagers instead of settling them.
+  if (forfeit) voidMatchWagers(matchId).catch(() => {});
+  else resolveMatchWagers(matchId, homeScore, awayScore).catch(() => {});
+
   return {
     ok: true,
     message: `${homeTeam.name} ${homeScore} — ${awayScore} ${awayTeam.name}${winnerName ? ` · ${winnerName} wins` : " · Draw"}`,
   };
+}
+
+// Refunds every pending wager/parlay on a forfeited match (the game wasn't played,
+// so over/under and moneyline bets can't fairly be settled).
+async function voidMatchWagers(matchId: string): Promise<void> {
+  const { data: wagers } = await supabaseAdmin
+    .from("wagers").select("id, player_id, amount").eq("match_id", matchId).eq("status", "pending");
+  if ((wagers ?? []).length) {
+    await supabaseAdmin.from("wagers").update({ status: "void" }).in("id", wagers!.map((w) => w.id));
+    await Promise.all(wagers!.map((w) =>
+      supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: w.player_id, coin_amount: w.amount }),
+    ));
+  }
+
+  // Any parlay that includes this match is voided in full and the stake refunded.
+  const { data: legs } = await supabaseAdmin
+    .from("parlay_legs").select("parlay_id").eq("match_id", matchId).eq("status", "pending");
+  const parlayIds = [...new Set((legs ?? []).map((l) => l.parlay_id as string))];
+  for (const pid of parlayIds) {
+    const { data: p } = await supabaseAdmin.from("parlays").select("player_id, amount, status").eq("id", pid).single();
+    if (!p || p.status !== "pending") continue;
+    await Promise.all([
+      supabaseAdmin.from("parlays").update({ status: "void" }).eq("id", pid),
+      supabaseAdmin.from("parlay_legs").update({ status: "void" }).eq("parlay_id", pid),
+      supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: p.player_id, coin_amount: p.amount }),
+    ]);
+  }
+}
+
+async function resolveMatchWagers(matchId: string, homeScore: number, awayScore: number): Promise<void> {
+  const { data: wagers } = await supabaseAdmin
+    .from("wagers")
+    .select("id, player_id, bet_type, amount, odds_multiplier")
+    .eq("match_id", matchId)
+    .eq("status", "pending");
+
+  if (!(wagers ?? []).length) return;
+
+  const totalGames = homeScore + awayScore;
+  const homeWon = homeScore > awayScore;
+
+  const wonIds: string[] = [];
+  const lostIds: string[] = [];
+  const gainByPlayer: Record<string, number> = {};
+
+  for (const w of wagers!) {
+    let won = false;
+    if (w.bet_type === "home") won = homeWon;
+    else if (w.bet_type === "away") won = !homeWon;
+    else {
+      const m = (w.bet_type as string).match(/^(over|under)_([\d.]+)$/);
+      if (m) {
+        const line = parseFloat(m[2]);
+        won = m[1] === "over" ? totalGames > line : totalGames < line;
+      }
+    }
+    if (won) {
+      wonIds.push(w.id);
+      const gain = Math.round(w.amount * Number(w.odds_multiplier));
+      gainByPlayer[w.player_id] = (gainByPlayer[w.player_id] ?? 0) + gain;
+    } else {
+      lostIds.push(w.id);
+    }
+  }
+
+  const updates: PromiseLike<unknown>[] = [];
+  if (wonIds.length) updates.push(supabaseAdmin.from("wagers").update({ status: "won" }).in("id", wonIds));
+  if (lostIds.length) updates.push(supabaseAdmin.from("wagers").update({ status: "lost" }).in("id", lostIds));
+  for (const [playerId, gain] of Object.entries(gainByPlayer)) {
+    updates.push(supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: playerId, coin_amount: gain }));
+  }
+
+  await Promise.all(updates);
+
+  // Resolve parlay legs for this match
+  const { data: parlayLegs } = await supabaseAdmin
+    .from("parlay_legs")
+    .select("id, parlay_id, bet_type")
+    .eq("match_id", matchId)
+    .eq("status", "pending");
+
+  if ((parlayLegs ?? []).length) {
+    const legWonIds: string[] = [];
+    const legLostIds: string[] = [];
+
+    for (const leg of parlayLegs!) {
+      let won = false;
+      if (leg.bet_type === "home") won = homeWon;
+      else if (leg.bet_type === "away") won = !homeWon;
+      else {
+        const m = (leg.bet_type as string).match(/^(over|under)_([\d.]+)$/);
+        if (m) {
+          const line = parseFloat(m[2]);
+          won = m[1] === "over" ? totalGames > line : totalGames < line;
+        }
+      }
+      if (won) legWonIds.push(leg.id);
+      else legLostIds.push(leg.id);
+    }
+
+    const legUpdates: PromiseLike<unknown>[] = [];
+    if (legWonIds.length) legUpdates.push(supabaseAdmin.from("parlay_legs").update({ status: "won" }).in("id", legWonIds));
+    if (legLostIds.length) legUpdates.push(supabaseAdmin.from("parlay_legs").update({ status: "lost" }).in("id", legLostIds));
+    await Promise.all(legUpdates);
+
+    const affectedParlayIds = [...new Set(parlayLegs!.map((l) => l.parlay_id as string))];
+    for (const parlayId of affectedParlayIds) {
+      const { data: allLegs } = await supabaseAdmin
+        .from("parlay_legs")
+        .select("status")
+        .eq("parlay_id", parlayId);
+
+      const hasLost = (allLegs ?? []).some((l) => l.status === "lost");
+      const allDone = (allLegs ?? []).every((l) => l.status !== "pending");
+
+      if (hasLost) {
+        await supabaseAdmin.from("parlays").update({ status: "lost" }).eq("id", parlayId);
+      } else if (allDone) {
+        const { data: p } = await supabaseAdmin
+          .from("parlays")
+          .select("player_id, amount, combined_multiplier")
+          .eq("id", parlayId)
+          .single();
+        if (p) {
+          const payout = Math.round(p.amount * Number(p.combined_multiplier));
+          await Promise.all([
+            supabaseAdmin.from("parlays").update({ status: "won" }).eq("id", parlayId),
+            supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: p.player_id, coin_amount: payout }),
+          ]);
+        }
+      }
+    }
+  }
 }
 
 // ─── Autocomplete ─────────────────────────────────────────────────────────────

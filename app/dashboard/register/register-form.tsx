@@ -45,10 +45,10 @@ export function RegisterForm({ isResubmit, existing }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={existing?.peak_3v3} />
-        <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={existing?.current_3v3} />
         <MMRInput name="peak_2v2"    label="All Time Peak 2v2" defaultValue={existing?.peak_2v2} />
         <MMRInput name="current_2v2" label="Season Peak 2v2"   defaultValue={existing?.current_2v2} />
+        <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={existing?.peak_3v3} />
+        <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={existing?.current_3v3} />
       </div>
 
       <div className="space-y-1">

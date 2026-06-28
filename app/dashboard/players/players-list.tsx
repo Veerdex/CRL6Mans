@@ -143,7 +143,7 @@ export default function PlayersList({
           teamName={statsFor.team_id ? (teamNames[statsFor.team_id] ?? null) : null}
           rvRank={rankMap.get(statsFor.id) ?? 0}
           totalPlayers={players.length}
-          stats={statsByPlayer[statsFor.id]}
+          stats={statsByPlayer[statsFor.id] ?? null}
           onClose={() => setStatsFor(null)}
         />
       )}

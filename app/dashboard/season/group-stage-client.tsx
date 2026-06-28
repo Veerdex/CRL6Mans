@@ -24,9 +24,10 @@ interface GroupStageClientProps {
   teams: Record<string, GroupTeam>;
   qualifiersPerGroup: number;
   topDirectQualifiers: number;
+  teamTitles: Record<string, string>;
 }
 
-export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup, topDirectQualifiers }: GroupStageClientProps) {
+export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup, topDirectQualifiers, teamTitles }: GroupStageClientProps) {
   const [selectedGroup, setSelectedGroup] = useState<number | "all">("all");
   const [search, setSearch] = useState("");
   // Start with fully-played rounds collapsed — but if the whole stage is done,
@@ -130,7 +131,7 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
               <p className="text-xs font-semibold text-zinc-400">Group {gNum}</p>
             </div>
             <div className="p-3">
-              <StandingsTable standings={standings} teams={teams} qualifiersPerGroup={qualifiersPerGroup} topDirectQualifiers={topDirectQualifiers} />
+              <StandingsTable standings={standings} teams={teams} qualifiersPerGroup={qualifiersPerGroup} topDirectQualifiers={topDirectQualifiers} teamTitles={teamTitles} />
             </div>
           </div>
         ))}
@@ -222,11 +223,13 @@ function StandingsTable({
   teams,
   qualifiersPerGroup,
   topDirectQualifiers,
+  teamTitles,
 }: {
   standings: GroupStanding[];
   teams: Record<string, GroupTeam>;
   qualifiersPerGroup: number;
   topDirectQualifiers: number;
+  teamTitles: Record<string, string>;
 }) {
   const hasSecondTier = topDirectQualifiers < qualifiersPerGroup;
 
@@ -258,7 +261,13 @@ function StandingsTable({
                     ) : (
                       <div className="w-4 h-4 rounded shrink-0 bg-zinc-800 border border-zinc-700/50" />
                     )}
-                    <span>{teams[s.teamId]?.name ?? "—"}</span>
+                    <a
+                      href={`/dashboard/teams?search=${encodeURIComponent(teams[s.teamId]?.name ?? "")}&from=season`}
+                      title={teamTitles[s.teamId]}
+                      className="hover:underline"
+                    >
+                      {teams[s.teamId]?.name ?? "—"}
+                    </a>
                   </div>
                 </td>
                 <td className="py-0.5 text-right px-1 tabular-nums text-emerald-400">{s.wins}</td>

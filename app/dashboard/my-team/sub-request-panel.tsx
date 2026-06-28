@@ -72,7 +72,9 @@ export function SubRequestPanel({ teamId, roster, availableSubs, existingRequest
 
   const selectedOut  = roster.find(p => p.id === playerOutId);
   const outMmr       = selectedOut ? peakMmr(selectedOut) : Infinity;
-  const eligibleSubs = availableSubs.filter(s => peakMmr(s) <= outMmr);
+  // Sub eligibility: if player out is below 1400 rating, subs can go up to +100 of that rating.
+  const mmrLimit     = outMmr < 1400 ? outMmr + 100 : outMmr;
+  const eligibleSubs = availableSubs.filter(s => peakMmr(s) <= mmrLimit);
 
   function resetForm() {
     setPlayerOutId(""); setSubPlayerId(""); setReason("");
@@ -150,7 +152,9 @@ export function SubRequestPanel({ teamId, roster, availableSubs, existingRequest
               Substitute *
               {selectedOut && (
                 <span className="ml-1 text-zinc-600 normal-case font-normal">
-                  — must be ≤ {Math.round(outMmr).toLocaleString()} RV
+                  {outMmr < 1400
+                    ? `— max ${Math.round(mmrLimit).toLocaleString()} RV (${Math.round(outMmr).toLocaleString()} + 100)`
+                    : `— must be ≤ ${Math.round(mmrLimit).toLocaleString()} RV`}
                 </span>
               )}
             </label>

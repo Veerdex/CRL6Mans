@@ -7,13 +7,15 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { roleMention, notifyMatchChannel } from "@/app/lib/match-notifications";
 import { pushToAdmins } from "@/app/lib/push";
-import { execReportMatchResult, getBestOfForMatch, validateSeriesScore } from "@/app/lib/discord-bot";
+import { execReportMatchResult, getBestOfForMatch, validateSeriesScore, processExpiredScoreConfirmations } from "@/app/lib/discord-bot";
 import { deleteChannel } from "@/app/lib/discord-api";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
 
-async function getCaptain() {
+// Any approved player on a team can submit/confirm results — not just the captain.
+// Subs are excluded because their team_id won't match the match's teams.
+async function getTeamMember() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
@@ -36,7 +38,7 @@ export async function submitSeriesResult(
   awayWins: number,
   games: SubmittedGame[] = [],
 ): Promise<{ error?: string }> {
-  const player = await getCaptain();
+  const player = await getTeamMember();
   if (!player?.team_id) return { error: "Not on a team" };
 
   const { data: match } = await supabaseAdmin
@@ -75,6 +77,7 @@ export async function submitSeriesResult(
       pending_away_score:         awayWins,
       score_submitted_by_team_id: player.team_id,
       score_confirmed:            false,
+      score_submitted_at:         new Date().toISOString(),
     })
     .eq("id", matchId);
 
@@ -132,7 +135,7 @@ export async function submitSeriesResult(
 export async function confirmSeriesResult(
   matchId: string
 ): Promise<{ error?: string }> {
-  const player = await getCaptain();
+  const player = await getTeamMember();
   if (!player?.team_id) return { error: "Not on a team" };
 
   const { data: match } = await supabaseAdmin
@@ -178,6 +181,18 @@ export async function confirmSeriesResult(
   return {};
 }
 
+// Client-fired when a confirmation deadline passes while someone has the page open —
+// auto-finalizes any series whose 5-minute confirm window has elapsed. Idempotent.
+export async function processScoreConfirmationsNow(): Promise<{ ok: boolean }> {
+  const player = await getTeamMember();
+  if (!player) return { ok: false };
+  await processExpiredScoreConfirmations().catch(() => {});
+  revalidatePath("/dashboard/my-team");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/season");
+  return { ok: true };
+}
+
 // Parses a .replay file and determines which team won that individual game.
 // Maps blue (team0) / orange (team1) to home/away by matching player names
 // against the team rosters stored in the database.
@@ -188,7 +203,7 @@ export async function uploadGameReplay(
   matchId: string,
   gameNumber = 1,
 ): Promise<{ homeTeamWon?: boolean; replayId?: string | null; stats?: AnalyzedGameStat[]; error?: string }> {
-  const player = await getCaptain();
+  const player = await getTeamMember();
   if (!player?.team_id) return { error: "Not on a team" };
 
   const file = formData.get("replay") as File | null;
@@ -209,11 +224,14 @@ export async function uploadGameReplay(
   if (replayData.team0Score === replayData.team1Score)
     return { error: "Replay shows a tied game — please check the file" };
 
+  // Casters appear in the replay with 0 score — exclude them before any validation.
+  const activePlayers = replayData.players.filter((p) => p.score > 0);
+
   // Every league game is a full 3v3 lobby. Reject replays that aren't 3-per-side
   // (someone left, a 2v2 was uploaded, etc.). Admin-side uploads bypass this.
   const PLAYERS_PER_TEAM = 3;
-  const team0Count = replayData.players.filter((p) => p.team === 0).length;
-  const team1Count = replayData.players.filter((p) => p.team === 1).length;
+  const team0Count = activePlayers.filter((p) => p.team === 0).length;
+  const team1Count = activePlayers.filter((p) => p.team === 1).length;
   if (team0Count !== PLAYERS_PER_TEAM || team1Count !== PLAYERS_PER_TEAM)
     return {
       error: `This replay is ${team0Count}v${team1Count} (${replayData.players.length} player${replayData.players.length === 1 ? "" : "s"}) — a valid game must be ${PLAYERS_PER_TEAM}v${PLAYERS_PER_TEAM} with ${PLAYERS_PER_TEAM * 2} players.`,
@@ -254,7 +272,7 @@ export async function uploadGameReplay(
   // Fetch both rosters once; resolve tracker names for all players in parallel.
   const { data: roster } = await supabaseAdmin
     .from("players")
-    .select("id, username, tracker_url, team_id")
+    .select("id, username, display_name, tracker_url, team_id")
     .in("team_id", [match.home_team_id, match.away_team_id])
     .eq("status", "approved");
 
@@ -270,12 +288,22 @@ export async function uploadGameReplay(
   // home team tracker names (for home/away detection)
   const homeTrackerNames = new Set<string>();
 
+  // Pass 1: tracker names (highest priority).
   for (const p of resolved) {
     if (p.trackerName) {
-      nameToId.set(normalizeName(p.trackerName), p.id);
-      if (p.team_id === match.home_team_id) {
-        homeTrackerNames.add(normalizeName(p.trackerName));
-      }
+      const norm = normalizeName(p.trackerName);
+      nameToId.set(norm, p.id);
+      if (p.team_id === match.home_team_id) homeTrackerNames.add(norm);
+    }
+  }
+  // Pass 2: username and display_name fallbacks (only if tracker didn't already match).
+  for (const p of resolved) {
+    for (const name of [p.username, p.display_name as string | null | undefined]) {
+      if (!name) continue;
+      const norm = normalizeName(name);
+      if (nameToId.has(norm)) continue;
+      nameToId.set(norm, p.id);
+      if (p.team_id === match.home_team_id) homeTrackerNames.add(norm);
     }
   }
 
@@ -325,8 +353,8 @@ export async function uploadGameReplay(
     }
   }
 
-  // Reject the replay if any player can't be matched to a known tracker name.
-  const unmatched = replayData.players.filter(
+  // Reject the replay if any active player can't be matched to a known tracker name.
+  const unmatched = activePlayers.filter(
     p => !nameToId.has(normalizeName(p.name)),
   );
   if (unmatched.length > 0) {
@@ -337,9 +365,9 @@ export async function uploadGameReplay(
   }
 
   // Whichever replay team has more home-tracker-name matches is the home team.
-  const team0Hits = replayData.players
+  const team0Hits = activePlayers
     .filter(p => p.team === 0 && homeTrackerNames.has(normalizeName(p.name))).length;
-  const team1Hits = replayData.players
+  const team1Hits = activePlayers
     .filter(p => p.team === 1 && homeTrackerNames.has(normalizeName(p.name))).length;
   const blueIsHome = team0Hits >= team1Hits;
 
@@ -348,7 +376,7 @@ export async function uploadGameReplay(
     : replayData.team1Score > replayData.team0Score;
 
   // Each replay player must resolve to a distinct registered player.
-  const resolvedIds = replayData.players
+  const resolvedIds = activePlayers
     .map((p) => nameToId.get(normalizeName(p.name)))
     .filter((id): id is string => !!id);
   if (new Set(resolvedIds).size !== resolvedIds.length)
@@ -368,7 +396,7 @@ export async function uploadGameReplay(
     };
   }
 
-  const stats: AnalyzedGameStat[] = replayData.players.map((p) => ({
+  const stats: AnalyzedGameStat[] = activePlayers.map((p) => ({
     player_id: nameToId.get(normalizeName(p.name)) ?? null,
     replay_name: p.name,
     goals: p.goals,
@@ -386,7 +414,7 @@ export async function uploadGameReplay(
 export async function cancelSeriesSubmission(
   matchId: string
 ): Promise<{ error?: string }> {
-  const player = await getCaptain();
+  const player = await getTeamMember();
   if (!player?.team_id) return { error: "Not on a team" };
 
   const { data: match } = await supabaseAdmin
@@ -407,6 +435,7 @@ export async function cancelSeriesSubmission(
       pending_away_score:         null,
       score_submitted_by_team_id: null,
       score_confirmed:            false,
+      score_submitted_at:         null,
     })
     .eq("id", matchId);
 

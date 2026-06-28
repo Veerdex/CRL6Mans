@@ -114,10 +114,10 @@ export default function RulesPage() {
             regular season, top teams advance through a Play-In then Playoffs stage.
           </p>
           <p className="mt-2 leading-relaxed">
-            <strong className="text-white">Default match time:</strong> Sunday at 7:00 PM PT (10:00 PM ET).
-            Teams may reschedule by mutual agreement. All matches must be completed by Tuesday
-            at 11:59 PM PT or the unavailable team receives a forfeit loss. Match results must be
-            reported within 1 hour of completion.
+            <strong className="text-white">Default match time:</strong> the default play day at 7:00 PM.
+            Teams may reschedule by mutual agreement. All matches must be completed by the round
+            deadline or the unavailable team receives a forfeit loss. Every time on the site is shown
+            in your own local timezone. Match results must be reported within 1 hour of completion.
           </p>
         </div>
       </section>
