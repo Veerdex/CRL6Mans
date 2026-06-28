@@ -440,7 +440,7 @@ function RoundRow({
         {/* Type selector */}
         <select
           value={type}
-          onChange={(e) => handleTypeChange(e.target.value as ScheduleType)}
+          onChange={(e) => { e.stopPropagation(); handleTypeChange(e.target.value as ScheduleType); }}
           className={`${inputBase} pr-7 appearance-none`}
           disabled={pending}
         >
@@ -456,7 +456,7 @@ function RoundRow({
               type="button"
               role="switch"
               aria-checked={chain}
-              onClick={handleToggleChain}
+              onClick={(e) => { e.stopPropagation(); handleToggleChain(); }}
               disabled={pending}
               className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
                 chain ? "bg-indigo-600 border-indigo-600" : "bg-zinc-700 border-zinc-700"
@@ -516,7 +516,7 @@ function RoundRow({
         {/* Clear */}
         {schedule && !pending && (
           <button
-            onClick={handleClear}
+            onClick={(e) => { e.stopPropagation(); handleClear(); }}
             className="text-xs px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-300 font-medium transition-colors"
           >
             Clear
@@ -526,7 +526,7 @@ function RoundRow({
         {/* Expand — per-match scheduling */}
         {canExpand && (
           <button
-            onClick={() => setExpanded((e) => !e)}
+            onClick={(e) => { e.stopPropagation(); setExpanded((e) => !e); }}
             className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-indigo-300 hover:text-indigo-200 font-medium transition-colors"
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
