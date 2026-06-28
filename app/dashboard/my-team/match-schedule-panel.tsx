@@ -45,6 +45,14 @@ function formatLocalDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
+function formatWeekRange(startIso: string, endIso: string): string {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const startStr = start.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  const endStr = end.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return `${startStr} - ${endStr}`;
+}
+
 // Deterministic 5-char code derived from a seed, so both teams see the same
 // lobby name/password for a match. Excludes ambiguous characters (0/O/1/I/L).
 function lobbyCode(seed: string): string {
@@ -80,7 +88,7 @@ function windowNote(match: SchedulableMatch): string | null {
   // An admin-pinned individual match is a fixed time, not a free window.
   if (match.adminPinned && match.scheduledAt) return `Admin scheduled this match for ${formatDateTime(match.scheduledAt)}.`;
   if (t === "daily") return `Scheduled window: any time on ${formatLocalDate(adminPlayAt!)} (your local time).`;
-  if (t === "weekly") return `Scheduled window: any time through the deadline, ${formatDateTime(adminDeadlineAt!)}.`;
+  if (t === "weekly") return `Scheduled window: any time ${formatWeekRange(adminPlayAt!, adminDeadlineAt!)} (your local time).`;
   return `Admin set this match for ${formatDateTime(adminPlayAt!)}.`;
 }
 
