@@ -274,10 +274,12 @@ export default async function AdminPage() {
     : Math.floor((enteredCount ?? 0) / 3);
   if (sf?.preset) {
     for (const { stage, rounds } of expectedStageRounds(sf.preset, schedulingTeams, sf.groupMaxAdvancing ?? null)) {
-      if (canonRoundSets.has(stage) || rounds <= 0) continue;
-      const set = new Set<number>();
+      if (rounds <= 0) continue;
+      // Always merge predicted rounds — stages that generate matches on-demand (Swiss,
+      // Hybrid) need future unplayed rounds visible even after the stage has started.
+      if (!canonRoundSets.has(stage)) canonRoundSets.set(stage, new Set());
+      const set = canonRoundSets.get(stage)!;
       for (let r = 1; r <= rounds; r++) set.add(r);
-      canonRoundSets.set(stage, set);
     }
   }
 
