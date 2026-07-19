@@ -1,5 +1,6 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
+import { addRole, removeRole, addRoleById, removeRoleById } from "./discord-api";
 
 export type PlayerStatus = "unregistered" | "pending" | "approved" | "rejected" | "banned";
 
@@ -83,6 +84,33 @@ export async function updatePlayerStatus(
     .select("discord_id")
     .single();
   return { discordId: data?.discord_id ?? null };
+}
+
+// ── Registered role ───────────────────────────────────────────────────────────
+// Granted on approval, stripped on ban. Prefers the role ID configured by
+// /setregisteredrole; falls back to resolving by name so the role keeps working
+// before an admin ever runs the command.
+
+const REGISTERED_ROLE_NAME = "Registered";
+
+async function getRegisteredRoleId(): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("league_settings")
+    .select("registered_role_id")
+    .single();
+  return (data?.registered_role_id as string | null) ?? null;
+}
+
+export async function addRegisteredRole(discordId: string): Promise<void> {
+  const roleId = await getRegisteredRoleId();
+  if (roleId) await addRoleById(discordId, roleId);
+  else await addRole(discordId, REGISTERED_ROLE_NAME);
+}
+
+export async function removeRegisteredRole(discordId: string): Promise<void> {
+  const roleId = await getRegisteredRoleId();
+  if (roleId) await removeRoleById(discordId, roleId);
+  else await removeRole(discordId, REGISTERED_ROLE_NAME);
 }
 
 export type StaffRole = "moderator" | "director" | "ceo";

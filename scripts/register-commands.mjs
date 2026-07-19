@@ -4,10 +4,15 @@ config({ path: ".env.local" });
 const APPLICATION_ID = process.env.DISCORD_CLIENT_ID;
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 
+// Hides admin commands from non-staff users in Discord's command picker.
+// Server-side adminGuard still enforces access regardless of this setting.
+const ADMIN_ONLY = { default_member_permissions: "0" };
+
 const commands = [
   {
     name: "setdraftchannel",
     description: "Set the draft announcements/picks channel — run in the target channel (admin only)",
+    ...ADMIN_ONLY,
   },
   {
     name: "pick",
@@ -43,14 +48,17 @@ const commands = [
   {
     name: "setruleschannel",
     description: "Set the rulebook channel linked in match messages — run in the target channel (admin only)",
+    ...ADMIN_ONLY,
   },
   {
     name: "syncroles",
     description: "Create missing Discord roles and assign them to all players based on current DB state (admin only)",
+    ...ADMIN_ONLY,
   },
   {
     name: "diagroles",
     description: "Diagnose why your Discord roles may not be assigned (admin only)",
+    ...ADMIN_ONLY,
   },
   {
     name: "assignrole",
@@ -59,6 +67,7 @@ const commands = [
       { name: "user", description: "The user to assign the role to", type: 6, required: true },
       { name: "role", description: "The role to assign", type: 8, required: true },
     ],
+    ...ADMIN_ONLY,
   },
   {
     name: "removerole",
@@ -67,21 +76,31 @@ const commands = [
       { name: "user", description: "The user to remove the role from", type: 6, required: true },
       { name: "role", description: "The role to remove", type: 8, required: true },
     ],
+    ...ADMIN_ONLY,
   },
   {
     name: "setmoderatorid",
     description: "Set the Discord role used as Moderator, for staff pings (admin only)",
     options: [{ name: "role", description: "The Moderator role", type: 8, required: true }],
+    ...ADMIN_ONLY,
   },
   {
     name: "setdirectorid",
     description: "Set the Discord role used as Director, for staff pings (admin only)",
     options: [{ name: "role", description: "The Director role", type: 8, required: true }],
+    ...ADMIN_ONLY,
   },
   {
     name: "setceoid",
     description: "Set the Discord role used as CEO, for staff pings (admin only)",
     options: [{ name: "role", description: "The CEO role", type: 8, required: true }],
+    ...ADMIN_ONLY,
+  },
+  {
+    name: "setregisteredrole",
+    description: "Set the role given to players when their registration is approved (admin only)",
+    options: [{ name: "role", description: "The Registered role", type: 8, required: true }],
+    ...ADMIN_ONLY,
   },
 ];
 

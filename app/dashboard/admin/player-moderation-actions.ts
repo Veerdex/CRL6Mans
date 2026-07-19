@@ -3,8 +3,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { decrypt } from "@/app/lib/session";
-import { getStaffRole, isModerator, type StaffRole } from "@/app/lib/players";
+import { decrypt, invalidatePlayerSessions } from "@/app/lib/session";
+import { getStaffRole, isModerator, removeRegisteredRole, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { addRole, removeRole, removeRoleById, timeoutMember, banMember, unbanMember } from "@/app/lib/discord-api";
 
@@ -29,7 +29,7 @@ function canActOn(actorRole: StaffRole, targetRole: StaffRole | null): boolean {
   return targetRole === null; // moderator can only act on non-staff
 }
 
-export async function removeFromActivePlay(playerId: string) {
+async function removeFromActivePlay(playerId: string) {
   await supabaseAdmin.from("players").update({
     team_id: null,
     is_captain: false,
@@ -83,6 +83,7 @@ export async function kickPlayer(
     await Promise.all(roleRemovals);
     await addRole(discord_id, "Kicked");
     await timeoutMember(discord_id, timeoutMs);
+    await invalidatePlayerSessions(discord_id);
   }
 
   revalidatePath("/dashboard/admin");
@@ -120,7 +121,7 @@ export async function banPlayer(
   if (player?.discord_id && !player.discord_id.startsWith("test_")) {
     const { discord_id, team_id } = player;
     const roleRemovals: Promise<unknown>[] = [
-      removeRole(discord_id, "Registered"),
+      removeRegisteredRole(discord_id),
       removeRole(discord_id, "Captain"),
       removeRole(discord_id, "Kicked"),
     ];
@@ -130,6 +131,7 @@ export async function banPlayer(
     }
     await Promise.all(roleRemovals);
     await banMember(discord_id); // server ban — removes them from the guild
+    await invalidatePlayerSessions(discord_id);
   }
 
   revalidatePath("/dashboard/admin");

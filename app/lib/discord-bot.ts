@@ -13,6 +13,7 @@ import {
   getRoundName, GROUP_STAGE_PREFIX, parseGroupNum,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
+import { teamRatingFromRVs, applyRatingUpdate } from "./rating";
 
 async function roleMentionByName(
   teamName: string,
@@ -76,6 +77,22 @@ async function setStaffRoleId(userId: string, roleId: string, tier: "moderator" 
   if (error) return reply(`❌ Failed to save: ${error.message}`);
   const title = tier === "ceo" ? "CEO" : tier === "director" ? "Director" : "Moderator";
   return reply(`✅ ${title} role set to <@&${roleId}>. The bot will use it for staff pings.`);
+}
+
+// Stores the role granted on registration approval (and stripped on ban). Until
+// this is set the bot resolves a role named "Registered" by name instead.
+async function setRegisteredRoleId(userId: string, roleId: string) {
+  const denied = await adminGuard(userId);
+  if (denied) return denied;
+  if (!roleId) return reply("❌ You must specify a role.");
+  const { error } = await supabaseAdmin.from("league_settings")
+    .update({ registered_role_id: roleId, updated_at: new Date().toISOString() })
+    .not("id", "is", null);
+  if (error) return reply(`❌ Failed to save: ${error.message}`);
+  return reply(
+    `✅ Registered role set to <@&${roleId}>. Players will get it when their registration is approved.\n` +
+    `Make sure the bot's own role is **above** it in the server's role list, or Discord will reject the assignment.`
+  );
 }
 
 // Returns a Unix timestamp (seconds) for the next occurrence of targetDay at hour:minute PT.
@@ -633,19 +650,9 @@ function rankValue(p: { peak_2v2: string; current_2v2: string; peak_3v3: string;
 }
 
 // ── Season rating calculator ──────────────────────────────────────────────────
-// Full spec: rating-system-explained-v2.txt
-// Constants (tunable):
-const RATING_K              = 67;
-const SERIES_BASE_SCALE     = 220;
-const EDGE_STRENGTH         = 1.5;
-const GAP_SOFTNESS          = 30;
-const GD_SENSITIVITY        = 1.0;
-const SWEEP_GD_REFERENCE    = 3;
-const SWEEP_GD_BONUS_SCALE  = 0.12;
-
-function rvToTeamPower(rv: number): number {
-  return 1000 / (1 + Math.exp(-(rv - 1200) / 220));
-}
+// Model: crl-game-share-elo-v1. Pure math lives in app/lib/rating.ts (shared
+// with the wager predictor); this layer only reads/writes season_rating.
+// Full spec: wagers-prediction-explainer.txt
 
 // Lazy-initialises a team's season_rating from its current roster RVs.
 async function initTeamSeasonRating(teamId: string): Promise<number> {
@@ -655,48 +662,12 @@ async function initTeamSeasonRating(teamId: string): Promise<number> {
     .eq("team_id", teamId)
     .eq("status", "approved");
   const rvs = (players ?? []).map((p) => rankValue(p as Parameters<typeof rankValue>[0]));
-  if (!rvs.length) return 500;
-  const avg = rvs.reduce((s, v) => s + v, 0) / rvs.length;
-  while (rvs.length < 3) rvs.push(avg);
-  return (rvToTeamPower(rvs[0]) + rvToTeamPower(rvs[1]) + rvToTeamPower(rvs[2])) / 3;
+  return teamRatingFromRVs(rvs);
 }
 
-// Series-level expected win probability (Part Three, section 6).
-// Uses a steeper edge-aware curve vs the per-game predictor; gap softness
-// prevents extreme rating gaps from producing near-100% certainty.
-function seriesExpected(ratingA: number, ratingB: number): number {
-  const diff = ratingA - ratingB;
-  const effectiveScale = SERIES_BASE_SCALE + GAP_SOFTNESS * Math.abs(diff) / SERIES_BASE_SCALE;
-  return 1 / (1 + Math.pow(10, -(diff * EDGE_STRENGTH) / effectiveScale));
-}
-
-// Actual score for one team (Part Three, sections 7-8).
-// wins/losses are from that team's perspective; gdPerGame is positive when GD
-// favours this team, negative when it favours the opponent.
-function computeActualScore(wins: number, losses: number, gdPerGame: number): number {
-  const totalGames = wins + losses;
-  if (totalGames === 0) return 0.5;
-  const winRatio = wins / totalGames;
-  const absGd = Math.abs(gdPerGame);
-  const gdBoost = Math.tanh(absGd / GD_SENSITIVITY);
-  const decisiveness = Math.abs(winRatio - 0.5) / 0.5;
-  const gdPower = 0.1 + 0.9 * decisiveness;
-  const sign = gdPerGame >= 0 ? 1 : -1;
-
-  let actual = 0.5 + (winRatio - 0.5)
-    + sign * gdBoost * (0.5 - Math.abs(winRatio - 0.5)) * gdPower;
-
-  // Sweep bonus: extra credit for dominant blowout sweeps (section 8).
-  if (losses === 0 && absGd > SWEEP_GD_REFERENCE) {
-    const excessGd = absGd - SWEEP_GD_REFERENCE;
-    actual += sign * SWEEP_GD_BONUS_SCALE * Math.log(1 + excessGd);
-  }
-
-  return Math.max(-0.5, Math.min(1.5, actual));
-}
-
-// Applies the full rating update to both teams after a result is recorded.
-// goalDiff = home_goals - away_goals; pass 0 when goal data is unavailable.
+// Applies the game-share Elo update to both teams after a series result.
+// homeScore/awayScore are games won in the series; the update is exactly
+// zero-sum, so goal differential no longer feeds the rating.
 async function applySeasonRatingUpdate(
   homeTeamId: string,
   awayTeamId: string,
@@ -704,33 +675,15 @@ async function applySeasonRatingUpdate(
   awayRatingRaw: number | null,
   homeScore: number,
   awayScore: number,
-  goalDiff: number,
 ): Promise<void> {
   const [hRating, aRating] = await Promise.all([
     homeRatingRaw != null ? Promise.resolve(Number(homeRatingRaw)) : initTeamSeasonRating(homeTeamId),
     awayRatingRaw != null ? Promise.resolve(Number(awayRatingRaw)) : initTeamSeasonRating(awayTeamId),
   ]);
 
-  const totalGames = homeScore + awayScore;
-  const gdPerGame = totalGames > 0 ? goalDiff / totalGames : 0;
-
-  const expectedHome = seriesExpected(hRating, aRating);
-  const expectedAway = 1 - expectedHome;
-
-  const homeActual = computeActualScore(homeScore, awayScore, gdPerGame);
-  const awayActual = computeActualScore(awayScore, homeScore, -gdPerGame);
-
-  const deltaHome = homeActual - expectedHome;
-  const deltaAway = awayActual - expectedAway;
-
-  const avgRating = (hRating + aRating) / 2;
-  const slopeMultiplier = avgRating * (1000 - avgRating) / 250000;
-
-  const homeBoundary = deltaHome >= 0 ? (1000 - hRating) / 1000 : hRating / 1000;
-  const awayBoundary = deltaAway >= 0 ? (1000 - aRating) / 1000 : aRating / 1000;
-
-  const newHome = Math.max(10, Math.min(990, hRating + RATING_K * deltaHome * homeBoundary * slopeMultiplier));
-  const newAway = Math.max(10, Math.min(990, aRating + RATING_K * deltaAway * awayBoundary * slopeMultiplier));
+  const { newRatingA: newHome, newRatingB: newAway } = applyRatingUpdate(
+    hRating, aRating, homeScore, awayScore,
+  );
 
   await Promise.all([
     supabaseAdmin.from("teams").update({ season_rating: newHome }).eq("id", homeTeamId),
@@ -1837,13 +1790,21 @@ export async function processExpiredScoreConfirmations(): Promise<void> {
 export async function execSyncRoles(): Promise<{ assigned: number; roleNames: string[]; warnings: string[] }> {
   const warnings: string[] = [];
 
-  const [{ data: teams }, { data: players }] = await Promise.all([
+  const [{ data: teams }, { data: approved }, { data: allPlayers }, { data: settings }] = await Promise.all([
     supabaseAdmin.from("teams").select("id, name, discord_role_id"),
     supabaseAdmin.from("players")
       .select("discord_id, team_id, is_captain")
       .eq("status", "approved")
       .not("discord_id", "is", null),
+    supabaseAdmin.from("players")
+      .select("discord_id")
+      .not("discord_id", "is", null),
+    supabaseAdmin.from("league_settings")
+      .select("registered_role_id")
+      .single(),
   ]);
+
+  const registeredRoleId = settings?.registered_role_id as string | null;
 
   // Only auto-create Drafted and Captain — team roles are pre-created manually
   const roleMap = await ensureRoles(["Drafted", "Captain"]);
@@ -1863,19 +1824,20 @@ export async function execSyncRoles(): Promise<{ assigned: number; roleNames: st
   });
 
   // Every role this sync owns — used to strip stale assignments before re-adding.
+  // Includes registered role so it gets stripped from non-approved players.
   const managedRoleIds = [
+    registeredRoleId,
     roleMap["Drafted"], roleMap["Captain"],
     ...Object.values(teamById).map(t => t.roleId),
   ].filter((id): id is string => !!id);
 
   // Skip test users (fake IDs like "test_...") — they don't exist in Discord
-  const realPlayers = (players ?? []).filter(p => {
+  const realPlayers = (allPlayers ?? []).filter(p => {
     const id = p.discord_id as string;
     return id && !id.startsWith("test_");
   });
 
-  // 1) Strip every managed role off every player (only removes ones they actually
-  //    have, sequentially with backoff — clears stale/wrong roles).
+  // 1) Strip every managed role off every player (clears stale/wrong roles).
   if (managedRoleIds.length) {
     await stripRoleIdsFromMembers(realPlayers.map(p => p.discord_id as string), managedRoleIds);
   }
@@ -1883,21 +1845,31 @@ export async function execSyncRoles(): Promise<{ assigned: number; roleNames: st
   // 2) Re-add only the roles each player should have per the DB.
   let assigned = 0;
   await Promise.all(
-    realPlayers.map(player => {
+    (approved ?? []).map(player => {
       const discordId = player.discord_id as string;
-      const team = player.team_id ? teamById[player.team_id as string] : null;
-      if (!team) return Promise.resolve(); // free agent — keeps no managed roles
-      assigned++;
       const promises: Promise<void>[] = [];
-      if (roleMap["Drafted"]) promises.push(addRoleById(discordId, roleMap["Drafted"]));
-      if (team.roleId)        promises.push(addRoleById(discordId, team.roleId));
-      if (player.is_captain && roleMap["Captain"])
-        promises.push(addRoleById(discordId, roleMap["Captain"]));
+
+      // All approved players get the registered role
+      if (registeredRoleId) promises.push(addRoleById(discordId, registeredRoleId));
+
+      // Team-specific roles (drafted/team/captain) only if on a team
+      const team = player.team_id ? teamById[player.team_id as string] : null;
+      if (team) {
+        assigned++;
+        if (roleMap["Drafted"]) promises.push(addRoleById(discordId, roleMap["Drafted"]));
+        if (team.roleId)        promises.push(addRoleById(discordId, team.roleId));
+        if (player.is_captain && roleMap["Captain"])
+          promises.push(addRoleById(discordId, roleMap["Captain"]));
+      }
+
       return Promise.all(promises);
     })
   );
 
-  const roleNames = ["Drafted", "Captain", ...(teams ?? []).map(t => t.name)];
+  const roleNames = [
+    ...(registeredRoleId ? ["Registered"] : []),
+    "Drafted", "Captain", ...(teams ?? []).map(t => t.name),
+  ];
   return { assigned, roleNames, warnings };
 }
 
@@ -2376,7 +2348,7 @@ export async function execReportMatchResult(
       homeTeam.id, awayTeam.id,
       homeTeam.season_rating as number | null,
       awayTeam.season_rating as number | null,
-      homeScore, awayScore, goalDiff,
+      homeScore, awayScore,
     ).catch(() => {});
 
     if (match.stage) {
@@ -2670,6 +2642,7 @@ export async function handleCommand(interaction: Interaction) {
     case "setmoderatorid":    return setStaffRoleId(userId, String(opt(interaction, "role")), "moderator");
     case "setdirectorid":     return setStaffRoleId(userId, String(opt(interaction, "role")), "director");
     case "setceoid":          return setStaffRoleId(userId, String(opt(interaction, "role")), "ceo");
+    case "setregisteredrole": return setRegisteredRoleId(userId, String(opt(interaction, "role")));
     case "assignrole":        return assignRole(userId, String(opt(interaction, "user")), String(opt(interaction, "role")));
     case "removerole":        return removeRoleCmd(userId, String(opt(interaction, "user")), String(opt(interaction, "role")));
     case "setruleschannel":   return setRulesChannel(userId, interaction.channel_id ?? "");

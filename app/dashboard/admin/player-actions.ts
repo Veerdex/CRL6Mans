@@ -4,8 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isModerator } from "@/app/lib/players";
-import { addRole } from "@/app/lib/discord-api";
+import { isModerator, addRegisteredRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 
 export type PlayerEditFields = {
@@ -65,7 +64,7 @@ export async function approvePlayerWithEdits(
     .select("discord_id")
     .single();
   if (error) return { error: error.message };
-  if (data?.discord_id) await addRole(data.discord_id, "Registered");
+  if (data?.discord_id) await addRegisteredRole(data.discord_id);
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard", "layout");
   return { ok: true };

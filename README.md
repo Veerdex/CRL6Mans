@@ -81,7 +81,12 @@ Sets the channel linked in match messages as the rulebook. Run this command insi
 ### Role Management — [Staff]
 
 #### `/syncroles`
-Creates missing Discord roles and syncs them to all players based on current DB state.
+Creates missing Discord roles and syncs them to all players based on current DB state. Ensures:
+- `Registered` — given to all approved players, stripped from unapproved
+- `Drafted` and `Captain` — assigned to active team members
+- Team roles — assigned based on team membership
+
+Run this after making staff role or registration changes to reconcile Discord with the database.
 
 #### `/diagroles`
 Diagnoses why your Discord roles may not be assigned correctly.
@@ -96,6 +101,13 @@ Stores the **Discord role ID** for each staff tier (saved on `league_settings`) 
 |--------|-------------|
 | `role` | The Discord role to use for that tier |
 
+#### `/setregisteredrole <role>`
+Stores the **Discord role ID** granted to players when their registration is approved. If set, `/syncroles` will use this role; if not set, the bot falls back to resolving a role named `Registered` by name (creating it if it doesn't exist). Storing the role ID prevents duplicates if the role is ever renamed in Discord.
+
+| Option | Description |
+|--------|-------------|
+| `role` | The Discord role to grant on registration approval |
+
 ---
 
 ## Discord Bot — What It Does, Permissions & Setup
@@ -105,7 +117,7 @@ The "bot" is the league's Discord application. It has **no always-on gateway con
 ### What it can do
 
 **Roles**
-- **Status roles — auto-created and managed by the bot:** `Registered` (on approval), `EnteredDraft` (on joining the draft pool), `Drafted` and `Captain` (on draft/team assignment — the highest-RV player gets `Captain`), and `Kicked`. The bot creates any of these that don't exist, then adds/removes them from members as their status changes.
+- **Status roles — auto-created and managed by the bot:** `Registered` (on approval), `EnteredDraft` (on joining the draft pool), `Drafted` and `Captain` (on draft/team assignment — the highest-RV player gets `Captain`), and `Kicked`. The bot creates any of these that don't exist, then adds/removes them from members as their status changes. `/syncroles` is authoritative for `Registered` — use `/setregisteredrole` to configure which Discord role to use, then run `/syncroles` to apply it retroactively to all approved players.
 - **Team roles — you set these up:** each team has a `discord_role_id` you assign in the **Admin → Team Slots** panel. Create a Discord role per team (so you control its name, color, and hierarchy position) and paste its **role ID** into that team's slot. The bot then assigns/removes that role as players join, move, or leave the team, and **renames the Discord role** when a team is renamed. If a team has no role ID linked, `/syncroles` will fall back to creating a role by the team's name.
 - Edits role names/colors, assigns/removes roles from members, strips team roles on a season reset, and `/syncroles` reconciles every player's roles to the database (adds correct ones, removes stale ones).
 
@@ -154,9 +166,10 @@ No **privileged gateway intents** are required — interactions arrive as signed
 **Part 2 — Configure within Discord**
 
 - [ ] Seed the first **staff member**: insert a row into `staff_roles` (or use an `ADMIN_DISCORD_IDS` account), then grant others with `/assignrole`.
-- [ ] Run `/syncroles`, then `/setdraftchannel` and `/setruleschannel` inside their target channels.
 - [ ] Map staff tiers to Discord roles for pings: `/setmoderatorid`, `/setdirectorid`, `/setceoid`.
-- [ ] **Set up team roles:** create a Discord role for each team and paste its role ID into the team's slot under **Admin → Team Slots** (slots show "⚠ no role ID set" until linked). Make sure each team role sits **below** the bot's role. (Status roles like `Registered`/`Captain`/`Drafted` are auto-created — only team roles need linking.)
+- [ ] Set the registration status role: `/setregisteredrole` (create a Discord role for `Registered` first, then link it), then run `/syncroles`.
+- [ ] Run `/syncroles`, then `/setdraftchannel` and `/setruleschannel` inside their target channels.
+- [ ] **Set up team roles:** create a Discord role for each team and paste its role ID into the team's slot under **Admin → Team Slots** (slots show "⚠ no role ID set" until linked). Make sure each team role sits **below** the bot's role. (Status roles like `Captain`/`Drafted` are auto-created — only team roles need linking.)
 
 ---
 
