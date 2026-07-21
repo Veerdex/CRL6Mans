@@ -23,6 +23,7 @@ export type SeasonFormatConfig = {
   preset: PresetId;
   groupSeedingMethod?: "balanced" | "random";
   groupMaxAdvancing?: number | null;
+  groupRounds?: number | null;
   roundBestOf?: Partial<Record<RoundTier, BestOf>>;
 };
 
@@ -129,6 +130,15 @@ export function getDefaultGroupAdvancing(teams: number): number {
   const ng = getNumGroups(teams);
   const natural = Math.floor((teams * 3) / 4);
   return Math.floor(natural / ng) * ng;
+}
+
+// Mirrors ROUNDS_BY_GROUP_SIZE in bracket-server.ts — kept in sync manually
+// since this file is client-side and that one is server-only.
+const ROUNDS_BY_GROUP_SIZE: Record<number, number> = { 3: 8, 4: 6, 5: 8, 6: 5, 7: 6, 8: 7 };
+export function getDefaultGroupRounds(teams: number): number {
+  const ng = getNumGroups(teams);
+  const minGroupSize = Math.floor(teams / ng);
+  return ROUNDS_BY_GROUP_SIZE[minGroupSize] ?? Math.max(1, minGroupSize - 1);
 }
 
 const STAGE_COLORS: Record<
@@ -433,6 +443,9 @@ export function FormatEditor({
   const [maxAdvancingInput, setMaxAdvancingInput] = useState(
     initialFormat?.groupMaxAdvancing != null ? String(initialFormat.groupMaxAdvancing) : ""
   );
+  const [groupRoundsInput, setGroupRoundsInput] = useState(
+    initialFormat?.groupRounds != null ? String(initialFormat.groupRounds) : ""
+  );
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [roundBestOf, setRoundBestOf] = useState<Record<RoundTier, BestOf>>({
@@ -448,11 +461,14 @@ export function FormatEditor({
   const numGroups = getNumGroups(previewTeams);
   const parsed = maxAdvancingInput.trim() === "" ? null : parseInt(maxAdvancingInput, 10);
   const effectiveMaxAdvancing = parsed !== null && !isNaN(parsed) ? parsed : null;
+  const parsedGroupRounds = groupRoundsInput.trim() === "" ? null : parseInt(groupRoundsInput, 10);
+  const effectiveGroupRounds = parsedGroupRounds !== null && !isNaN(parsedGroupRounds) ? parsedGroupRounds : null;
 
   const hasUnsavedChanges =
     selected !== (initialFormat?.preset ?? null) ||
     (hasGroupStage && seedingMethod !== (initialFormat?.groupSeedingMethod ?? "balanced")) ||
     (hasGroupStage && effectiveMaxAdvancing !== (initialFormat?.groupMaxAdvancing ?? null)) ||
+    (hasGroupStage && effectiveGroupRounds !== (initialFormat?.groupRounds ?? null)) ||
     TIER_ORDER.some((tier) => roundBestOf[tier] !== (initialFormat?.roundBestOf?.[tier] ?? DEFAULT_BEST_OF[tier]));
 
   let maxAdvancingError: string | null = null;
@@ -464,6 +480,15 @@ export function FormatEditor({
       maxAdvancingError = `Must be a multiple of ${numGroups} (groups for ${previewTeams} teams).`;
     } else if (effectiveMaxAdvancing > maxAllowed) {
       maxAdvancingError = `Cannot exceed ¾ of teams: max ${maxAllowed} for ${previewTeams} teams.`;
+    }
+  }
+
+  let groupRoundsError: string | null = null;
+  if (hasGroupStage && effectiveGroupRounds !== null) {
+    if (effectiveGroupRounds < 1) {
+      groupRoundsError = "Must be at least 1.";
+    } else if (effectiveGroupRounds > 30) {
+      groupRoundsError = "Cannot exceed 30.";
     }
   }
 
@@ -482,7 +507,9 @@ export function FormatEditor({
   const canSave =
     selected !== null &&
     !maxAdvancingError &&
-    !(maxAdvancingInput !== "" && (parsed === null || isNaN(parsed)));
+    !groupRoundsError &&
+    !(maxAdvancingInput !== "" && (parsed === null || isNaN(parsed))) &&
+    !(groupRoundsInput !== "" && (parsedGroupRounds === null || isNaN(parsedGroupRounds)));
 
   const handleSave = () => {
     if (!selected) return;
@@ -491,6 +518,7 @@ export function FormatEditor({
       if (hasGroupStage) {
         config.groupSeedingMethod = seedingMethod;
         if (!groupAdvancingFixed) config.groupMaxAdvancing = effectiveMaxAdvancing;
+        config.groupRounds = effectiveGroupRounds;
       }
       const result = await saveSeasonFormat(config);
       if (result?.error) {
@@ -522,6 +550,9 @@ export function FormatEditor({
           <span className="text-white font-medium">{selectedPreset.name}</span>
           {initialFormat.groupSeedingMethod && (
             <span className="text-zinc-500">· {initialFormat.groupSeedingMethod} seeding</span>
+          )}
+          {initialFormat.groupRounds != null && (
+            <span className="text-zinc-500">· {initialFormat.groupRounds} group rounds</span>
           )}
         </div>
         <StageFlow stages={readOnlyStages} />
@@ -654,6 +685,25 @@ export function FormatEditor({
               : "Advancing is fixed at 16 to feed the Swiss stage."}
           </p>
           )}
+
+          <div>
+            <p className="text-xs text-zinc-500 mb-1">
+              Group rounds{" "}
+              <span className="text-zinc-600">
+                (default {getDefaultGroupRounds(previewTeams)} · rounded up to a full round-robin pass)
+              </span>
+            </p>
+            <input
+              type="number"
+              value={groupRoundsInput}
+              onChange={(e) => setGroupRoundsInput(e.target.value)}
+              placeholder={String(getDefaultGroupRounds(previewTeams))}
+              className="w-24 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 [appearance:textfield]"
+            />
+            {groupRoundsError && (
+              <p className="text-xs text-red-400 mt-1">{groupRoundsError}</p>
+            )}
+          </div>
         </div>
       )}
 

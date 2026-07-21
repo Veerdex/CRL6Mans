@@ -157,11 +157,12 @@ async function buildGroupMatches(
 
   // Rounds per group size: single round-robin for groups of 6+, padded with
   // rematch rounds for small groups so they still get enough games. Keyed by the
-  // smallest group so every group plays the same number of rounds.
+  // smallest group so every group plays the same number of rounds. An admin-set
+  // groupRounds overrides this default outright.
   //   3 → 8   4 → 6   5 → 8   6 → 5   7 → 6   8 → 7
   const ROUNDS_BY_GROUP_SIZE: Record<number, number> = { 3: 8, 4: 6, 5: 8, 6: 5, 7: 6, 8: 7 };
   const minGroupSize = Math.min(...groups.map(g => g.length));
-  const targetRounds = ROUNDS_BY_GROUP_SIZE[minGroupSize] ?? Math.max(1, minGroupSize - 1);
+  const targetRounds = format.groupRounds ?? ROUNDS_BY_GROUP_SIZE[minGroupSize] ?? Math.max(1, minGroupSize - 1);
   // Round up to a whole number of round-robin passes so byes distribute evenly and
   // every team in the smallest group plays the same number of games. A pass is
   // groupSize rounds for odd groups (one bye each round) or groupSize-1 for even.

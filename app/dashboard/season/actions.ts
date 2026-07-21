@@ -63,6 +63,12 @@ export async function saveSeasonFormat(config: SeasonFormatConfig): Promise<{ er
     }
   }
 
+  if (config.groupRounds != null) {
+    if (!Number.isInteger(config.groupRounds) || config.groupRounds < 1 || config.groupRounds > 30) {
+      return { error: "groupRounds must be an integer between 1 and 30." };
+    }
+  }
+
   const { error } = await supabaseAdmin.from("league_settings").upsert({
     id: 1,
     season_format: config,

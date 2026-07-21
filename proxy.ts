@@ -10,11 +10,16 @@ const protectedRoutes = ["/dashboard"];
 // Images allow https/data/blob to cover Supabase logos, Discord avatars, and
 // canvas output. Everything else (connect, fonts, workers, media) is same-origin.
 function buildCsp(nonce: string): string {
+  // 'wasm-unsafe-eval' lets @react-pdf/renderer compile its WebAssembly layout
+  // engine (for PDF export) without permitting general eval(). 'unsafe-eval' is
+  // added only in dev — React's Fast Refresh/DevTools use eval() to reconstruct
+  // stack traces, but production React never calls it, so prod stays strict.
+  const scriptSrc = process.env.NODE_ENV === "production"
+    ? `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`
+    : `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval' 'unsafe-eval'`;
   return [
     `default-src 'self'`,
-    // 'wasm-unsafe-eval' lets @react-pdf/renderer compile its WebAssembly layout
-    // engine (for PDF export) without permitting general eval().
-    `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`,
+    scriptSrc,
     `style-src 'self' 'unsafe-inline'`,
     `img-src 'self' blob: data: https:`,
     `font-src 'self'`,
