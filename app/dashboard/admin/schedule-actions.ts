@@ -276,6 +276,18 @@ export async function setRoundSchedule(params: {
     const { data: others } = await allQ;
     const myPhase = phaseRank(stage);
 
+    // DE LB rounds are synced in pairs: (R1,R2), (R3,R4), (R5,R6).
+    // Rounds in the same pair should not trigger ordering conflicts with each other.
+    const getSyncedLBPair = (r: number): Set<number> => {
+      if (stage === "de_losers") {
+        if (r === 1 || r === 2) return new Set([1, 2]);
+        if (r === 3 || r === 4) return new Set([3, 4]);
+        if (r === 5 || r === 6) return new Set([5, 6]);
+      }
+      return new Set();
+    };
+    const syncedWithThis = getSyncedLBPair(round);
+
     // Downstream same-stage rounds chained off this one are shifted by the cascade,
     // so they must not block moving this round later.
     const chainedDownstream = new Set<number>();
@@ -309,6 +321,8 @@ export async function setRoundSchedule(params: {
       if (oStage === stage && oRound === round) continue; // skip the row being edited
       // Ignore stale rows from a different format (not part of the current stages).
       if (validStages.size > 0 && oStage !== stage && !validStages.has(oStage)) continue;
+      // Ignore synced DE LB pairs — they're meant to overlap at the same time.
+      if (oStage === stage && syncedWithThis.has(oRound)) continue;
       const oStartMs = windowStartMs(new Date(o.play_at as string).getTime(), o.schedule_type as string, tz);
       const oEndMs = oStartMs + windowLenMs(o.schedule_type as string);
 
