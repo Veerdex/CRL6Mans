@@ -617,13 +617,12 @@ export async function simulateMatch(): Promise<{ error?: string; ok?: boolean }>
     const sizes = await getDESizes();
     if (sizes) {
       // Fetch all ready DE matches across all stages
-      const deReady: Record<string, typeof (await getReadyDEMatches("de_winners"))[0][]> = {
-        [DE_WINNERS]: await getReadyDEMatches(DE_WINNERS),
-        [DE_LOSERS]: await getReadyDEMatches(DE_LOSERS),
-        [DE_GF]: await getReadyDEMatches(DE_GF),
-      };
-
-      const allDEReady = [...deReady[DE_WINNERS], ...deReady[DE_LOSERS], ...deReady[DE_GF]];
+      const [wbReady, lbReady, gfReady] = await Promise.all([
+        getReadyDEMatches(DE_WINNERS),
+        getReadyDEMatches(DE_LOSERS),
+        getReadyDEMatches(DE_GF),
+      ]);
+      const allDEReady = [...wbReady, ...lbReady, ...gfReady];
       if (allDEReady.length) {
         // Fetch schedules to sort by time
         const { data: schedules } = await supabaseAdmin
