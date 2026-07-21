@@ -461,6 +461,47 @@ export async function setRoundSchedule(params: {
     }
   }
 
+  // DE LB pair sync: when setting an LB round schedule, also update its synced partner.
+  // LB rounds are synced in pairs: (R1,R2), (R3,R4), (R5,R6).
+  if (stage === "de_losers") {
+    let syncPartnerRound: number | null = null;
+    if (round === 1 || round === 2) syncPartnerRound = round === 1 ? 2 : 1;
+    else if (round === 3 || round === 4) syncPartnerRound = round === 3 ? 4 : 3;
+    else if (round === 5 || round === 6) syncPartnerRound = round === 5 ? 6 : 5;
+
+    if (syncPartnerRound !== null) {
+      const syncLocked = await isRoundLocked("de_losers", syncPartnerRound);
+      if (!syncLocked) {
+        const oldSyncQ = tournamentId
+          ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type").eq("tournament_id", tournamentId).eq("stage", "de_losers").eq("round", syncPartnerRound).maybeSingle()
+          : supabaseAdmin.from("round_schedules").select("play_at, schedule_type").is("tournament_id", null).eq("stage", "de_losers").eq("round", syncPartnerRound).maybeSingle();
+        const { data: oldSync } = await oldSyncQ;
+
+        const syncDelQ = tournamentId
+          ? supabaseAdmin.from("round_schedules").delete().eq("tournament_id", tournamentId).eq("stage", "de_losers").eq("round", syncPartnerRound)
+          : supabaseAdmin.from("round_schedules").delete().is("tournament_id", null).eq("stage", "de_losers").eq("round", syncPartnerRound);
+        await syncDelQ;
+
+        await supabaseAdmin.from("round_schedules").insert({
+          tournament_id: tournamentId,
+          stage: "de_losers",
+          round: syncPartnerRound,
+          schedule_type: scheduleType,
+          play_at: playAt,
+          deadline_at: deadlineAt,
+          updated_at: now,
+        });
+
+        await syncRoundMatchPins(
+          "de_losers", syncPartnerRound, scheduleType, playAtMs,
+          (oldSync?.schedule_type as string | undefined) ?? null,
+          oldSync?.play_at ? new Date(oldSync.play_at as string).getTime() : null,
+          tz,
+        );
+      }
+    }
+  }
+
   // Open any channels that are now unblocked by this schedule being set
   await openReadyMatchChannels().catch(() => {});
 
