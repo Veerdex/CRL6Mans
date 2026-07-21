@@ -200,6 +200,7 @@ export async function saveDisplayName(
   const raw = (formData.get("display_name") as string ?? "").trim();
 
   if (raw.length > 30) return { error: "Nickname must be 30 characters or fewer." };
+  if (/@everyone|@here|<@/i.test(raw)) return { error: "Nickname cannot contain Discord mentions." };
 
   const { data: player } = await supabaseAdmin
     .from("players")

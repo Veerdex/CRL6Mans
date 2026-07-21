@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isDirector, isCEO } from "@/app/lib/players";
+import { isDirector, isCEO, isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 
 async function getSession() {
@@ -21,6 +21,8 @@ export type StaffMember = {
 };
 
 export async function getStaffList(): Promise<StaffMember[]> {
+  const session = await getSession();
+  if (!session?.userId || !(await isModerator(session.userId))) return [];
   const { data } = await supabaseAdmin
     .from("staff_roles")
     .select("discord_id, role, username, added_by, created_at")
@@ -33,6 +35,8 @@ export async function addStaffMember(
   username: string,
   role: "moderator" | "director"
 ): Promise<{ ok?: boolean; error?: string }> {
+  if (role !== "moderator" && role !== "director") return { error: "Invalid role." };
+
   const session = await getSession();
   if (!session?.userId) redirect("/login");
 
@@ -69,6 +73,8 @@ export async function removeStaffMember(
   discordId: string,
   role: "moderator" | "director"
 ): Promise<{ ok?: boolean; error?: string }> {
+  if (role !== "moderator" && role !== "director") return { error: "Invalid role." };
+
   const session = await getSession();
   if (!session?.userId) redirect("/login");
 

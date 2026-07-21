@@ -21,6 +21,7 @@ export async function updateTeamInfo(formData: FormData) {
   const teamId = formData.get("teamId") as string;
   const name = (formData.get("name") as string)?.trim();
   if (name && name.length > 30) return { error: "Team name must be 30 characters or fewer." };
+  if (name && /@everyone|@here|<@/i.test(name)) return { error: "Team name cannot contain Discord mentions." };
   const offsetX = Math.max(0, Math.min(100, parseInt(formData.get("offsetX") as string) || 50));
   const offsetY = Math.max(0, Math.min(100, parseInt(formData.get("offsetY") as string) || 50));
   const logoFile = formData.get("logo") as File | null;
@@ -52,33 +53,32 @@ export async function updateTeamInfo(formData: FormData) {
   if (name) updates.name = name;
 
   if (logoFile && logoFile.size > 0) {
-    const validated = validateImageUpload(logoFile);
+    const validated = await validateImageUpload(logoFile);
     if ("error" in validated) return { error: validated.error };
 
     const fileName = `${teamId}-${Date.now()}.${validated.ext}`;
-    const bytes = await logoFile.arrayBuffer();
 
     // Ensure the bucket exists; ignore "already exists" to handle race conditions
     const { data: buckets } = await supabaseAdmin.storage.listBuckets();
     if (!buckets?.find((b) => b.name === "team-logos")) {
       const { error: bucketError } = await supabaseAdmin.storage.createBucket("team-logos", { public: true });
       if (bucketError && !bucketError.message.toLowerCase().includes("already exists")) {
-        return { error: `Could not create storage bucket: ${bucketError.message}` };
+        return { error: "Could not initialize storage. Please try again." };
       }
     }
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from("team-logos")
-      .upload(fileName, bytes, { contentType: validated.contentType, upsert: true });
+      .upload(fileName, validated.bytes, { contentType: validated.contentType, upsert: true });
 
-    if (uploadError) return { error: `Logo upload failed: ${uploadError.message}` };
+    if (uploadError) return { error: "Logo upload failed. Please try again." };
 
     const { data: urlData } = supabaseAdmin.storage.from("team-logos").getPublicUrl(fileName);
     updates.logo_url = urlData.publicUrl;
   }
 
   const { error } = await supabaseAdmin.from("teams").update(updates).eq("id", teamId);
-  if (error) return { error: `Failed to save: ${error.message}` };
+  if (error) return { error: "Failed to save changes. Please try again." };
 
   if (name && team?.discord_role_id) {
     await editRole(team.discord_role_id, { name });

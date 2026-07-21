@@ -3,7 +3,7 @@ import { supabaseAdmin } from "./supabase";
 import {
   generateSEMatchInserts, generateDEMatchInserts,
   DE_WINNERS, DE_LOSERS, wbLoserTarget,
-  nextPow2,
+  nextPow2, getSeedOrder,
   getNumGroups, getGroupStage, parseGroupNum,
   snakeDraftGroups, roundRobinSchedule,
   computeGroupStandings, seedGroupQualifiers,
@@ -19,9 +19,9 @@ import {
 import type { SeasonFormatConfig } from "@/app/dashboard/season/format-editor";
 
 // Pair seeds for a cross-group Swiss R1. Each entry carries a groupIdx so the
-// algorithm can enforce different-group matchups. Tries top-half vs bottom-half
-// first (best seed-quality spread), then backtracks to find any cross-group
-// pairing, and only allows same-group as a true last resort.
+// algorithm can enforce different-group matchups. Uses 1-vs-N, 2-vs-(N-1) fold
+// ideal (best-vs-worst seeding), then backtracks to find any cross-group pairing,
+// and only allows same-group as a true last resort.
 function pairCrossGroupR1(
   seeds: { id: string; groupIdx: number }[]
 ): { homeId: string; awayId: string }[] {
@@ -30,7 +30,9 @@ function pairCrossGroupR1(
   const sameGroup = (i: number, j: number) => seeds[i].groupIdx === seeds[j].groupIdx;
   const half = Math.floor(n / 2);
 
-  const ideal: [number, number][] = Array.from({ length: half }, (_, i) => [i, i + half]);
+  // Fold ideal: 1vN, 2v(N-1), ..., 8v9 for 16 seeds.
+  // With cyclic group assignment (i%g), this is always conflict-free for even g.
+  const ideal: [number, number][] = Array.from({ length: half }, (_, i) => [i, n - 1 - i]);
   if (ideal.every(([i, j]) => !sameGroup(i, j)))
     return ideal.map(([i, j]) => ({ homeId: seeds[i].id, awayId: seeds[j].id }));
 
@@ -57,6 +59,74 @@ function makeSwissR1Inserts(pairs: { homeId: string; awayId: string }[]): Bracke
     home_team_id: p.homeId, away_team_id: p.awayId,
     home_score: null, away_score: null, status: "scheduled",
   }));
+}
+
+// Build a set of canonical "A:B" (lexicographic) keys from completed match history.
+function buildPlayedSet(
+  matches: { home_team_id: string | null; away_team_id: string | null }[],
+): Set<string> {
+  const s = new Set<string>();
+  for (const m of matches) {
+    if (m.home_team_id && m.away_team_id) {
+      const a = m.home_team_id, b = m.away_team_id;
+      s.add(a < b ? `${a}:${b}` : `${b}:${a}`);
+    }
+  }
+  return s;
+}
+
+// Compute average RV per team from player rows.
+function computeAvgRV(
+  teamIds: string[],
+  players: { team_id: string | null; peak_2v2: number | null; current_2v2: number | null; peak_3v3: number | null; current_3v3: number | null }[],
+): Record<string, number> {
+  const rv: Record<string, number> = {};
+  for (const id of teamIds) {
+    const roster = players.filter(p => p.team_id === id);
+    const sum = roster.reduce((s, p) =>
+      s + (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 +
+           (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2, 0);
+    rv[id] = roster.length ? sum / roster.length : 0;
+  }
+  return rv;
+}
+
+// Reorder SE seeds to avoid R1 rematches from a prior stage without restructuring
+// the bracket. For each R1 pair (determined by getSeedOrder), if both teams played
+// before, swaps one seed with the nearest alternative that clears the rematch.
+function avoidR1Rematches(
+  seeds: { id: string }[],
+  playedPairs: Set<string>,
+): { id: string }[] {
+  const n = seeds.length;
+  const size = nextPow2(n);
+  const order = getSeedOrder(size);
+  const result = [...seeds];
+  const hasPlayed = (a: string, b: string) =>
+    playedPairs.has(a < b ? `${a}:${b}` : `${b}:${a}`);
+
+  for (let i = 0; i < size / 2; i++) {
+    const s1 = order[2 * i] - 1;
+    const s2 = order[2 * i + 1] - 1;
+    if (s1 >= n || s2 >= n) continue;
+    if (!hasPlayed(result[s1].id, result[s2].id)) continue;
+
+    // Swap result[s2] with the nearest seed that resolves the rematch.
+    for (let delta = 1; delta < n; delta++) {
+      let swapped = false;
+      for (const c of [s2 + delta, s2 - delta]) {
+        if (c < 0 || c >= n || c === s1) continue;
+        if (!hasPlayed(result[s1].id, result[c].id)) {
+          [result[s2], result[c]] = [result[c], result[s2]];
+          swapped = true;
+          break;
+        }
+      }
+      if (swapped || !hasPlayed(result[s1].id, result[s2].id)) break;
+    }
+  }
+
+  return result;
 }
 
 // Per-format ceiling on participating teams. When the pool exceeds this, only the
@@ -308,8 +378,12 @@ export async function buildAndSaveSEFromSwiss(): Promise<{ error?: string; ok?: 
     [m.home_team_id, m.away_team_id].filter(Boolean) as string[]
   ))];
   const records = computeSwissRecords(swissMatches, teamIds);
-  const qualified = seedSwissQualifiers(records);
-  if (qualified.length < 2) return { error: "Not enough Swiss qualifiers." };
+  const seeded = seedSwissQualifiers(records);
+  if (seeded.length < 2) return { error: "Not enough Swiss qualifiers." };
+
+  // Swap seeds to avoid R1 SE rematches from Swiss without breaking bracket structure.
+  const swissPlayedPairs = buildPlayedSet(swissMatches);
+  const qualified = avoidR1Rematches(seeded, swissPlayedPairs);
 
   const seInserts = generateSEMatchInserts(qualified);
   const { error: insertError } = await supabaseAdmin.from("matches").insert(seInserts);
@@ -362,11 +436,18 @@ export async function buildAndSaveSwissFromSEQualifier(): Promise<{ error?: stri
     return { id: (homeWon ? m.home_team_id : m.away_team_id) as string };
   });
 
-  // Rotate bottom half to vary cross-bracket matchups in Swiss R1
-  const half = qualified.length / 2;
-  const seeded = [...qualified.slice(0, half), ...qualified.slice(half + 1), qualified[half]];
+  // Sort by team RV so fold-seeding (1v16, 2v15, ...) is meaningful.
+  const qualifiedIds = qualified.map(t => t.id);
+  const { data: rvPlayers } = await supabaseAdmin
+    .from("players")
+    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .in("team_id", qualifiedIds);
+  const rvByTeam = computeAvgRV(qualifiedIds, rvPlayers ?? []);
+  const seeded = [...qualified].sort((a, b) => (rvByTeam[b.id] ?? 0) - (rvByTeam[a.id] ?? 0));
 
-  const inserts = generateSwissR1Inserts(seeded);
+  // Avoid rematches from the SE qualifier stage.
+  const playedPairs = buildPlayedSet(seqMatches);
+  const inserts = generateSwissR1Inserts(seeded, playedPairs);
   const { error } = await supabaseAdmin.from("matches").insert(inserts);
   if (error) return { error: error.message };
   return { ok: true };
@@ -415,15 +496,24 @@ export async function buildAndSaveSwissFromDEQualifier(): Promise<{ error?: stri
     .sort((a, b) => a.match_number - b.match_number)
     .map(m => ({ id: pickWinner(m) as string }));
 
-  const qualified = [...wbSurvivors, ...lbSurvivors];
-  if (qualified.length !== 16)
-    return { error: `Expected 16 qualifier survivors, got ${qualified.length}.` };
+  if (wbSurvivors.length + lbSurvivors.length !== 16)
+    return { error: `Expected 16 qualifier survivors, got ${wbSurvivors.length + lbSurvivors.length}.` };
 
-  // Rotate bottom half to avoid same-bracket R1 rematches
-  const half = qualified.length / 2;
-  const seeded = [...qualified.slice(0, half), ...qualified.slice(half + 1), qualified[half]];
+  // Sort within each bracket by RV so WB seeds 1-8 and LB seeds 9-16 reflect quality.
+  const allIds = [...wbSurvivors, ...lbSurvivors].map(t => t.id);
+  const { data: rvPlayers } = await supabaseAdmin
+    .from("players")
+    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .in("team_id", allIds);
+  const rvByTeam = computeAvgRV(allIds, rvPlayers ?? []);
+  const seeded = [
+    ...wbSurvivors.sort((a, b) => (rvByTeam[b.id] ?? 0) - (rvByTeam[a.id] ?? 0)),
+    ...lbSurvivors.sort((a, b) => (rvByTeam[b.id] ?? 0) - (rvByTeam[a.id] ?? 0)),
+  ];
 
-  const inserts = generateSwissR1Inserts(seeded);
+  // Avoid rematches from the DE qualifier stage.
+  const playedPairs = buildPlayedSet(deqMatches);
+  const inserts = generateSwissR1Inserts(seeded, playedPairs);
   const { error } = await supabaseAdmin.from("matches").insert(inserts);
   if (error) return { error: error.message };
   return { ok: true };
@@ -516,7 +606,9 @@ export async function buildAndSaveHybridFromSwiss(): Promise<{ error?: string; o
   if (ubSeeds.length !== numGroups) return { error: `Expected ${numGroups} UB seeds, got ${ubSeeds.length}.` };
   if (ubSeeds.length !== 4) return { error: `Hybrid requires exactly 4 UB seeds (got ${ubSeeds.length}). Format requires 4 groups.` };
 
-  const inserts = generateHybridMatchInserts(ubSeeds, lbSeeds.slice(0, 8));
+  // Pass Swiss match history so LB R1 avoids rematches from Swiss stage.
+  const swissPlayedPairs = buildPlayedSet(swissMatches);
+  const inserts = generateHybridMatchInserts(ubSeeds, lbSeeds.slice(0, 8), swissPlayedPairs);
   const { error } = await supabaseAdmin.from("matches").insert(inserts);
   if (error) return { error: error.message };
   return { ok: true };

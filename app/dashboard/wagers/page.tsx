@@ -127,8 +127,18 @@ export default async function WagersPage() {
     | null;
   const roundBestOf = format?.roundBestOf ?? {};
 
+  // Only matches with a confirmed future scheduled time are bettable. Unscheduled
+  // matches (scheduled_at null) are hidden — their outcome may already be known or
+  // self-reportable, so betting on them must not be possible. Mirrors isBettingClosed
+  // in actions.ts.
+  const now = Date.now();
   const bettable = (allMatches ?? []).filter(
-    (m) => m.status !== "completed" && m.home_team_id && m.away_team_id,
+    (m) =>
+      m.status !== "completed" &&
+      m.home_team_id &&
+      m.away_team_id &&
+      m.scheduled_at &&
+      new Date(m.scheduled_at).getTime() > now,
   );
 
   type MatchBO = {

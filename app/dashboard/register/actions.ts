@@ -81,15 +81,14 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
   let uploadedFileName: string | null = null;
 
   if (file?.size) {
-    const validated = validateImageUpload(file);
+    const validated = await validateImageUpload(file);
     if ("error" in validated) return { error: validated.error };
 
     const fileName = `${session.userId}-${Date.now()}.${validated.ext}`;
-    const bytes    = await file.arrayBuffer();
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from("college-ids")
-      .upload(fileName, bytes, { contentType: validated.contentType, upsert: true });
+      .upload(fileName, validated.bytes, { contentType: validated.contentType, upsert: true });
 
     if (uploadError) {
       console.error("Storage upload error:", uploadError);

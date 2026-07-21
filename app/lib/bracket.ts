@@ -276,15 +276,54 @@ function pairBucketSwiss(sorted: SwissRecord[]): [string, string][] {
   return result.map(([i, j]) => [sorted[i].teamId, sorted[j].teamId]);
 }
 
-// R1: pair seed 1 vs 9, 2 vs 10, ..., 8 vs 16.
-export function generateSwissR1Inserts(teams: { id: string }[]): BracketMatchInsert[] {
-  const half = teams.length / 2;
-  return Array.from({ length: half }, (_, i) => ({
+// Pair n seeds using 1-vs-N, 2-vs-(N-1), ... ideal order.
+// isConflict(a, b) marks pairs to avoid (same group, prior rematch, etc.).
+// Backtracks to allow conflicts only when unavoidable.
+export function pairSeededR1(
+  ids: string[],
+  isConflict?: (a: string, b: string) => boolean,
+): [string, string][] {
+  const n = ids.length;
+  const conflict = (i: number, j: number) =>
+    !!isConflict && isConflict(ids[i], ids[j]);
+
+  const ideal: [number, number][] = Array.from({ length: n / 2 }, (_, i) => [i, n - 1 - i]);
+  if (ideal.every(([i, j]) => !conflict(i, j)))
+    return ideal.map(([i, j]) => [ids[i], ids[j]]);
+
+  function backtrack(rem: number[], allowConflicts: boolean): [number, number][] | null {
+    if (rem.length === 0) return [];
+    const [first, ...rest] = rem;
+    for (let k = 0; k < rest.length; k++) {
+      if (allowConflicts || !conflict(first, rest[k])) {
+        const sub = backtrack([...rest.slice(0, k), ...rest.slice(k + 1)], allowConflicts);
+        if (sub !== null) return [[first, rest[k]], ...sub];
+      }
+    }
+    return null;
+  }
+
+  const indices = Array.from({ length: n }, (_, i) => i);
+  const result = backtrack(indices, false) ?? backtrack(indices, true)!;
+  return result.map(([i, j]) => [ids[i], ids[j]]);
+}
+
+// R1: pair seed 1 vs N, 2 vs N-1, ..., using fold-seeding.
+// playedPairs: canonical "A:B" keys (lexicographic) for cross-stage rematches to avoid.
+export function generateSwissR1Inserts(
+  teams: { id: string }[],
+  playedPairs?: Set<string>,
+): BracketMatchInsert[] {
+  const isConflict = playedPairs
+    ? (a: string, b: string) => playedPairs.has(a < b ? `${a}:${b}` : `${b}:${a}`)
+    : undefined;
+  const pairs = pairSeededR1(teams.map(t => t.id), isConflict);
+  return pairs.map(([homeId, awayId], i) => ({
     round: 1,
     match_number: i + 1,
     stage: SWISS_STAGE,
-    home_team_id: teams[i].id,
-    away_team_id: teams[i + half].id,
+    home_team_id: homeId,
+    away_team_id: awayId,
     home_score: null,
     away_score: null,
     status: "scheduled",
@@ -568,9 +607,11 @@ export const HYBRID8_GF = "hybrid8_gf";
 
 // Generate all match rows for the hybrid bracket given 4 UB seeds and 8 LB seeds.
 // ubTeams: group 1sts (seeded 1-4), lbTeams: Swiss qualifiers (seeded 1-8).
+// playedPairs: canonical "A:B" keys for prior-stage rematches to avoid in LB R1.
 export function generateHybridMatchInserts(
   ubTeams: { id: string }[],
   lbTeams: { id: string }[],
+  playedPairs?: Set<string>,
 ): BracketMatchInsert[] {
   const inserts: BracketMatchInsert[] = [];
 
@@ -585,12 +626,16 @@ export function generateHybridMatchInserts(
     });
   }
 
-  // LB R1: 4 matches (1v5, 2v6, 3v7, 4v8)
-  for (let i = 0; i < 4; i++) {
+  // LB R1: 4 matches, fold-seeded (1v8, 2v7, 3v6, 4v5), rematch-aware
+  const lbConflict = playedPairs
+    ? (a: string, b: string) => playedPairs.has(a < b ? `${a}:${b}` : `${b}:${a}`)
+    : undefined;
+  const lbPairs = pairSeededR1(lbTeams.map(t => t.id), lbConflict);
+  for (let i = 0; i < lbPairs.length; i++) {
     inserts.push({
       round: 1, match_number: i + 1, stage: HYBRID_LB,
-      home_team_id: lbTeams[i].id,
-      away_team_id: lbTeams[i + 4].id,
+      home_team_id: lbPairs[i][0],
+      away_team_id: lbPairs[i][1],
       home_score: null, away_score: null, status: "scheduled",
     });
   }

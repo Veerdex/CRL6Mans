@@ -1,16 +1,12 @@
-// ── Rating math (ported from rl-rating-tracker.jsx) ──────────────────────────
+// ── Rating math ─────────────────────────────────────────────────────────────
+// The per-game curve and RV→rating transforms live in app/lib/rating.ts so the
+// season updater and this predictor read a rating gap the same way.
 
-function rvToPower(rv: number): number {
-  return 1000 / (1 + Math.exp(-(rv - 1200) / 220));
-}
+import { perGameExpected, teamRatingFromRVs } from "@/app/lib/rating";
 
-export function teamBaseRating(rv1: number, rv2: number, rv3: number): number {
-  return (rvToPower(rv1) + rvToPower(rv2) + rvToPower(rv3)) / 3;
-}
-
+// perGameExpected returns a probability in [0, 1] (not a percentage).
 function perGameProbability(ratingA: number, ratingB: number): number {
-  const diff = ratingA - ratingB;
-  return 100 / (1 + Math.pow(10, -diff / 200));
+  return perGameExpected(ratingA, ratingB);
 }
 
 function nChooseK(n: number, k: number): number {
@@ -75,21 +71,9 @@ export type MatchPrediction = {
   ouLines: { line: number; overProb: number; underProb: number }[];
 };
 
-// Pads an RV array to exactly 3 values by repeating the team average for
-// missing roster spots (handles <3 players gracefully).
-function padRvs(rvs: number[]): [number, number, number] {
-  const filled = [...rvs];
-  const avg =
-    filled.length > 0
-      ? filled.reduce((s, v) => s + v, 0) / filled.length
-      : 1200;
-  while (filled.length < 3) filled.push(avg);
-  return [filled[0], filled[1], filled[2]];
-}
-
 function computeFromRatings(homeRating: number, awayRating: number, bestOf: number): MatchPrediction {
   const winsNeeded = Math.ceil(bestOf / 2);
-  const perGameH = perGameProbability(homeRating, awayRating) / 100;
+  const perGameH = perGameProbability(homeRating, awayRating);
   const perGameA = 1 - perGameH;
 
   const homeWinProb = seriesWinProbability(perGameH, winsNeeded);
@@ -132,8 +116,8 @@ export function computeMatchPrediction(
   bestOf: number,
 ): MatchPrediction {
   return computeFromRatings(
-    teamBaseRating(...padRvs(homeRvs)),
-    teamBaseRating(...padRvs(awayRvs)),
+    teamRatingFromRVs(homeRvs),
+    teamRatingFromRVs(awayRvs),
     bestOf,
   );
 }
