@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { registerPlayer } from "./actions";
 
@@ -22,6 +22,29 @@ interface Props {
 export function RegisterForm({ isResubmit, existing }: Props) {
   const router = useRouter();
   const [state, action, pending] = useActionState(registerPlayer, { error: "" });
+  const [fileError, setFileError] = useState<string>("");
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      setFileError("");
+      return;
+    }
+
+    const maxSizeMB = 5;
+    const maxSizeBytes = maxSizeMB * 1024 * 1024;
+
+    if (file.size > maxSizeBytes) {
+      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      setFileError(
+        `College image is too large (${fileSizeMB}MB). Please compress it to under ${maxSizeMB}MB. ` +
+        `Tip: use an online image compressor or convert to JPG quality 80%.`
+      );
+      e.target.value = "";
+    } else {
+      setFileError("");
+    }
+  };
 
   useEffect(() => {
     if ((state as { success?: boolean }).success) router.push("/dashboard");
@@ -85,8 +108,12 @@ export function RegisterForm({ isResubmit, existing }: Props) {
           name="college_image"
           accept="image/*,.pdf"
           required={!isResubmit || !existing?.college_image_url}
+          onChange={handleFileChange}
           className="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-zinc-700 file:text-white hover:file:bg-zinc-600 cursor-pointer"
         />
+        {fileError && (
+          <p className="text-sm text-red-400 mt-2">{fileError}</p>
+        )}
       </div>
 
       <div className="flex items-center justify-between p-4 bg-zinc-800 border border-zinc-700 rounded-lg">
