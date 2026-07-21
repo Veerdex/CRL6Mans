@@ -2040,6 +2040,8 @@ async function resolveDeByeMatches(): Promise<boolean> {
       presentTeamId,
     );
     resolved = true;
+    // Opening channels may unblock downstream matches in the bracket
+    await openReadyMatchChannels().catch(() => {});
   }
 
   return resolved;

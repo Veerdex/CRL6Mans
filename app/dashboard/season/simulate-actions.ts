@@ -612,17 +612,42 @@ export async function simulateMatch(): Promise<{ error?: string; ok?: boolean }>
     }
   }
 
-  // DE (WB → LB → GF order)
+  // DE (respect schedule order instead of hardcoded stage sequence)
   if (!simulatedId) {
     const sizes = await getDESizes();
     if (sizes) {
-      for (const stage of [DE_WINNERS, DE_LOSERS, DE_GF]) {
-        const ready = await getReadyDEMatches(stage);
-        if (ready.length) {
-          await simulateDESingleMatch(ready[0] as Parameters<typeof simulateDESingleMatch>[0], sizes);
-          simulatedId = ready[0].id;
-          break;
+      // Fetch all ready DE matches across all stages
+      const deReady: Record<string, typeof (await getReadyDEMatches("de_winners"))[0][]> = {
+        [DE_WINNERS]: await getReadyDEMatches(DE_WINNERS),
+        [DE_LOSERS]: await getReadyDEMatches(DE_LOSERS),
+        [DE_GF]: await getReadyDEMatches(DE_GF),
+      };
+
+      const allDEReady = [...deReady[DE_WINNERS], ...deReady[DE_LOSERS], ...deReady[DE_GF]];
+      if (allDEReady.length) {
+        // Fetch schedules to sort by time
+        const { data: schedules } = await supabaseAdmin
+          .from("round_schedules")
+          .select("stage, round, play_at")
+          .in("stage", [DE_WINNERS, DE_LOSERS, DE_GF]);
+
+        const scheduleMap = new Map<string, string>();
+        for (const s of schedules ?? []) {
+          scheduleMap.set(`${s.stage}:${s.round}`, s.play_at as string);
         }
+
+        // Sort by schedule time; if no schedule, use Infinity to push to end
+        const sorted = allDEReady.sort((a, b) => {
+          const aKey = `${a.stage}:${a.round}`;
+          const bKey = `${b.stage}:${b.round}`;
+          const aTime = scheduleMap.has(aKey) ? new Date(scheduleMap.get(aKey)!).getTime() : Infinity;
+          const bTime = scheduleMap.has(bKey) ? new Date(scheduleMap.get(bKey)!).getTime() : Infinity;
+          return aTime - bTime;
+        });
+
+        // Simulate the earliest match
+        await simulateDESingleMatch(sorted[0] as Parameters<typeof simulateDESingleMatch>[0], sizes);
+        simulatedId = sorted[0].id;
       }
     }
   }

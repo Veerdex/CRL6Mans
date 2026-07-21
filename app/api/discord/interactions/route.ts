@@ -37,6 +37,13 @@ export async function POST(req: NextRequest) {
     return new NextResponse("Invalid signature", { status: 401 });
   }
 
+  // Defense-in-depth: reject interactions with timestamps older than 5 minutes
+  // to limit the replay window if a signed request were ever captured in transit.
+  const timestampSec = parseInt(timestamp, 10);
+  if (isNaN(timestampSec) || Math.abs(Date.now() / 1000 - timestampSec) > 300) {
+    return new NextResponse("Request timestamp is too old", { status: 401 });
+  }
+
   const interaction = JSON.parse(rawBody);
 
   // PING

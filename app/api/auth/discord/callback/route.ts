@@ -3,6 +3,19 @@ import { cookies } from "next/headers";
 import { createSession } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 
+// Prefer an explicit env var; fall back to Vercel's canonical production URL.
+// This prevents host-header injection from affecting redirect destinations.
+const BASE_URL =
+  process.env.NEXT_PUBLIC_BASE_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : undefined);
+
+function safeRedirect(request: NextRequest, path: string) {
+  const base = BASE_URL ?? new URL(request.url).origin;
+  return NextResponse.redirect(`${base}${path}`);
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get("code");
@@ -15,25 +28,25 @@ export async function GET(request: NextRequest) {
 
   if (discordError) {
     clearState();
-    return NextResponse.redirect(new URL("/login?error=cancelled", request.url));
+    return safeRedirect(request, "/login?error=cancelled");
   }
 
   if (!code) {
     clearState();
-    return NextResponse.redirect(new URL("/login?error=cancelled", request.url));
+    return safeRedirect(request, "/login?error=cancelled");
   }
 
   const storedState = cookieStore.get("oauth_state")?.value;
   if (!storedState || storedState !== state) {
     clearState();
-    return NextResponse.redirect(new URL("/login?error=auth_failed", request.url));
+    return safeRedirect(request, "/login?error=auth_failed");
   }
 
   clearState();
 
   const { DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI } = process.env;
   if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET || !DISCORD_REDIRECT_URI) {
-    return NextResponse.redirect(new URL("/login?error=auth_failed", request.url));
+    return safeRedirect(request, "/login?error=auth_failed");
   }
 
   try {
@@ -50,7 +63,7 @@ export async function GET(request: NextRequest) {
     });
 
     if (!tokenRes.ok) {
-      return NextResponse.redirect(new URL("/login?error=auth_failed", request.url));
+      return safeRedirect(request, "/login?error=auth_failed");
     }
 
     const { access_token } = await tokenRes.json();
@@ -60,39 +73,48 @@ export async function GET(request: NextRequest) {
     });
 
     if (!userRes.ok) {
-      return NextResponse.redirect(new URL("/login?error=auth_failed", request.url));
+      return safeRedirect(request, "/login?error=auth_failed");
     }
 
     const user = await userRes.json();
 
     if (!user.id || !user.username) {
-      return NextResponse.redirect(new URL("/login?error=auth_failed", request.url));
+      return safeRedirect(request, "/login?error=auth_failed");
     }
 
-    await createSession(user.id, user.username, user.avatar ?? null);
-
-    // Keep avatar in sync on every login.
+    // Keep avatar in sync and read session_version + theme in one query.
     await supabaseAdmin
       .from("players")
       .update({ avatar: user.avatar ?? null, updated_at: new Date().toISOString() })
       .eq("discord_id", user.id);
 
-    // Mirror the player's saved theme + nav layout into cookies for no-flash SSR.
     const { data: player } = await supabaseAdmin
-      .from("players").select("theme, nav_layout").eq("discord_id", user.id).single();
+      .from("players")
+      .select("theme, nav_layout, session_version")
+      .eq("discord_id", user.id)
+      .single();
+
+    // Embed the current session_version so it can be validated on revocation.
+    const sessionVersion = (player?.session_version as number | null) ?? 0;
+    await createSession(user.id, user.username, user.avatar ?? null, sessionVersion);
+
+    // Mirror the player's saved theme + nav layout into cookies for no-flash SSR.
     const saved = player?.theme;
     const theme = saved === "dark" || saved === "light" || saved === "crl6mans" ? saved : "crl6mans";
+    const isProduction = process.env.NODE_ENV === "production";
     cookieStore.set("theme", theme, {
       path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax",
+      secure: isProduction,
     });
     const navLayout = player?.nav_layout === "topbar" ? "topbar" : "sidebar";
     cookieStore.set("nav_layout", navLayout, {
       path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax",
+      secure: isProduction,
     });
 
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return safeRedirect(request, "/dashboard");
   } catch (err) {
     console.error("[discord/callback] unexpected error", err);
-    return NextResponse.redirect(new URL("/login?error=auth_failed", request.url));
+    return safeRedirect(request, "/login?error=auth_failed");
   }
 }
