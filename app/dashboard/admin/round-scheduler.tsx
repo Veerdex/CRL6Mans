@@ -99,7 +99,6 @@ type Props = {
   matchesByRound: Record<string, RoundMatchInfo[]>;  // keyed "canonStage:round"
   playHour: number;
   deadlineDay: number;
-  isDE: boolean;
 };
 
 function namedRound(fromFinal: number, round: number, prefix = ""): string {
@@ -267,7 +266,6 @@ function RoundRow({
   prevSchedule,
   playHour,
   deadlineDay,
-  isDeAutoSynced,
   matches,
 }: {
   tournamentId: string | null;
@@ -279,7 +277,6 @@ function RoundRow({
   prevSchedule: RoundScheduleRow | undefined;
   playHour: number;
   deadlineDay: number;
-  isDeAutoSynced?: boolean;
   matches?: RoundMatchInfo[];
 }) {
   const label = getRoundLabel(stage, round, maxRound);
@@ -406,9 +403,6 @@ function RoundRow({
             )}
           </span>
         )}
-        {isDeAutoSynced && (
-          <span className="text-[10px] text-indigo-400 bg-indigo-950/40 px-1.5 py-0.5 rounded">auto-synced</span>
-        )}
       </div>
     );
   }
@@ -424,9 +418,6 @@ function RoundRow({
             <LocalTime iso={schedule.playAt} className="text-zinc-400" />
             {schedule.scheduleType !== "specific" && (
               <>{" → deadline "}<LocalTime iso={schedule.deadlineAt} className="text-zinc-400" /></>
-            )}
-            {isDeAutoSynced && (
-              <span className="ml-2 text-[10px] text-indigo-400 bg-indigo-950/40 px-1.5 py-0.5 rounded">auto-synced</span>
             )}
           </span>
         </div>
@@ -563,42 +554,8 @@ function stageGroupInfo(stage: string): { key: string; name: string } {
   return { key: stage, name: stageName(stage) };
 }
 
-// Read-only LB round whose time is driven entirely by the corresponding WB round.
-function AutoSyncedRow({
-  stage, round, maxRound, schedule, wbRound, wbMaxRound,
-}: {
-  stage: string;
-  round: number;
-  maxRound: number;
-  schedule: RoundScheduleRow | undefined;
-  wbRound: number;
-  wbMaxRound?: number;
-}) {
-  const label = getRoundLabel(stage, round, maxRound);
-  const wbName = namedRound(wbMaxRound != null ? wbMaxRound - wbRound : 99, wbRound);
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5 border-b border-zinc-800/60 last:border-0">
-      <span className="text-sm font-medium text-zinc-300 w-36 shrink-0">{label}</span>
-      {schedule ? (
-        <span className="text-xs text-zinc-400">
-          <LocalTime iso={schedule.playAt} className="text-zinc-400" />
-          {schedule.scheduleType !== "specific" && (
-            <>{" → deadline "}<LocalTime iso={schedule.deadlineAt} className="text-zinc-400" /></>
-          )}
-          <span className="ml-2 text-[10px] text-indigo-400 bg-indigo-950/40 px-1.5 py-0.5 rounded">
-            synced from WB {wbName}
-          </span>
-        </span>
-      ) : (
-        <span className="text-xs text-zinc-500">Set Winners Bracket {wbName} to schedule this.</span>
-      )}
-    </div>
-  );
-}
-
 function CollapsibleSub({
   sub,
-  isDE,
   ...rowProps
 }: {
   sub: SubSection;
@@ -608,8 +565,6 @@ function CollapsibleSub({
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
   deadlineDay: number;
-  isDE: boolean;
-  wbMaxRound?: number;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -621,11 +576,6 @@ function CollapsibleSub({
       >
         <div className="flex items-center gap-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{sub.name}</h4>
-          {isDE && sub.stage === "de_losers" && (
-            <span className="text-[10px] text-indigo-400 bg-indigo-950/40 border border-indigo-900/50 px-1.5 py-0.5 rounded normal-case">
-              auto-syncs with WB — set WB rounds to fill these
-            </span>
-          )}
         </div>
         <svg
           width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -636,7 +586,7 @@ function CollapsibleSub({
       </button>
       {open && (
         <div className="px-3 pb-1">
-          <SubSectionRows sub={sub} isDE={isDE} {...rowProps} />
+          <SubSectionRows sub={sub} {...rowProps} />
         </div>
       )}
     </div>
@@ -651,8 +601,6 @@ function SubSectionRows({
   matchesByRound,
   playHour,
   deadlineDay,
-  isDE,
-  wbMaxRound,
 }: {
   sub: SubSection;
   scheduleByKey: Map<string, RoundScheduleRow>;
@@ -661,8 +609,6 @@ function SubSectionRows({
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
   deadlineDay: number;
-  isDE: boolean;
-  wbMaxRound?: number;
 }) {
   return (
     <div>
@@ -671,22 +617,6 @@ function SubSectionRows({
         const schedule = scheduleByKey.get(key);
         const prevSchedule = round > 1 ? scheduleByKey.get(`${stage}:${round - 1}`) : undefined;
         const isLocked = lockedSet.has(key);
-
-        // LB rounds 1..(numWB-1) are driven by WB (WB round N → LB round N-1) and
-        // are read-only. Deeper LB rounds (>= numWB) are scheduled manually.
-        if (stage === "de_losers" && wbMaxRound != null && round < wbMaxRound) {
-          return (
-            <AutoSyncedRow
-              key={`${key}:${schedule ? "set" : "unset"}`}
-              stage={stage}
-              round={round}
-              maxRound={maxRound}
-              schedule={schedule}
-              wbRound={round + 1}
-              wbMaxRound={wbMaxRound}
-            />
-          );
-        }
 
         return (
           <RoundRow
@@ -701,7 +631,6 @@ function SubSectionRows({
             matches={matchesByRound[key]}
             playHour={playHour}
             deadlineDay={deadlineDay}
-            isDeAutoSynced={false}
           />
         );
       })}
@@ -717,7 +646,6 @@ function GroupSection({
   matchesByRound,
   playHour,
   deadlineDay,
-  isDE,
 }: {
   group: SchedulingGroup;
   scheduleByKey: Map<string, RoundScheduleRow>;
@@ -726,19 +654,12 @@ function GroupSection({
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
   deadlineDay: number;
-  isDE: boolean;
 }) {
   const [open, setOpen] = useState(true);
   const hasSubHeaders = group.subs.length > 1;
   const totalRows = group.subs.reduce((n, s) => n + s.rows.length, 0);
 
-  // WB max round drives which LB rounds are read-only (LB 1..numWB-1 are WB-synced).
-  const wbSub = group.subs.find((s) => s.stage === "de_winners");
-  const wbMaxRound = wbSub && wbSub.rows.length
-    ? Math.max(...wbSub.rows.map((r) => r.round))
-    : undefined;
-
-  const subProps = { scheduleByKey, lockedSet, tournamentId, matchesByRound, playHour, deadlineDay, isDE, wbMaxRound };
+  const subProps = { scheduleByKey, lockedSet, tournamentId, matchesByRound, playHour, deadlineDay };
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
@@ -790,7 +711,6 @@ export function RoundScheduler({
   matchesByRound,
   playHour,
   deadlineDay,
-  isDE,
 }: Props) {
   // Inputs derive their initial values from browser-local dates, which differ from the
   // server's zone — render after mount so SSR and the first client paint never mismatch.
@@ -843,7 +763,6 @@ export function RoundScheduler({
           matchesByRound={matchesByRound}
           playHour={playHour}
           deadlineDay={deadlineDay}
-          isDE={isDE}
         />
       ))}
     </div>

@@ -276,18 +276,6 @@ export async function setRoundSchedule(params: {
     const { data: others } = await allQ;
     const myPhase = phaseRank(stage);
 
-    // DE LB rounds are synced in pairs: (R1,R2), (R3,R4), (R5,R6).
-    // Rounds in the same pair should not trigger ordering conflicts with each other.
-    const getSyncedLBPair = (r: number): Set<number> => {
-      if (stage === "de_losers") {
-        if (r === 1 || r === 2) return new Set([1, 2]);
-        if (r === 3 || r === 4) return new Set([3, 4]);
-        if (r === 5 || r === 6) return new Set([5, 6]);
-      }
-      return new Set();
-    };
-    const syncedWithThis = getSyncedLBPair(round);
-
     // Downstream same-stage rounds chained off this one are shifted by the cascade,
     // so they must not block moving this round later.
     const chainedDownstream = new Set<number>();
@@ -321,8 +309,6 @@ export async function setRoundSchedule(params: {
       if (oStage === stage && oRound === round) continue; // skip the row being edited
       // Ignore stale rows from a different format (not part of the current stages).
       if (validStages.size > 0 && oStage !== stage && !validStages.has(oStage)) continue;
-      // Ignore synced DE LB pairs — they're meant to overlap at the same time.
-      if (oStage === stage && syncedWithThis.has(oRound)) continue;
       const oStartMs = windowStartMs(new Date(o.play_at as string).getTime(), o.schedule_type as string, tz);
       const oEndMs = oStartMs + windowLenMs(o.schedule_type as string);
 
@@ -418,87 +404,6 @@ export async function setRoundSchedule(params: {
       prevNewPlayAt = newPlayAt;
       prevType = nextType;
       nextRound++;
-    }
-  }
-
-  // DE auto-sync: setting WB round N syncs LB drop and consolidation rounds.
-  // LB alternates between drop rounds (receive new losers) and consolidation rounds.
-  // WB R1 → LB R1 (drop) + R2 (consolidation)
-  // WB R2 → LB R3 (drop) + R4 (consolidation)
-  // WB R3 → LB R5 (drop) + R6 (consolidation)
-  // WB R4 → no LB sync (goes to GF)
-  if (stage === "de_winners" && round <= 3) {
-    const lbDropRound = 2 * round - 1;
-    const lbConsolidationRound = 2 * round;
-
-    for (const lbRound of [lbDropRound, lbConsolidationRound]) {
-      const lbLocked = await isRoundLocked("de_losers", lbRound);
-      if (!lbLocked) {
-        const oldLbQ = tournamentId
-          ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type").eq("tournament_id", tournamentId).eq("stage", "de_losers").eq("round", lbRound).maybeSingle()
-          : supabaseAdmin.from("round_schedules").select("play_at, schedule_type").is("tournament_id", null).eq("stage", "de_losers").eq("round", lbRound).maybeSingle();
-        const { data: oldLb } = await oldLbQ;
-        const delLbQ = tournamentId
-          ? supabaseAdmin.from("round_schedules").delete().eq("tournament_id", tournamentId).eq("stage", "de_losers").eq("round", lbRound)
-          : supabaseAdmin.from("round_schedules").delete().is("tournament_id", null).eq("stage", "de_losers").eq("round", lbRound);
-        await delLbQ;
-        await supabaseAdmin.from("round_schedules").insert({
-          tournament_id: tournamentId,
-          stage: "de_losers",
-          round: lbRound,
-          schedule_type: scheduleType,
-          play_at: playAt,
-          deadline_at: deadlineAt,
-          updated_at: now,
-        });
-        await syncRoundMatchPins(
-          "de_losers", lbRound, scheduleType, playAtMs,
-          (oldLb?.schedule_type as string | undefined) ?? null,
-          oldLb?.play_at ? new Date(oldLb.play_at as string).getTime() : null,
-          tz,
-        );
-      }
-    }
-  }
-
-  // DE LB pair sync: when setting an LB round schedule, also update its synced partner.
-  // LB rounds are synced in pairs: (R1,R2), (R3,R4), (R5,R6).
-  if (stage === "de_losers") {
-    let syncPartnerRound: number | null = null;
-    if (round === 1 || round === 2) syncPartnerRound = round === 1 ? 2 : 1;
-    else if (round === 3 || round === 4) syncPartnerRound = round === 3 ? 4 : 3;
-    else if (round === 5 || round === 6) syncPartnerRound = round === 5 ? 6 : 5;
-
-    if (syncPartnerRound !== null) {
-      const syncLocked = await isRoundLocked("de_losers", syncPartnerRound);
-      if (!syncLocked) {
-        const oldSyncQ = tournamentId
-          ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type").eq("tournament_id", tournamentId).eq("stage", "de_losers").eq("round", syncPartnerRound).maybeSingle()
-          : supabaseAdmin.from("round_schedules").select("play_at, schedule_type").is("tournament_id", null).eq("stage", "de_losers").eq("round", syncPartnerRound).maybeSingle();
-        const { data: oldSync } = await oldSyncQ;
-
-        const syncDelQ = tournamentId
-          ? supabaseAdmin.from("round_schedules").delete().eq("tournament_id", tournamentId).eq("stage", "de_losers").eq("round", syncPartnerRound)
-          : supabaseAdmin.from("round_schedules").delete().is("tournament_id", null).eq("stage", "de_losers").eq("round", syncPartnerRound);
-        await syncDelQ;
-
-        await supabaseAdmin.from("round_schedules").insert({
-          tournament_id: tournamentId,
-          stage: "de_losers",
-          round: syncPartnerRound,
-          schedule_type: scheduleType,
-          play_at: playAt,
-          deadline_at: deadlineAt,
-          updated_at: now,
-        });
-
-        await syncRoundMatchPins(
-          "de_losers", syncPartnerRound, scheduleType, playAtMs,
-          (oldSync?.schedule_type as string | undefined) ?? null,
-          oldSync?.play_at ? new Date(oldSync.play_at as string).getTime() : null,
-          tz,
-        );
-      }
     }
   }
 

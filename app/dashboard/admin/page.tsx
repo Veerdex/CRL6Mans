@@ -341,9 +341,6 @@ export default async function AdminPage() {
     matchesByRound[key].sort((a, b) => (a.groupNum ?? 0) - (b.groupNum ?? 0) || a.matchNumber - b.matchNumber);
   }
 
-  const schedulingIsDE =
-    schedulingSections.some((s) => s.stage === "de_winners" || s.stage === "de_losers");
-
   // Out-of-window times both teams agreed on, awaiting admin approval.
   const scheduleOverrideCards: ScheduleOverrideCardData[] = (scheduledMatches ?? [])
     .filter((m) => m.schedule_admin_required && m.schedule_accepted && m.scheduled_at)
@@ -578,7 +575,6 @@ export default async function AdminPage() {
               matchesByRound={matchesByRound}
               playHour={(settings?.match_play_hour as number | null) ?? 19}
               deadlineDay={(settings?.match_deadline_day as number | null) ?? 2}
-              isDE={schedulingIsDE}
             />
           )}
         </CollapsibleSection>
