@@ -30,6 +30,7 @@ export type ReplayData = {
 
 type S = { buf: Buffer; pos: number };
 
+const u8  = (s: S): number => s.buf[s.pos++];
 const i32 = (s: S): number => { const v = s.buf.readInt32LE(s.pos);   s.pos += 4; return v; };
 const u32 = (s: S): number => { const v = s.buf.readUInt32LE(s.pos);  s.pos += 4; return v; };
 const f32 = (s: S): number => { const v = s.buf.readFloatLE(s.pos);   s.pos += 4; return v; };
@@ -61,7 +62,7 @@ function readStr(s: S): string {
 // Property map reader
 // ---------------------------------------------------------------------------
 
-function readProps(s: S, depth = 0): Record<string, unknown> {
+function readProps(s: S, boolWidth: 1 | 4, depth = 0): Record<string, unknown> {
   if (depth > 6) throw new Error("Property nesting too deep — possibly corrupt replay");
   const props: Record<string, unknown> = {};
   for (let guard = 0; guard < 2048; guard++) {
@@ -89,7 +90,10 @@ function readProps(s: S, depth = 0): Record<string, unknown> {
         value = readStr(s);
         break;
       case "BoolProperty":
-        value = i32(s) !== 0;
+        // Value width varies by replay encoding (1 byte standard, 4 bytes on
+        // some outlier files) — parseReplay retries with the other width if
+        // the first attempt desyncs and throws.
+        value = (boolWidth === 4 ? i32(s) : u8(s)) !== 0;
         break;
       case "QWordProperty": {
         const lo = u32(s);
@@ -98,13 +102,15 @@ function readProps(s: S, depth = 0): Record<string, unknown> {
         break;
       }
       case "ByteProperty": {
-        // Some replays (e.g. Epic-platform games) only serialize a single
-        // name here instead of an enumType/enumValue pair — propSize is the
-        // authoritative boundary, so only read a second string if room remains.
+        // propSize here is the encoded length of enumValue alone (not the
+        // combined tag content), so it can only be used to decide whether a
+        // second string follows — never to resync s.pos afterward. Some
+        // replays (e.g. some Epic-platform games) only serialize enumType
+        // with no enumValue, in which case reading enumType alone already
+        // consumes exactly propSize bytes.
         const enumType  = readStr(s);
         const consumed  = s.pos - sizeStart - 8;
         const enumValue = consumed < propSize ? readStr(s) : "None";
-        s.pos = sizeStart + 8 + propSize;
         value = { enumType, enumValue };
         break;
       }
@@ -136,7 +142,7 @@ function readProps(s: S, depth = 0): Record<string, unknown> {
           break;
         }
         const items: Record<string, unknown>[] = [];
-        for (let i = 0; i < count; i++) items.push(readProps(s, depth + 1));
+        for (let i = 0; i < count; i++) items.push(readProps(s, boolWidth, depth + 1));
         value = items;
         break;
       }
@@ -159,6 +165,22 @@ const LABEL = "TAGame.Replay_Soccar_TA";
 const LABEL_LEN = LABEL.length + 1; // 24 — includes null terminator
 
 export function parseReplay(buf: Buffer, debug = false): ReplayData {
+  // BoolProperty value width is 1 byte in the standard format; a small number
+  // of outlier files use 4 bytes instead. Both a correct parse and a width
+  // mismatch are self-evident (mismatches desync and throw), so try the
+  // common case first and fall back rather than guessing from header version.
+  try {
+    return parseReplayWithBoolWidth(buf, debug, 1);
+  } catch (err) {
+    try {
+      return parseReplayWithBoolWidth(buf, debug, 4);
+    } catch {
+      throw err;
+    }
+  }
+}
+
+function parseReplayWithBoolWidth(buf: Buffer, debug: boolean, boolWidth: 1 | 4): ReplayData {
   const s: S = { buf, pos: 0 };
 
   skip(s, 4); // header_size  (u32)
@@ -180,7 +202,7 @@ export function parseReplay(buf: Buffer, debug = false): ReplayData {
     );
   }
 
-  const props = readProps(s);
+  const props = readProps(s, boolWidth);
 
   const team0Score = typeof props["Team0Score"] === "number" ? (props["Team0Score"] as number) : 0;
   const team1Score = typeof props["Team1Score"] === "number" ? (props["Team1Score"] as number) : 0;
