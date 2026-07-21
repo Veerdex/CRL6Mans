@@ -30,7 +30,6 @@ export type ReplayData = {
 
 type S = { buf: Buffer; pos: number };
 
-const u8  = (s: S): number => s.buf[s.pos++];
 const i32 = (s: S): number => { const v = s.buf.readInt32LE(s.pos);   s.pos += 4; return v; };
 const u32 = (s: S): number => { const v = s.buf.readUInt32LE(s.pos);  s.pos += 4; return v; };
 const f32 = (s: S): number => { const v = s.buf.readFloatLE(s.pos);   s.pos += 4; return v; };
@@ -90,7 +89,7 @@ function readProps(s: S, depth = 0): Record<string, unknown> {
         value = readStr(s);
         break;
       case "BoolProperty":
-        value = u8(s) !== 0;
+        value = i32(s) !== 0;
         break;
       case "QWordProperty": {
         const lo = u32(s);
@@ -99,8 +98,13 @@ function readProps(s: S, depth = 0): Record<string, unknown> {
         break;
       }
       case "ByteProperty": {
+        // Some replays (e.g. Epic-platform games) only serialize a single
+        // name here instead of an enumType/enumValue pair — propSize is the
+        // authoritative boundary, so only read a second string if room remains.
         const enumType  = readStr(s);
-        const enumValue = readStr(s);
+        const consumed  = s.pos - sizeStart - 8;
+        const enumValue = consumed < propSize ? readStr(s) : "None";
+        s.pos = sizeStart + 8 + propSize;
         value = { enumType, enumValue };
         break;
       }
