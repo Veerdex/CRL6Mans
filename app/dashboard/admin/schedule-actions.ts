@@ -407,11 +407,13 @@ export async function setRoundSchedule(params: {
     }
   }
 
-  // DE auto-sync: setting WB round N always (re)sets LB round N-1 to the same time,
+  // DE auto-sync: setting WB round N always (re)sets the corresponding LB round to the same time,
   // unless that LB round has already started. LB rounds 1..(numWB-1) are driven
   // entirely by WB and are read-only in the UI.
-  if (stage === "de_winners" && round > 1) {
-    const lbRound = round - 1;
+  // WB R1 → LB R1 (so channels can be created once WB R1 losers drop in)
+  // WB R2+ → LB R(N-1) (offset pattern)
+  if (stage === "de_winners") {
+    const lbRound = round === 1 ? 1 : round - 1;
     const lbLocked = await isRoundLocked("de_losers", lbRound);
     if (!lbLocked) {
       const oldLbQ = tournamentId
