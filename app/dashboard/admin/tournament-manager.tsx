@@ -30,6 +30,7 @@ import {
   applyBestOfCascade,
   getNumGroups,
   getDefaultGroupAdvancing,
+  getDefaultGroupRounds,
 } from "@/app/dashboard/season/format-editor";
 import { LocalTime } from "@/app/dashboard/local-time";
 
@@ -118,7 +119,8 @@ function computeStageSchedule(
   preset: string,
   teams: number,
   groupMaxAdvancing: number | null,
-  bof: Record<RoundTier, BestOf>
+  bof: Record<RoundTier, BestOf>,
+  groupRounds: number | null = null,
 ): StageScheduleEntry[] {
   if (teams < 2) return [];
 
@@ -127,7 +129,7 @@ function computeStageSchedule(
   const sf  = gapMin(bof.semifinals);
   const fin = gapMin(bof.finals);
 
-  const groups = { key: "groups", label: "Groups", estimatedMinutes: groupStageRounds(teams) * std };
+  const groups = { key: "groups", label: "Groups", estimatedMinutes: (groupRounds ?? groupStageRounds(teams)) * std };
   const swiss  = { key: "swiss", label: "Swiss", estimatedMinutes: SWISS_ROUNDS * std };
   const se8    = { key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(3, bof) }; // 8→1: QF+SF+Final
 
@@ -236,6 +238,7 @@ type FormState = {
   roundBestOf: Record<RoundTier, BestOf>;
   groupSeedingMethod: "balanced" | "random";
   groupMaxAdvancing: string;
+  groupRounds: string;
   draftOpenAt: string;
   draftCloseAt: string;
   draftStartAt: string;
@@ -256,6 +259,7 @@ const EMPTY_FORM: FormState = {
   roundBestOf: { ...DEFAULT_BEST_OF },
   groupSeedingMethod: "balanced",
   groupMaxAdvancing: "",
+  groupRounds: "",
   draftOpenAt: "",
   draftCloseAt: "",
   draftStartAt: "",
@@ -310,9 +314,10 @@ export function TournamentManager({
 
   const teams = parseInt(form.minTeams) || 0;
   const groupMaxAdvParsed = form.groupMaxAdvancing ? parseInt(form.groupMaxAdvancing) || null : null;
-  const stages = computeStageSchedule(form.preset, teams, groupMaxAdvParsed, form.roundBestOf);
+  const groupRoundsParsed = form.groupRounds ? parseInt(form.groupRounds) || null : null;
+  const stages = computeStageSchedule(form.preset, teams, groupMaxAdvParsed, form.roundBestOf, groupRoundsParsed);
   const previewCount = parseInt(form.previewTeams) || teams;
-  const displayStages = computeStageSchedule(form.preset, previewCount, groupMaxAdvParsed, form.roundBestOf);
+  const displayStages = computeStageSchedule(form.preset, previewCount, groupMaxAdvParsed, form.roundBestOf, groupRoundsParsed);
 
   const buildInput = (): TournamentInput => {
     const season_format: SeasonFormatConfig = {
@@ -325,6 +330,8 @@ export function TournamentManager({
         const parsed = form.groupMaxAdvancing ? parseInt(form.groupMaxAdvancing) : null;
         season_format.groupMaxAdvancing = parsed && !isNaN(parsed) ? parsed : null;
       }
+      const parsedRounds = form.groupRounds ? parseInt(form.groupRounds) : null;
+      season_format.groupRounds = parsedRounds && !isNaN(parsedRounds) ? parsedRounds : null;
     }
 
     const stage_starts: Record<string, string> = {};
@@ -423,7 +430,8 @@ export function TournamentManager({
     const tTeams = t.min_teams || 0;
     const tBof = { ...DEFAULT_BEST_OF, ...(fmt?.roundBestOf ?? {}) };
     const tGroupAdv = fmt?.groupMaxAdvancing ?? null;
-    const tStages = computeStageSchedule(preset, tTeams, tGroupAdv, tBof);
+    const tGroupRounds = fmt?.groupRounds ?? null;
+    const tStages = computeStageSchedule(preset, tTeams, tGroupAdv, tBof, tGroupRounds);
     const savedStarts = (t as { stage_starts?: Record<string, string> | null }).stage_starts ?? null;
 
     setForm({
@@ -436,6 +444,7 @@ export function TournamentManager({
       roundBestOf: tBof,
       groupSeedingMethod: fmt?.groupSeedingMethod ?? "balanced",
       groupMaxAdvancing: fmt?.groupMaxAdvancing != null ? String(fmt.groupMaxAdvancing) : "",
+      groupRounds: fmt?.groupRounds != null ? String(fmt.groupRounds) : "",
       draftOpenAt: isoToLocalInput(t.draft_open_at),
       draftCloseAt: isoToLocalInput(t.draft_close_at),
       draftStartAt: isoToLocalInput(t.draft_start_at),
@@ -660,6 +669,21 @@ export function TournamentManager({
             ) : (
               <p className="text-xs text-zinc-500">Advancing is fixed by this format.</p>
             )}
+            <div>
+              <p className="text-xs text-zinc-500 mb-1">
+                Group rounds{" "}
+                <span className="text-zinc-600">
+                  (default {getDefaultGroupRounds(parseInt(form.minTeams) || 8)} · rounded up to a full round-robin pass)
+                </span>
+              </p>
+              <input
+                type="number"
+                value={form.groupRounds}
+                onChange={(e) => setForm(f => ({ ...f, groupRounds: e.target.value }))}
+                placeholder={String(getDefaultGroupRounds(parseInt(form.minTeams) || 8))}
+                className="w-24 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 [appearance:textfield]"
+              />
+            </div>
           </div>
         )}
 
@@ -806,7 +830,8 @@ export function TournamentManager({
                 sf.preset,
                 t.min_teams || 0,
                 sf.groupMaxAdvancing ?? null,
-                { ...DEFAULT_BEST_OF, ...(sf.roundBestOf ?? {}) }
+                { ...DEFAULT_BEST_OF, ...(sf.roundBestOf ?? {}) },
+                sf.groupRounds ?? null,
               )
             : [];
 
