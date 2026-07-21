@@ -155,7 +155,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         .single();
 
       const startAmount = pendingStart ? ((ls?.pending_start_coin_amount as number | null) ?? 0) : 0;
-      const weeklyAmount = pendingWeekly ? 1000 : 0;
+      const weeklyAmount = pendingWeekly ? 250 : 0;
       const total = startAmount + weeklyAmount;
 
       if (total > 0) {

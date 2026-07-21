@@ -105,7 +105,7 @@ export async function GET(request: Request) {
       try {
         await supabaseAdmin
           .from("players")
-          .update({ coin_grant_pending_weekly: true })
+          .update({ coin_grant_pending_weekly: true });
           .eq("status", "approved");
         await supabaseAdmin
           .from("league_settings")
