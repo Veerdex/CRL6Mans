@@ -407,37 +407,43 @@ export async function setRoundSchedule(params: {
     }
   }
 
-  // DE auto-sync: setting WB round N always (re)sets the corresponding LB round to the same time,
-  // unless that LB round has already started. Each WB round feeds losers to a LB round.
-  // WB R1 → LB R1 (so channels can be created once WB R1 losers drop in)
-  // WB R2 → LB R2 (WB R2 losers feed LB R2 along with LB R1 winners), etc.
-  if (stage === "de_winners") {
-    const lbRound = round;
-    const lbLocked = await isRoundLocked("de_losers", lbRound);
-    if (!lbLocked) {
-      const oldLbQ = tournamentId
-        ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type").eq("tournament_id", tournamentId).eq("stage", "de_losers").eq("round", lbRound).maybeSingle()
-        : supabaseAdmin.from("round_schedules").select("play_at, schedule_type").is("tournament_id", null).eq("stage", "de_losers").eq("round", lbRound).maybeSingle();
-      const { data: oldLb } = await oldLbQ;
-      const delLbQ = tournamentId
-        ? supabaseAdmin.from("round_schedules").delete().eq("tournament_id", tournamentId).eq("stage", "de_losers").eq("round", lbRound)
-        : supabaseAdmin.from("round_schedules").delete().is("tournament_id", null).eq("stage", "de_losers").eq("round", lbRound);
-      await delLbQ;
-      await supabaseAdmin.from("round_schedules").insert({
-        tournament_id: tournamentId,
-        stage: "de_losers",
-        round: lbRound,
-        schedule_type: scheduleType,
-        play_at: playAt,
-        deadline_at: deadlineAt,
-        updated_at: now,
-      });
-      await syncRoundMatchPins(
-        "de_losers", lbRound, scheduleType, playAtMs,
-        (oldLb?.schedule_type as string | undefined) ?? null,
-        oldLb?.play_at ? new Date(oldLb.play_at as string).getTime() : null,
-        tz,
-      );
+  // DE auto-sync: setting WB round N syncs LB drop and consolidation rounds.
+  // LB alternates between drop rounds (receive new losers) and consolidation rounds.
+  // WB R1 → LB R1 (drop) + R2 (consolidation)
+  // WB R2 → LB R3 (drop) + R4 (consolidation)
+  // WB R3 → LB R5 (drop) + R6 (consolidation)
+  // WB R4 → no LB sync (goes to GF)
+  if (stage === "de_winners" && round <= 3) {
+    const lbDropRound = 2 * round - 1;
+    const lbConsolidationRound = 2 * round;
+
+    for (const lbRound of [lbDropRound, lbConsolidationRound]) {
+      const lbLocked = await isRoundLocked("de_losers", lbRound);
+      if (!lbLocked) {
+        const oldLbQ = tournamentId
+          ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type").eq("tournament_id", tournamentId).eq("stage", "de_losers").eq("round", lbRound).maybeSingle()
+          : supabaseAdmin.from("round_schedules").select("play_at, schedule_type").is("tournament_id", null).eq("stage", "de_losers").eq("round", lbRound).maybeSingle();
+        const { data: oldLb } = await oldLbQ;
+        const delLbQ = tournamentId
+          ? supabaseAdmin.from("round_schedules").delete().eq("tournament_id", tournamentId).eq("stage", "de_losers").eq("round", lbRound)
+          : supabaseAdmin.from("round_schedules").delete().is("tournament_id", null).eq("stage", "de_losers").eq("round", lbRound);
+        await delLbQ;
+        await supabaseAdmin.from("round_schedules").insert({
+          tournament_id: tournamentId,
+          stage: "de_losers",
+          round: lbRound,
+          schedule_type: scheduleType,
+          play_at: playAt,
+          deadline_at: deadlineAt,
+          updated_at: now,
+        });
+        await syncRoundMatchPins(
+          "de_losers", lbRound, scheduleType, playAtMs,
+          (oldLb?.schedule_type as string | undefined) ?? null,
+          oldLb?.play_at ? new Date(oldLb.play_at as string).getTime() : null,
+          tz,
+        );
+      }
     }
   }
 
