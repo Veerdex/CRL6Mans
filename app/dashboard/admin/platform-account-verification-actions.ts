@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { decrypt } from "@/app/lib/session";
 import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
 
 const VERIFICATION_METHODS = [
   "steam_openid",
@@ -105,13 +106,14 @@ export async function verifyPlatformAccount(
 
 export async function rejectPlatformAccount(
   accountId: string,
-  adminNote: string
+  adminNote: string,
+  cooldown?: RejectionCooldown
 ): Promise<{ error?: string; ok?: boolean }> {
   const adminId = await requireAdmin();
 
   const { data: account } = await supabaseAdmin
     .from("player_platform_accounts")
-    .select("id, verification_status")
+    .select("id, player_id, verification_status")
     .eq("id", accountId)
     .single();
   if (!account) return { error: "Claim not found." };
@@ -129,8 +131,17 @@ export async function rejectPlatformAccount(
     account_id: accountId,
     event_type: "rejected",
     actor: adminId,
-    detail_json: { admin_note: adminNote.trim() || null },
+    detail_json: { admin_note: adminNote.trim() || null, cooldown: cooldown ?? null },
   });
+
+  if (cooldown) {
+    const cooldownResult = await kickForRejectionCooldown(
+      account.player_id,
+      adminNote.trim() || "Platform account claim rejected.",
+      cooldown
+    );
+    if (cooldownResult.error) return { error: `Claim rejected, but the cooldown kick failed: ${cooldownResult.error}` };
+  }
 
   revalidatePath("/dashboard/admin");
   return { ok: true };

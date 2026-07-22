@@ -8,6 +8,7 @@ import { isGuildMember } from "@/app/lib/discord-api";
 import { isTrackerStale } from "@/app/lib/tracker";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
+import { isCurrentlyKicked } from "@/app/lib/players";
 
 async function currentPlayer() {
   const cookieStore = await cookies();
@@ -15,7 +16,7 @@ async function currentPlayer() {
   if (!session?.userId) return null;
   const { data } = await supabaseAdmin
     .from("players")
-    .select("id, status, discord_id, kick_reason, peak_2v2, peak_3v3, tracker_confirmed_at")
+    .select("id, status, discord_id, kick_reason, kicked_until, peak_2v2, peak_3v3, tracker_confirmed_at")
     .eq("discord_id", session.userId)
     .single();
   return data ? { ...data, userId: session.userId } : null;
@@ -25,7 +26,7 @@ export async function joinTournament(tournamentId: string, confirmTrackerSame = 
   const player = await currentPlayer();
   if (!player) return { error: "You are not registered." };
   if (player.status !== "approved") return { error: "Your registration must be approved first." };
-  if (player.kick_reason) return { error: "You are not eligible to join this tournament." };
+  if (isCurrentlyKicked(player.kick_reason, player.kicked_until)) return { error: "You are not eligible to join this tournament." };
 
   const inServer = await isGuildMember(player.userId);
   if (!inServer) return { inviteRequired: true };

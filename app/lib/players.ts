@@ -22,6 +22,13 @@ export type Player = {
   team_id: string | null;
 };
 
+/** kick_reason is a permanent gate unless kicked_until is set and has passed. */
+export function isCurrentlyKicked(kickReason: string | null, kickedUntil: string | null): boolean {
+  if (!kickReason) return false;
+  if (!kickedUntil) return true;
+  return new Date(kickedUntil).getTime() > Date.now();
+}
+
 export async function getPlayerStatus(discordId: string): Promise<PlayerStatus> {
   const { data } = await supabaseAdmin
     .from("players")

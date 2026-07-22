@@ -54,7 +54,8 @@ async function removeFromActivePlay(playerId: string) {
 export async function kickPlayer(
   playerId: string,
   reason: string,
-  timeoutMs: number = 7 * 24 * 60 * 60 * 1000
+  timeoutMs: number = 7 * 24 * 60 * 60 * 1000,
+  kickedUntil: Date | null = null
 ): Promise<{ ok?: boolean; error?: string }> {
   const actorRole = await getActorRole();
 
@@ -70,7 +71,11 @@ export async function kickPlayer(
   await removeFromActivePlay(playerId);
   await supabaseAdmin
     .from("players")
-    .update({ kick_reason: reason.trim() || null, updated_at: new Date().toISOString() })
+    .update({
+      kick_reason: reason.trim() || null,
+      kicked_until: kickedUntil ? kickedUntil.toISOString() : null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", playerId);
 
   if (player?.discord_id && !player.discord_id.startsWith("test_")) {
@@ -89,6 +94,23 @@ export async function kickPlayer(
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/players");
   return { ok: true };
+}
+
+export type RejectionCooldown = "5m" | "1d" | "forever";
+
+// Reused by rejectPlatformAccount for the optional cooldown on a rejected
+// platform-account claim. "forever" reuses kickPlayer's default (permanent
+// kick_reason, no kicked_until, standard Discord timeout) — same broad kick
+// as the moderation panel. "5m"/"1d" set kicked_until to match, and size the
+// Discord timeout to the same window so the two don't disagree.
+export async function kickForRejectionCooldown(
+  playerId: string,
+  reason: string,
+  cooldown: RejectionCooldown
+): Promise<{ ok?: boolean; error?: string }> {
+  if (cooldown === "forever") return kickPlayer(playerId, reason);
+  const ms = cooldown === "5m" ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  return kickPlayer(playerId, reason, ms, new Date(Date.now() + ms));
 }
 
 export async function banPlayer(
@@ -113,6 +135,7 @@ export async function banPlayer(
       status: "banned",
       ban_reason: reason.trim() || null,
       kick_reason: null,
+      kicked_until: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", playerId);
@@ -157,6 +180,7 @@ export async function unbanPlayer(
       status: "unregistered",
       ban_reason: null,
       kick_reason: null,
+      kicked_until: null,
       peak_3v3: "0",
       current_3v3: "0",
       peak_2v2: "0",

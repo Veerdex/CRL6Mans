@@ -88,6 +88,7 @@ alter table players add column if not exists sub_willing        boolean not null
 alter table players add column if not exists display_name       text;
 alter table players add column if not exists ban_reason         text;
 alter table players add column if not exists kick_reason        text;
+alter table players add column if not exists kicked_until       timestamptz;
 alter table players add column if not exists theme              text not null default 'crl6mans';
 alter table players add column if not exists nav_layout         text not null default 'sidebar';
 alter table players add column if not exists updated_at         timestamptz not null default now();
@@ -486,7 +487,7 @@ create table if not exists player_platform_account_events (
   event_type   text        not null
                            check (event_type in
                              ('claimed', 'verification_submitted', 'verified', 'rejected',
-                              'withdrawn', 'revoked', 'corrected', 'note_added')),
+                              'withdrawn', 'revoked', 'corrected', 'note_added', 'ban_evasion_flagged')),
   actor        text        not null,
   detail_json  jsonb,
   created_at   timestamptz not null default now()

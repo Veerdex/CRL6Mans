@@ -1,7 +1,13 @@
 "use client";
 
-import { useActionState, useTransition, useState } from "react";
-import { claimPlatformAccount, withdrawPlatformAccount } from "./platform-account-actions";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  claimPlatformAccount,
+  previewClaimReplay,
+  withdrawPlatformAccount,
+  type ClaimReplayCandidate,
+} from "./platform-account-actions";
 
 export type ClaimablePlatform = "steam" | "epic" | "playstation" | "xbox" | "switch";
 
@@ -22,7 +28,11 @@ const PLATFORM_LABELS: Record<ClaimablePlatform, string> = {
   switch: "Nintendo Switch",
 };
 
-const CONSOLE_PLATFORMS: ClaimablePlatform[] = ["playstation", "xbox", "switch"];
+const REPLAY_PLATFORM_LABELS: Record<string, string> = {
+  ...PLATFORM_LABELS,
+  psynet: "PSyNet",
+  unknown: "Unknown",
+};
 
 export function PlatformAccountsSection({
   accounts,
@@ -33,14 +43,17 @@ export function PlatformAccountsSection({
     <div className="mb-6 space-y-3">
       <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Platform Accounts</p>
       <p className="text-xs text-zinc-500">
-        Claim the platform account(s) you play on. An admin verifies each claim before it counts toward
+        Claim the platform account you play on. An admin verifies each claim before it counts toward
         match identity checks — a claim alone does not certify anything.
       </p>
-      <div className="space-y-3">
+
+      <div className="space-y-1.5">
         {(Object.keys(PLATFORM_LABELS) as ClaimablePlatform[]).map(platform => (
-          <PlatformClaimCard key={platform} platform={platform} record={accounts[platform]} />
+          <PlatformStatusRow key={platform} platform={platform} record={accounts[platform]} />
         ))}
       </div>
+
+      <UnifiedClaimCard />
     </div>
   );
 }
@@ -74,202 +87,201 @@ const TONE_CLASSES = {
   red: "bg-red-950/40 border-red-700/50 text-red-300",
 };
 
-function PlatformClaimCard({
+function PlatformStatusRow({
   platform,
   record,
 }: {
   platform: ClaimablePlatform;
   record: PlatformAccountRecord | null;
 }) {
-  const [state, action, submitting] = useActionState(claimPlatformAccount, {});
+  const router = useRouter();
   const [withdrawing, startWithdraw] = useTransition();
-  const [editing, setEditing] = useState(false);
 
-  const isConsole = CONSOLE_PLATFORMS.includes(platform);
-  const verified = record?.verification_status === "verified";
   const canWithdraw = record?.verification_status === "claimed" || record?.verification_status === "pending_verification";
   const banner = record ? statusBanner(record) : null;
-  const showForm = !record || editing || (!verified && !canWithdraw);
 
   function handleWithdraw() {
     if (!record) return;
     startWithdraw(async () => {
       await withdrawPlatformAccount(record.id);
+      router.refresh();
     });
   }
 
   return (
-    <div className="p-4 bg-zinc-800 border border-zinc-700 rounded-lg space-y-3">
-      <div className="flex items-center justify-between gap-4">
-        <p className="text-sm font-semibold text-zinc-200">{PLATFORM_LABELS[platform]}</p>
-        {canWithdraw && !editing && (
-          <button
-            onClick={handleWithdraw}
-            disabled={withdrawing}
-            className="text-xs text-zinc-500 hover:text-red-400 underline transition-colors disabled:opacity-50"
-          >
-            {withdrawing ? "Withdrawing…" : "Withdraw claim"}
-          </button>
-        )}
-      </div>
-
-      {banner && (
-        <p className={`text-xs rounded-lg border px-3 py-2 ${TONE_CLASSES[banner.tone]}`}>{banner.text}</p>
-      )}
-
-      {record && !editing && (
-        <div className="text-xs text-zinc-400 space-y-0.5">
-          {record.platform_account_id && <p>ID: {record.platform_account_id}</p>}
-          {record.claimed_display_name && <p>Display name: {record.claimed_display_name}</p>}
-          {record.claimed_tracker_url && (
-            <p>
-              Tracker:{" "}
-              <a href={record.claimed_tracker_url} target="_blank" rel="noreferrer" className="underline hover:text-zinc-300">
-                {record.claimed_tracker_url}
-              </a>
-            </p>
+    <div className="px-3 py-2 rounded-lg bg-zinc-900/50 border border-zinc-800 text-xs space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-zinc-300 font-medium">{PLATFORM_LABELS[platform]}</span>
+        <div className="flex items-center gap-2">
+          {!record && <span className="text-zinc-600">No claim</span>}
+          {canWithdraw && (
+            <button
+              onClick={handleWithdraw}
+              disabled={withdrawing}
+              className="text-zinc-500 hover:text-red-400 underline transition-colors disabled:opacity-50"
+            >
+              {withdrawing ? "Withdrawing…" : "Withdraw"}
+            </button>
           )}
         </div>
-      )}
-
-      {record && canWithdraw && !editing && (
-        <button
-          onClick={() => setEditing(true)}
-          className="text-xs text-indigo-400 hover:text-indigo-300 underline transition-colors"
-        >
-          Edit claim
-        </button>
-      )}
-
-      {verified && (
-        <p className="text-xs text-zinc-500">
-          Verified accounts can only be changed by an admin.
-        </p>
-      )}
-
-      {showForm && (
-        <form action={action} className="space-y-3 pt-1">
-          <input type="hidden" name="platform" value={platform} />
-
-          {platform === "steam" && (
-            <Field
-              name="steam_id"
-              label="SteamID64 or profile URL"
-              placeholder="76561198012345678 or steamcommunity.com/profiles/..."
-              defaultValue={record?.platform_account_id ?? ""}
-              required
-            />
-          )}
-          {platform === "epic" && (
-            <Field
-              name="epic_account_id"
-              label="Epic Account ID"
-              placeholder="32-character ID from epicgames.com/account"
-              defaultValue={record?.platform_account_id ?? ""}
-              required
-            />
-          )}
-          {(platform === "steam" || platform === "epic") && (
-            <Field
-              name="display_name"
-              label="Current display name (optional)"
-              placeholder="Your in-game name"
-              defaultValue={record?.claimed_display_name ?? ""}
-            />
-          )}
-          {isConsole && (
-            <Field
-              name="display_name"
-              label="Platform display name"
-              placeholder="Your in-game name on this platform"
-              defaultValue={record?.claimed_display_name ?? ""}
-              required
-            />
-          )}
-
-          <Field
-            name="tracker_url"
-            label="Tracker URL"
-            type="url"
-            placeholder="https://rocketleague.tracker.network/rocket-league/profile/..."
-            defaultValue={record?.claimed_tracker_url ?? ""}
-            required
-          />
-
-          {isConsole && (
-            <div className="space-y-1">
-              <label className="block text-xs font-medium text-zinc-400">
-                Verification replay (optional, .replay)
-              </label>
-              <input
-                name="verification_replay"
-                type="file"
-                accept=".replay"
-                className="w-full text-xs text-zinc-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-zinc-700 file:text-zinc-200 file:text-xs hover:file:bg-zinc-600"
-              />
-              <p className="text-[11px] text-zinc-500">
-                A replay from a match you played helps an admin confirm your console account without
-                asking for a numeric ID you can&apos;t normally see.
-              </p>
-            </div>
-          )}
-
-          {state?.error && <p className="text-xs text-red-400">{state.error}</p>}
-          {state?.ok && <p className="text-xs text-emerald-400">Claim submitted.</p>}
-
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
-            >
-              {submitting ? "Submitting…" : record ? "Update Claim" : "Submit Claim"}
-            </button>
-            {editing && (
-              <button
-                type="button"
-                onClick={() => setEditing(false)}
-                className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs font-semibold rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-        </form>
+      </div>
+      {banner && <p className={`rounded-lg px-2 py-1 border ${TONE_CLASSES[banner.tone]}`}>{banner.text}</p>}
+      {record?.claimed_display_name && (
+        <p className="text-zinc-500">Claimed as: {record.claimed_display_name}</p>
       )}
     </div>
   );
 }
 
-function Field({
-  name,
-  label,
-  placeholder,
-  defaultValue,
-  required,
-  type = "text",
-}: {
-  name: string;
-  label: string;
-  placeholder: string;
-  defaultValue: string;
-  required?: boolean;
-  type?: string;
-}) {
+function UnifiedClaimCard() {
+  const router = useRouter();
+  const [candidates, setCandidates] = useState<ClaimReplayCandidate[] | null>(null);
+  const [replayPath, setReplayPath] = useState<string | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [trackerUrl, setTrackerUrl] = useState("");
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitOk, setSubmitOk] = useState(false);
+  const [isPreviewing, startPreview] = useTransition();
+  const [isSubmitting, startSubmit] = useTransition();
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPreviewError(null);
+    setSubmitError(null);
+    setSubmitOk(false);
+    setCandidates(null);
+    setReplayPath(null);
+    setSelectedIndex(null);
+
+    const fd = new FormData();
+    fd.set("verification_replay", file);
+    startPreview(async () => {
+      const res = await previewClaimReplay(undefined, fd);
+      if (res.error) {
+        setPreviewError(res.error);
+      } else {
+        setReplayPath(res.replayPath ?? null);
+        setCandidates(res.candidates ?? []);
+      }
+    });
+    e.target.value = "";
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!replayPath || selectedIndex === null) return;
+    setSubmitError(null);
+
+    const fd = new FormData();
+    fd.set("replay_path", replayPath);
+    fd.set("selected_index", String(selectedIndex));
+    fd.set("tracker_url", trackerUrl);
+    startSubmit(async () => {
+      const res = await claimPlatformAccount(undefined, fd);
+      if (res.error) {
+        setSubmitError(res.error);
+      } else {
+        setSubmitOk(true);
+        setCandidates(null);
+        setReplayPath(null);
+        setSelectedIndex(null);
+        setTrackerUrl("");
+        router.refresh();
+      }
+    });
+  }
+
   return (
-    <div className="space-y-1">
-      <label htmlFor={name} className="block text-xs font-medium text-zinc-400">
-        {label}
-      </label>
-      <input
-        id={name}
-        name={name}
-        type={type}
-        required={required}
-        defaultValue={defaultValue}
-        placeholder={placeholder}
-        className="w-full bg-zinc-900 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-600"
-      />
+    <div className="p-4 bg-zinc-800 border border-zinc-700 rounded-lg space-y-3">
+      <p className="text-sm font-semibold text-zinc-200">Claim a Platform Account</p>
+      <p className="text-xs text-zinc-500">
+        Upload a .replay file from a match you played, then pick your name from the scoreboard below.
+        This works for every platform — Steam, Epic, PlayStation, Xbox, and Switch.
+      </p>
+
+      <div className="space-y-1">
+        <label className="block text-xs font-medium text-zinc-400">Replay file (.replay)</label>
+        <input
+          type="file"
+          accept=".replay"
+          onChange={handleFileChange}
+          disabled={isPreviewing}
+          className="w-full text-xs text-zinc-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-zinc-700 file:text-zinc-200 file:text-xs hover:file:bg-zinc-600 disabled:opacity-50"
+        />
+      </div>
+
+      {isPreviewing && <p className="text-xs text-zinc-500">Reading replay…</p>}
+      {previewError && <p className="text-xs text-red-400">{previewError}</p>}
+
+      {candidates && candidates.length > 0 && (
+        <form onSubmit={handleSubmit} className="space-y-3 pt-1">
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-zinc-400">Which row is you?</p>
+            <div className="space-y-1">
+              {candidates.map(c => (
+                <label
+                  key={c.index}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-colors ${
+                    !c.claimable
+                      ? "opacity-40 cursor-not-allowed border-zinc-700"
+                      : selectedIndex === c.index
+                        ? "border-indigo-500 bg-indigo-950/30 cursor-pointer"
+                        : "border-zinc-700 hover:border-zinc-600 cursor-pointer"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="candidate"
+                    disabled={!c.claimable}
+                    checked={selectedIndex === c.index}
+                    onChange={() => setSelectedIndex(c.index)}
+                    className="accent-indigo-500"
+                  />
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                      c.team === 0 ? "bg-blue-900/50 text-blue-300" : "bg-orange-900/50 text-orange-300"
+                    }`}
+                  >
+                    {c.team === 0 ? "Blue" : "Orange"}
+                  </span>
+                  <span className="text-zinc-200 flex-1 truncate">{c.name}</span>
+                  <span className="text-zinc-500 shrink-0">
+                    {c.claimable ? REPLAY_PLATFORM_LABELS[c.platform ?? "unknown"] : "Not claimable"}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="claim_tracker_url" className="block text-xs font-medium text-zinc-400">
+              Tracker URL
+            </label>
+            <input
+              id="claim_tracker_url"
+              type="url"
+              required
+              value={trackerUrl}
+              onChange={e => setTrackerUrl(e.target.value)}
+              placeholder="https://rocketleague.tracker.network/rocket-league/profile/..."
+              className="w-full bg-zinc-900 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-600"
+            />
+          </div>
+
+          {submitError && <p className="text-xs text-red-400">{submitError}</p>}
+          {submitOk && <p className="text-xs text-emerald-400">Claim submitted.</p>}
+
+          <button
+            type="submit"
+            disabled={isSubmitting || selectedIndex === null}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+          >
+            {isSubmitting ? "Submitting…" : "Submit Claim"}
+          </button>
+        </form>
+      )}
     </div>
   );
 }

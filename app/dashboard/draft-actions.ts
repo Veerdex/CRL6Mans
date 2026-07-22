@@ -10,6 +10,7 @@ import { isGuildMember } from "@/app/lib/discord-api";
 import { isTrackerStale } from "@/app/lib/tracker";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
+import { isCurrentlyKicked } from "@/app/lib/players";
 
 export async function triggerAutoPick(): Promise<{ done: boolean }> {
   // Fired by the draft client when a pick deadline passes. execAutoPick is
@@ -28,13 +29,13 @@ export async function enterDraft(confirmTrackerSame = false): Promise<{ error?: 
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("id, status, draft_entered, kick_reason, tracker_confirmed_at, peak_2v2, peak_3v3")
+    .select("id, status, draft_entered, kick_reason, kicked_until, tracker_confirmed_at, peak_2v2, peak_3v3")
     .eq("discord_id", session.userId)
     .single();
 
   if (!player) return { error: "You are not registered." };
   if (player.status !== "approved") return { error: "Your registration must be approved first." };
-  if (player.kick_reason) return { error: "You are not eligible to join the draft." };
+  if (isCurrentlyKicked(player.kick_reason, player.kicked_until)) return { error: "You are not eligible to join the draft." };
   if (player.draft_entered) return { error: "You are already in the draft." };
 
   const inServer = await isGuildMember(session.userId);

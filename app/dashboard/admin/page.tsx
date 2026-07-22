@@ -69,7 +69,7 @@ export default async function AdminPage() {
   const [{ data: pendingPlatformClaimRows }, { data: verifiedPlatformAccountRows }] = await Promise.all([
     supabaseAdmin
       .from("player_platform_accounts")
-      .select("id, player_id, platform, platform_account_id, claimed_display_name, claimed_tracker_url, claimed_verification_replay_path, created_at")
+      .select("id, player_id, platform, platform_account_id, claimed_display_name, claimed_tracker_url, claimed_verification_replay_path, admin_note, created_at")
       .in("verification_status", ["claimed", "pending_verification"])
       .order("created_at", { ascending: true }),
     supabaseAdmin
@@ -107,6 +107,7 @@ export default async function AdminPage() {
         claimedTrackerUrl: row.claimed_tracker_url,
         platformAccountId: row.platform_account_id,
         replayDownloadUrl,
+        flagNote: row.admin_note,
         createdAt: row.created_at,
       };
     }),

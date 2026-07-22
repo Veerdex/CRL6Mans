@@ -13,8 +13,16 @@ export type PlatformAccountClaimCardData = {
   claimedTrackerUrl: string | null;
   platformAccountId: string | null;
   replayDownloadUrl: string | null;
+  flagNote: string | null;
   createdAt: string;
 };
+
+const COOLDOWN_OPTIONS: { value: "none" | "5m" | "1d" | "forever"; label: string }[] = [
+  { value: "none", label: "No cooldown" },
+  { value: "5m", label: "5 minutes" },
+  { value: "1d", label: "1 day" },
+  { value: "forever", label: "Forever" },
+];
 
 const PLATFORM_LABELS: Record<PlatformAccountClaimCardData["platform"], string> = {
   steam: "Steam",
@@ -49,6 +57,7 @@ export function PlatformAccountClaimCard({ claim }: { claim: PlatformAccountClai
   const [method, setMethod] = useState(DEFAULT_METHOD_BY_PLATFORM[claim.platform]);
   const [verifiedDisplayName, setVerifiedDisplayName] = useState(claim.claimedDisplayName ?? "");
   const [note, setNote] = useState("");
+  const [cooldown, setCooldown] = useState<"none" | "5m" | "1d" | "forever">("none");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -69,7 +78,7 @@ export function PlatformAccountClaimCard({ claim }: { claim: PlatformAccountClai
   function handleReject() {
     setError(null);
     startTransition(async () => {
-      const res = await rejectPlatformAccount(claim.id, note);
+      const res = await rejectPlatformAccount(claim.id, note, cooldown === "none" ? undefined : cooldown);
       if (res.error) setError(res.error);
       else router.refresh();
     });
@@ -102,15 +111,22 @@ export function PlatformAccountClaimCard({ claim }: { claim: PlatformAccountClai
         </div>
       </div>
 
+      {claim.flagNote && (
+        <div className="bg-red-950 border border-red-800 rounded-lg px-4 py-3 text-xs text-red-300 font-medium">
+          {claim.flagNote}
+        </div>
+      )}
+
       <div className="bg-zinc-800 rounded-lg px-4 py-3 text-xs text-zinc-400 space-y-1">
         <p>Claimed display name: <span className="text-zinc-200">{claim.claimedDisplayName ?? "—"}</span></p>
         <p>
-          {isConsole ? "Numeric ID" : "Claimed ID"}:{" "}
+          Claimed ID:{" "}
           <span className="text-zinc-200 font-mono">{claim.platformAccountId ?? "not yet known"}</span>
         </p>
-        {isConsole && !claim.platformAccountId && (
+        {!claim.platformAccountId && (
           <p className="text-amber-400">
-            Run the full parser locally against the downloaded replay to extract the numeric console ID, then enter it below.
+            No platform ID on this claim — it predates the replay-based claim flow. Ask the player to resubmit,
+            or enter the ID manually below if you can confirm it another way.
           </p>
         )}
       </div>
@@ -164,6 +180,25 @@ export function PlatformAccountClaimCard({ claim }: { claim: PlatformAccountClai
             placeholder="Reason for rejection…"
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
+        </div>
+        <div>
+          <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
+            Rejection Cooldown
+          </label>
+          <select
+            value={cooldown}
+            onChange={e => setCooldown(e.target.value as typeof cooldown)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          >
+            {COOLDOWN_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          {cooldown !== "none" && (
+            <p className="text-[10px] text-amber-400 mt-1">
+              Rejecting will also kick this player from active play ({cooldown === "forever" ? "no auto-expiry" : `eligible again in ${cooldown === "5m" ? "5 minutes" : "1 day"}`}).
+            </p>
+          )}
         </div>
       </div>
 

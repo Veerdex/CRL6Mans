@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { pushToAdmins } from "@/app/lib/push";
+import { isCurrentlyKicked } from "@/app/lib/players";
 
 function validateMmr(label: string, val: string): string | null {
   const n = Number(val);
@@ -50,11 +51,11 @@ export async function requestProfileChange(
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("id, username, status, kick_reason, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2")
+    .select("id, username, status, kick_reason, kicked_until, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2")
     .eq("discord_id", session.userId)
     .single();
 
-  if (player?.status !== "approved" || player?.kick_reason) redirect("/dashboard");
+  if (player?.status !== "approved" || isCurrentlyKicked(player?.kick_reason ?? null, player?.kicked_until ?? null)) redirect("/dashboard");
 
   // sub_willing is a preference with no competitive impact — apply immediately
   await supabaseAdmin
@@ -204,11 +205,11 @@ export async function saveDisplayName(
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("status, kick_reason")
+    .select("status, kick_reason, kicked_until")
     .eq("discord_id", session.userId)
     .single();
 
-  if (player?.status !== "approved" || player?.kick_reason) redirect("/dashboard");
+  if (player?.status !== "approved" || isCurrentlyKicked(player?.kick_reason ?? null, player?.kicked_until ?? null)) redirect("/dashboard");
 
   const display_name = raw.length > 0 ? raw : null;
 

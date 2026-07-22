@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
-import { getPlayerInfo } from "@/app/lib/players";
+import { getPlayerInfo, isCurrentlyKicked } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { PodiumClient, type RichPlayer, type Accolade } from "./podium-client";
 
@@ -88,14 +88,14 @@ export default async function PodiumPage() {
     const usernames = summary.championPlayers.map((p) => p.username);
     const { data: rows } = await supabaseAdmin
       .from("players")
-      .select("id, username, display_name, discord_id, avatar, status, kick_reason")
+      .select("id, username, display_name, discord_id, avatar, status, kick_reason, kicked_until")
       .in("username", usernames);
 
     const byUsername = Object.fromEntries((rows ?? []).map((r) => [r.username, r]));
     players = summary.championPlayers
       .filter((p) => {
         const row = byUsername[p.username];
-        return !(row && (row.status === "banned" || row.kick_reason));
+        return !(row && (row.status === "banned" || isCurrentlyKicked(row.kick_reason, row.kicked_until)));
       })
       .map((p) => {
         const row = byUsername[p.username];
@@ -115,11 +115,13 @@ export default async function PodiumPage() {
       .from("player_game_stats")
       .select("player_id, goals, assists, saves, shots, score")
       .not("player_id", "is", null),
-    supabaseAdmin.from("players").select("id, username, display_name").eq("status", "approved").is("kick_reason", null),
+    supabaseAdmin.from("players").select("id, username, display_name, kick_reason, kicked_until").eq("status", "approved"),
   ]);
 
   const nameById = Object.fromEntries(
-    (allPlayers ?? []).map((p) => [p.id, p.display_name ?? p.username])
+    (allPlayers ?? [])
+      .filter((p) => !isCurrentlyKicked(p.kick_reason, p.kicked_until))
+      .map((p) => [p.id, p.display_name ?? p.username])
   );
 
   const agg = new Map<string, Agg>();
