@@ -7,6 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirector } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
+import { computeTopStats, type TopStats } from "@/app/lib/game-stats";
 import { resetSeason } from "./league-actions";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 
@@ -69,6 +70,7 @@ export type TournamentSummary = {
   runnerUpLogoUrl?: string | null;
   championPlayers?: { username: string; displayName: string | null }[];
   runnerUpPlayers?: { username: string; displayName: string | null }[];
+  topStats?: TopStats;
 };
 
 async function verifyAdmin() {
@@ -352,9 +354,9 @@ export async function activateTournament(id: string) {
   };
 }
 
-/** Champion + final standings derived from completed matches. Snapshots rosters and logos before reset. */
+/** Champion + final standings derived from completed matches. Snapshots rosters, logos, and stat leaders before reset. */
 async function computeSummary(): Promise<TournamentSummary> {
-  const [{ data: allTeams }, { data: completedMatches }] = await Promise.all([
+  const [{ data: allTeams }, { data: completedMatches }, topStats] = await Promise.all([
     supabaseAdmin.from("teams").select("id, name, logo_url"),
     supabaseAdmin
       .from("matches")
@@ -364,6 +366,7 @@ async function computeSummary(): Promise<TournamentSummary> {
       .not("away_score", "is", null)
       .not("home_team_id", "is", null)
       .not("away_team_id", "is", null),
+    computeTopStats(),
   ]);
 
   const records: Record<string, { wins: number; losses: number }> = {};
@@ -410,6 +413,7 @@ async function computeSummary(): Promise<TournamentSummary> {
     runnerUpLogoUrl: (runnerUpTeam?.logo_url as string | null) ?? null,
     championPlayers: byTeam(championTeam?.id),
     runnerUpPlayers: byTeam(runnerUpTeam?.id),
+    topStats,
   };
 }
 

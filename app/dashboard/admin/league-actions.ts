@@ -9,6 +9,7 @@ import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, de
 import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app/lib/discord-api";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 import { APP_NAME } from "@/app/lib/constants";
+import { computeTopStats } from "@/app/lib/game-stats";
 
 const TEAM_ROLE_COLOR = 0x3498db; // blue
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -554,8 +555,8 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     .from("league_settings").select("season_active, season_format, is_test_season").single();
   if (!settings?.season_active) return { error: "No active season to complete." };
 
-  // Snapshot standings, logos, and rosters BEFORE resetSeason wipes matches/teams.
-  const [{ data: allTeams }, { data: completedMatches }] = await Promise.all([
+  // Snapshot standings, logos, rosters, and stat leaders BEFORE resetSeason wipes matches/teams.
+  const [{ data: allTeams }, { data: completedMatches }, topStats] = await Promise.all([
     supabaseAdmin.from("teams").select("id, name, logo_url"),
     supabaseAdmin
       .from("matches")
@@ -565,6 +566,7 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
       .not("away_score", "is", null)
       .not("home_team_id", "is", null)
       .not("away_team_id", "is", null),
+    computeTopStats(),
   ]);
 
   const records: Record<string, { wins: number; losses: number }> = {};
@@ -620,6 +622,7 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
       runnerUpLogoUrl: (runnerUpTeam?.logo_url as string | null) ?? null,
       championPlayers: byTeam(championTeam?.id),
       runnerUpPlayers: byTeam(runnerUpTeam?.id),
+      topStats,
     },
     ended_at: new Date().toISOString(),
   });
