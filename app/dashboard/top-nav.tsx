@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
 
 export type TopNavLeaf = { href: string; label: string; icon: React.ReactNode };
 export type TopNavGroup = { label: string; icon: React.ReactNode; items: TopNavLeaf[] };
@@ -152,9 +153,9 @@ export function TopNav({ items }: { items: TopNavEntry[] }) {
                         key={item.href}
                         href={item.href}
                         onClick={() => setOpenKey(null)}
-                        className={`${ITEM_CLS} w-full ${itemActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"}`}
+                        className={`${ITEM_CLS} w-full ${item.href === PODIUM_HREF ? podiumTabClass + " " : ""}${itemActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"}`}
                       >
-                        {item.icon}{item.label}
+                        <NavLeafContent item={item} />
                       </Link>
                     );
                   })}
@@ -169,9 +170,9 @@ export function TopNav({ items }: { items: TopNavEntry[] }) {
           <Link
             key={entry.href}
             href={entry.href}
-            className={`${ITEM_CLS} ${active ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"}`}
+            className={`${ITEM_CLS} ${entry.href === PODIUM_HREF ? podiumTabClass + " " : ""}${active ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"}`}
           >
-            {entry.icon}{entry.label}
+            <NavLeafContent item={entry} />
           </Link>
         );
       })}
@@ -205,9 +206,9 @@ export function TopNav({ items }: { items: TopNavEntry[] }) {
                             key={item.href}
                             href={item.href}
                             onClick={() => setOpenKey(null)}
-                            className={`${ITEM_CLS} w-full ${itemActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"}`}
+                            className={`${ITEM_CLS} w-full ${item.href === PODIUM_HREF ? podiumTabClass + " " : ""}${itemActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"}`}
                           >
-                            {item.icon}{item.label}
+                            <NavLeafContent item={item} />
                           </Link>
                         );
                       })}
@@ -220,9 +221,9 @@ export function TopNav({ items }: { items: TopNavEntry[] }) {
                     key={entry.href}
                     href={entry.href}
                     onClick={() => setOpenKey(null)}
-                    className={`${ITEM_CLS} w-full ${itemActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"}`}
+                    className={`${ITEM_CLS} w-full ${entry.href === PODIUM_HREF ? podiumTabClass + " " : ""}${itemActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"}`}
                   >
-                    {entry.icon}{entry.label}
+                    <NavLeafContent item={entry} />
                   </Link>
                 );
               })}

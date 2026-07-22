@@ -6,16 +6,17 @@ import { usePathname } from "next/navigation";
 type Props = {
   href: string;
   children: React.ReactNode;
+  className?: string;
 };
 
-export default function NavLink({ href, children }: Props) {
+export default function NavLink({ href, children, className = "" }: Props) {
   const pathname = usePathname();
   const active = href === "/dashboard" ? pathname === href : pathname.startsWith(href);
 
   return (
     <Link
       href={href}
-      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${className} ${
         active
           ? "bg-zinc-800 text-white"
           : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"

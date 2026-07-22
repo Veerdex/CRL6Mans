@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
 
 type Item = { href: string; label: string; icon: React.ReactNode };
 
@@ -78,17 +79,17 @@ export function SidebarNavGroup({ label, icon, items }: { label: string; icon: R
         <div className="absolute left-full top-0 ml-1 min-w-44 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl p-1 z-50">
           {items.map((item) => {
             const itemActive = isActive(item.href, pathname);
+            const podium = item.href === PODIUM_HREF;
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 onClick={() => setOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${podium ? podiumTabClass + " " : ""}${
                   itemActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"
                 }`}
               >
-                {item.icon}
-                {item.label}
+                <NavLeafContent item={item} />
               </Link>
             );
           })}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LogoutButton } from "./logout-button";
+import { NavLeafContent, PodiumGlowIcon, PODIUM_HREF, podiumTabClass, podiumLabelClass } from "./podium-glow";
 
 type Item = { href: string; label: string; icon: React.ReactNode };
 
@@ -57,16 +58,17 @@ export default function MobileNav({ items, username, displayName, avatarUrl, sta
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 flex bg-zinc-900/95 backdrop-blur border-t border-zinc-800 pb-[env(safe-area-inset-bottom)]">
         {primary.map((item) => {
           const active = isActive(item.href, pathname);
+          const podium = item.href === PODIUM_HREF;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex-1 flex flex-col items-center justify-center gap-1 py-3 min-h-20 text-[10px] font-medium transition-colors ${
+              className={`flex-1 flex flex-col items-center justify-center gap-1 py-3 min-h-20 text-[10px] font-medium transition-colors ${podium ? podiumTabClass + " " : ""}${
                 active ? "text-white" : "text-zinc-500 hover:text-zinc-300"
               }`}
             >
-              {item.icon}
-              <span className="truncate max-w-full px-1">{item.label}</span>
+              {podium ? <PodiumGlowIcon>{item.icon}</PodiumGlowIcon> : item.icon}
+              <span className={`truncate max-w-full px-1 ${podium ? podiumLabelClass : ""}`}>{item.label}</span>
             </Link>
           );
         })}
@@ -119,19 +121,19 @@ export default function MobileNav({ items, username, displayName, avatarUrl, sta
             <div className="grid grid-cols-2 gap-1">
               {overflow.map((item) => {
                 const active = isActive(item.href, pathname);
+                const podium = item.href === PODIUM_HREF;
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
                     onClick={() => setMoreOpen(false)}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${podium ? podiumTabClass + " " : ""}${
                       active
                         ? "bg-zinc-800 text-white"
                         : "text-zinc-400 hover:text-white hover:bg-zinc-800/60"
                     }`}
                   >
-                    {item.icon}
-                    {item.label}
+                    <NavLeafContent item={item} />
                   </Link>
                 );
               })}

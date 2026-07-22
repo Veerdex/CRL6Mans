@@ -6,6 +6,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import NavLink from "./nav-link";
 import { TopNav, type TopNavEntry } from "./top-nav";
 import { SidebarNavGroup } from "./sidebar-nav-group";
+import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
 import { APP_NAME } from "@/app/lib/constants";
 import MobileNav from "./mobile-nav";
 import { ServiceWorkerRegistrar } from "./sw-register";
@@ -420,9 +421,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
             isNavGroup(entry) ? (
               <SidebarNavGroup key={`group:${entry.label}`} label={entry.label} icon={entry.icon} items={entry.items} />
             ) : (
-              <NavLink key={entry.href} href={entry.href}>
-                {entry.icon}
-                {entry.label}
+              <NavLink key={entry.href} href={entry.href} className={entry.href === PODIUM_HREF ? podiumTabClass : ""}>
+                <NavLeafContent item={entry} />
               </NavLink>
             )
           )}
