@@ -82,10 +82,16 @@ export async function GET(request: NextRequest) {
       return safeRedirect(request, "/login?error=auth_failed");
     }
 
-    // Keep avatar in sync and read session_version + theme in one query.
+    // Keep avatar + Discord 2FA status in sync. Discord's mfa_enabled reflects
+    // whether the account CURRENTLY has 2FA — re-read on every login so a staff
+    // member who disables 2FA loses the website's admin gate on their next refresh.
     await supabaseAdmin
       .from("players")
-      .update({ avatar: user.avatar ?? null, updated_at: new Date().toISOString() })
+      .update({
+        avatar: user.avatar ?? null,
+        mfa_enabled: !!user.mfa_enabled,
+        updated_at: new Date().toISOString(),
+      })
       .eq("discord_id", user.id);
 
     const { data: player } = await supabaseAdmin

@@ -146,4 +146,40 @@ export async function isCEO(discordId: string): Promise<boolean> {
   return role === "ceo";
 }
 
+// ── Website 2FA gate ────────────────────────────────────────────────────────
+// Discord's guild-level "Require 2FA for moderation" only guarantees a staff
+// member's Discord account has 2FA enabled as a prerequisite for holding that
+// role — it doesn't force a live 2FA challenge on this site's own OAuth login,
+// and it does nothing for this site's own session cookie once issued. So the
+// website enforces its own check against `players.mfa_enabled`, refreshed from
+// Discord's `mfa_enabled` field on every login (see the OAuth callback).
+//
+// These *Verified variants are for gating the acting user's own permissions on
+// the website only (verifyAdmin-style checks, and the UI flags that mirror
+// them) — never for resolving a target player's role (canActOn hierarchy
+// checks must keep using getStaffRole/isModerator/isDirector/isCEO directly,
+// since an unverified director must not be treated as non-staff for that
+// purpose). Also not used by the Discord bot's own slash-command permission
+// checks — those are a separate surface this task doesn't cover.
+export async function hasMfaEnabled(discordId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from("players")
+    .select("mfa_enabled")
+    .eq("discord_id", discordId)
+    .single();
+  return !!data?.mfa_enabled;
+}
+
+export async function isModeratorVerified(discordId: string): Promise<boolean> {
+  return (await isModerator(discordId)) && (await hasMfaEnabled(discordId));
+}
+
+export async function isDirectorVerified(discordId: string): Promise<boolean> {
+  return (await isDirector(discordId)) && (await hasMfaEnabled(discordId));
+}
+
+export async function isCEOVerified(discordId: string): Promise<boolean> {
+  return (await isCEO(discordId)) && (await hasMfaEnabled(discordId));
+}
+
 export { RL_RANKS } from "./ranks";

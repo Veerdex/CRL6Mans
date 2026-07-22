@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
-import { isModerator } from "@/app/lib/players";
+import { isModeratorVerified } from "@/app/lib/players";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
@@ -50,7 +50,7 @@ export async function analyzeReplayFile(
 ): Promise<{ data?: ReplayAnalysis; error?: string }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isModerator(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) redirect("/dashboard");
 
   const file = formData.get("replay") as File | null;
   if (!file) return { error: "No file provided." };

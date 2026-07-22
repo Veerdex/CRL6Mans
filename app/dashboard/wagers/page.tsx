@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
-import { isDirector } from "@/app/lib/players";
+import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { getTier } from "@/app/lib/discord-bot";
 import { computeMatchPrediction, computeMatchPredictionFromRating, type MatchPrediction } from "./prediction";
@@ -53,7 +53,7 @@ export default async function WagersPage() {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const testingMode = cookieStore.get("testing_mode")?.value === "1" && (await isDirector(session.userId));
+  const testingMode = cookieStore.get("testing_mode")?.value === "1" && (await isDirectorVerified(session.userId));
 
   const [{ data: ls }, { data: playerRow }, { data: leaderboardData }] = await Promise.all([
     supabaseAdmin

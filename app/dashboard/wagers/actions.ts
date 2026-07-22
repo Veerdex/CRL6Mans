@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isDirector } from "@/app/lib/players";
+import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import {
   computeMatchPredictionFromRating,
@@ -17,7 +17,7 @@ export async function resetAllWestsideWages(): Promise<{ ok?: boolean; error?: s
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) return { error: "Not authenticated" };
-  if (!(await isDirector(session.userId))) return { error: "Not authorized" };
+  if (!(await isDirectorVerified(session.userId))) return { error: "Not authorized" };
   if (cookieStore.get("testing_mode")?.value !== "1") return { error: "Testing mode is not enabled." };
 
   await supabaseAdmin.from("players").update({ crl_coins: 0 }).eq("status", "approved");

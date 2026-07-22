@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
-import { getAllPendingPlayers, isModerator, isDirector, isCEO, isCurrentlyKicked, type StaffRole } from "@/app/lib/players";
+import { getAllPendingPlayers, isModeratorVerified, isDirector, isCEO, isCurrentlyKicked, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { LeagueControls } from "./league-controls";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
@@ -51,7 +51,7 @@ export default async function AdminPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
 
-  if (!session?.userId || !(await isModerator(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) redirect("/dashboard");
 
   const [userIsDirector, userIsCEO] = await Promise.all([
     isDirector(session.userId),

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isModerator, addRegisteredRole } from "@/app/lib/players";
+import { isModeratorVerified, addRegisteredRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
 
@@ -20,7 +20,7 @@ export type PlayerEditFields = {
 async function assertAdmin() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isModerator(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) redirect("/dashboard");
 }
 
 // Pick only the columns an admin is allowed to edit, so a crafted payload can't

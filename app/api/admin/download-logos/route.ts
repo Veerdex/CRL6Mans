@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
-import { isModerator } from "@/app/lib/players";
+import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import JSZip from "jszip";
 
@@ -22,7 +22,7 @@ function extFromUrl(url: string): string {
 export async function GET() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isModerator(session.userId))) {
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) {
     return new Response("Forbidden", { status: 403 });
   }
 

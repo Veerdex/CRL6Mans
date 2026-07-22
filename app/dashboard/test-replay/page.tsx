@@ -1,13 +1,13 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
-import { isDirector } from "@/app/lib/players";
+import { isDirectorVerified } from "@/app/lib/players";
 import { ReplayTester } from "./replay-tester";
 
 export default async function TestReplayPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isDirector(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">

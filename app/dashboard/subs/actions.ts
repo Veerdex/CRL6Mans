@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isModerator } from "@/app/lib/players";
+import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { sendChannelMessage, getGuildRoles, type DiscordEmbed } from "@/app/lib/discord-api";
 import { roleMention } from "@/app/lib/match-notifications";
@@ -67,7 +67,7 @@ export async function submitSubRequest(
   const session = await getSession();
   if (!session?.userId) redirect("/login");
 
-  const admin = await isModerator(session.userId);
+  const admin = await isModeratorVerified(session.userId);
 
   if (!admin) {
     const { data: requestingPlayer } = await supabaseAdmin
@@ -231,7 +231,7 @@ async function loadRequestForOpponent(requestId: string) {
     ? (match.home_team_id === request.team_id ? match.away_team_id : match.home_team_id)
     : null;
 
-  if (!(await isModerator(session.userId))) {
+  if (!(await isModeratorVerified(session.userId))) {
     const { data: caller } = await supabaseAdmin
       .from("players").select("team_id").eq("discord_id", session.userId).single();
     if (!caller || caller.team_id !== opposingTeamId) {
@@ -325,7 +325,7 @@ export async function escalateSubRequest(requestId: string): Promise<{ ok?: bool
   if (!request) return { error: "Request not found." };
   if (request.status !== "rejected") return { error: "Only a rejected request can be reported to staff." };
 
-  if (!(await isModerator(session.userId))) {
+  if (!(await isModeratorVerified(session.userId))) {
     const { data: caller } = await supabaseAdmin
       .from("players").select("team_id").eq("discord_id", session.userId).single();
     if (!caller || caller.team_id !== request.team_id) return { error: "You cannot report this request." };
@@ -373,7 +373,7 @@ export async function adminApproveSubRequest(
   adminNote?: string,
 ): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
-  if (!session?.userId || !(await isModerator(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) redirect("/dashboard");
 
   const { data: req } = await supabaseAdmin
     .from("sub_requests")
@@ -427,7 +427,7 @@ export async function cancelSubRequest(requestId: string): Promise<{ ok?: boolea
 
   if (!request) return { error: "Request not found." };
 
-  const admin = await isModerator(session.userId);
+  const admin = await isModeratorVerified(session.userId);
   if (!admin) {
     const { data: player } = await supabaseAdmin
       .from("players").select("team_id").eq("discord_id", session.userId).single();

@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
-import { isModerator } from "@/app/lib/players";
+import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { AdminTeamsManager } from "./admin-teams-manager";
 import { TeamsGrid } from "./teams-grid";
@@ -14,7 +14,7 @@ export default async function TeamsPage({
   const { search: initialSearch, from } = await searchParams;
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  const userIsAdmin = session?.userId ? await isModerator(session.userId) : false;
+  const userIsAdmin = session?.userId ? await isModeratorVerified(session.userId) : false;
 
   const [{ data: teamsRaw }, { data: allPlayers }, { data: settings }] = await Promise.all([
     supabaseAdmin

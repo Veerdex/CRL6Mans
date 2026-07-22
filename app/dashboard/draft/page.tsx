@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
-import { isModerator } from "@/app/lib/players";
+import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { DraftLive } from "./draft-live";
 
@@ -89,7 +89,7 @@ export default async function DraftPage() {
       }))}
       pickQueue={pickQueue}
       viewerTeamId={viewerTeamId}
-      userIsAdmin={await isModerator(callerId)}
+      userIsAdmin={await isModeratorVerified(callerId)}
     />
   );
 }

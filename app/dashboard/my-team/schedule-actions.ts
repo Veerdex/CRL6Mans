@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isModerator } from "@/app/lib/players";
+import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { roleMention, notifyMatchChannel } from "@/app/lib/match-notifications";
 import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
@@ -75,7 +75,7 @@ async function getCaptainContext(matchId: string): Promise<
   if (match.status === "completed")
     return { ok: false, error: "This match is already completed." };
 
-  if (await isModerator(session.userId)) {
+  if (await isModeratorVerified(session.userId)) {
     return { ok: true, myTeamId: match.home_team_id as string, match: match as MatchRow };
   }
 

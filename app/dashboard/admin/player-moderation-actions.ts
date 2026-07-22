@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt, invalidatePlayerSessions } from "@/app/lib/session";
-import { getStaffRole, isModerator, removeRegisteredRole, type StaffRole } from "@/app/lib/players";
+import { getStaffRole, hasMfaEnabled, removeRegisteredRole, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { addRole, removeRole, removeRoleById, timeoutMember, banMember, unbanMember } from "@/app/lib/discord-api";
 
@@ -14,13 +14,16 @@ async function getActorRole(): Promise<StaffRole> {
   if (!session?.userId) redirect("/dashboard");
   const role = await getStaffRole(session.userId);
   if (!role) redirect("/dashboard");
+  if (!(await hasMfaEnabled(session.userId))) redirect("/dashboard");
   return role;
 }
 
 async function assertModerator() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isModerator(session.userId))) redirect("/dashboard");
+  if (!session?.userId) redirect("/dashboard");
+  const role = await getStaffRole(session.userId);
+  if (!role || !(await hasMfaEnabled(session.userId))) redirect("/dashboard");
 }
 
 function canActOn(actorRole: StaffRole, targetRole: StaffRole | null): boolean {

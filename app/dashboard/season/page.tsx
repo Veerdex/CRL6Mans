@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
-import { isDirector } from "@/app/lib/players";
+import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { FormatEditor, type SeasonFormatConfig } from "./format-editor";
 import { SEBracketView, DEBracketView, DEQualifierBracketView, GroupBracketView } from "./bracket-view";
@@ -14,7 +14,7 @@ import { getNumGroups, SWISS_STAGE, SWISS_ADVANCE_WINS, SWISS8_ADVANCE_WINS, SE_
 export default async function SeasonPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  const userIsAdmin = session?.userId ? await isDirector(session.userId) : false;
+  const userIsAdmin = session?.userId ? await isDirectorVerified(session.userId) : false;
   const testingMode = userIsAdmin && cookieStore.get("testing_mode")?.value === "1";
 
   let myTeamId: string | null = null;

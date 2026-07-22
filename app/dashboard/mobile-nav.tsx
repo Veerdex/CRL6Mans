@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { LogoutButton } from "./logout-button";
 
 type Item = { href: string; label: string; icon: React.ReactNode };
 
@@ -147,10 +148,13 @@ export default function MobileNav({ items, username, displayName, avatarUrl, sta
               </div>
             )}
 
-            <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center gap-3 px-1">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={avatarUrl} alt="avatar" width={32} height={32} className="rounded-full" />
-              <span className="text-sm text-zinc-300 truncate">{displayName ?? username}</span>
+            <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between gap-3 px-1">
+              <div className="flex items-center gap-3 min-w-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={avatarUrl} alt="avatar" width={32} height={32} className="rounded-full shrink-0" />
+                <span className="text-sm text-zinc-300 truncate">{displayName ?? username}</span>
+              </div>
+              <LogoutButton className="shrink-0" />
             </div>
           </div>
         </div>

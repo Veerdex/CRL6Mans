@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
-import { getPlayerInfo, isModerator } from "@/app/lib/players";
+import { getPlayerInfo, getStaffRole, hasMfaEnabled } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import NavLink from "./nav-link";
 import { TopNav } from "./top-nav";
@@ -12,6 +12,7 @@ import { NotificationButton } from "./notification-button";
 import { PullToRefresh } from "./pull-to-refresh";
 import { PwaDesktopHint } from "./pwa-desktop-hint";
 import { CoinGrantToast } from "./coin-grant-toast";
+import { LogoutButton } from "./logout-button";
 
 type NavItem = { href: string; label: string; icon: React.ReactNode };
 
@@ -178,7 +179,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
     supabaseAdmin.from("league_settings").select("draft_active, season_active, active_tournament_id").single(),
     supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true),
   ]);
-  const admin = session?.userId ? await isModerator(session.userId) : false;
+  // Fresh, uncached lookups on every request: staff role from staff_roles, and
+  // Discord 2FA status from players.mfa_enabled (synced on each OAuth login).
+  // A staff member without 2FA is treated as non-admin everywhere on the site —
+  // this is what makes the check "happen on refresh" rather than being baked
+  // into the session JWT at login time.
+  const staffRole = session?.userId ? await getStaffRole(session.userId) : null;
+  const mfaOk = session?.userId ? await hasMfaEnabled(session.userId) : false;
+  const admin = staffRole !== null && mfaOk;
+  const needsMfa = staffRole !== null && !mfaOk;
   const seasonActive = settingsRes.data?.season_active ?? false;
   const draftActive = settingsRes.data?.draft_active ?? false;
   const activeTournamentId = (settingsRes.data?.active_tournament_id as string | null) ?? null;
@@ -322,8 +331,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </header>
 
-        <main className="flex-1 overflow-hidden">
-          <PullToRefresh>{children}</PullToRefresh>
+        <main className="flex-1 overflow-hidden flex flex-col">
+          {needsMfa && <MfaBanner />}
+          <div className="flex-1 overflow-hidden">
+            <PullToRefresh>{children}</PullToRefresh>
+          </div>
         </main>
         <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
 
@@ -333,6 +345,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={avatarUrl} alt="avatar" width={28} height={28} className="rounded-full shrink-0" />
             <span className="text-sm text-zinc-300 truncate">{playerInfo.displayName ?? session?.username ?? "Unknown"}</span>
+            <LogoutButton className="shrink-0" />
           </div>
           <p className="hidden lg:block flex-1 text-center text-[9px] text-zinc-600 truncate px-2">
             © 2026 CRL West 6mans. Website code and design © 2026{" "}
@@ -398,10 +411,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         )}
 
-        <div className="p-3 border-t border-zinc-800 flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={avatarUrl} alt="avatar" width={32} height={32} className="rounded-full" />
-          <span className="text-sm text-zinc-300 truncate">{playerInfo.displayName ?? session?.username ?? "Unknown"}</span>
+        <div className="p-3 border-t border-zinc-800 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={avatarUrl} alt="avatar" width={32} height={32} className="rounded-full shrink-0" />
+            <span className="text-sm text-zinc-300 truncate">{playerInfo.displayName ?? session?.username ?? "Unknown"}</span>
+          </div>
+          <LogoutButton className="shrink-0" />
         </div>
 
         <div className="px-4 py-2 border-t border-zinc-800/60">
@@ -421,12 +437,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
       </aside>
 
-      <main className="flex-1 overflow-hidden">
-        <PullToRefresh>{children}</PullToRefresh>
+      <main className="flex-1 overflow-hidden flex flex-col">
+        {needsMfa && <MfaBanner />}
+        <div className="flex-1 overflow-hidden">
+          <PullToRefresh>{children}</PullToRefresh>
+        </div>
       </main>
       <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
 
       <MobileNav items={navItems} username={session?.username ?? "Unknown"} displayName={playerInfo.displayName} avatarUrl={avatarUrl} status={status} priorityHrefs={priorityHrefs} />
+    </div>
+  );
+}
+
+function MfaBanner() {
+  return (
+    <div className="shrink-0 px-4 py-2 bg-red-900/50 border-b border-red-700/50 text-xs sm:text-sm text-red-200 text-center">
+      Your staff account needs Discord two-factor authentication enabled to use admin features on this site.
+      Enable 2FA in Discord's User Settings, then log out and back in here to refresh your status.
     </div>
   );
 }

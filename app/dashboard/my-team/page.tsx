@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
-import { isModerator } from "@/app/lib/players";
+import { isModeratorVerified } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import {
@@ -189,7 +189,7 @@ export default async function MyTeamPage() {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const userIsAdmin = await isModerator(session.userId);
+  const userIsAdmin = await isModeratorVerified(session.userId);
 
   const { data: player } = await supabaseAdmin
     .from("players").select("team_id").eq("discord_id", session.userId).single();

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isDirector } from "@/app/lib/players";
+import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import type { SeasonFormatConfig } from "./format-editor";
 import {
@@ -29,7 +29,7 @@ async function runStageAdvance(
 ): Promise<{ error?: string; ok?: boolean }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isDirector(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
 
   const result = await fn();
   if (result.ok) await openReadyMatchChannels();
@@ -40,7 +40,7 @@ async function runStageAdvance(
 export async function saveSeasonFormat(config: SeasonFormatConfig): Promise<{ error?: string; ok?: boolean }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isDirector(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
 
   if (!config?.preset) return { error: "Select a format preset." };
 
@@ -85,7 +85,7 @@ export async function saveSeasonFormat(config: SeasonFormatConfig): Promise<{ er
 export async function generateBracketForSeason(): Promise<{ error?: string; ok?: boolean }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isDirector(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
 
   const result = await buildAndSaveBracket();
   revalidatePath("/dashboard/season");

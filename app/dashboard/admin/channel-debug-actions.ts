@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
-import { isCEO } from "@/app/lib/players";
+import { isCEOVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { getGuildChannels, deleteChannel } from "@/app/lib/discord-api";
 import { createMatchChannel } from "@/app/lib/discord-bot";
@@ -11,7 +11,7 @@ import { createMatchChannel } from "@/app/lib/discord-bot";
 async function verifyCEO() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isCEO(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isCEOVerified(session.userId))) redirect("/dashboard");
   return session;
 }
 

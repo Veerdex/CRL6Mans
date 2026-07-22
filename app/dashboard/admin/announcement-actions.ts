@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isDirector } from "@/app/lib/players";
+import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { sendChannelMessage, getGuildRoles, getGuildChannels, searchGuildMembers } from "@/app/lib/discord-api";
 import { pushToAllApproved } from "@/app/lib/push";
@@ -103,7 +103,7 @@ const MENTION_END = "";
 export async function checkAnnouncementMentions(text: string): Promise<{ annotated: string } | { error: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
-  if (!(await isDirector(session.userId))) return { error: "Only Directors can post announcements." };
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can post announcements." };
 
   const withPrefix = text.trim() ? `@everyone\n${text}` : "";
   const { channelResolutions, atResolutions } = await resolveTokens(withPrefix);
@@ -144,7 +144,7 @@ export async function postAnnouncement(
 ): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
-  if (!(await isDirector(session.userId))) return { error: "Only Directors can post announcements." };
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can post announcements." };
 
   const trimmed = text.trim();
   if (!trimmed) return { error: "Announcement text is required." };
@@ -189,7 +189,7 @@ export async function postAnnouncement(
 export async function clearAnnouncement(): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
-  if (!(await isDirector(session.userId))) return { error: "Only Directors can clear the announcement." };
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can clear the announcement." };
 
   const { error } = await supabaseAdmin
     .from("league_settings")

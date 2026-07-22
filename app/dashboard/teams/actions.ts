@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isModerator } from "@/app/lib/players";
+import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { editRole, addRole, addRoleById, removeRoleById, removeRole } from "@/app/lib/discord-api";
 import { validateImageUpload } from "@/app/lib/uploads";
@@ -33,7 +33,7 @@ export async function updateTeamInfo(formData: FormData) {
     .eq("id", teamId)
     .single();
 
-  const userIsAdmin = await isModerator(session.userId);
+  const userIsAdmin = await isModeratorVerified(session.userId);
   if (team?.is_locked && !userIsAdmin) return { error: "Team info is locked by an admin." };
 
   if (!userIsAdmin) {
@@ -92,7 +92,7 @@ export async function updateTeamInfo(formData: FormData) {
 
 export async function deleteTeam(teamId: string) {
   const session = await getSession();
-  if (!session?.userId || !(await isModerator(session.userId))) return { error: "Not authorized." };
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
 
   // Only the last numbered team slot can be deleted — use the Team Slots panel in admin.
   const { data: teams } = await supabaseAdmin
@@ -150,7 +150,7 @@ async function assignCaptainIfMissing(teamId: string): Promise<void> {
 
 export async function removePlayerFromTeam(playerId: string) {
   const session = await getSession();
-  if (!session?.userId || !(await isModerator(session.userId))) return { error: "Not authorized." };
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
 
   const { data: player } = await supabaseAdmin
     .from("players")
@@ -179,7 +179,7 @@ export async function removePlayerFromTeam(playerId: string) {
 
 export async function movePlayerToTeam(playerId: string, newTeamId: string) {
   const session = await getSession();
-  if (!session?.userId || !(await isModerator(session.userId))) return { error: "Not authorized." };
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
 
   const { data: player } = await supabaseAdmin
     .from("players")
@@ -221,7 +221,7 @@ export async function addPlayerToTeam(playerId: string, teamId: string) {
 
 export async function toggleTeamLock(teamId: string) {
   const session = await getSession();
-  if (!session?.userId || !(await isModerator(session.userId))) return { error: "Not authorized." };
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
 
   const { data: team } = await supabaseAdmin
     .from("teams")

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isDirector, isCEO, isModerator } from "@/app/lib/players";
+import { isDirectorVerified, isCEOVerified, isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { addRoleById, removeRoleById } from "@/app/lib/discord-api";
 import { getStaffRoleIdMap } from "@/app/lib/discord-bot";
@@ -48,7 +48,7 @@ export type StaffMember = {
 
 export async function getStaffList(): Promise<StaffMember[]> {
   const session = await getSession();
-  if (!session?.userId || !(await isModerator(session.userId))) return [];
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) return [];
   const { data } = await supabaseAdmin
     .from("staff_roles")
     .select("discord_id, role, username, added_by, created_at")
@@ -66,9 +66,9 @@ export async function addStaffMember(
   const session = await getSession();
   if (!session?.userId) redirect("/login");
 
-  if (role === "moderator" && !(await isDirector(session.userId)))
+  if (role === "moderator" && !(await isDirectorVerified(session.userId)))
     return { error: "Only Directors can add Moderators." };
-  if (role === "director" && !(await isCEO(session.userId)))
+  if (role === "director" && !(await isCEOVerified(session.userId)))
     return { error: "Only the CEO can add Directors." };
 
   const id = discordId.trim();
@@ -107,9 +107,9 @@ export async function removeStaffMember(
   const session = await getSession();
   if (!session?.userId) redirect("/login");
 
-  if (role === "moderator" && !(await isDirector(session.userId)))
+  if (role === "moderator" && !(await isDirectorVerified(session.userId)))
     return { error: "Only Directors can remove Moderators." };
-  if (role === "director" && !(await isCEO(session.userId)))
+  if (role === "director" && !(await isCEOVerified(session.userId)))
     return { error: "Only the CEO can remove Directors." };
 
   if (discordId === session.userId)
@@ -136,7 +136,7 @@ export async function transferCEO(
 ): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
-  if (!(await isCEO(session.userId))) return { error: "Only the CEO can transfer this role." };
+  if (!(await isCEOVerified(session.userId))) return { error: "Only the CEO can transfer this role." };
   if (confirmCode !== "TRANSFER CEO") return { error: 'Type exactly: TRANSFER CEO' };
 
   const id = newDiscordId.trim();
