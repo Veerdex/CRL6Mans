@@ -2524,6 +2524,33 @@ async function voidMatchWagers(matchId: string): Promise<void> {
   }
 }
 
+// Refunds every pending wager/parlay league-wide. Called when a season/tournament
+// is reset or cancelled early — resetSeason wipes the matches those bets reference,
+// so there is no future match-completion event left to settle them naturally.
+export async function voidAllPendingWagers(): Promise<void> {
+  const { data: wagers } = await supabaseAdmin
+    .from("wagers").select("id, player_id, amount").eq("status", "pending");
+  if ((wagers ?? []).length) {
+    await supabaseAdmin.from("wagers").update({ status: "void" }).in("id", wagers!.map((w) => w.id));
+    await Promise.all(wagers!.map((w) =>
+      supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: w.player_id, coin_amount: w.amount }),
+    ));
+  }
+
+  const { data: parlays } = await supabaseAdmin
+    .from("parlays").select("id, player_id, amount").eq("status", "pending");
+  if ((parlays ?? []).length) {
+    const parlayIds = parlays!.map((p) => p.id);
+    await Promise.all([
+      supabaseAdmin.from("parlays").update({ status: "void" }).in("id", parlayIds),
+      supabaseAdmin.from("parlay_legs").update({ status: "void" }).in("parlay_id", parlayIds),
+      ...parlays!.map((p) =>
+        supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: p.player_id, coin_amount: p.amount }),
+      ),
+    ]);
+  }
+}
+
 async function resolveMatchWagers(matchId: string, homeScore: number, awayScore: number): Promise<void> {
   const { data: wagers } = await supabaseAdmin
     .from("wagers")

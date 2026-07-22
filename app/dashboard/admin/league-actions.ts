@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirector } from "@/app/lib/players";
-import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, deleteMatchChannels, execSyncRoles } from "@/app/lib/discord-bot";
+import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, deleteMatchChannels, execSyncRoles, voidAllPendingWagers } from "@/app/lib/discord-bot";
 import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app/lib/discord-api";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 import { APP_NAME } from "@/app/lib/constants";
@@ -496,6 +496,10 @@ export async function resetSeason() {
 
   // Delete Discord match channels before wiping the DB
   await deleteMatchChannels();
+
+  // Refund and void any bets still pending — the matches they reference are about
+  // to be deleted, so nothing will ever settle them otherwise.
+  await voidAllPendingWagers();
 
   // Delete matches and reset team stats — team slots (name, discord_role_id) are preserved
   await supabaseAdmin.from("sub_requests").delete().not("id", "is", null);
