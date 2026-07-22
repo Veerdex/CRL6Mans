@@ -37,26 +37,34 @@ export function AdminTabsProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function AdminTabsBar({ labels }: { labels: string[] }) {
+export function AdminTabsBar({ labels, counts }: { labels: string[]; counts?: number[] }) {
   const { isDesktop, activeTab, setActiveTab } = useContext(AdminTabsContext);
 
   if (!isDesktop) return null;
 
   return (
     <div className="hidden md:flex gap-1 overflow-x-auto border-b border-zinc-800 mb-8">
-      {labels.map((label, i) => (
-        <button
-          key={label}
-          onClick={() => setActiveTab(i)}
-          className={`shrink-0 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === i
-              ? "border-indigo-500 text-white"
-              : "border-transparent text-zinc-500 hover:text-zinc-300"
-          }`}
-        >
-          {label}
-        </button>
-      ))}
+      {labels.map((label, i) => {
+        const count = counts?.[i] ?? 0;
+        return (
+          <button
+            key={label}
+            onClick={() => setActiveTab(i)}
+            className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === i
+                ? "border-indigo-500 text-white"
+                : "border-transparent text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            {label}
+            {count > 0 && (
+              <span className="text-xs font-medium bg-indigo-600 text-white px-2 py-0.5 rounded-full">
+                {count}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

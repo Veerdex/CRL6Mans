@@ -1,22 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { useShowEmptySections } from "./empty-sections-context";
 
 interface Props {
   title: string;
   badge?: number;
   defaultOpen?: boolean;
-  isEmpty?: boolean;
   description?: string;
   children: React.ReactNode;
 }
 
-export function CollapsibleSection({ title, badge, defaultOpen = true, isEmpty = false, description, children }: Props) {
+export function CollapsibleSection({ title, badge, defaultOpen = true, description, children }: Props) {
   const [open, setOpen] = useState(defaultOpen);
-  const showEmptySections = useShowEmptySections();
-
-  if (isEmpty && !showEmptySections) return null;
 
   return (
     <section>

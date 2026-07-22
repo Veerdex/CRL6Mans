@@ -135,6 +135,16 @@ export async function evaluateAndPersistGameCertification(input: {
   // persisting a certification row (the submission gate fails closed on a
   // missing record, so this replay simply can never certify).
   if (replayId) {
+    // Kept only long enough for a later admin reverify pass (see
+    // reverifyGameIdentity) to re-run the resolver without needing the
+    // original file re-uploaded — cleared once certified, since a certified
+    // replay has nothing left to reverify.
+    const playerResolutionsForReverify = certified
+      ? null
+      : activePlayers.map(({ name, team, platform, onlineId, identityKey, identitySource }) => ({
+          name, team, platform, onlineId, identityKey, identitySource,
+        }));
+
     await supabaseAdmin.from("replay_identity_certifications").upsert(
       {
         replay_id: replayId,
@@ -144,6 +154,7 @@ export async function evaluateAndPersistGameCertification(input: {
         reason,
         home_team_won: homeTeamWon,
         stats_json: stats,
+        player_resolutions_json: playerResolutionsForReverify,
         evaluated_at: new Date().toISOString(),
       },
       { onConflict: "replay_id" },

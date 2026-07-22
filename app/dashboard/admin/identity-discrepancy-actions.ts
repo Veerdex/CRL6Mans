@@ -6,6 +6,9 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModerator, isDirector } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { buildResolverContext } from "@/app/lib/replay-identity-context";
+import { resolveReplayParticipants } from "@/app/lib/replay-identity-resolver";
+import type { PlayerStat } from "@/app/lib/replay-parser";
 
 const RESOLUTION_TYPES = [
   "registration_corrected",
@@ -111,4 +114,97 @@ export async function resolveIdentityDiscrepancy(
 
   revalidatePath("/dashboard/admin");
   return { ok: true };
+}
+
+// Re-runs the Step 6 resolver server-side using the per-player identity
+// fields captured at analyze time (name/team/platform/onlineId/identitySource
+// — everything resolveReplayParticipants needs, none of the raw replay
+// bytes), instead of requiring a fresh .replay upload. Only meaningful after
+// an admin has actually fixed the underlying cause (e.g. verified the
+// player's platform account) — buildResolverContext re-fetches live account/
+// eligibility state, so a genuine fix here changes the outcome exactly as a
+// re-upload would have.
+//
+// This still never manually forces a match certified: it's a real resolver
+// re-run, just fed from stored inputs. On success it clears
+// player_resolutions_json (nothing left to reverify) and auto-resolves the
+// open discrepancy rows for this replay; on failure it leaves both alone so
+// the admin can fix further and try again.
+export async function reverifyGameIdentity(
+  matchId: string,
+  gameNumber: number,
+): Promise<{ error?: string; ok?: boolean; certified?: boolean; message?: string }> {
+  const adminId = await requireAdmin();
+
+  const { data: certRow } = await supabaseAdmin
+    .from("replay_identity_certifications")
+    .select("replay_id, player_resolutions_json")
+    .eq("match_id", matchId)
+    .eq("game_number", gameNumber)
+    .maybeSingle();
+  if (!certRow?.replay_id) return { error: "No analyzed replay found for this game." };
+  if (!certRow.player_resolutions_json) {
+    return { error: "No stored identity data for this replay — re-upload it to analyze again." };
+  }
+
+  const storedIdentities = certRow.player_resolutions_json as Array<
+    Pick<PlayerStat, "name" | "team" | "platform" | "onlineId" | "identityKey" | "identitySource">
+  >;
+  const activePlayers: PlayerStat[] = storedIdentities.map(p => ({
+    ...p,
+    score: 1,
+    goals: 0,
+    assists: 0,
+    saves: 0,
+    shots: 0,
+  }));
+
+  const context = await buildResolverContext(matchId, activePlayers);
+  if (!context) return { error: "Could not rebuild match context for this game." };
+
+  const resolution = resolveReplayParticipants({
+    replayPlayers: activePlayers,
+    expectedLineup: context.expectedLineup,
+    currentlyEligiblePlayerIds: context.currentlyEligiblePlayerIds,
+    kickoffAt: context.kickoffAt,
+    globalVerifiedAccounts: context.globalVerifiedAccounts,
+  });
+
+  const certified = resolution.players.every(p => p.type === "matched-by-platform-id");
+  const now = new Date().toISOString();
+
+  await supabaseAdmin
+    .from("replay_identity_certifications")
+    .update({
+      certified,
+      reason: certified
+        ? "All active players resolved by verified platform ID (reverified)"
+        : "One or more players still fail identity verification",
+      player_resolutions_json: certified ? null : certRow.player_resolutions_json,
+      evaluated_at: now,
+    })
+    .eq("replay_id", certRow.replay_id);
+
+  if (certified) {
+    await supabaseAdmin
+      .from("replay_identity_discrepancies")
+      .update({
+        status: "resolved",
+        resolution: "reverified",
+        admin_reason: "Automatically reverified after admin correction — all players now resolve by verified platform ID.",
+        resolved_by: adminId,
+        resolved_at: now,
+      })
+      .eq("replay_id", certRow.replay_id)
+      .eq("status", "open");
+  }
+
+  revalidatePath("/dashboard/admin");
+  return {
+    ok: true,
+    certified,
+    message: certified
+      ? "Reverified — all players now resolve correctly."
+      : "Still failing — one or more players still don't resolve to a verified platform ID.",
+  };
 }

@@ -8,7 +8,6 @@ import { AdminNotificationToggles } from "./admin-notification-toggles";
 import { InsightsChart, type InsightsPoint } from "./insights-chart";
 import { FormatEditor, type SeasonFormatConfig } from "../season/format-editor";
 import { CollapsibleSection } from "./collapsible-section";
-import { EmptySectionsProvider } from "./empty-sections-context";
 import { AdminTabsProvider, AdminTabsBar, AdminTabSection } from "./admin-tabs";
 import { RegistrationCard } from "./registration-card";
 import { PlayerPanel, type CombinedPlayer, type PlatformAccountSummary } from "./player-panel";
@@ -31,6 +30,8 @@ import { StaffManager } from "./staff-section";
 import { RoundScheduler, type ScheduleSection, type RoundMatchInfo } from "./round-scheduler";
 import { ScheduleOverrideCard, type ScheduleOverrideCardData } from "./schedule-override-card";
 import { canonicalStage, stageName, STAGE_ORDER, expectedStageRounds, type RoundScheduleRow } from "./schedule-utils";
+import { WagersBalanceTable, type BalanceRow } from "./wagers-balance-table";
+import { WagersBulkForm } from "./wagers-bulk-form";
 
 async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean; userIsDirector: boolean }) {
   const staff = await getStaffList();
@@ -196,6 +197,7 @@ export default async function AdminPage() {
     const roundLabel = match?.round != null ? ` r${match.round}` : "";
     return {
       id: row.id,
+      matchId: row.match_id,
       matchLabel: `${homeName} vs ${awayName} (${stageLabel}${roundLabel})`,
       gameNumber: row.game_number,
       createdAt: row.created_at,
@@ -210,6 +212,82 @@ export default async function AdminPage() {
       reason: row.reason,
     };
   });
+
+  const { data: wagerBalancePlayers } = await supabaseAdmin
+    .from("players")
+    .select("id, username, display_name, crl_coins")
+    .eq("status", "approved")
+    .order("crl_coins", { ascending: false });
+
+  const wagerBalanceRows: BalanceRow[] = (wagerBalancePlayers ?? []).map(p => ({
+    id: p.id,
+    username: p.username,
+    displayName: p.display_name,
+    balance: p.crl_coins ?? 0,
+  }));
+
+  const { data: rawAdjustmentRows } = await supabaseAdmin
+    .from("wager_balance_adjustments")
+    .select("batch_id, scope, player_id, amount, reason, actor, created_at")
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  const adjustmentPlayerIds = [...new Set((rawAdjustmentRows ?? []).map(r => r.player_id))];
+  const { data: adjustmentPlayerRows } = adjustmentPlayerIds.length
+    ? await supabaseAdmin.from("players").select("id, username, display_name").in("id", adjustmentPlayerIds)
+    : { data: [] as { id: string; username: string; display_name: string | null }[] };
+  const adjustmentPlayerById = Object.fromEntries((adjustmentPlayerRows ?? []).map(p => [p.id, p]));
+
+  const adjustmentActorIds = [...new Set((rawAdjustmentRows ?? []).map(r => r.actor))];
+  const { data: adjustmentActorRows } = adjustmentActorIds.length
+    ? await supabaseAdmin.from("players").select("discord_id, username, display_name").in("discord_id", adjustmentActorIds)
+    : { data: [] as { discord_id: string; username: string; display_name: string | null }[] };
+  const adjustmentActorByDiscordId = Object.fromEntries((adjustmentActorRows ?? []).map(p => [p.discord_id, p]));
+
+  type BalanceAdjustmentBatch = {
+    batchId: string;
+    scope: string;
+    reason: string;
+    actor: string;
+    createdAt: string;
+    totalAmount: number;
+    playerCount: number;
+    singlePlayerId: string | null;
+  };
+  const adjustmentBatchById = new Map<string, BalanceAdjustmentBatch>();
+  for (const row of rawAdjustmentRows ?? []) {
+    const existing = adjustmentBatchById.get(row.batch_id);
+    if (existing) {
+      existing.totalAmount += row.amount;
+      existing.playerCount += 1;
+    } else {
+      adjustmentBatchById.set(row.batch_id, {
+        batchId: row.batch_id,
+        scope: row.scope,
+        reason: row.reason,
+        actor: row.actor,
+        createdAt: row.created_at,
+        totalAmount: row.amount,
+        playerCount: 1,
+        singlePlayerId: row.scope === "single" ? row.player_id : null,
+      });
+    }
+  }
+  const balanceAdjustmentLog = [...adjustmentBatchById.values()]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 30);
+
+  const playerLabel = (id: string | null): string => {
+    if (!id) return "player";
+    const p = adjustmentPlayerById[id];
+    if (!p) return "player";
+    return p.display_name ? `${p.display_name} (${p.username})` : p.username;
+  };
+  const actorLabel = (discordId: string): string => {
+    const a = adjustmentActorByDiscordId[discordId];
+    if (!a) return "an admin";
+    return a.display_name ? `${a.display_name} (${a.username})` : a.username;
+  };
 
   // Fetch staff roles for all players to support hierarchy-aware kick/ban buttons
   const playerDiscordIds = (allPlayers ?? []).map((p: { discord_id: string }) => p.discord_id).filter(Boolean);
@@ -592,7 +670,6 @@ export default async function AdminPage() {
   }
 
   return (
-    <EmptySectionsProvider>
     <AdminTabsProvider>
     <div className="p-4 sm:p-6 lg:p-8 space-y-12">
 
@@ -609,7 +686,17 @@ export default async function AdminPage() {
         </div>
       )}
 
-      <AdminTabsBar labels={["Overview", "Players & Staff", "Match Ops", "Approvals", "Season & League"]} />
+      <AdminTabsBar
+        labels={["Overview", "Players & Staff", "Match Ops", "Approvals", "Season & League", "Wagers"]}
+        counts={[
+          0,
+          identityDiscrepancyCards.length,
+          matchRows.length + subRequestCards.length + scheduleOverrideCards.length,
+          pending.length + platformClaimCards.length + playerEditRequestCards.length,
+          userIsDirector && seasonActive ? schedulingUnscheduledCount : 0,
+          0,
+        ]}
+      />
 
       <AdminTabSection tab={0}>
       {/* ── Insights ── */}
@@ -681,7 +768,6 @@ export default async function AdminPage() {
         title="Match Reporting"
         badge={matchRows.length}
         defaultOpen={false}
-        isEmpty={matchRows.length === 0}
         description="Report scores for scheduled matches, including per-game replay uploads that get parsed for scoreboard stats. Only matches with both teams already assigned show up here."
       >
         <MatchReporter matches={matchRows} />
@@ -692,7 +778,6 @@ export default async function AdminPage() {
         title="Sub Requests"
         badge={subRequestCards.length}
         defaultOpen={subRequestCards.length > 0}
-        isEmpty={subRequestCards.length === 0}
         description="Substitution requests that a team escalated to admin review, typically because the opposing team didn't accept or reject in time. Review the out/sub player details and approve or deny each one."
       >
         {subRequestCards.length === 0 ? (
@@ -713,7 +798,6 @@ export default async function AdminPage() {
         title="Registrations & Platform Claims"
         badge={pending.length + platformClaimCards.length}
         defaultOpen={pending.length > 0 || platformClaimCards.length > 0}
-        isEmpty={pending.length === 0 && platformClaimCards.length === 0}
         description="New player sign-ups awaiting approval or rejection, plus platform account claims (Steam, Epic, console) awaiting verification. A player needs both an approved registration and, once enforcement is on, a verified account to fully participate."
       >
         {pending.length === 0 && platformClaimCards.length === 0 ? (
@@ -745,7 +829,6 @@ export default async function AdminPage() {
         title="Profile Change Requests"
         badge={playerEditRequestCards.length}
         defaultOpen={playerEditRequestCards.length > 0}
-        isEmpty={playerEditRequestCards.length === 0}
         description="Player-submitted edits to their tracker URL or MMR values, shown alongside their current live values so you can compare before approving or rejecting. Nothing changes on the player's profile until you approve it."
       >
         {playerEditRequestCards.length === 0 ? (
@@ -764,7 +847,6 @@ export default async function AdminPage() {
         title="Verified Platform Accounts"
         badge={platformVerifiedCards.length}
         defaultOpen={false}
-        isEmpty={platformVerifiedCards.length === 0}
         description="A read-only record of platform accounts that have already passed verification, along with who verified them, when, and by what method (OAuth, replay evidence, or manual admin review)."
       >
         {platformVerifiedCards.length === 0 ? (
@@ -811,7 +893,6 @@ export default async function AdminPage() {
         title="Schedule Approvals"
         badge={scheduleOverrideCards.length}
         defaultOpen={scheduleOverrideCards.length > 0}
-        isEmpty={scheduleOverrideCards.length === 0}
         description="Match times that both teams agreed on outside their normal scheduled window (day, week, or hour). Approve to lock the time in, or reject to send the teams back to propose another."
       >
         {scheduleOverrideCards.length === 0 ? (
@@ -929,9 +1010,43 @@ export default async function AdminPage() {
       )}
       </AdminTabSection>
 
+      <AdminTabSection tab={5}>
+      {/* ── Wagers ── */}
+      <CollapsibleSection
+        title="Wagers"
+        description="Manage Westside Wages balances: view every approved player's balance, grant or deduct from one player, or adjust everyone at once. Every adjustment is logged below with who made it and why."
+      >
+        <div className="space-y-6">
+          <WagersBalanceTable rows={wagerBalanceRows} />
+          {userIsDirector && <WagersBulkForm approvedCount={wagerBalanceRows.length} />}
+          <div>
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Recent Adjustments</p>
+            {balanceAdjustmentLog.length === 0 ? (
+              <p className="text-sm text-zinc-500">No manual adjustments yet.</p>
+            ) : (
+              <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                {balanceAdjustmentLog.map(entry => (
+                  <div key={entry.batchId} className="text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2">
+                    <span className={entry.totalAmount >= 0 ? "text-emerald-400" : "text-red-400"}>
+                      {entry.totalAmount >= 0 ? "+" : ""}{entry.totalAmount.toLocaleString()}
+                    </span>
+                    {" "}
+                    {entry.scope === "bulk"
+                      ? `to ${entry.playerCount} players`
+                      : `to ${playerLabel(entry.singlePlayerId)}`}
+                    {" — "}{entry.reason}{" — "}{actorLabel(entry.actor)}{" — "}
+                    {new Date(entry.createdAt).toLocaleString()}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </CollapsibleSection>
+      </AdminTabSection>
+
     </div>
     </AdminTabsProvider>
-    </EmptySectionsProvider>
   );
 }
 

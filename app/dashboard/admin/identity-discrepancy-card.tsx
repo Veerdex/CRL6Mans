@@ -2,10 +2,11 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { resolveIdentityDiscrepancy, type DiscrepancyResolution } from "./identity-discrepancy-actions";
+import { resolveIdentityDiscrepancy, reverifyGameIdentity, type DiscrepancyResolution } from "./identity-discrepancy-actions";
 
 export type IdentityDiscrepancyCardData = {
   id: string;
+  matchId: string;
   matchLabel: string;
   gameNumber: number | null;
   createdAt: string;
@@ -49,6 +50,8 @@ export function IdentityDiscrepancyCard({ discrepancy }: { discrepancy: Identity
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [reverifyPending, startReverifyTransition] = useTransition();
+  const [reverifyMessage, setReverifyMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   function handleResolve() {
     setError(null);
@@ -56,6 +59,21 @@ export function IdentityDiscrepancyCard({ discrepancy }: { discrepancy: Identity
       const res = await resolveIdentityDiscrepancy(discrepancy.id, resolution, reason);
       if (res.error) setError(res.error);
       else router.refresh();
+    });
+  }
+
+  function handleReverify() {
+    if (discrepancy.gameNumber == null) return;
+    setError(null);
+    setReverifyMessage(null);
+    startReverifyTransition(async () => {
+      const res = await reverifyGameIdentity(discrepancy.matchId, discrepancy.gameNumber!);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setReverifyMessage({ ok: !!res.certified, text: res.message ?? "" });
+      if (res.certified) router.refresh();
     });
   }
 
@@ -120,7 +138,7 @@ export function IdentityDiscrepancyCard({ discrepancy }: { discrepancy: Identity
 
       {resolution !== "rejected" && resolution !== "escalated" && (
         <p className="text-xs text-amber-400">
-          This records the decision only. Fix the underlying data, then re-upload/re-analyze this replay to re-run the resolver — this cannot manually mark the match certified.
+          This records the decision only. Fix the underlying data (e.g. verify the platform account), then click Reverify to re-run the resolver — no re-upload needed. This cannot manually mark the match certified.
         </p>
       )}
       {resolution === "rejected" && (
@@ -137,7 +155,21 @@ export function IdentityDiscrepancyCard({ discrepancy }: { discrepancy: Identity
         >
           {isPending ? "Saving…" : "Save Resolution"}
         </button>
+        {discrepancy.gameNumber != null && (
+          <button
+            onClick={handleReverify}
+            disabled={reverifyPending}
+            className="px-4 py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {reverifyPending ? "Reverifying…" : "Reverify"}
+          </button>
+        )}
         {error && <span className="text-xs text-red-400">{error}</span>}
+        {reverifyMessage && (
+          <span className={`text-xs ${reverifyMessage.ok ? "text-emerald-400" : "text-amber-400"}`}>
+            {reverifyMessage.text}
+          </span>
+        )}
       </div>
     </div>
   );
