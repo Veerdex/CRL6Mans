@@ -1,8 +1,8 @@
 import { supabaseAdmin } from "./supabase";
-import { isModerator, isDirector, isCEO } from "./players";
+import { isModerator, isDirector, isCEO, isCurrentlyKicked } from "./players";
 import { pushToAllApproved, pushToTeam } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
-import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter } from "./discord-api";
+import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -2164,6 +2164,68 @@ async function diagRoles(userId: string) {
   return ephemeralReply(lines.join("\n"));
 }
 
+const DEFAULT_KICK_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Re-applies ban/timeout/"Kicked" state to the currently-configured guild for
+// players whose DB moderation state (guild-independent) says they should
+// currently be banned or kicked. Needed after moving the bot to a new Discord
+// server, since bans/timeouts/roles are all guild-scoped and don't carry over.
+export async function execResyncModeration(): Promise<{ banned: number; kicked: number; warnings: string[] }> {
+  const warnings: string[] = [];
+
+  const { data: players } = await supabaseAdmin
+    .from("players")
+    .select("discord_id, status, kick_reason, kicked_until")
+    .not("discord_id", "is", null)
+    .or("status.eq.banned,kick_reason.not.is.null");
+
+  const realPlayers = (players ?? []).filter(p => {
+    const id = p.discord_id as string;
+    return id && !id.startsWith("test_");
+  });
+
+  let banned = 0;
+  let kicked = 0;
+
+  for (const player of realPlayers) {
+    const discordId = player.discord_id as string;
+
+    if (player.status === "banned") {
+      await banMember(discordId);
+      banned++;
+      await sleep(DISCORD_PACE_MS);
+    }
+
+    if (isCurrentlyKicked(player.kick_reason, player.kicked_until)) {
+      const timeoutMs = player.kicked_until
+        ? new Date(player.kicked_until).getTime() - Date.now()
+        : DEFAULT_KICK_TIMEOUT_MS;
+      await addRole(discordId, "Kicked");
+      await timeoutMember(discordId, timeoutMs);
+      kicked++;
+      await sleep(DISCORD_PACE_MS);
+    }
+  }
+
+  return { banned, kicked, warnings };
+}
+
+async function resyncModeration(userId: string) {
+  const denied = await ceoGuard(userId);
+  if (denied) return denied;
+
+  const { banned, kicked, warnings } = await execResyncModeration();
+  const lines = [
+    `• Players re-banned: **${banned}**`,
+    `• Players re-kicked (role + timeout): **${kicked}**`,
+    ...warnings.map(w => `⚠️ ${w}`),
+  ];
+  return ephemeralReply(
+    (warnings.length ? "⚠️ Partial resync" : "✅ Moderation resynced") + "\n" + lines.join("\n") +
+    "\n\nThis re-applies bans/timeouts/the Kicked role to the guild currently configured for this bot — run it once after pointing the bot at a new Discord server."
+  );
+}
+
 async function assignRole(userId: string, targetUserId: string, roleId: string) {
   const denied = await adminGuard(userId);
   if (denied) return denied;
@@ -2902,6 +2964,7 @@ export async function handleCommand(interaction: Interaction) {
       case "checklist":  return adminChecklist(userId);
       case "disconnect": return adminDisconnect(userId, String(sOpt("confirm")));
       case "wipe":       return adminWipe(userId, String(sOpt("confirm")), sOpt("clear_history") === true);
+      case "resyncmoderation": return resyncModeration(userId);
       default:           return ephemeralReply("Unknown admin subcommand.");
     }
   }

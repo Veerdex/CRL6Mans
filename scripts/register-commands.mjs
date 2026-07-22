@@ -119,6 +119,11 @@ const commands = [
           { name: "clear_history", description: "Also delete the completed-seasons archive (default: false)", type: BOOLEAN, required: false },
         ],
       },
+      {
+        type: SUB_COMMAND,
+        name: "resyncmoderation",
+        description: "CEO only: re-apply bans/timeouts/Kicked role to this guild for players the DB says are banned/kicked",
+      },
     ],
   },
   {
