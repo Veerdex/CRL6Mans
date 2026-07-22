@@ -58,6 +58,63 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
       continue;
     }
 
+    const url = rest.match(/^https?:\/\/[^\s<]+/);
+    if (url) {
+      let href = url[0];
+      const trailing = href.match(/[.,!?;:'")\]}>]+$/);
+      if (trailing) href = href.slice(0, href.length - trailing[0].length);
+      flush();
+      nodes.push(
+        <a
+          key={k}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-indigo-400 underline decoration-indigo-400/40 hover:decoration-indigo-400 break-all"
+        >
+          {href}
+        </a>,
+      );
+      i += href.length;
+      continue;
+    }
+
+    const everyoneOrHere = rest.match(/^@(everyone|here)\b/);
+    if (everyoneOrHere) {
+      flush();
+      nodes.push(
+        <span key={k} className="bg-indigo-500/30 text-indigo-300 rounded px-1 font-medium">
+          @{everyoneOrHere[1]}
+        </span>,
+      );
+      i += everyoneOrHere[0].length;
+      continue;
+    }
+
+    const mention = rest.match(/^@[A-Za-z0-9_.-]+/);
+    if (mention) {
+      flush();
+      nodes.push(
+        <span key={k} className="bg-indigo-500/30 text-indigo-300 rounded px-1 font-medium">
+          {mention[0]}
+        </span>,
+      );
+      i += mention[0].length;
+      continue;
+    }
+
+    const channelMention = rest.match(/^#[A-Za-z0-9_-]+/);
+    if (channelMention) {
+      flush();
+      nodes.push(
+        <span key={k} className="bg-indigo-500/30 text-indigo-300 rounded px-1 font-medium">
+          {channelMention[0]}
+        </span>,
+      );
+      i += channelMention[0].length;
+      continue;
+    }
+
     const spoiler = matchWrapped(rest, "||");
     if (spoiler) {
       flush();

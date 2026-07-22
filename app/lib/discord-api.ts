@@ -161,6 +161,20 @@ export async function getGuildChannels(): Promise<Array<{ id: string; name: stri
   return res.ok ? res.json() : [];
 }
 
+export async function searchGuildMembers(
+  query: string,
+  limit = 5,
+): Promise<Array<{ id: string; username: string; nick: string | null; globalName: string | null }>> {
+  if (!GUILD_ID || !BOT_TOKEN || !query) return [];
+  const res = await fetch(
+    `${API}/guilds/${GUILD_ID}/members/search?query=${encodeURIComponent(query)}&limit=${limit}`,
+    { headers: botHeaders() },
+  );
+  if (!res.ok) return [];
+  const data = await res.json() as Array<{ user: { id: string; username: string; global_name: string | null }; nick: string | null }>;
+  return data.map(m => ({ id: m.user.id, username: m.user.username, nick: m.nick, globalName: m.user.global_name }));
+}
+
 // Creates a private text channel visible only to the specified roles (+ anyone with Administrator).
 // VIEW_CHANNEL(1024) | SEND_MESSAGES(2048) | ATTACH_FILES(32768) | READ_MESSAGE_HISTORY(65536) = 101376
 export async function createTextChannel(

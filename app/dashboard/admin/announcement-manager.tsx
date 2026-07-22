@@ -12,6 +12,8 @@ const SYNTAX_HINTS: Array<[string, string]> = [
   ["~~strike~~", "Line through"],
   ["`code`", "Code"],
   ["||spoiler||", "Spoiler"],
+  ["@RoleOrUser", "Mention"],
+  ["#channel-name", "Channel link"],
 ];
 
 export function AnnouncementManager({
@@ -66,6 +68,9 @@ export function AnnouncementManager({
       {postedAt && (
         <p className="text-xs text-zinc-500">Currently live since {new Date(postedAt).toLocaleString()}.</p>
       )}
+      <p className="text-xs text-zinc-500">
+        Every post to Discord always starts with <code className="text-zinc-400">@everyone</code>. Reference a role or member with <code className="text-zinc-400">@name</code> and a channel with <code className="text-zinc-400">#channel-name</code> — matching ones are converted to real mentions/links.
+      </p>
       <div className="grid md:grid-cols-2 gap-5">
         <div className="space-y-2">
           <textarea
@@ -85,7 +90,7 @@ export function AnnouncementManager({
         </div>
         <div className="space-y-2">
           <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Discord Preview</p>
-          <DiscordMarkdownPreview text={text} />
+          <DiscordMarkdownPreview text={text.trim() ? `@everyone\n${text}` : ""} />
         </div>
       </div>
       <div className="flex items-center gap-3 flex-wrap">

@@ -693,7 +693,7 @@ export default async function AdminPage() {
         counts={[
           0,
           identityDiscrepancyCards.length,
-          matchRows.length + subRequestCards.length + scheduleOverrideCards.length,
+          matchesUnderReviewCount + subRequestCards.length + scheduleOverrideCards.length,
           pending.length + platformClaimCards.length + playerEditRequestCards.length,
           userIsDirector && seasonActive ? schedulingUnscheduledCount : 0,
           0,
