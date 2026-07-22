@@ -44,6 +44,7 @@ export type RoundScheduleRow = {
   stage: string;
   round: number;
   scheduleType: string;
+  rangeDays: number | null;
   playAt: string;
 };
 
@@ -61,6 +62,7 @@ export function buildCalEntries(rows: RoundScheduleRow[]): CalEntry[] {
     stage: s.stage,
     round: s.round,
     scheduleType: s.scheduleType,
+    rangeDays: s.rangeDays,
     playAt: s.playAt,
     label: getRoundDisplayLabel(s.stage, s.round, maxRoundByStage[s.stage]),
     stageName: stageDisplayName(s.stage),
@@ -94,6 +96,7 @@ export function buildPinnedMatchEntries(matches: PinnedMatch[], roundRows: Round
       stage: cs,
       round: m.round,
       scheduleType: "specific",
+      rangeDays: null,
       playAt: m.scheduledAt,
       label,
       stageName: stageDisplayName(cs),

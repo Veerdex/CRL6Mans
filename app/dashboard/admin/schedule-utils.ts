@@ -1,6 +1,6 @@
 // Pure utilities for round scheduling — no server dependencies, safe to import anywhere.
 
-export type ScheduleType = "weekly" | "daily" | "specific";
+export type ScheduleType = "range" | "specific";
 
 export type RoundScheduleRow = {
   stage: string;
@@ -8,6 +8,7 @@ export type RoundScheduleRow = {
   scheduleType: ScheduleType;
   playAt: string;
   deadlineAt: string;
+  rangeDays: number | null;
 };
 
 export function canonicalStage(stage: string): string {

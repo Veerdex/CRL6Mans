@@ -581,21 +581,23 @@ export async function createMatchChannel(
   }
 
   // For standalone seasons, look up this round's admin schedule so the message matches
-  // the schedule type (weekly/daily/specific) and uses its real deadline.
+  // the schedule type (range/specific) and uses its real deadline.
   let scheduleType: string | null = null;
+  let rangeDays: number | null = null;
   let realPlayTs = playTs;
   let realDeadlineTs = deadlineTs;
   if (matchInfo && !isTournament) {
     const cs = matchInfo.stage.startsWith("group_") ? "group" : matchInfo.stage;
     const { data: sched } = await supabaseAdmin
       .from("round_schedules")
-      .select("schedule_type, play_at, deadline_at")
+      .select("schedule_type, play_at, deadline_at, range_days")
       .is("tournament_id", null)
       .eq("stage", cs)
       .eq("round", matchInfo.round)
       .maybeSingle();
     if (sched) {
       scheduleType = sched.schedule_type as string;
+      rangeDays = sched.range_days as number | null;
       realPlayTs = Math.floor(new Date(sched.play_at as string).getTime() / 1000);
       realDeadlineTs = Math.floor(new Date(sched.deadline_at as string).getTime() / 1000);
     }
@@ -625,12 +627,12 @@ export async function createMatchChannel(
     if (scheduleType === "specific") {
       scheduleLines = `Scheduled for: <t:${realPlayTs}:F>`;
       coordinateLine = `- This is a fixed time set by the admins — please be ready to play then.`;
-    } else if (scheduleType === "daily") {
+    } else if (scheduleType === "range" && (rangeDays ?? 1) <= 1) {
       scheduleLines = `Play any time on: <t:${realPlayTs}:D>\nMatch Deadline (end of day): <t:${realDeadlineTs}:F>`;
       coordinateLine = `- This match must be played on this day — coordinate a time that works for both teams.`;
     } else {
-      // weekly / fallback
-      scheduleLines = `Play any time this week, before the deadline.\nMatch Deadline: <t:${realDeadlineTs}:F>`;
+      // multi-day range / fallback
+      scheduleLines = `Play any time between <t:${realPlayTs}:D> and <t:${realDeadlineTs}:D>, before the deadline.\nMatch Deadline: <t:${realDeadlineTs}:F>`;
       coordinateLine = `- Coordinate a time that works for both teams before the match deadline.`;
     }
 

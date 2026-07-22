@@ -479,9 +479,9 @@ export default async function AdminPage() {
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
   const { data: roundScheduleRows } = settings?.season_active
     ? await (activeTournamentId
-        ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at").eq("tournament_id", activeTournamentId)
-        : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at").is("tournament_id", null))
-    : { data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string }[] };
+        ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").eq("tournament_id", activeTournamentId)
+        : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").is("tournament_id", null))
+    : { data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string; range_days: number | null }[] };
 
   type MatchStageRow = { stage: string; round: number; discord_channel_id: string | null };
   const matchStageRows = (allMatchStages ?? []) as MatchStageRow[];
@@ -538,6 +538,7 @@ export default async function AdminPage() {
     scheduleType: s.schedule_type as RoundScheduleRow["scheduleType"],
     playAt: s.play_at,
     deadlineAt: s.deadline_at,
+    rangeDays: s.range_days,
   }));
 
   // Per-round match rows (incl. TBD-team future rounds) for the expand/per-match
@@ -578,8 +579,7 @@ export default async function AdminPage() {
       const cs = canonicalStage(m.stage);
       const sched = (roundScheduleRows ?? []).find((s) => s.stage === cs && s.round === m.round);
       const windowNote = sched
-        ? sched.schedule_type === "daily" ? "must be on the scheduled day"
-          : sched.schedule_type === "weekly" ? "must be within the scheduled week"
+        ? sched.schedule_type === "range" ? "must be within the scheduled window"
           : "a specific time was set"
         : null;
       return {
@@ -954,7 +954,6 @@ export default async function AdminPage() {
               lockedRounds={[...lockedRoundKeys]}
               matchesByRound={matchesByRound}
               playHour={(settings?.match_play_hour as number | null) ?? 19}
-              deadlineDay={(settings?.match_deadline_day as number | null) ?? 2}
             />
           )}
         </CollapsibleSection>

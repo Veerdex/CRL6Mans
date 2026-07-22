@@ -8,7 +8,7 @@ import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { openReadyMatchChannels } from "@/app/lib/discord-bot";
 import { type ScheduleType, stageName, expectedStageRounds, canonicalStage } from "./schedule-utils";
-import { zonedDate, zonedWeekday, wallToUtc, shiftWall } from "@/app/lib/pt-time";
+import { zonedDate, wallToUtc, shiftWall } from "@/app/lib/pt-time";
 
 // Fallback zone when a client doesn't supply one (e.g. a non-browser caller).
 const FALLBACK_TZ = "America/Los_Angeles";
@@ -35,53 +35,42 @@ async function verifyAdmin() {
 function computeDeadlineAt(
   playAtMs: number,
   scheduleType: ScheduleType,
-  deadlineDay: number,
+  rangeDays: number | null,
   tz: string,
 ): string {
   // A specific time has no window — the exact time is both play and deadline.
   if (scheduleType === "specific") return new Date(playAtMs).toISOString();
 
+  // Range: 23:59 on the last day of the range (rangeDays counted from the start day).
   const play = zonedDate(tz, playAtMs); // UTC getters return wall-clock fields in `tz`
-
-  if (scheduleType === "daily") {
-    // Same day at 23:59.
-    return new Date(
-      wallToUtc(tz, play.getUTCFullYear(), play.getUTCMonth(), play.getUTCDate(), 23, 59),
-    ).toISOString();
-  }
-
-  // weekly: next deadlineDay at 23:59 after playAt
-  const playDow = play.getUTCDay();
-  let daysAhead = (deadlineDay - playDow + 7) % 7;
-  if (daysAhead === 0) daysAhead = 7;
+  const days = rangeDays ?? 1;
   return new Date(
-    wallToUtc(tz, play.getUTCFullYear(), play.getUTCMonth(), play.getUTCDate() + daysAhead, 23, 59),
+    wallToUtc(tz, play.getUTCFullYear(), play.getUTCMonth(), play.getUTCDate() + (days - 1), 23, 59),
   ).toISOString();
 }
 
 // Play time a "follow" produces: the next round starts when the previous round's
-// window ends. Daily/weekly results are anchored to 12:00 AM in `tz` so chain
+// window ends. A range result is anchored to 12:00 AM in `tz` so chain
 // detection matches storage.
-function inferredPlayAtMs(prevMs: number, prevType: string, nextType: string, tz: string): number {
-  const ms = prevMs + windowLenMs(prevType);
-  if (nextType === "daily" || nextType === "weekly") {
+function inferredPlayAtMs(prevMs: number, prevType: string, prevRangeDays: number | null, nextType: string, tz: string): number {
+  const ms = prevMs + windowLenMs(prevType, prevRangeDays);
+  if (nextType === "range") {
     const d = zonedDate(tz, ms);
     return wallToUtc(tz, d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0);
   }
   return ms;
 }
 
-// How long a round occupies, so later rounds can't overlap it. A daily round fills
-// its day, weekly fills its week, and a specific time is an instant (no window).
-function windowLenMs(type: string): number {
-  if (type === "daily") return 86_400_000;
-  if (type === "weekly") return 7 * 86_400_000;
+// How long a round occupies, so later rounds can't overlap it. A range fills its
+// day count, and a specific time is an instant (no window).
+function windowLenMs(type: string, rangeDays: number | null): number {
+  if (type === "range") return (rangeDays ?? 1) * 86_400_000;
   return 0; // specific
 }
 
-// Start of a round's window: daily/weekly windows begin at 12:00 AM of the play day.
+// Start of a round's window: a range window begins at 12:00 AM of the play day.
 function windowStartMs(playMs: number, type: string, tz: string): number {
-  if (type === "daily" || type === "weekly") {
+  if (type === "range") {
     const d = zonedDate(tz, playMs);
     return wallToUtc(tz, d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0);
   }
@@ -137,8 +126,10 @@ async function syncRoundMatchPins(
   round: number,
   newType: string,
   newPlayMs: number,
+  newRangeDays: number | null,
   oldType: string | null,
   oldPlayMs: number | null,
+  oldRangeDays: number | null,
   tz: string,
 ): Promise<void> {
   const matches = await fetchRoundMatches(canonStage, round);
@@ -174,19 +165,29 @@ async function syncRoundMatchPins(
   }
 
   // Same window type → re-anchor pinned matches to the new window start, preserving
-  // their weekday + clock time (DST-correct; not a raw millisecond shift).
+  // their weekday + clock time (DST-correct; not a raw millisecond shift). A shrinking
+  // range can then leave a pin past the new deadline — reset those to undecided rather
+  // than leaving a stale out-of-window time.
   const oldStart = windowStartMs(oldPlayMs!, oldType!, tz);
   const newStart = windowStartMs(newPlayMs, newType, tz);
-  if (oldStart !== newStart) {
-    for (const m of matches) {
-      if (m.admin_scheduled && m.scheduled_at) {
-        const shifted = shiftWall(tz, new Date(m.scheduled_at).getTime(), oldStart, newStart);
-        await supabaseAdmin.from("matches")
-          .update({ scheduled_at: new Date(shifted).toISOString() })
-          .eq("id", m.id);
-      }
+  const newEnd = newStart + windowLenMs(newType, newRangeDays);
+  const resetIds: string[] = [];
+  for (const m of matches) {
+    if (!m.admin_scheduled || !m.scheduled_at) continue;
+    const origMs = new Date(m.scheduled_at).getTime();
+    const shiftedMs = oldStart !== newStart ? shiftWall(tz, origMs, oldStart, newStart) : origMs;
+    if (shiftedMs < newStart || shiftedMs > newEnd) {
+      resetIds.push(m.id);
+    } else if (shiftedMs !== origMs) {
+      await supabaseAdmin.from("matches")
+        .update({ scheduled_at: new Date(shiftedMs).toISOString() })
+        .eq("id", m.id);
     }
   }
+  if (resetIds.length)
+    await supabaseAdmin.from("matches")
+      .update({ scheduled_at: null, admin_scheduled: false, schedule_accepted: false })
+      .in("id", resetIds);
   // Ensure non-pinned, non-negotiated matches carry no stamped time.
   const clearIds = matches.filter((m) => !m.admin_scheduled && !m.schedule_proposed_by_team_id && m.scheduled_at).map((m) => m.id);
   if (clearIds.length)
@@ -198,12 +199,14 @@ export async function setRoundSchedule(params: {
   stage: string; // canonical stage
   round: number;
   scheduleType: ScheduleType;
+  rangeDays: number | null; // day count for "range"; ignored/null for "specific"
   dateStr: string; // empty = infer from previous round
   timeZone?: string; // the admin's IANA zone; dates are read in it
 }): Promise<{ ok: boolean; error?: string }> {
   await verifyAdmin();
 
   const { tournamentId, stage, round, scheduleType, dateStr } = params;
+  const rangeDays = scheduleType === "range" ? Math.max(1, Math.floor(params.rangeDays ?? 1)) : null;
   const tz = params.timeZone || FALLBACK_TZ;
 
   if (await isRoundLocked(stage, round)) {
@@ -212,9 +215,8 @@ export async function setRoundSchedule(params: {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("match_deadline_day, match_play_hour, season_format, num_teams")
+    .select("match_play_hour, season_format, num_teams")
     .single();
-  const deadlineDay = (settings?.match_deadline_day as number | null) ?? 2;
   const playHour = (settings?.match_play_hour as number | null) ?? 19;
 
   // Stages that belong to the current format — used to ignore stale round_schedules
@@ -231,29 +233,24 @@ export async function setRoundSchedule(params: {
   if (!dateStr) {
     if (round <= 1) return { ok: false, error: "The first round requires an explicit date." };
     const prevQ = tournamentId
-      ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type").eq("tournament_id", tournamentId).eq("stage", stage).eq("round", round - 1).maybeSingle()
-      : supabaseAdmin.from("round_schedules").select("play_at, schedule_type").is("tournament_id", null).eq("stage", stage).eq("round", round - 1).maybeSingle();
+      ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type, range_days").eq("tournament_id", tournamentId).eq("stage", stage).eq("round", round - 1).maybeSingle()
+      : supabaseAdmin.from("round_schedules").select("play_at, schedule_type, range_days").is("tournament_id", null).eq("stage", stage).eq("round", round - 1).maybeSingle();
     const { data: prev } = await prevQ;
     if (!prev) return { ok: false, error: "Cannot infer: previous round has no schedule set." };
     // Start when the previous round's window ends (its window length, not ours).
-    playAtMs = new Date(prev.play_at as string).getTime() + windowLenMs(prev.schedule_type as string);
+    playAtMs = new Date(prev.play_at as string).getTime() + windowLenMs(prev.schedule_type as string, prev.range_days as number | null);
   } else if (scheduleType === "specific") {
     playAtMs = parseDateTimeInZone(dateStr, tz);
   } else {
     playAtMs = parseDateInZone(dateStr, playHour, tz);
-    if (scheduleType === "weekly") {
-      // The week starts the day after the deadline day (deadline = end of the week).
-      if (zonedWeekday(tz, playAtMs) !== (deadlineDay + 1) % 7)
-        return { ok: false, error: "Weekly schedule must start the day after the deadline day." };
-    }
   }
 
   if (isNaN(playAtMs)) return { ok: false, error: "Invalid date." };
 
-  // Daily/weekly rounds are time *windows*, not a fixed kickoff, so anchor play_at to
-  // the start of the day (12:00 AM) in the admin's zone. Deadline is that day's/week's
-  // 11:59 PM. (Also re-anchors a chained "follow" whose inferred time carried a stale hour.)
-  if (scheduleType === "daily" || scheduleType === "weekly") {
+  // A range round is a time *window*, not a fixed kickoff, so anchor play_at to the
+  // start of the day (12:00 AM) in the admin's zone. Deadline is the range's last day
+  // at 11:59 PM. (Also re-anchors a chained "follow" whose inferred time carried a stale hour.)
+  if (scheduleType === "range") {
     const d = zonedDate(tz, playAtMs);
     playAtMs = wallToUtc(tz, d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0);
   }
@@ -261,8 +258,8 @@ export async function setRoundSchedule(params: {
   // Old play_at of this round — needed both to detect downstream chained rounds and
   // to exclude them from the ordering check below (the cascade will shift them).
   const oldQ = tournamentId
-    ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type").eq("tournament_id", tournamentId).eq("stage", stage).eq("round", round).maybeSingle()
-    : supabaseAdmin.from("round_schedules").select("play_at, schedule_type").is("tournament_id", null).eq("stage", stage).eq("round", round).maybeSingle();
+    ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type, range_days").eq("tournament_id", tournamentId).eq("stage", stage).eq("round", round).maybeSingle()
+    : supabaseAdmin.from("round_schedules").select("play_at, schedule_type, range_days").is("tournament_id", null).eq("stage", stage).eq("round", round).maybeSingle();
   const { data: oldSchedule } = await oldQ;
 
   // Enforce global ordering against every other scheduled round:
@@ -271,8 +268,8 @@ export async function setRoundSchedule(params: {
   //  • same phase, different stage (concurrent sub-brackets) → no constraint
   {
     const allQ = tournamentId
-      ? supabaseAdmin.from("round_schedules").select("stage, round, play_at, schedule_type").eq("tournament_id", tournamentId)
-      : supabaseAdmin.from("round_schedules").select("stage, round, play_at, schedule_type").is("tournament_id", null);
+      ? supabaseAdmin.from("round_schedules").select("stage, round, play_at, schedule_type, range_days").eq("tournament_id", tournamentId)
+      : supabaseAdmin.from("round_schedules").select("stage, round, play_at, schedule_type, range_days").is("tournament_id", null);
     const { data: others } = await allQ;
     const myPhase = phaseRank(stage);
 
@@ -280,21 +277,23 @@ export async function setRoundSchedule(params: {
     // so they must not block moving this round later.
     const chainedDownstream = new Set<number>();
     if (oldSchedule?.play_at) {
-      const sameStage = new Map<number, { ms: number; type: string }>();
+      const sameStage = new Map<number, { ms: number; type: string; rangeDays: number | null }>();
       for (const o of others ?? []) {
         if ((o.stage as string) === stage)
-          sameStage.set(o.round as number, { ms: new Date(o.play_at as string).getTime(), type: o.schedule_type as string });
+          sameStage.set(o.round as number, { ms: new Date(o.play_at as string).getTime(), type: o.schedule_type as string, rangeDays: o.range_days as number | null });
       }
       let prevOldMs = new Date(oldSchedule.play_at as string).getTime();
       let prevType = sameStage.get(round)?.type ?? scheduleType;
+      let prevRangeDays = sameStage.get(round)?.rangeDays ?? rangeDays;
       let r = round + 1;
       for (;;) {
         const nxt = sameStage.get(r);
         if (!nxt) break;
-        if (Math.abs(nxt.ms - inferredPlayAtMs(prevOldMs, prevType, nxt.type, tz)) >= 60_000) break;
+        if (Math.abs(nxt.ms - inferredPlayAtMs(prevOldMs, prevType, prevRangeDays, nxt.type, tz)) >= 60_000) break;
         chainedDownstream.add(r);
         prevOldMs = nxt.ms;
         prevType = nxt.type;
+        prevRangeDays = nxt.rangeDays;
         r++;
       }
     }
@@ -302,7 +301,7 @@ export async function setRoundSchedule(params: {
     // Order by each round's *window* (start .. start + window length), so a later
     // round can't start until the previous round's window has ended (and vice-versa).
     const myStartMs = windowStartMs(playAtMs, scheduleType, tz);
-    const myEndMs = myStartMs + windowLenMs(scheduleType);
+    const myEndMs = myStartMs + windowLenMs(scheduleType, rangeDays);
     for (const o of others ?? []) {
       const oStage = o.stage as string;
       const oRound = o.round as number;
@@ -310,7 +309,7 @@ export async function setRoundSchedule(params: {
       // Ignore stale rows from a different format (not part of the current stages).
       if (validStages.size > 0 && oStage !== stage && !validStages.has(oStage)) continue;
       const oStartMs = windowStartMs(new Date(o.play_at as string).getTime(), o.schedule_type as string, tz);
-      const oEndMs = oStartMs + windowLenMs(o.schedule_type as string);
+      const oEndMs = oStartMs + windowLenMs(o.schedule_type as string, o.range_days as number | null);
 
       if (oStage === stage) {
         if (oRound < round && oEndMs > myStartMs)
@@ -328,7 +327,7 @@ export async function setRoundSchedule(params: {
   }
 
   const playAt = new Date(playAtMs).toISOString();
-  const deadlineAt = computeDeadlineAt(playAtMs, scheduleType, deadlineDay, tz);
+  const deadlineAt = computeDeadlineAt(playAtMs, scheduleType, rangeDays, tz);
   const now = new Date().toISOString();
 
   // Delete then insert (upsert can't target partial indexes when tournament_id is null)
@@ -342,6 +341,7 @@ export async function setRoundSchedule(params: {
     stage,
     round,
     schedule_type: scheduleType,
+    range_days: rangeDays,
     play_at: playAt,
     deadline_at: deadlineAt,
     updated_at: now,
@@ -354,7 +354,7 @@ export async function setRoundSchedule(params: {
   // stage start re-opens the window at the new time instead of the stale one.
   //
   // Only a "specific" schedule is an actual fixed play time — those auto-confirm.
-  // "weekly"/"daily" define a *window*; the play_at is just the window start (and the
+  // "range" defines a *window*; the play_at is just the window start (and the
   // default play hour is only a recommendation), so we leave scheduled_at for the teams
   // to propose within the window rather than stamping a misleading "confirmed" time.
   if (round === 1) {
@@ -367,42 +367,53 @@ export async function setRoundSchedule(params: {
   // Reconcile per-match times with the round's window/type (handles admin-pinned
   // individual matches: shift on move, reset on type change, pin-all on specific).
   await syncRoundMatchPins(
-    stage, round, scheduleType, playAtMs,
+    stage, round, scheduleType, playAtMs, rangeDays,
     (oldSchedule?.schedule_type as string | undefined) ?? null,
     oldSchedule?.play_at ? new Date(oldSchedule.play_at as string).getTime() : null,
+    (oldSchedule?.range_days as number | null | undefined) ?? null,
     tz,
   );
 
-  // Cascade-update downstream rounds that were chained off this one
+  // Cascade-update downstream rounds that were chained off this one. "wasChained" must
+  // be tested against this round's OLD type/rangeDays (its window length before this
+  // edit) — using the new values here would misjudge chaining whenever only the range
+  // day count changed (type staying "range"), breaking the cascade for a plain resize.
   if (oldSchedule?.play_at) {
     let prevOldPlayAt = oldSchedule.play_at as string;
+    let prevOldType: string = (oldSchedule.schedule_type as string | undefined) ?? scheduleType;
+    let prevOldRangeDays: number | null = (oldSchedule.range_days as number | null | undefined) ?? rangeDays;
     let prevNewPlayAt = playAt;
-    let prevType: string = scheduleType;
+    let prevNewType: string = scheduleType;
+    let prevNewRangeDays: number | null = rangeDays;
     let nextRound = round + 1;
     while (true) {
       const nextQ = tournamentId
-        ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type").eq("tournament_id", tournamentId).eq("stage", stage).eq("round", nextRound).maybeSingle()
-        : supabaseAdmin.from("round_schedules").select("play_at, schedule_type").is("tournament_id", null).eq("stage", stage).eq("round", nextRound).maybeSingle();
+        ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type, range_days").eq("tournament_id", tournamentId).eq("stage", stage).eq("round", nextRound).maybeSingle()
+        : supabaseAdmin.from("round_schedules").select("play_at, schedule_type, range_days").is("tournament_id", null).eq("stage", stage).eq("round", nextRound).maybeSingle();
       const { data: next } = await nextQ;
       if (!next) break;
       const nextType = next.schedule_type as ScheduleType;
-      const oldInferredMs = inferredPlayAtMs(new Date(prevOldPlayAt).getTime(), prevType, nextType, tz);
+      const nextRangeDays = next.range_days as number | null;
+      const oldInferredMs = inferredPlayAtMs(new Date(prevOldPlayAt).getTime(), prevOldType, prevOldRangeDays, nextType, tz);
       const wasChained = Math.abs(new Date(next.play_at as string).getTime() - oldInferredMs) < 60_000;
       if (!wasChained) break;
       if (await isRoundLocked(stage, nextRound)) break;
-      const newPlayAtMs = inferredPlayAtMs(new Date(prevNewPlayAt).getTime(), prevType, nextType, tz);
+      const newPlayAtMs = inferredPlayAtMs(new Date(prevNewPlayAt).getTime(), prevNewType, prevNewRangeDays, nextType, tz);
       const newPlayAt = new Date(newPlayAtMs).toISOString();
-      const newDeadlineAt = computeDeadlineAt(newPlayAtMs, nextType, deadlineDay, tz);
+      const newDeadlineAt = computeDeadlineAt(newPlayAtMs, nextType, nextRangeDays, tz);
       const cascadeDelQ = tournamentId
         ? supabaseAdmin.from("round_schedules").delete().eq("tournament_id", tournamentId).eq("stage", stage).eq("round", nextRound)
         : supabaseAdmin.from("round_schedules").delete().is("tournament_id", null).eq("stage", stage).eq("round", nextRound);
       await cascadeDelQ;
-      await supabaseAdmin.from("round_schedules").insert({ tournament_id: tournamentId, stage, round: nextRound, schedule_type: nextType, play_at: newPlayAt, deadline_at: newDeadlineAt, updated_at: now });
+      await supabaseAdmin.from("round_schedules").insert({ tournament_id: tournamentId, stage, round: nextRound, schedule_type: nextType, range_days: nextRangeDays, play_at: newPlayAt, deadline_at: newDeadlineAt, updated_at: now });
       // Chained move: same type, shifted window → pinned matches shift by the delta.
-      await syncRoundMatchPins(stage, nextRound, nextType, newPlayAtMs, nextType, new Date(next.play_at as string).getTime(), tz);
+      await syncRoundMatchPins(stage, nextRound, nextType, newPlayAtMs, nextRangeDays, nextType, new Date(next.play_at as string).getTime(), nextRangeDays, tz);
       prevOldPlayAt = next.play_at as string;
+      prevOldType = nextType;
+      prevOldRangeDays = nextRangeDays;
       prevNewPlayAt = newPlayAt;
-      prevType = nextType;
+      prevNewType = nextType;
+      prevNewRangeDays = nextRangeDays;
       nextRound++;
     }
   }
@@ -431,8 +442,8 @@ export async function deleteRoundSchedule(params: {
 
   // Fetch play_at before deleting so we can cascade-check downstream rounds
   const fetchQ = tournamentId
-    ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type").eq("tournament_id", tournamentId).eq("stage", stage).eq("round", round).maybeSingle()
-    : supabaseAdmin.from("round_schedules").select("play_at, schedule_type").is("tournament_id", null).eq("stage", stage).eq("round", round).maybeSingle();
+    ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type, range_days").eq("tournament_id", tournamentId).eq("stage", stage).eq("round", round).maybeSingle()
+    : supabaseAdmin.from("round_schedules").select("play_at, schedule_type, range_days").is("tournament_id", null).eq("stage", stage).eq("round", round).maybeSingle();
   const { data: current } = await fetchQ;
 
   const delQ = tournamentId
@@ -449,15 +460,16 @@ export async function deleteRoundSchedule(params: {
   if (current?.play_at) {
     let prevPlayAt = current.play_at as string;
     let prevType = current.schedule_type as string;
+    let prevRangeDays = current.range_days as number | null;
     let nextRound = round + 1;
     while (true) {
       const nextQ = tournamentId
-        ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type").eq("tournament_id", tournamentId).eq("stage", stage).eq("round", nextRound).maybeSingle()
-        : supabaseAdmin.from("round_schedules").select("play_at, schedule_type").is("tournament_id", null).eq("stage", stage).eq("round", nextRound).maybeSingle();
+        ? supabaseAdmin.from("round_schedules").select("play_at, schedule_type, range_days").eq("tournament_id", tournamentId).eq("stage", stage).eq("round", nextRound).maybeSingle()
+        : supabaseAdmin.from("round_schedules").select("play_at, schedule_type, range_days").is("tournament_id", null).eq("stage", stage).eq("round", nextRound).maybeSingle();
       const { data: next } = await nextQ;
       if (!next) break;
 
-      const inferredMs = inferredPlayAtMs(new Date(prevPlayAt).getTime(), prevType, next.schedule_type as string, tz);
+      const inferredMs = inferredPlayAtMs(new Date(prevPlayAt).getTime(), prevType, prevRangeDays, next.schedule_type as string, tz);
       const isChained = Math.abs(new Date(next.play_at as string).getTime() - inferredMs) < 60_000;
       if (!isChained) break;
 
@@ -466,6 +478,7 @@ export async function deleteRoundSchedule(params: {
 
       prevPlayAt = next.play_at as string;
       prevType = next.schedule_type as string;
+      prevRangeDays = next.range_days as number | null;
       const cascadeQ = tournamentId
         ? supabaseAdmin.from("round_schedules").delete().eq("tournament_id", tournamentId).eq("stage", stage).eq("round", nextRound)
         : supabaseAdmin.from("round_schedules").delete().is("tournament_id", null).eq("stage", stage).eq("round", nextRound);

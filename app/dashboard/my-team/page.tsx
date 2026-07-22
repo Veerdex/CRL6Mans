@@ -494,15 +494,16 @@ export default async function MyTeamPage() {
   // Admin-set round schedules define the allowed scheduling window per round.
   const { data: roundScheduleRows } = seasonActive
     ? await (activeTournamentId
-        ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at").eq("tournament_id", activeTournamentId)
-        : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at").is("tournament_id", null))
-    : { data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string }[] };
-  const adminScheduleByRound: Record<string, { type: string; playAt: string; deadlineAt: string }> = {};
+        ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").eq("tournament_id", activeTournamentId)
+        : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").is("tournament_id", null))
+    : { data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string; range_days: number | null }[] };
+  const adminScheduleByRound: Record<string, { type: string; playAt: string; deadlineAt: string; rangeDays: number | null }> = {};
   for (const s of roundScheduleRows ?? []) {
     adminScheduleByRound[`${s.stage}:${s.round}`] = {
       type: s.schedule_type as string,
       playAt: s.play_at as string,
       deadlineAt: s.deadline_at as string,
+      rangeDays: s.range_days as number | null,
     };
   }
 
@@ -539,9 +540,10 @@ export default async function MyTeamPage() {
             scheduleAccepted: sd?.schedule_accepted ?? false,
             scheduleAdminRequired: sd?.schedule_admin_required ?? false,
             adminPinned:     sd?.admin_scheduled ?? false,
-            adminScheduleType: (adminSched?.type as "weekly" | "daily" | "specific" | undefined) ?? null,
+            adminScheduleType: (adminSched?.type as "range" | "specific" | undefined) ?? null,
             adminPlayAt:     adminSched?.playAt ?? null,
             adminDeadlineAt: adminSched?.deadlineAt ?? null,
+            adminRangeDays:  adminSched?.rangeDays ?? null,
             isTournament:    !!activeTournamentId,
             checkinDeadline: sd?.checkin_deadline ?? null,
             iCheckedIn:      isHome ? !!sd?.home_checked_in : !!sd?.away_checked_in,

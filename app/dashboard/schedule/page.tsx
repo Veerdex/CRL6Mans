@@ -22,8 +22,8 @@ export default async function SchedulePage() {
   // windows where teams still pick a time, so they must not be treated as locked-in.
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
   const { data: roundScheduleRows } = activeTournamentId
-    ? await supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at").eq("tournament_id", activeTournamentId).order("stage").order("round")
-    : await supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at").is("tournament_id", null).order("stage").order("round");
+    ? await supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, range_days").eq("tournament_id", activeTournamentId).order("stage").order("round")
+    : await supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, range_days").is("tournament_id", null).order("stage").order("round");
   const adminFixedRounds = new Set(
     (roundScheduleRows ?? []).filter((s) => s.schedule_type === "specific").map((s) => `${s.stage}:${s.round}`),
   );
@@ -33,6 +33,7 @@ export default async function SchedulePage() {
     stage: s.stage as string,
     round: s.round as number,
     scheduleType: s.schedule_type as string,
+    rangeDays: s.range_days as number | null,
     playAt: s.play_at as string,
   }));
 

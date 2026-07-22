@@ -15,9 +15,10 @@ export type SchedulableMatch = {
   scheduleAccepted: boolean;
   scheduleAdminRequired: boolean;
   adminPinned: boolean; // admin set a fixed time for this specific match
-  adminScheduleType: "weekly" | "daily" | "specific" | null;
+  adminScheduleType: "range" | "specific" | null;
   adminPlayAt: string | null;
   adminDeadlineAt: string | null;
+  adminRangeDays: number | null;
   isTournament: boolean;
   checkinDeadline: string | null;
   iCheckedIn: boolean;
@@ -27,15 +28,15 @@ export type SchedulableMatch = {
 
 const CHECKIN_WINDOW_MS = 10 * 60 * 1000;
 
-// Mirrors the server-side window check so we can warn before submitting. Daily and
-// weekly are just the stored [playAt, deadlineAt] instant range (zone-independent).
+// Mirrors the server-side window check so we can warn before submitting. A range is
+// just the stored [playAt, deadlineAt] instant range (zone-independent).
 function inAdminWindow(
   ms: number,
-  type: "weekly" | "daily" | "specific",
+  type: "range" | "specific",
   playAt: string,
   deadlineAt: string,
 ): boolean {
-  if (type === "daily" || type === "weekly") {
+  if (type === "range") {
     return ms >= new Date(playAt).getTime() && ms <= new Date(deadlineAt).getTime();
   }
   return ms === new Date(playAt).getTime();
@@ -83,12 +84,14 @@ function formatDateTime(iso: string): string {
 }
 
 function windowNote(match: SchedulableMatch): string | null {
-  const { adminScheduleType: t, adminPlayAt, adminDeadlineAt } = match;
+  const { adminScheduleType: t, adminPlayAt, adminDeadlineAt, adminRangeDays } = match;
   if (!t) return null;
   // An admin-pinned individual match is a fixed time, not a free window.
   if (match.adminPinned && match.scheduledAt) return `Admin scheduled this match for ${formatDateTime(match.scheduledAt)}.`;
-  if (t === "daily") return `Scheduled window: any time on ${formatLocalDate(adminPlayAt!)} (your local time).`;
-  if (t === "weekly") return `Scheduled window: any time ${formatWeekRange(adminPlayAt!, adminDeadlineAt!)} (your local time).`;
+  if (t === "range") {
+    if ((adminRangeDays ?? 1) <= 1) return `Scheduled window: any time on ${formatLocalDate(adminPlayAt!)} (your local time).`;
+    return `Scheduled window: any time ${formatWeekRange(adminPlayAt!, adminDeadlineAt!)} (your local time).`;
+  }
   return `Admin set this match for ${formatDateTime(adminPlayAt!)}.`;
 }
 
@@ -124,10 +127,10 @@ function MatchScheduleRow({
   const admin = match.adminScheduleType;
   // A "specific" round OR an admin-pinned individual match is a fixed, confirmed time.
   const adminLocked = admin === "specific" || match.adminPinned;
-  // Weekly/daily are *windows*: the admin only set a play window (the window-start time
+  // A range is a *window*: the admin only set a play window (the window-start time
   // and default play hour are recommendations, not a fixed time), so teams still pick a
   // time within it — unless this specific match was pinned by the admin.
-  const isWindow = (admin === "weekly" || admin === "daily") && !match.adminPinned;
+  const isWindow = admin === "range" && !match.adminPinned;
 
   const weProposed = match.proposedByTeamId === teamId;
   const theyProposed = !!match.proposedByTeamId && !weProposed;

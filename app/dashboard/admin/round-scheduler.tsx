@@ -47,41 +47,20 @@ function ZoneLabel() {
 }
 
 const SCHEDULE_TYPE_LABELS: Record<ScheduleType, string> = {
-  weekly: "Weekly",
-  daily: "Daily",
+  range: "Range",
   specific: "Specific",
 };
+
+function scheduleTypeLabel(s: RoundScheduleRow): string {
+  if (s.scheduleType === "range") return `Range (${s.rangeDays ?? 1}d)`;
+  return SCHEDULE_TYPE_LABELS[s.scheduleType];
+}
 
 function playAtToInputStr(playAt: string, schedType: ScheduleType): string {
   const d = new Date(playAt); // local-zone fields
   const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   if (schedType === "specific") return `${date}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   return date;
-}
-
-// Weekly start-date options (the day after the deadline day), computed in the admin's
-// local zone so the saved date is read back in the same zone.
-function getWeekdayOptions(playDay: number, currentValue?: string): { label: string; value: string }[] {
-  const today = new Date();
-  const lastPlayDay = new Date(today);
-  lastPlayDay.setDate(today.getDate() - ((today.getDay() - playDay + 7) % 7));
-  lastPlayDay.setHours(0, 0, 0, 0);
-
-  const results: { label: string; value: string }[] = [];
-  for (let i = -4; i <= 20; i++) {
-    const d = new Date(lastPlayDay);
-    d.setDate(lastPlayDay.getDate() + i * 7);
-    const value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-    const label = d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
-    results.push({ value, label });
-  }
-  if (currentValue && !results.find((r) => r.value === currentValue)) {
-    const [y, m, dd] = currentValue.split("-").map(Number);
-    const d = new Date(y, m - 1, dd);
-    const label = d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
-    results.unshift({ value: currentValue, label });
-  }
-  return results;
 }
 
 
@@ -98,7 +77,6 @@ type Props = {
   lockedRounds: string[];  // "stage:round" strings
   matchesByRound: Record<string, RoundMatchInfo[]>;  // keyed "canonStage:round"
   playHour: number;
-  deadlineDay: number;
 };
 
 function namedRound(fromFinal: number, round: number, prefix = ""): string {
@@ -139,17 +117,16 @@ function getRoundLabel(stage: string, round: number, maxRound: number): string {
   return `Round ${round}`;
 }
 
-function windowLenMs(type: ScheduleType): number {
-  if (type === "daily") return 86_400_000;
-  if (type === "weekly") return 7 * 86_400_000;
+function windowLenMs(type: ScheduleType, rangeDays: number | null): number {
+  if (type === "range") return (rangeDays ?? 1) * 86_400_000;
   return 0; // specific
 }
 
 // The play time a "follow" would produce — must mirror setRoundSchedule: start when
-// the previous round's window ends, anchored to 12:00 AM (local zone) for daily/weekly.
-function inferredPlayAt(prevPlayAt: string, prevType: ScheduleType, nextType: ScheduleType): Date {
-  const ms = new Date(prevPlayAt).getTime() + windowLenMs(prevType);
-  if (nextType === "daily" || nextType === "weekly") {
+// the previous round's window ends, anchored to 12:00 AM (local zone) for a range.
+function inferredPlayAt(prevPlayAt: string, prevType: ScheduleType, prevRangeDays: number | null, nextType: ScheduleType): Date {
+  const ms = new Date(prevPlayAt).getTime() + windowLenMs(prevType, prevRangeDays);
+  if (nextType === "range") {
     const d = new Date(ms);
     d.setHours(0, 0, 0, 0); // local midnight
     return d;
@@ -265,7 +242,6 @@ function RoundRow({
   isLocked,
   prevSchedule,
   playHour,
-  deadlineDay,
   matches,
 }: {
   tournamentId: string | null;
@@ -276,12 +252,12 @@ function RoundRow({
   isLocked: boolean;
   prevSchedule: RoundScheduleRow | undefined;
   playHour: number;
-  deadlineDay: number;
   matches?: RoundMatchInfo[];
 }) {
   const label = getRoundLabel(stage, round, maxRound);
 
-  const [type, setType] = useState<ScheduleType>(schedule?.scheduleType ?? "weekly");
+  const [type, setType] = useState<ScheduleType>(schedule?.scheduleType ?? "range");
+  const [rangeDays, setRangeDays] = useState<number>(schedule?.rangeDays ?? 1);
   const [expanded, setExpanded] = useState(false);
 
   // Per-match scheduling is available once the round has a window set, the type is a
@@ -294,7 +270,7 @@ function RoundRow({
   const initialChain = canChain && !!schedule && !!prevSchedule
     ? Math.abs(
         new Date(schedule.playAt).getTime() -
-        inferredPlayAt(prevSchedule.playAt, prevSchedule.scheduleType, schedule.scheduleType).getTime()
+        inferredPlayAt(prevSchedule.playAt, prevSchedule.scheduleType, prevSchedule.rangeDays, schedule.scheduleType).getTime()
       ) < 60_000
     : false;
 
@@ -306,14 +282,16 @@ function RoundRow({
   const [err, setErr] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
 
-  const inferred = canChain && chain ? inferredPlayAt(prevSchedule!.playAt, prevSchedule!.scheduleType, type) : null;
+  const inferred = canChain && chain
+    ? inferredPlayAt(prevSchedule!.playAt, prevSchedule!.scheduleType, prevSchedule!.rangeDays, type)
+    : null;
 
   function flashSaved() {
     setSavedOk(true);
     setTimeout(() => setSavedOk(false), 2000);
   }
 
-  function doSave(opts: { useChain: boolean; date: string; schedType: ScheduleType }) {
+  function doSave(opts: { useChain: boolean; date: string; schedType: ScheduleType; days: number }) {
     setErr(null);
     startTransition(async () => {
       const res = await setRoundSchedule({
@@ -321,6 +299,7 @@ function RoundRow({
         stage,
         round,
         scheduleType: opts.schedType,
+        rangeDays: opts.schedType === "range" ? opts.days : null,
         dateStr: opts.useChain ? "" : opts.date,
         timeZone: browserTz(),
       });
@@ -345,8 +324,8 @@ function RoundRow({
       });
       return;
     }
-    if (chain) doSave({ useChain: true, date: "", schedType: next });
-    else if (dateStr && !formatChanged) doSave({ useChain: false, date: dateStr, schedType: next });
+    if (chain) doSave({ useChain: true, date: "", schedType: next, days: rangeDays });
+    else if (dateStr && !formatChanged) doSave({ useChain: false, date: dateStr, schedType: next, days: rangeDays });
   }
 
   function handleToggleChain() {
@@ -359,7 +338,7 @@ function RoundRow({
       });
     } else {
       setChain(true);
-      doSave({ useChain: true, date: "", schedType: type });
+      doSave({ useChain: true, date: "", schedType: type, days: rangeDays });
     }
   }
 
@@ -367,7 +346,14 @@ function RoundRow({
     setDateStr(val);
     setErr(null);
     if (!val) return;
-    doSave({ useChain: false, date: val, schedType: type });
+    doSave({ useChain: false, date: val, schedType: type, days: rangeDays });
+  }
+
+  function handleRangeDaysChange(days: number) {
+    setRangeDays(days);
+    setErr(null);
+    if (chain) doSave({ useChain: true, date: "", schedType: type, days });
+    else if (dateStr) doSave({ useChain: false, date: dateStr, schedType: type, days });
   }
 
   function handleClear() {
@@ -396,7 +382,7 @@ function RoundRow({
         </span>
         {schedule && (
           <span className="text-xs text-zinc-400">
-            {SCHEDULE_TYPE_LABELS[schedule.scheduleType]} ·{" "}
+            {scheduleTypeLabel(schedule)} ·{" "}
             <LocalTime iso={schedule.playAt} />
             {schedule.scheduleType !== "specific" && (
               <>{" → deadline "}<LocalTime iso={schedule.deadlineAt} /></>
@@ -414,7 +400,7 @@ function RoundRow({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
           <span className="text-sm font-medium text-zinc-300 w-36 shrink-0">{label}</span>
           <span className="text-xs text-zinc-500">
-            {SCHEDULE_TYPE_LABELS[schedule.scheduleType]} ·{" "}
+            {scheduleTypeLabel(schedule)} ·{" "}
             <LocalTime iso={schedule.playAt} className="text-zinc-400" />
             {schedule.scheduleType !== "specific" && (
               <>{" → deadline "}<LocalTime iso={schedule.deadlineAt} className="text-zinc-400" /></>
@@ -435,8 +421,7 @@ function RoundRow({
           className={`${inputBase} pr-7 appearance-none`}
           disabled={pending}
         >
-          <option value="weekly">Weekly</option>
-          <option value="daily">Daily</option>
+          <option value="range">Range</option>
           <option value="specific">Specific</option>
         </select>
 
@@ -467,36 +452,38 @@ function RoundRow({
           </div>
         )}
 
-        {/* Date input — hidden when follow is on */}
+        {/* Date input — hidden when follow is on (follow infers the start date) */}
         {!chain && (
           <div className="flex items-center gap-1.5">
-            {type === "weekly" ? (
-              <select
-                value={dateStr}
-                onChange={(e) => handleDateChange(e.target.value)}
-                className={`${inputBase} pr-7 appearance-none`}
-                disabled={pending}
-              >
-                <option value="">Pick a {["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][(deadlineDay + 1) % 7]}…</option>
-                {getWeekdayOptions((deadlineDay + 1) % 7, dateStr || undefined).map(({ value, label }) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            ) : (
-              <input
-                type={type === "specific" ? "datetime-local" : "date"}
-                value={dateStr}
-                onChange={(e) => handleDateChange(e.target.value)}
-                className={inputBase}
-                disabled={pending}
-              />
-            )}
-            {(type === "weekly" || type === "daily") && (
+            <input
+              type={type === "specific" ? "datetime-local" : "date"}
+              value={dateStr}
+              onChange={(e) => handleDateChange(e.target.value)}
+              className={inputBase}
+              disabled={pending}
+            />
+            {type === "range" && (
               <span className="flex items-center gap-1 text-[10px] text-zinc-600">
                 {playHour % 12 || 12}{playHour >= 12 ? "PM" : "AM"} <ZoneLabel />
               </span>
             )}
             {type === "specific" && <ZoneLabel />}
+          </div>
+        )}
+
+        {/* Range day-count — editable regardless of follow, since follow only infers the start date */}
+        {type === "range" && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-zinc-500">for</span>
+            <input
+              type="number"
+              min={1}
+              value={rangeDays}
+              onChange={(e) => handleRangeDaysChange(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              className={`${inputBase} w-16`}
+              disabled={pending}
+            />
+            <span className="text-xs text-zinc-500">day{rangeDays === 1 ? "" : "s"}</span>
           </div>
         )}
 
@@ -564,7 +551,6 @@ function CollapsibleSub({
   tournamentId: string | null;
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
-  deadlineDay: number;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -600,7 +586,6 @@ function SubSectionRows({
   tournamentId,
   matchesByRound,
   playHour,
-  deadlineDay,
 }: {
   sub: SubSection;
   scheduleByKey: Map<string, RoundScheduleRow>;
@@ -608,7 +593,6 @@ function SubSectionRows({
   tournamentId: string | null;
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
-  deadlineDay: number;
 }) {
   return (
     <div>
@@ -630,7 +614,6 @@ function SubSectionRows({
             prevSchedule={prevSchedule}
             matches={matchesByRound[key]}
             playHour={playHour}
-            deadlineDay={deadlineDay}
           />
         );
       })}
@@ -645,7 +628,6 @@ function GroupSection({
   tournamentId,
   matchesByRound,
   playHour,
-  deadlineDay,
 }: {
   group: SchedulingGroup;
   scheduleByKey: Map<string, RoundScheduleRow>;
@@ -653,13 +635,12 @@ function GroupSection({
   tournamentId: string | null;
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
-  deadlineDay: number;
 }) {
   const [open, setOpen] = useState(true);
   const hasSubHeaders = group.subs.length > 1;
   const totalRows = group.subs.reduce((n, s) => n + s.rows.length, 0);
 
-  const subProps = { scheduleByKey, lockedSet, tournamentId, matchesByRound, playHour, deadlineDay };
+  const subProps = { scheduleByKey, lockedSet, tournamentId, matchesByRound, playHour };
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
@@ -710,7 +691,6 @@ export function RoundScheduler({
   lockedRounds,
   matchesByRound,
   playHour,
-  deadlineDay,
 }: Props) {
   // Inputs derive their initial values from browser-local dates, which differ from the
   // server's zone — render after mount so SSR and the first client paint never mismatch.
@@ -762,7 +742,6 @@ export function RoundScheduler({
           tournamentId={tournamentId}
           matchesByRound={matchesByRound}
           playHour={playHour}
-          deadlineDay={deadlineDay}
         />
       ))}
     </div>
