@@ -8,7 +8,7 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY!
 );
 
-export type NotificationCategory = "tournament" | "draft" | "season";
+export type NotificationCategory = "tournament" | "draft" | "season" | "announcement";
 
 export type PushPayload = {
   title: string;

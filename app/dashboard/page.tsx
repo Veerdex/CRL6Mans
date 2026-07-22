@@ -9,6 +9,7 @@ import { getTeamSignupView, type TeamSignupView } from "./team-signup-data";
 import { PastEvents, presetLabel, type PastEvent } from "./past-events";
 import { LocalTime } from "./local-time";
 import { TrackerUpdateBanner } from "./tracker-update-banner";
+import { AnnouncementBanner } from "./announcement-banner";
 
 export default async function DashboardPage() {
   const cookieStore = await cookies();
@@ -21,7 +22,7 @@ export default async function DashboardPage() {
       .select("id, status, draft_entered, display_name, must_update_tracker")
       .eq("discord_id", session.userId)
       .single(),
-    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active").single(),
+    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, announcement_text").single(),
     supabaseAdmin
       .from("players")
       .select("id")
@@ -142,6 +143,8 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-bold text-white">Dashboard</h1>
         <p className="text-sm text-zinc-400 mt-1">Welcome back, {player?.display_name ?? session.username}</p>
       </div>
+
+      {settings?.announcement_text && <AnnouncementBanner text={settings.announcement_text} />}
 
       {player?.must_update_tracker && <TrackerUpdateBanner />}
 

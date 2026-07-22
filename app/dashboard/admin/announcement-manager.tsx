@@ -1,0 +1,111 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { DiscordMarkdownPreview } from "./discord-markdown-preview";
+import { postAnnouncement, clearAnnouncement } from "./announcement-actions";
+
+const SYNTAX_HINTS: Array<[string, string]> = [
+  ["**bold**", "Bold"],
+  ["*italic*", "Italic"],
+  ["__underline__", "Underline"],
+  ["~~strike~~", "Line through"],
+  ["`code`", "Code"],
+  ["||spoiler||", "Spoiler"],
+];
+
+export function AnnouncementManager({
+  initialText,
+  channelConfigured,
+  postedAt,
+}: {
+  initialText: string;
+  channelConfigured: boolean;
+  postedAt: string | null;
+}) {
+  const router = useRouter();
+  const [text, setText] = useState(initialText);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  function handlePost() {
+    setError(null);
+    setStatus(null);
+    start(async () => {
+      const res = await postAnnouncement(text);
+      if (res.error) setError(res.error);
+      else {
+        setStatus("Announcement posted.");
+        router.refresh();
+      }
+    });
+  }
+
+  function handleClear() {
+    setError(null);
+    setStatus(null);
+    start(async () => {
+      const res = await clearAnnouncement();
+      if (res.error) setError(res.error);
+      else {
+        setText("");
+        setStatus("Announcement cleared.");
+        router.refresh();
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      {!channelConfigured && (
+        <p className="text-xs text-amber-400/90 bg-amber-950/30 border border-amber-700/40 rounded-lg px-3 py-2">
+          No announcement channel configured yet — run <code className="font-mono">/setannouncement</code> in the target Discord channel to enable Discord posting. The home-page banner and push notification still work without it.
+        </p>
+      )}
+      {postedAt && (
+        <p className="text-xs text-zinc-500">Currently live since {new Date(postedAt).toLocaleString()}.</p>
+      )}
+      <div className="grid md:grid-cols-2 gap-5">
+        <div className="space-y-2">
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            rows={8}
+            placeholder="Write your announcement..."
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+          />
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {SYNTAX_HINTS.map(([syntax, label]) => (
+              <span key={syntax} className="text-xs text-zinc-500">
+                <code className="text-zinc-400">{syntax}</code> {label}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Discord Preview</p>
+          <DiscordMarkdownPreview text={text} />
+        </div>
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          onClick={handlePost}
+          disabled={pending || !text.trim()}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          {pending ? "Working…" : "Post Announcement"}
+        </button>
+        <button
+          onClick={handleClear}
+          disabled={pending || !initialText}
+          className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 border border-zinc-700 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
+        >
+          Clear Live Announcement
+        </button>
+        {status && <span className="text-xs text-emerald-400">{status}</span>}
+        {error && <span className="text-xs text-red-400">{error}</span>}
+      </div>
+    </div>
+  );
+}

@@ -51,6 +51,11 @@ const commands = [
     ...ADMIN_ONLY,
   },
   {
+    name: "setannouncement",
+    description: "Set the channel where league announcements are posted — run in the target channel (admin only)",
+    ...ADMIN_ONLY,
+  },
+  {
     name: "syncroles",
     description: "Create missing Discord roles and assign them to all players based on current DB state (admin only)",
     ...ADMIN_ONLY,

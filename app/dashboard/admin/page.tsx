@@ -32,6 +32,7 @@ import { ScheduleOverrideCard, type ScheduleOverrideCardData } from "./schedule-
 import { canonicalStage, stageName, STAGE_ORDER, expectedStageRounds, type RoundScheduleRow } from "./schedule-utils";
 import { WagersBalanceTable, type BalanceRow } from "./wagers-balance-table";
 import { WagersBulkForm } from "./wagers-bulk-form";
+import { AnnouncementManager } from "./announcement-manager";
 
 async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean; userIsDirector: boolean }) {
   const staff = await getStaffList();
@@ -61,7 +62,7 @@ export default async function AdminPage() {
 
   const [pending, { data: settings }, { count: enteredCount }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allPlayers }, { data: allMatchStages }] = await Promise.all([
     getAllPendingPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id").maybeSingle(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_posted_at").maybeSingle(),
     supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
@@ -165,6 +166,7 @@ export default async function AdminPage() {
     .order("created_at", { ascending: true });
 
   const discrepancyMatchIds = [...new Set((openDiscrepancyRows ?? []).map(r => r.match_id))];
+  const matchesUnderReviewCount = discrepancyMatchIds.length;
   const { data: discrepancyMatchRows } = discrepancyMatchIds.length
     ? await supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round").in("id", discrepancyMatchIds)
     : { data: [] as { id: string; home_team_id: string | null; away_team_id: string | null; stage: string | null; round: number | null }[] };
@@ -724,7 +726,7 @@ export default async function AdminPage() {
       {/* ── Players ── */}
       <CollapsibleSection
         title="Players"
-        badge={combinedPlayers.length}
+        value={combinedPlayers.length}
         defaultOpen={false}
         description="Every approved and banned player, with MMR, tracker links, staff role, and platform accounts. From here you can edit a player's data, kick or ban them, or reverse a ban — subject to the staff hierarchy."
       >
@@ -739,7 +741,7 @@ export default async function AdminPage() {
       {/* ── Team Slots (Director+) ── */}
       {userIsDirector && <CollapsibleSection
         title="Team Slots"
-        badge={(teamSlots ?? []).length}
+        value={(teamSlots ?? []).length}
         defaultOpen={false}
         description="Reserve and order the named team slots that a draft or auto-balance assigns players into, and download every uploaded team logo as one ZIP. Slots exist independently of whether a season is currently active."
       >
@@ -766,9 +768,10 @@ export default async function AdminPage() {
       {/* ── Match Reporting ── */}
       <CollapsibleSection
         title="Match Reporting"
-        badge={matchRows.length}
+        value={matchRows.length}
+        notification={matchesUnderReviewCount || undefined}
         defaultOpen={false}
-        description="Report scores for scheduled matches, including per-game replay uploads that get parsed for scoreboard stats. Only matches with both teams already assigned show up here."
+        description="Report scores for scheduled matches, including per-game replay uploads that get parsed for scoreboard stats. Only matches with both teams already assigned show up here. The grey count is matches waiting to be reported; the blue count is matches with a submitted replay awaiting identity review."
       >
         <MatchReporter matches={matchRows} />
       </CollapsibleSection>
@@ -776,7 +779,7 @@ export default async function AdminPage() {
       {/* ── Sub Requests ── */}
       <CollapsibleSection
         title="Sub Requests"
-        badge={subRequestCards.length}
+        notification={subRequestCards.length}
         defaultOpen={subRequestCards.length > 0}
         description="Substitution requests that a team escalated to admin review, typically because the opposing team didn't accept or reject in time. Review the out/sub player details and approve or deny each one."
       >
@@ -796,7 +799,7 @@ export default async function AdminPage() {
       {/* ── Registrations & Platform Claims ── */}
       <CollapsibleSection
         title="Registrations & Platform Claims"
-        badge={pending.length + platformClaimCards.length}
+        notification={pending.length + platformClaimCards.length}
         defaultOpen={pending.length > 0 || platformClaimCards.length > 0}
         description="New player sign-ups awaiting approval or rejection, plus platform account claims (Steam, Epic, console) awaiting verification. A player needs both an approved registration and, once enforcement is on, a verified account to fully participate."
       >
@@ -827,7 +830,7 @@ export default async function AdminPage() {
       {/* ── Profile Change Requests ── */}
       <CollapsibleSection
         title="Profile Change Requests"
-        badge={playerEditRequestCards.length}
+        notification={playerEditRequestCards.length}
         defaultOpen={playerEditRequestCards.length > 0}
         description="Player-submitted edits to their tracker URL or MMR values, shown alongside their current live values so you can compare before approving or rejecting. Nothing changes on the player's profile until you approve it."
       >
@@ -845,7 +848,7 @@ export default async function AdminPage() {
       {/* ── Verified Platform Accounts ── */}
       <CollapsibleSection
         title="Verified Platform Accounts"
-        badge={platformVerifiedCards.length}
+        value={platformVerifiedCards.length}
         defaultOpen={false}
         description="A read-only record of platform accounts that have already passed verification, along with who verified them, when, and by what method (OAuth, replay evidence, or manual admin review)."
       >
@@ -865,7 +868,7 @@ export default async function AdminPage() {
       {/* ── Identity Discrepancies (Director+ toggle, Moderator+ adjudication) ── */}
       <CollapsibleSection
         title="Identity Discrepancies"
-        badge={identityDiscrepancyCards.length}
+        notification={identityDiscrepancyCards.length}
         defaultOpen={identityDiscrepancyCards.length > 0}
         description="Flags cases where a submitted replay's platform account doesn't match the expected roster — wrong account, wrong team, or an unverifiable ID. Also houses the identity enforcement and join-gate toggles for directors."
       >
@@ -891,7 +894,7 @@ export default async function AdminPage() {
       {/* ── Schedule Approvals ── */}
       <CollapsibleSection
         title="Schedule Approvals"
-        badge={scheduleOverrideCards.length}
+        notification={scheduleOverrideCards.length}
         defaultOpen={scheduleOverrideCards.length > 0}
         description="Match times that both teams agreed on outside their normal scheduled window (day, week, or hour). Approve to lock the time in, or reject to send the teams back to propose another."
       >
@@ -916,11 +919,27 @@ export default async function AdminPage() {
       </AdminTabSection>
 
       <AdminTabSection tab={4}>
+      {/* ── Announcements (Director+) ── */}
+      {userIsDirector && (
+        <CollapsibleSection
+          title="Announcements"
+          value={settings?.announcement_text ? 1 : undefined}
+          defaultOpen={false}
+          description="Post a league-wide announcement — it shows at the top of every player's dashboard home, sends a push notification, and posts to the configured Discord channel (set via /setannouncement). There's no history; posting replaces whatever is currently live."
+        >
+          <AnnouncementManager
+            initialText={(settings?.announcement_text as string | null) ?? ""}
+            channelConfigured={!!settings?.announcement_channel_id}
+            postedAt={(settings?.announcement_posted_at as string | null) ?? null}
+          />
+        </CollapsibleSection>
+      )}
+
       {/* ── Scheduling (Director+, visible whenever a season is active) ── */}
       {userIsDirector && seasonActive && (
         <CollapsibleSection
           title="Scheduling"
-          badge={schedulingUnscheduledCount || undefined}
+          notification={schedulingUnscheduledCount || undefined}
           defaultOpen={schedulingUnscheduledCount > 0}
           description="Set the play window and deadline for each round of the active season, per stage. The badge counts rounds that don't have a schedule set yet."
         >
@@ -944,7 +963,7 @@ export default async function AdminPage() {
       {userIsDirector && (
         <CollapsibleSection
           title="Tournaments"
-          badge={(tournaments ?? []).filter((t: Tournament) => t.status === "scheduled" || t.status === "active").length}
+          value={(tournaments ?? []).filter((t: Tournament) => t.status === "scheduled" || t.status === "active").length}
           description="Create and launch standalone tournaments (separate from the main season), track their signup/draft/active phases, and browse the archive of completed seasons and tournaments."
         >
           <TournamentManager

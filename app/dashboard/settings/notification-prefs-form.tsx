@@ -26,6 +26,11 @@ const CATEGORIES: Category[] = [
     label: "Season",
     description: "Season start and end announcements",
   },
+  {
+    key: "announcement",
+    label: "Announcements",
+    description: "League-wide announcements posted by staff",
+  },
 ];
 
 export function NotificationPrefsForm({

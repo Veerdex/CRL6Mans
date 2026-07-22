@@ -1425,6 +1425,15 @@ async function setRulesChannel(userId: string, channelId: string) {
   return reply(`✅ Rules channel set to <#${channelId}>.`);
 }
 
+async function setAnnouncementChannel(userId: string, channelId: string) {
+  const denied = await adminGuard(userId);
+  if (denied) return denied;
+  const { error } = await supabaseAdmin.from("league_settings")
+    .update({ announcement_channel_id: channelId, updated_at: new Date().toISOString() }).not("id", "is", null);
+  if (error) return reply(`❌ DB error: ${error.message}`);
+  return reply(`✅ Announcement channel set to <#${channelId}>.`);
+}
+
 async function openRound(userId: string, roundOverride?: number) {
   const denied = await adminGuard(userId);
   if (denied) return denied;
@@ -2719,6 +2728,7 @@ export async function handleCommand(interaction: Interaction) {
     case "assignrole":        return assignRole(userId, String(opt(interaction, "user")), String(opt(interaction, "role")));
     case "removerole":        return removeRoleCmd(userId, String(opt(interaction, "user")), String(opt(interaction, "role")));
     case "setruleschannel":   return setRulesChannel(userId, interaction.channel_id ?? "");
+    case "setannouncement":   return setAnnouncementChannel(userId, interaction.channel_id ?? "");
     case "openround": {
       const w = opt(interaction, "round");
       return openRound(userId, w ? Number(w) : undefined);
