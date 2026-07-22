@@ -313,7 +313,7 @@ export async function withdrawPlatformAccount(
 
   const { data: account } = await supabaseAdmin
     .from("player_platform_accounts")
-    .select("id, verification_status")
+    .select("id, verification_status, claimed_verification_replay_path")
     .eq("id", accountId)
     .eq("player_id", player.id)
     .single();
@@ -325,10 +325,20 @@ export async function withdrawPlatformAccount(
 
   const { error } = await supabaseAdmin
     .from("player_platform_accounts")
-    .update({ verification_status: "withdrawn", updated_at: new Date().toISOString() })
+    .update({
+      verification_status: "withdrawn",
+      claimed_verification_replay_path: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", accountId);
 
   if (error) return { error: "Failed to withdraw claim." };
+
+  if (account.claimed_verification_replay_path) {
+    await supabaseAdmin.storage
+      .from("platform-verification-replays")
+      .remove([account.claimed_verification_replay_path]);
+  }
 
   await supabaseAdmin.from("player_platform_account_events").insert({
     account_id: accountId,

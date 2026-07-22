@@ -9,19 +9,16 @@ import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
 
-const VERIFICATION_METHODS = [
-  "steam_openid",
-  "epic_oauth",
-  "official_account_page",
-  "console_replay_network",
-  "admin_live",
-  "legacy_manual",
-] as const;
-type VerificationMethod = typeof VERIFICATION_METHODS[number];
-
-function isVerificationMethod(value: string): value is VerificationMethod {
-  return (VERIFICATION_METHODS as readonly string[]).includes(value);
-}
+// The verification-method label is audit metadata only — no code path branches
+// on it — so it's derived from the account's platform rather than collected
+// from the admin. See DEFAULT_METHOD_BY_PLATFORM in platform-account-claim-card.
+const DEFAULT_METHOD_BY_PLATFORM: Record<string, string> = {
+  steam: "legacy_manual",
+  epic: "official_account_page",
+  playstation: "console_replay_network",
+  xbox: "console_replay_network",
+  switch: "console_replay_network",
+};
 
 async function requireAdmin(): Promise<string> {
   const cookieStore = await cookies();
@@ -34,16 +31,11 @@ export async function verifyPlatformAccount(
   accountId: string,
   input: {
     platformAccountId: string;
-    verificationMethod: string;
     verifiedDisplayName: string;
     adminNote: string;
   }
 ): Promise<{ error?: string; ok?: boolean }> {
   const adminId = await requireAdmin();
-
-  if (!isVerificationMethod(input.verificationMethod)) {
-    return { error: "Unknown verification method." };
-  }
 
   const { data: account } = await supabaseAdmin
     .from("player_platform_accounts")
@@ -71,14 +63,16 @@ export async function verifyPlatformAccount(
     replaySha256 = createHash("sha256").update(bytes).digest("hex");
   }
 
+  const verificationMethod = DEFAULT_METHOD_BY_PLATFORM[account.platform] ?? "legacy_manual";
   const now = new Date().toISOString();
   const { error } = await supabaseAdmin
     .from("player_platform_accounts")
     .update({
       platform_account_id: platformAccountId,
       verification_status: "verified",
-      verification_method: input.verificationMethod,
+      verification_method: verificationMethod,
       verification_replay_sha256: replaySha256,
+      claimed_verification_replay_path: null,
       verified_display_name: input.verifiedDisplayName.trim() || null,
       verified_by: adminId,
       verified_at: now,
@@ -93,11 +87,20 @@ export async function verifyPlatformAccount(
     return { error: "Failed to verify claim." };
   }
 
+  // The SHA-256 recorded above is the permanent proof of what was verified;
+  // the raw replay serves no further purpose once an account is verified,
+  // so free the storage instead of retaining it indefinitely.
+  if (account.claimed_verification_replay_path) {
+    await supabaseAdmin.storage
+      .from("platform-verification-replays")
+      .remove([account.claimed_verification_replay_path]);
+  }
+
   await supabaseAdmin.from("player_platform_account_events").insert({
     account_id: accountId,
     event_type: "verified",
     actor: adminId,
-    detail_json: { platform: account.platform, platform_account_id: platformAccountId, method: input.verificationMethod },
+    detail_json: { platform: account.platform, platform_account_id: platformAccountId, method: verificationMethod },
   });
 
   revalidatePath("/dashboard/admin");
@@ -113,7 +116,7 @@ export async function rejectPlatformAccount(
 
   const { data: account } = await supabaseAdmin
     .from("player_platform_accounts")
-    .select("id, player_id, verification_status")
+    .select("id, player_id, verification_status, claimed_verification_replay_path")
     .eq("id", accountId)
     .single();
   if (!account) return { error: "Claim not found." };
@@ -123,9 +126,20 @@ export async function rejectPlatformAccount(
 
   const { error } = await supabaseAdmin
     .from("player_platform_accounts")
-    .update({ verification_status: "rejected", admin_note: adminNote.trim() || null, updated_at: new Date().toISOString() })
+    .update({
+      verification_status: "rejected",
+      admin_note: adminNote.trim() || null,
+      claimed_verification_replay_path: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", accountId);
   if (error) return { error: "Failed to reject claim." };
+
+  if (account.claimed_verification_replay_path) {
+    await supabaseAdmin.storage
+      .from("platform-verification-replays")
+      .remove([account.claimed_verification_replay_path]);
+  }
 
   await supabaseAdmin.from("player_platform_account_events").insert({
     account_id: accountId,

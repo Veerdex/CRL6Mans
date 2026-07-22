@@ -640,15 +640,32 @@ export default async function AdminPage() {
         )}
       </CollapsibleSection>
 
-      {/* ── Pending Registrations ── */}
-      <CollapsibleSection title="Pending Registrations" badge={pending.length} defaultOpen={pending.length > 0}>
-        {pending.length === 0 ? (
-          <p className="text-zinc-400 text-sm">No pending registrations.</p>
+      {/* ── Registrations & Platform Claims ── */}
+      <CollapsibleSection
+        title="Registrations & Platform Claims"
+        badge={pending.length + platformClaimCards.length}
+        defaultOpen={pending.length > 0 || platformClaimCards.length > 0}
+      >
+        {pending.length === 0 && platformClaimCards.length === 0 ? (
+          <p className="text-zinc-400 text-sm">No pending registrations or platform account claims.</p>
         ) : (
-          <div className="space-y-4">
-            {pending.map(player => (
-              <RegistrationCard key={player.id} player={player} />
-            ))}
+          <div className="space-y-6">
+            {pending.length > 0 && (
+              <div className="space-y-4">
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Pending Registrations</p>
+                {pending.map(player => (
+                  <RegistrationCard key={player.id} player={player} />
+                ))}
+              </div>
+            )}
+            {platformClaimCards.length > 0 && (
+              <div className="space-y-4">
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Platform Account Claims</p>
+                {platformClaimCards.map(claim => (
+                  <PlatformAccountClaimCard key={claim.id} claim={claim} />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </CollapsibleSection>
@@ -661,19 +678,6 @@ export default async function AdminPage() {
           <div className="space-y-4">
             {playerEditRequestCards.map(req => (
               <PlayerEditRequestCard key={req.id} request={req} />
-            ))}
-          </div>
-        )}
-      </CollapsibleSection>
-
-      {/* ── Platform Account Claims ── */}
-      <CollapsibleSection title="Platform Account Claims" badge={platformClaimCards.length} defaultOpen={platformClaimCards.length > 0}>
-        {platformClaimCards.length === 0 ? (
-          <p className="text-zinc-400 text-sm">No pending platform account claims.</p>
-        ) : (
-          <div className="space-y-4">
-            {platformClaimCards.map(claim => (
-              <PlatformAccountClaimCard key={claim.id} claim={claim} />
             ))}
           </div>
         )}

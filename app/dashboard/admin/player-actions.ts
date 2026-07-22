@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModerator, addRegisteredRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
 
 export type PlayerEditFields = {
   username: string;
@@ -71,7 +72,9 @@ export async function approvePlayerWithEdits(
 }
 
 export async function rejectPlayer(
-  id: string
+  id: string,
+  adminNote?: string,
+  cooldown?: RejectionCooldown
 ): Promise<{ error?: string; ok?: boolean }> {
   await assertAdmin();
   const { error } = await supabaseAdmin
@@ -80,6 +83,16 @@ export async function rejectPlayer(
     .eq("id", id)
     .eq("status", "pending");
   if (error) return { error: error.message };
+
+  if (cooldown) {
+    const cooldownResult = await kickForRejectionCooldown(
+      id,
+      adminNote?.trim() || "Registration rejected.",
+      cooldown
+    );
+    if (cooldownResult.error) return { error: `Registration rejected, but the cooldown failed: ${cooldownResult.error}` };
+  }
+
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard", "layout");
   return { ok: true };

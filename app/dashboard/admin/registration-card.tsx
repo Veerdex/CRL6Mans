@@ -8,6 +8,13 @@ interface Props {
   player: Player;
 }
 
+const COOLDOWN_OPTIONS: { value: "none" | "5m" | "1d" | "forever"; label: string }[] = [
+  { value: "none", label: "No cooldown" },
+  { value: "5m", label: "5 minutes" },
+  { value: "1d", label: "1 day" },
+  { value: "forever", label: "Forever" },
+];
+
 export function RegistrationCard({ player }: Props) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +25,8 @@ export function RegistrationCard({ player }: Props) {
   const [curr3v3, setCurr3v3]       = useState(player.current_3v3);
   const [peak2v2, setPeak2v2]       = useState(player.peak_2v2);
   const [curr2v2, setCurr2v2]       = useState(player.current_2v2);
+  const [note, setNote]             = useState("");
+  const [cooldown, setCooldown]     = useState<"none" | "5m" | "1d" | "forever">("none");
 
   function handleApprove() {
     setError(null);
@@ -34,7 +43,7 @@ export function RegistrationCard({ player }: Props) {
   function handleReject() {
     setError(null);
     startTransition(async () => {
-      const res = await rejectPlayer(player.id);
+      const res = await rejectPlayer(player.id, note, cooldown === "none" ? undefined : cooldown);
       if (res?.error) setError(res.error);
     });
   }
@@ -78,6 +87,41 @@ export function RegistrationCard({ player }: Props) {
           className="text-sm text-indigo-400 hover:underline">
           View tracker profile →
         </a>
+      </div>
+
+      {/* Rejection fields */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
+            Admin Note (optional — shown if rejected)
+          </label>
+          <input
+            type="text"
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Reason for rejection…"
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
+            Rejection Cooldown
+          </label>
+          <select
+            value={cooldown}
+            onChange={e => setCooldown(e.target.value as typeof cooldown)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          >
+            {COOLDOWN_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          {cooldown !== "none" && (
+            <p className="text-[10px] text-amber-400 mt-1">
+              Rejecting will block re-registration ({cooldown === "forever" ? "no auto-expiry" : `eligible again in ${cooldown === "5m" ? "5 minutes" : "1 day"}`}).
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Actions */}

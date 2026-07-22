@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { isCurrentlyKicked } from "@/app/lib/players";
 import { pushToAdmins } from "@/app/lib/push";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { sendDm, isGuildMember } from "@/app/lib/discord-api";
@@ -65,7 +66,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
   // Look up any existing registration so we can check status and fall back to its image
   const { data: existing } = await supabaseAdmin
     .from("players")
-    .select("status, college_image_url")
+    .select("status, college_image_url, kick_reason, kicked_until")
     .eq("discord_id", session.userId)
     .single();
 
@@ -75,6 +76,13 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
   }
   if (existing?.status === "pending") {
     return { error: "Your registration is already pending review." };
+  }
+  if (existing?.status === "rejected" && isCurrentlyKicked(existing.kick_reason, existing.kicked_until)) {
+    return {
+      error: existing.kick_reason
+        ? `You can't re-register yet: ${existing.kick_reason}`
+        : "You can't re-register yet. Please try again later.",
+    };
   }
 
   let collegeImageUrl: string;

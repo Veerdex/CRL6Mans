@@ -32,29 +32,11 @@ const PLATFORM_LABELS: Record<PlatformAccountClaimCardData["platform"], string> 
   switch: "Nintendo Switch",
 };
 
-const DEFAULT_METHOD_BY_PLATFORM: Record<PlatformAccountClaimCardData["platform"], string> = {
-  steam: "legacy_manual",
-  epic: "official_account_page",
-  playstation: "console_replay_network",
-  xbox: "console_replay_network",
-  switch: "console_replay_network",
-};
-
-const METHOD_LABELS: Record<string, string> = {
-  steam_openid: "Steam OpenID",
-  epic_oauth: "Epic OAuth",
-  official_account_page: "Official account page (manual)",
-  console_replay_network: "Console verification replay",
-  admin_live: "Admin observed live",
-  legacy_manual: "Manual review",
-};
-
 export function PlatformAccountClaimCard({ claim }: { claim: PlatformAccountClaimCardData }) {
   const router = useRouter();
   const isConsole = claim.platform === "playstation" || claim.platform === "xbox" || claim.platform === "switch";
 
   const [platformAccountId, setPlatformAccountId] = useState(claim.platformAccountId ?? "");
-  const [method, setMethod] = useState(DEFAULT_METHOD_BY_PLATFORM[claim.platform]);
   const [verifiedDisplayName, setVerifiedDisplayName] = useState(claim.claimedDisplayName ?? "");
   const [note, setNote] = useState("");
   const [cooldown, setCooldown] = useState<"none" | "5m" | "1d" | "forever">("none");
@@ -66,7 +48,6 @@ export function PlatformAccountClaimCard({ claim }: { claim: PlatformAccountClai
     startTransition(async () => {
       const res = await verifyPlatformAccount(claim.id, {
         platformAccountId,
-        verificationMethod: method,
         verifiedDisplayName,
         adminNote: note,
       });
@@ -143,20 +124,6 @@ export function PlatformAccountClaimCard({ claim }: { claim: PlatformAccountClai
             placeholder={isConsole ? "Extracted numeric ID" : "Confirm or correct the claimed ID"}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
-        </div>
-        <div>
-          <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
-            Verification Method
-          </label>
-          <select
-            value={method}
-            onChange={e => setMethod(e.target.value)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          >
-            {Object.entries(METHOD_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
         </div>
         <div>
           <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
