@@ -562,7 +562,7 @@ export function WagersClient({
             }}
           />
         </div>
-      ) : !selectedMatch ? (
+      ) : !selectedMatch && !showMyBets && !showLeaderboard ? (
         <div className="p-6">
           <h1 className="text-2xl font-bold text-white mb-2">Wagers</h1>
           <p className="text-zinc-500">No matches available for betting right now.</p>
@@ -690,7 +690,7 @@ export function WagersClient({
               teams={teams}
               onSelectMatch={(id) => { setSelectedMatchId(id); setShowMyBets(false); setMobileTab("market"); }}
             />
-          ) : (
+          ) : selectedMatch ? (
             <MatchMarketView
               match={selectedMatch}
               teams={teams}
@@ -699,6 +699,10 @@ export function WagersClient({
               selections={betMode === "straight" ? straightSelections : parlaySelections}
               onSideClick={handleSideClick}
             />
+          ) : (
+            <div className="p-6">
+              <p className="text-zinc-500 text-sm">No matches available for betting right now.</p>
+            </div>
           )}
         </div>
 
