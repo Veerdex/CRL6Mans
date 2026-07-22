@@ -865,29 +865,29 @@ export default async function AdminPage() {
       </AdminTabSection>
 
       <AdminTabSection tab={1}>
-      {/* ── Identity Discrepancies (Director+ toggle, Moderator+ adjudication) ── */}
-      <CollapsibleSection
-        title="Identity Discrepancies"
-        notification={identityDiscrepancyCards.length}
-        defaultOpen={identityDiscrepancyCards.length > 0}
-        description="Flags cases where a submitted replay's platform account doesn't match the expected roster — wrong account, wrong team, or an unverifiable ID. Also houses the identity enforcement and join-gate toggles for directors."
-      >
-        {userIsDirector && (
+      {/* ── Identity Discrepancies (Director+) ── */}
+      {userIsDirector && (
+        <CollapsibleSection
+          title="Identity Discrepancies"
+          notification={identityDiscrepancyCards.length}
+          defaultOpen={identityDiscrepancyCards.length > 0}
+          description="Flags cases where a submitted replay's platform account doesn't match the expected roster — wrong account, wrong team, or an unverifiable ID. Also houses the identity enforcement and join-gate toggles."
+        >
           <div className="mb-4 space-y-2">
             <IdentityEnforcementToggle initialEnabled={identityEnforcementEnabled} />
             <JoinGateToggle initialEnabled={joinGateEnabled} />
           </div>
-        )}
-        {identityDiscrepancyCards.length === 0 ? (
-          <p className="text-zinc-400 text-sm">No open identity discrepancies.</p>
-        ) : (
-          <div className="space-y-4">
-            {identityDiscrepancyCards.map(discrepancy => (
-              <IdentityDiscrepancyCard key={discrepancy.id} discrepancy={discrepancy} />
-            ))}
-          </div>
-        )}
-      </CollapsibleSection>
+          {identityDiscrepancyCards.length === 0 ? (
+            <p className="text-zinc-400 text-sm">No open identity discrepancies.</p>
+          ) : (
+            <div className="space-y-4">
+              {identityDiscrepancyCards.map(discrepancy => (
+                <IdentityDiscrepancyCard key={discrepancy.id} discrepancy={discrepancy} />
+              ))}
+            </div>
+          )}
+        </CollapsibleSection>
+      )}
       </AdminTabSection>
 
       <AdminTabSection tab={2}>
@@ -954,6 +954,7 @@ export default async function AdminPage() {
               lockedRounds={[...lockedRoundKeys]}
               matchesByRound={matchesByRound}
               playHour={(settings?.match_play_hour as number | null) ?? 19}
+              matchDeadlineDay={(settings?.match_deadline_day as number | null) ?? 2}
               round1ManualStartPending={!!settings?.round1_manual_start_pending}
             />
           )}

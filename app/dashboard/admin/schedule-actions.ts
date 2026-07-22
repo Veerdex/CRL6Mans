@@ -54,23 +54,23 @@ function computeDeadlineAt(
 // detection matches storage.
 function inferredPlayAtMs(prevMs: number, prevType: string, prevRangeDays: number | null, nextType: string, tz: string): number {
   const ms = prevMs + windowLenMs(prevType, prevRangeDays);
-  if (nextType === "range") {
+  if (nextType !== "specific") {
     const d = zonedDate(tz, ms);
     return wallToUtc(tz, d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0);
   }
   return ms;
 }
 
-// How long a round occupies, so later rounds can't overlap it. A range fills its
-// day count, and a specific time is an instant (no window).
+// How long a round occupies, so later rounds can't overlap it. A window type (range
+// or weekly) fills its day count, and a specific time is an instant (no window).
 function windowLenMs(type: string, rangeDays: number | null): number {
-  if (type === "range") return (rangeDays ?? 1) * 86_400_000;
+  if (type !== "specific") return (rangeDays ?? 1) * 86_400_000;
   return 0; // specific
 }
 
-// Start of a round's window: a range window begins at 12:00 AM of the play day.
+// Start of a round's window: a window type begins at 12:00 AM of the play day.
 function windowStartMs(playMs: number, type: string, tz: string): number {
-  if (type === "range") {
+  if (type !== "specific") {
     const d = zonedDate(tz, playMs);
     return wallToUtc(tz, d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0);
   }
@@ -206,7 +206,9 @@ export async function setRoundSchedule(params: {
   await verifyAdmin();
 
   const { tournamentId, stage, round, scheduleType, dateStr } = params;
-  const rangeDays = scheduleType === "range" ? Math.max(1, Math.floor(params.rangeDays ?? 1)) : null;
+  const rangeDays = scheduleType === "range" ? Math.max(1, Math.floor(params.rangeDays ?? 1))
+    : scheduleType === "weekly" ? 7
+    : null;
   const tz = params.timeZone || FALLBACK_TZ;
 
   if (await isRoundLocked(stage, round)) {
@@ -215,9 +217,27 @@ export async function setRoundSchedule(params: {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("match_play_hour, season_format, num_teams")
+    .select("match_play_hour, match_deadline_day, season_format, num_teams")
     .single();
   const playHour = (settings?.match_play_hour as number | null) ?? 19;
+
+  // A weekly round's start day is anchored to the league's standard weekly cadence —
+  // it must fall the day after the configured match deadline day (e.g. deadline
+  // Tuesday → weekly rounds start Wednesday). Only checked for an explicit date;
+  // a chained ("Follow") start is trusted since it derives from the prior round.
+  if (scheduleType === "weekly" && dateStr) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    const deadlineDay = (settings?.match_deadline_day as number | null) ?? 2;
+    const requiredWeekday = (deadlineDay + 1) % 7;
+    if (weekday !== requiredWeekday) {
+      const names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      return {
+        ok: false,
+        error: `Weekly rounds must start on ${names[requiredWeekday]} — the day after the match deadline day (${names[deadlineDay]}).`,
+      };
+    }
+  }
 
   // Stages that belong to the current format — used to ignore stale round_schedules
   // rows left over from a previously-configured format when checking ordering.
@@ -247,10 +267,11 @@ export async function setRoundSchedule(params: {
 
   if (isNaN(playAtMs)) return { ok: false, error: "Invalid date." };
 
-  // A range round is a time *window*, not a fixed kickoff, so anchor play_at to the
-  // start of the day (12:00 AM) in the admin's zone. Deadline is the range's last day
-  // at 11:59 PM. (Also re-anchors a chained "follow" whose inferred time carried a stale hour.)
-  if (scheduleType === "range") {
+  // A window round (range or weekly) is a time *window*, not a fixed kickoff, so anchor
+  // play_at to the start of the day (12:00 AM) in the admin's zone. Deadline is the
+  // window's last day at 11:59 PM. (Also re-anchors a chained "follow" whose inferred
+  // time carried a stale hour.)
+  if (scheduleType !== "specific") {
     const d = zonedDate(tz, playAtMs);
     playAtMs = wallToUtc(tz, d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0);
   }

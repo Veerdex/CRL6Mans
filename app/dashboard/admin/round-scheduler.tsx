@@ -49,10 +49,14 @@ function ZoneLabel() {
 const SCHEDULE_TYPE_LABELS: Record<ScheduleType, string> = {
   range: "Range",
   specific: "Specific",
+  weekly: "Weekly",
 };
+
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 function scheduleTypeLabel(s: RoundScheduleRow): string {
   if (s.scheduleType === "range") return `Range (${s.rangeDays ?? 1}d)`;
+  if (s.scheduleType === "weekly") return "Weekly (7d)";
   return SCHEDULE_TYPE_LABELS[s.scheduleType];
 }
 
@@ -77,6 +81,7 @@ type Props = {
   lockedRounds: string[];  // "stage:round" strings
   matchesByRound: Record<string, RoundMatchInfo[]>;  // keyed "canonStage:round"
   playHour: number;
+  matchDeadlineDay: number;
   round1ManualStartPending: boolean;
 };
 
@@ -119,20 +124,37 @@ function getRoundLabel(stage: string, round: number, maxRound: number): string {
 }
 
 function windowLenMs(type: ScheduleType, rangeDays: number | null): number {
-  if (type === "range") return (rangeDays ?? 1) * 86_400_000;
+  if (type !== "specific") return (rangeDays ?? 1) * 86_400_000;
   return 0; // specific
 }
 
 // The play time a "follow" would produce — must mirror setRoundSchedule: start when
-// the previous round's window ends, anchored to 12:00 AM (local zone) for a range.
+// the previous round's window ends, anchored to 12:00 AM (local zone) for a window type.
 function inferredPlayAt(prevPlayAt: string, prevType: ScheduleType, prevRangeDays: number | null, nextType: ScheduleType): Date {
   const ms = new Date(prevPlayAt).getTime() + windowLenMs(prevType, prevRangeDays);
-  if (nextType === "range") {
+  if (nextType !== "specific") {
     const d = new Date(ms);
     d.setHours(0, 0, 0, 0); // local midnight
     return d;
   }
   return new Date(ms);
+}
+
+// Weekday (0=Sunday) a weekly round must start on, given the league's match deadline day.
+function requiredWeeklyWeekday(matchDeadlineDay: number): number {
+  return (matchDeadlineDay + 1) % 7;
+}
+
+function weekdayOfDateStr(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+// Nearest date (browser-local) on/after `from` that falls on `targetWeekday`, as YYYY-MM-DD.
+function nearestWeekdayOnOrAfter(from: Date, targetWeekday: number): string {
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  d.setDate(d.getDate() + ((targetWeekday - d.getDay() + 7) % 7));
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 // ── Per-match scheduling (expanded round) ───────────────────────────────────────
@@ -243,6 +265,7 @@ function RoundRow({
   isLocked,
   prevSchedule,
   playHour,
+  matchDeadlineDay,
   matches,
   isSeasonOpener,
   manualStartPending,
@@ -255,11 +278,13 @@ function RoundRow({
   isLocked: boolean;
   prevSchedule: RoundScheduleRow | undefined;
   playHour: number;
+  matchDeadlineDay: number;
   matches?: RoundMatchInfo[];
   isSeasonOpener: boolean;
   manualStartPending: boolean;
 }) {
   const label = getRoundLabel(stage, round, maxRound);
+  const requiredWeekday = requiredWeeklyWeekday(matchDeadlineDay);
 
   const [type, setType] = useState<ScheduleType>(schedule?.scheduleType ?? "range");
   const [rangeDays, setRangeDays] = useState<number>(schedule?.rangeDays ?? 1);
@@ -318,7 +343,7 @@ function RoundRow({
         stage,
         round,
         scheduleType: opts.schedType,
-        rangeDays: opts.schedType === "range" ? opts.days : null,
+        rangeDays: opts.schedType === "range" ? opts.days : opts.schedType === "weekly" ? 7 : null,
         dateStr: opts.useChain ? "" : opts.date,
         timeZone: browserTz(),
       });
@@ -328,6 +353,13 @@ function RoundRow({
         if (opts.useChain) setChain(false);
       }
     });
+  }
+
+  // Weekly rounds must start the day after the league's match deadline day (e.g.
+  // deadline Tuesday → weekly starts Wednesday). Returns an error message, or null if OK.
+  function weeklyDateError(val: string): string | null {
+    if (weekdayOfDateStr(val) === requiredWeekday) return null;
+    return `Weekly rounds must start on ${WEEKDAY_NAMES[requiredWeekday]} — the day after the match deadline day (${WEEKDAY_NAMES[matchDeadlineDay]}).`;
   }
 
   function handleTypeChange(next: ScheduleType) {
@@ -344,7 +376,13 @@ function RoundRow({
       return;
     }
     if (chain) doSave({ useChain: true, date: "", schedType: next, days: rangeDays });
-    else if (dateStr && !formatChanged) doSave({ useChain: false, date: dateStr, schedType: next, days: rangeDays });
+    else if (dateStr && !formatChanged) {
+      if (next === "weekly") {
+        const werr = weeklyDateError(dateStr);
+        if (werr) { setErr(werr); return; }
+      }
+      doSave({ useChain: false, date: dateStr, schedType: next, days: rangeDays });
+    }
   }
 
   function handleToggleChain() {
@@ -365,6 +403,10 @@ function RoundRow({
     setDateStr(val);
     setErr(null);
     if (!val) return;
+    if (type === "weekly") {
+      const werr = weeklyDateError(val);
+      if (werr) { setErr(werr); return; }
+    }
     doSave({ useChain: false, date: val, schedType: type, days: rangeDays });
   }
 
@@ -444,6 +486,7 @@ function RoundRow({
           disabled={pending}
         >
           <option value="range">Range</option>
+          <option value="weekly">Weekly</option>
           <option value="specific">Specific</option>
         </select>
 
@@ -480,6 +523,8 @@ function RoundRow({
             <input
               type={type === "specific" ? "datetime-local" : "date"}
               value={dateStr}
+              min={type === "weekly" ? nearestWeekdayOnOrAfter(new Date(), requiredWeekday) : undefined}
+              step={type === "weekly" ? 7 : undefined}
               onChange={(e) => handleDateChange(e.target.value)}
               className={inputBase}
               disabled={pending}
@@ -487,6 +532,11 @@ function RoundRow({
             {type === "range" && (
               <span className="flex items-center gap-1 text-[10px] text-zinc-600">
                 {playHour % 12 || 12}{playHour >= 12 ? "PM" : "AM"} <ZoneLabel />
+              </span>
+            )}
+            {type === "weekly" && (
+              <span className="flex items-center gap-1 text-[10px] text-zinc-600">
+                {WEEKDAY_NAMES[requiredWeekday]}s only, {playHour % 12 || 12}{playHour >= 12 ? "PM" : "AM"} <ZoneLabel />
               </span>
             )}
             {type === "specific" && <ZoneLabel />}
@@ -507,6 +557,9 @@ function RoundRow({
             />
             <span className="text-xs text-zinc-500">day{rangeDays === 1 ? "" : "s"}</span>
           </div>
+        )}
+        {type === "weekly" && (
+          <span className="text-xs text-zinc-500">for 7 days</span>
         )}
 
         {/* Status indicators */}
@@ -601,6 +654,7 @@ function CollapsibleSub({
   tournamentId: string | null;
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
+  matchDeadlineDay: number;
   firstStage: string | undefined;
   round1ManualStartPending: boolean;
 }) {
@@ -638,6 +692,7 @@ function SubSectionRows({
   tournamentId,
   matchesByRound,
   playHour,
+  matchDeadlineDay,
   firstStage,
   round1ManualStartPending,
 }: {
@@ -647,6 +702,7 @@ function SubSectionRows({
   tournamentId: string | null;
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
+  matchDeadlineDay: number;
   firstStage: string | undefined;
   round1ManualStartPending: boolean;
 }) {
@@ -670,6 +726,7 @@ function SubSectionRows({
             prevSchedule={prevSchedule}
             matches={matchesByRound[key]}
             playHour={playHour}
+            matchDeadlineDay={matchDeadlineDay}
             isSeasonOpener={stage === firstStage && round === 1}
             manualStartPending={round1ManualStartPending}
           />
@@ -686,6 +743,7 @@ function GroupSection({
   tournamentId,
   matchesByRound,
   playHour,
+  matchDeadlineDay,
   firstStage,
   round1ManualStartPending,
 }: {
@@ -695,6 +753,7 @@ function GroupSection({
   tournamentId: string | null;
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
+  matchDeadlineDay: number;
   firstStage: string | undefined;
   round1ManualStartPending: boolean;
 }) {
@@ -702,7 +761,7 @@ function GroupSection({
   const hasSubHeaders = group.subs.length > 1;
   const totalRows = group.subs.reduce((n, s) => n + s.rows.length, 0);
 
-  const subProps = { scheduleByKey, lockedSet, tournamentId, matchesByRound, playHour, firstStage, round1ManualStartPending };
+  const subProps = { scheduleByKey, lockedSet, tournamentId, matchesByRound, playHour, matchDeadlineDay, firstStage, round1ManualStartPending };
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
@@ -753,6 +812,7 @@ export function RoundScheduler({
   lockedRounds,
   matchesByRound,
   playHour,
+  matchDeadlineDay,
   round1ManualStartPending,
 }: Props) {
   // Inputs derive their initial values from browser-local dates, which differ from the
@@ -809,6 +869,7 @@ export function RoundScheduler({
           tournamentId={tournamentId}
           matchesByRound={matchesByRound}
           playHour={playHour}
+          matchDeadlineDay={matchDeadlineDay}
           firstStage={firstStage}
           round1ManualStartPending={round1ManualStartPending}
         />

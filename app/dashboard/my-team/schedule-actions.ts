@@ -28,11 +28,11 @@ async function getAdminSchedule(stage: string, round: number): Promise<AdminSche
     : null;
 }
 
-// Whether a proposed time falls inside the admin's allowed window. A range is just
-// the stored [playAt, deadlineAt] instant range (zone-independent); specific is the
-// exact scheduled time.
+// Whether a proposed time falls inside the admin's allowed window. A window type
+// (range or weekly) is just the stored [playAt, deadlineAt] instant range
+// (zone-independent); specific is the exact scheduled time.
 function isInWindow(ms: number, sched: AdminSchedule): boolean {
-  if (sched.type === "range") {
+  if (sched.type !== "specific") {
     return ms >= new Date(sched.playAt).getTime() && ms <= new Date(sched.deadlineAt).getTime();
   }
   return ms === new Date(sched.playAt).getTime();
