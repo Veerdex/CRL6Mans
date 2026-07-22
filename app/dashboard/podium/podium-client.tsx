@@ -13,6 +13,10 @@ type Piece = {
   id: number; color: string; left: number; delay: number;
   duration: number; size: number; rotate: number; circle: boolean;
 };
+type Ember = {
+  left: number; bottom: number; size: number; delay: number;
+  duration: number; drift: number; bright: boolean;
+};
 
 export type RichPlayer = {
   id: string | null;
@@ -126,6 +130,49 @@ function ConfettiBurst() {
   );
 }
 
+// Continuous sparks rising from the champion logo — unlike the one-shot
+// confetti burst, this loops forever so the trophy always feels "alive".
+function EmberParticles() {
+  const [embers, setEmbers] = useState<Ember[]>([]);
+  useEffect(() => {
+    setEmbers(
+      Array.from({ length: 28 }, () => ({
+        left: 8 + Math.random() * 84,
+        bottom: Math.random() * 18,
+        size: 2 + Math.random() * 4,
+        delay: Math.random() * 4.5,
+        duration: 2.75 + Math.random() * 2.5,
+        drift: (Math.random() - 0.5) * 70,
+        bright: Math.random() > 0.7,
+      }))
+    );
+  }, []);
+
+  return (
+    <div className="absolute inset-0 z-20 pointer-events-none overflow-visible">
+      {embers.map((e, i) => (
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            left: `${e.left}%`,
+            bottom: `${e.bottom}%`,
+            width: e.size,
+            height: e.size,
+            borderRadius: "50%",
+            backgroundColor: e.bright ? "#fff7ed" : "#fbbf24",
+            boxShadow: e.bright
+              ? "0 0 7px 2px rgba(255,255,255,0.9)"
+              : "0 0 9px 3px rgba(251,191,36,0.85)",
+            "--drift": `${e.drift}px`,
+            animation: `ember-rise ${e.duration}s ${e.delay}s ease-out infinite`,
+          } as React.CSSProperties}
+        />
+      ))}
+    </div>
+  );
+}
+
 function AccoladeRow({ a, index }: { a: Accolade; index: number }) {
   return (
     <div
@@ -231,7 +278,7 @@ export function PodiumClient({
             <p className="text-sm font-bold uppercase tracking-[0.25em] text-amber-400">Champion</p>
             <p className="text-3xl sm:text-5xl font-bold text-white">{champion}</p>
 
-            {/* Logo with pulsing glow halo */}
+            {/* Logo with pulsing glow halo + continuous ember particles */}
             <div className="relative flex items-center justify-center mt-2">
               <div
                 className="absolute rounded-3xl"
@@ -242,6 +289,16 @@ export function PodiumClient({
                   animation: "logo-glow-pulse 3s ease-in-out infinite",
                 }}
               />
+              <div
+                className="absolute rounded-3xl"
+                style={{
+                  inset: "-8px",
+                  background: "radial-gradient(circle, rgba(253,230,138,0.6) 0%, transparent 65%)",
+                  filter: "blur(10px)",
+                  animation: "logo-glow-flare 1.6s ease-in-out infinite",
+                }}
+              />
+              <EmberParticles />
               {championLogoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
