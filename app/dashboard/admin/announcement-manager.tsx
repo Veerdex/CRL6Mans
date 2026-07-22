@@ -3,7 +3,11 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DiscordMarkdownPreview } from "./discord-markdown-preview";
-import { postAnnouncement, clearAnnouncement } from "./announcement-actions";
+import { postAnnouncement, clearAnnouncement, checkAnnouncementMentions } from "./announcement-actions";
+
+type MentionCheck =
+  | { forText: string; annotated: string }
+  | { forText: string; error: string };
 
 const SYNTAX_HINTS: Array<[string, string]> = [
   ["**bold**", "Bold"],
@@ -30,6 +34,15 @@ export function AnnouncementManager({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [mentionCheck, setMentionCheck] = useState<MentionCheck | null>(null);
+  const [checkingMentions, setCheckingMentions] = useState(false);
+
+  async function handleCheckMentions() {
+    setCheckingMentions(true);
+    const res = await checkAnnouncementMentions(text);
+    setCheckingMentions(false);
+    setMentionCheck("error" in res ? { forText: text, error: res.error } : { forText: text, annotated: res.annotated });
+  }
 
   function handlePost() {
     setError(null);
@@ -89,8 +102,35 @@ export function AnnouncementManager({
           </div>
         </div>
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Discord Preview</p>
-          <DiscordMarkdownPreview text={text.trim() ? `@everyone\n${text}` : ""} />
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Discord Preview</p>
+            <button
+              type="button"
+              onClick={handleCheckMentions}
+              disabled={checkingMentions || !text.trim()}
+              className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 border border-zinc-700 text-zinc-300 rounded transition-colors"
+            >
+              {checkingMentions ? "Checking…" : "Check Mentions"}
+            </button>
+          </div>
+          <DiscordMarkdownPreview
+            text={
+              mentionCheck?.forText === text && "annotated" in mentionCheck
+                ? mentionCheck.annotated
+                : text.trim() ? `@everyone\n${text}` : ""
+            }
+          />
+          {mentionCheck?.forText === text && "error" in mentionCheck && (
+            <p className="text-xs text-red-400">{mentionCheck.error}</p>
+          )}
+          {mentionCheck && mentionCheck.forText !== text && (
+            <p className="text-xs text-zinc-500">Text changed since last check — click &ldquo;Check Mentions&rdquo; to re-verify.</p>
+          )}
+          {mentionCheck?.forText === text && "annotated" in mentionCheck && (
+            <p className="text-xs text-zinc-500">
+              <span className="text-emerald-400">green</span> will ping · <span className="text-amber-400">amber</span> fuzzy match, verify the name shown · <span className="text-zinc-400">grey</span> posts as plain text
+            </p>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-3 flex-wrap">

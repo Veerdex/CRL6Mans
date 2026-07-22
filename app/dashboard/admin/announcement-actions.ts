@@ -14,42 +14,115 @@ async function getSession() {
   return decrypt(cookieStore.get("session")?.value);
 }
 
-// Converts friendly @name / #channel references typed by the admin into
-// Discord's real mention syntax (<@id>, <@&id>, <#id>) so they actually ping.
-// @everyone / @here are left as literal text — Discord recognizes those directly.
-async function resolveMentions(text: string): Promise<string> {
+type AtResolution =
+  | { kind: "everyone" }
+  | { kind: "role"; id: string }
+  | { kind: "member"; id: string; exact: boolean; display: string }
+  | null;
+
+// Looks up every #channel and @name token against the guild once, so both
+// the real send path and the admin's on-demand mention check agree on what
+// resolves — an admin should never see "will ping" in one and not the other.
+async function resolveTokens(text: string): Promise<{
+  channelResolutions: Map<string, string | null>;
+  atResolutions: Map<string, AtResolution>;
+}> {
   const [roles, channels] = await Promise.all([getGuildRoles(), getGuildChannels()]);
 
-  let result = text.replace(/#([A-Za-z0-9_-]+)/g, (match, name: string) => {
-    const channel = channels.find(c => c.name.toLowerCase() === name.toLowerCase());
-    return channel ? `<#${channel.id}>` : match;
-  });
-
-  const tokens = new Set(result.match(/@[A-Za-z0-9_.-]+/g) ?? []);
-  const replacements = new Map<string, string>();
-
-  for (const token of tokens) {
+  const channelResolutions = new Map<string, string | null>();
+  for (const token of new Set(text.match(/#[A-Za-z0-9_-]+/g) ?? [])) {
     const name = token.slice(1);
-    if (name.toLowerCase() === "everyone" || name.toLowerCase() === "here") continue;
+    const channel = channels.find(c => c.name.toLowerCase() === name.toLowerCase());
+    channelResolutions.set(token, channel?.id ?? null);
+  }
+
+  const atResolutions = new Map<string, AtResolution>();
+  for (const token of new Set(text.match(/@[A-Za-z0-9_.-]+/g) ?? [])) {
+    const name = token.slice(1);
+    if (name.toLowerCase() === "everyone" || name.toLowerCase() === "here") {
+      atResolutions.set(token, { kind: "everyone" });
+      continue;
+    }
 
     const role = roles.find(r => r.name.toLowerCase() === name.toLowerCase());
     if (role) {
-      replacements.set(token, `<@&${role.id}>`);
+      atResolutions.set(token, { kind: "role", id: role.id });
       continue;
     }
 
     const matches = await searchGuildMembers(name, 5);
-    const exact = matches.find(m =>
+    const exactMatch = matches.find(m =>
       m.username.toLowerCase() === name.toLowerCase() ||
       m.globalName?.toLowerCase() === name.toLowerCase() ||
       m.nick?.toLowerCase() === name.toLowerCase(),
-    ) ?? matches[0] ?? null;
-    if (exact) replacements.set(token, `<@${exact.id}>`);
+    );
+    const chosen = exactMatch ?? matches[0] ?? null;
+    atResolutions.set(
+      token,
+      chosen
+        ? { kind: "member", id: chosen.id, exact: !!exactMatch, display: chosen.nick ?? chosen.globalName ?? chosen.username }
+        : null,
+    );
   }
 
-  result = result.replace(/@[A-Za-z0-9_.-]+/g, match => replacements.get(match) ?? match);
+  return { channelResolutions, atResolutions };
+}
+
+// Converts friendly @name / #channel references typed by the admin into
+// Discord's real mention syntax (<@id>, <@&id>, <#id>) so they actually ping.
+// @everyone / @here are left as literal text — Discord recognizes those directly.
+async function resolveMentions(text: string): Promise<string> {
+  const { channelResolutions, atResolutions } = await resolveTokens(text);
+
+  let result = text.replace(/#[A-Za-z0-9_-]+/g, match => {
+    const id = channelResolutions.get(match);
+    return id ? `<#${id}>` : match;
+  });
+
+  result = result.replace(/@[A-Za-z0-9_.-]+/g, match => {
+    const res = atResolutions.get(match);
+    if (!res || res.kind === "everyone") return match;
+    return res.kind === "role" ? `<@&${res.id}>` : `<@${res.id}>`;
+  });
 
   return result;
+}
+
+const MENTION_OK = "OK";
+const MENTION_AMBIGUOUS = "AM";
+const MENTION_FAIL = "NO";
+const MENTION_END = "";
+
+// On-demand, real-lookup preview: wraps each @/# token in a marker the
+// shared discord-markdown renderer understands, so the admin sees exactly
+// which tokens will actually ping vs. post as plain text — without a
+// lookup firing on every keystroke. Fuzzy member matches (no exact username/
+// nick/global-name hit) are shown as "will ping <resolved name>" rather than
+// green-lighting the typed name verbatim — a near-miss like @Veer could
+// resolve to a completely different person than the one typed.
+export async function checkAnnouncementMentions(text: string): Promise<{ annotated: string } | { error: string }> {
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
+  if (!(await isDirector(session.userId))) return { error: "Only Directors can post announcements." };
+
+  const withPrefix = text.trim() ? `@everyone\n${text}` : "";
+  const { channelResolutions, atResolutions } = await resolveTokens(withPrefix);
+
+  let annotated = withPrefix.replace(/#[A-Za-z0-9_-]+/g, match => {
+    const found = channelResolutions.get(match);
+    return `${found ? MENTION_OK : MENTION_FAIL}${match}${MENTION_END}`;
+  });
+
+  annotated = annotated.replace(/@[A-Za-z0-9_.-]+/g, match => {
+    const res = atResolutions.get(match);
+    if (!res) return `${MENTION_FAIL}${match}${MENTION_END}`;
+    if (res.kind === "member" && !res.exact) {
+      return `${MENTION_AMBIGUOUS}@${res.display}${MENTION_END}`;
+    }
+    return `${MENTION_OK}${match}${MENTION_END}`;
+  });
+
+  return { annotated };
 }
 
 function stripMarkdownForPush(text: string): string {

@@ -58,6 +58,54 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
       continue;
     }
 
+    const resolvedMention = rest.match(/^OK([^]*)/);
+    if (resolvedMention) {
+      flush();
+      nodes.push(
+        <span
+          key={k}
+          className="bg-emerald-500/25 text-emerald-300 rounded px-1 font-medium"
+          title="Resolves to a real Discord mention"
+        >
+          {resolvedMention[1]}
+        </span>,
+      );
+      i += resolvedMention[0].length;
+      continue;
+    }
+
+    const ambiguousMention = rest.match(/^AM([^]*)/);
+    if (ambiguousMention) {
+      flush();
+      nodes.push(
+        <span
+          key={k}
+          className="bg-amber-500/25 text-amber-300 rounded px-1 font-medium"
+          title="No exact match — Discord's fuzzy search picked the closest name; verify this is the intended person"
+        >
+          {ambiguousMention[1]}
+        </span>,
+      );
+      i += ambiguousMention[0].length;
+      continue;
+    }
+
+    const unresolvedMention = rest.match(/^NO([^]*)/);
+    if (unresolvedMention) {
+      flush();
+      nodes.push(
+        <span
+          key={k}
+          className="bg-zinc-700/40 text-zinc-400 rounded px-1"
+          title="No matching role, member, or channel — will post as plain text"
+        >
+          {unresolvedMention[1]}
+        </span>,
+      );
+      i += unresolvedMention[0].length;
+      continue;
+    }
+
     const url = rest.match(/^https?:\/\/[^\s<]+/);
     if (url) {
       let href = url[0];
