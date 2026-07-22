@@ -57,7 +57,7 @@ const commands = [
   },
   {
     name: "setmatchcategoryanchor",
-    description: "Place new match categories right after this category — omit to reset to default (bottom) (admin only)",
+    description: "Place new match categories after this one — omit to reset to bottom (admin only)",
     options: [
       { name: "category", description: "Existing category to anchor new match categories after", type: 7, channel_types: [4], required: false },
     ],
