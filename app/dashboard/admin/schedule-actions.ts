@@ -575,3 +575,28 @@ export async function clearMatchTime(matchId: string): Promise<{ ok: boolean; er
   revalidatePath("/dashboard/schedule");
   return { ok: true };
 }
+
+// Manually opens the season's opening round, which otherwise waits on this flag
+// (set by execStartSeason) rather than opening the instant its schedule is set —
+// giving the admin a chance to fix a bad round-1 schedule before it goes live.
+export async function startFirstRound(): Promise<{ ok: boolean; error?: string }> {
+  await verifyAdmin();
+
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings")
+    .select("round1_manual_start_pending")
+    .single();
+  if (!settings?.round1_manual_start_pending) {
+    return { ok: false, error: "Round 1 has already been started." };
+  }
+
+  await supabaseAdmin.from("league_settings")
+    .update({ round1_manual_start_pending: false, updated_at: new Date().toISOString() })
+    .not("id", "is", null);
+
+  await openReadyMatchChannels().catch(() => {});
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/season");
+  return { ok: true };
+}

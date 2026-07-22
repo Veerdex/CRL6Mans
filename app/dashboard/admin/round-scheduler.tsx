@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { setRoundSchedule, deleteRoundSchedule, pinMatchTime, clearMatchTime } from "./schedule-actions";
+import { setRoundSchedule, deleteRoundSchedule, pinMatchTime, clearMatchTime, startFirstRound } from "./schedule-actions";
 import { stageName, type ScheduleType, type RoundScheduleRow } from "./schedule-utils";
 import { LocalTime } from "../local-time";
 
@@ -77,6 +77,7 @@ type Props = {
   lockedRounds: string[];  // "stage:round" strings
   matchesByRound: Record<string, RoundMatchInfo[]>;  // keyed "canonStage:round"
   playHour: number;
+  round1ManualStartPending: boolean;
 };
 
 function namedRound(fromFinal: number, round: number, prefix = ""): string {
@@ -243,6 +244,8 @@ function RoundRow({
   prevSchedule,
   playHour,
   matches,
+  isSeasonOpener,
+  manualStartPending,
 }: {
   tournamentId: string | null;
   stage: string;
@@ -253,6 +256,8 @@ function RoundRow({
   prevSchedule: RoundScheduleRow | undefined;
   playHour: number;
   matches?: RoundMatchInfo[];
+  isSeasonOpener: boolean;
+  manualStartPending: boolean;
 }) {
   const label = getRoundLabel(stage, round, maxRound);
 
@@ -281,6 +286,20 @@ function RoundRow({
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
+  const [confirmingStart, setConfirmingStart] = useState(false);
+
+  // Standalone seasons only — tournament round 1 is gated by team check-in instead,
+  // so the manual-start flag never applies there.
+  const showStartButton = !tournamentId && isSeasonOpener && manualStartPending && !!schedule;
+
+  function doStart() {
+    setErr(null);
+    startTransition(async () => {
+      const res = await startFirstRound();
+      if (!res.ok) setErr(res.error ?? "Failed.");
+      setConfirmingStart(false);
+    });
+  }
 
   const inferred = canChain && chain
     ? inferredPlayAt(prevSchedule!.playAt, prevSchedule!.scheduleType, prevSchedule!.rangeDays, type)
@@ -406,6 +425,9 @@ function RoundRow({
               <>{" → deadline "}<LocalTime iso={schedule.deadlineAt} className="text-zinc-400" /></>
             )}
           </span>
+          {showStartButton && (
+            <span className="text-[10px] text-emerald-400">Awaiting manual start — won&apos;t go live until you press Start Round</span>
+          )}
         </div>
       )}
 
@@ -501,6 +523,34 @@ function RoundRow({
           </button>
         )}
 
+        {/* Manual start — season opener only, holds off auto-open until clicked */}
+        {showStartButton && !pending && (
+          confirmingStart ? (
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs text-zinc-400">Start round now?</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); doStart(); }}
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors"
+              >
+                Confirm
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setConfirmingStart(false); }}
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 font-medium transition-colors"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); setConfirmingStart(true); }}
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors"
+            >
+              Start Round
+            </button>
+          )
+        )}
+
         {/* Expand — per-match scheduling */}
         {canExpand && (
           <button
@@ -551,6 +601,8 @@ function CollapsibleSub({
   tournamentId: string | null;
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
+  firstStage: string | undefined;
+  round1ManualStartPending: boolean;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -586,6 +638,8 @@ function SubSectionRows({
   tournamentId,
   matchesByRound,
   playHour,
+  firstStage,
+  round1ManualStartPending,
 }: {
   sub: SubSection;
   scheduleByKey: Map<string, RoundScheduleRow>;
@@ -593,6 +647,8 @@ function SubSectionRows({
   tournamentId: string | null;
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
+  firstStage: string | undefined;
+  round1ManualStartPending: boolean;
 }) {
   return (
     <div>
@@ -614,6 +670,8 @@ function SubSectionRows({
             prevSchedule={prevSchedule}
             matches={matchesByRound[key]}
             playHour={playHour}
+            isSeasonOpener={stage === firstStage && round === 1}
+            manualStartPending={round1ManualStartPending}
           />
         );
       })}
@@ -628,6 +686,8 @@ function GroupSection({
   tournamentId,
   matchesByRound,
   playHour,
+  firstStage,
+  round1ManualStartPending,
 }: {
   group: SchedulingGroup;
   scheduleByKey: Map<string, RoundScheduleRow>;
@@ -635,12 +695,14 @@ function GroupSection({
   tournamentId: string | null;
   matchesByRound: Record<string, RoundMatchInfo[]>;
   playHour: number;
+  firstStage: string | undefined;
+  round1ManualStartPending: boolean;
 }) {
   const [open, setOpen] = useState(true);
   const hasSubHeaders = group.subs.length > 1;
   const totalRows = group.subs.reduce((n, s) => n + s.rows.length, 0);
 
-  const subProps = { scheduleByKey, lockedSet, tournamentId, matchesByRound, playHour };
+  const subProps = { scheduleByKey, lockedSet, tournamentId, matchesByRound, playHour, firstStage, round1ManualStartPending };
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
@@ -691,6 +753,7 @@ export function RoundScheduler({
   lockedRounds,
   matchesByRound,
   playHour,
+  round1ManualStartPending,
 }: Props) {
   // Inputs derive their initial values from browser-local dates, which differ from the
   // server's zone — render after mount so SSR and the first client paint never mismatch.
@@ -710,6 +773,10 @@ export function RoundScheduler({
   if (!mounted) {
     return <p className="text-sm text-zinc-500">Loading scheduler…</p>;
   }
+
+  // sections arrive pre-sorted by STAGE_ORDER, so the first entry is the season's
+  // opening stage — round 1 there is the one gated by round1ManualStartPending.
+  const firstStage = sections[0]?.stage;
 
   // Collapse stages into display groups (e.g. all DE stages → one "Double Elimination"
   // box with Winners/Losers/Grand Final sub-sections). sections arrive pre-sorted by
@@ -742,6 +809,8 @@ export function RoundScheduler({
           tournamentId={tournamentId}
           matchesByRound={matchesByRound}
           playHour={playHour}
+          firstStage={firstStage}
+          round1ManualStartPending={round1ManualStartPending}
         />
       ))}
     </div>

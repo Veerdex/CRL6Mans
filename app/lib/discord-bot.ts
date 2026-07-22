@@ -15,6 +15,7 @@ import {
 import { buildAndSaveBracket } from "./bracket-server";
 import { teamRatingFromRVs, applyRatingUpdate } from "./rating";
 import { hasBlockingIdentityDiscrepancy } from "./replay-identity-certification";
+import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 
 async function roleMentionByName(
   teamName: string,
@@ -1319,7 +1320,7 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   await supabaseAdmin.from("round_schedules").delete().not("id", "is", null);
 
   await supabaseAdmin.from("league_settings")
-    .update({ season_active: true, updated_at: new Date().toISOString() })
+    .update({ season_active: true, round1_manual_start_pending: true, updated_at: new Date().toISOString() })
     .not("id", "is", null);
 
   const bracketResult = await buildAndSaveBracket();
@@ -1700,9 +1701,16 @@ export async function openReadyMatchChannels(): Promise<void> {
   // seasons (tournament_id IS NULL).
   const { data: ls } = await supabaseAdmin
     .from("league_settings")
-    .select("active_tournament_id")
+    .select("active_tournament_id, round1_manual_start_pending")
     .single();
   const activeTournamentId = (ls?.active_tournament_id as string | null) ?? null;
+  const round1ManualStartPending = !!ls?.round1_manual_start_pending;
+
+  // The season's opening stage — round 1 of this stage waits for an explicit admin
+  // "Start Round" click instead of opening the instant its schedule is set, so a
+  // scheduling mistake on round 1 can still be corrected before anything goes live.
+  const presentStages = new Set(allMatches.map((m) => canonicalStage(m.stage as string)));
+  const firstStage = STAGE_ORDER.find((s) => presentStages.has(s));
 
   const scheduleMap = new Map<string, { play_at: string; deadline_at: string }>();
   {
@@ -1749,6 +1757,7 @@ export async function openReadyMatchChannels(): Promise<void> {
     if (isTournamentMode) return !!m.home_checked_in && !!m.away_checked_in;
 
     const cs = (m.stage as string).startsWith("group_") ? "group" : (m.stage as string);
+    if (round1ManualStartPending && (m.round as number) === 1 && cs === firstStage) return false;
     if (!scheduleMap.has(`${cs}:${m.round}`)) return false;
     if ((m.round as number) > 1) {
       const prev = scheduleMap.get(`${cs}:${(m.round as number) - 1}`);
