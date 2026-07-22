@@ -6,7 +6,7 @@ import { handleCommand, handleAutocomplete, handleModalSubmit } from "@/app/lib/
 const DEFERRED_COMMANDS = new Set(["openround"]);
 // Subcommands of /admin that are slow enough to need deferral (matched against
 // interaction.data.options[0].name, since Discord nests subcommand names one level deep).
-const DEFERRED_ADMIN_SUBCOMMANDS = new Set(["syncroles"]);
+const DEFERRED_ADMIN_SUBCOMMANDS = new Set(["syncroles", "disconnect", "wipe"]);
 const DEFERRED_MODALS = new Set(["confirm_startdraft", "confirm_enddraft", "confirm_startseason"]);
 
 function verify(publicKey: string, signature: string, timestamp: string, body: string): boolean {
