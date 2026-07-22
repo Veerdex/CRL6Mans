@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAdminTabs } from "./admin-tabs";
 
 interface Props {
   title: string;
@@ -15,12 +16,30 @@ interface Props {
 
 export function CollapsibleSection({ title, value, notification, defaultOpen = true, description, children }: Props) {
   const [open, setOpen] = useState(defaultOpen);
+  const { hydrated, openSection, setOpenSection } = useAdminTabs();
+
+  // Apply the admin's persisted section preference once, right when it loads from
+  // localStorage. A stored value (including "" for "explicitly none") overrides this
+  // section's defaultOpen; if the admin has never toggled any section, defaultOpen stands.
+  useEffect(() => {
+    if (!hydrated || openSection === undefined) return;
+    setOpen(openSection === title);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated]);
+
+  function toggle() {
+    setOpen((v) => {
+      const next = !v;
+      setOpenSection(next ? title : "");
+      return next;
+    });
+  }
 
   return (
     <section>
       <div className="w-full flex items-center gap-3 mb-5 pb-3 border-b border-zinc-800">
         <button
-          onClick={() => setOpen((v) => !v)}
+          onClick={toggle}
           className="flex items-center gap-2 flex-1 text-left group min-w-0"
         >
           <h2 className="text-lg font-semibold text-white truncate min-w-0">{title}</h2>
