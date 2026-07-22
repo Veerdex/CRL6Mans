@@ -42,7 +42,7 @@ export function PodiumGlowIcon({ children }: { children: React.ReactNode }) {
             height: s.size,
             background: "#fde68a",
             boxShadow: "0 0 4px 1px rgba(253,230,138,0.9)",
-            animation: `nav-spark ${s.duration} ${s.delay} ease-out infinite`,
+            animation: `nav-spark ${s.duration} ${s.delay} ease-out infinite backwards`,
           }}
         />
       ))}

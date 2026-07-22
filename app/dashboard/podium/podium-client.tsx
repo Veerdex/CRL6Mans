@@ -165,7 +165,7 @@ function EmberParticles() {
               ? "0 0 7px 2px rgba(255,255,255,0.9)"
               : "0 0 9px 3px rgba(251,191,36,0.85)",
             "--drift": `${e.drift}px`,
-            animation: `ember-rise ${e.duration}s ${e.delay}s ease-out infinite`,
+            animation: `ember-rise ${e.duration}s ${e.delay}s ease-out infinite backwards`,
           } as React.CSSProperties}
         />
       ))}
