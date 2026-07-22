@@ -233,7 +233,9 @@ export async function removeRole(userId: string, roleName: string): Promise<void
 export async function timeoutMember(userId: string, durationMs: number): Promise<void> {
   if (!GUILD_ID || !BOT_TOKEN) return;
   if (userId.startsWith("test_")) return;
-  const until = new Date(Date.now() + durationMs).toISOString();
+  // Discord clears an active timeout only when this field is explicit null —
+  // a past timestamp is not equivalent and can be rejected or ignored.
+  const until = durationMs > 0 ? new Date(Date.now() + durationMs).toISOString() : null;
   const res = await fetch(`${API}/guilds/${GUILD_ID}/members/${userId}`, {
     method: "PATCH",
     headers: botHeaders(true),

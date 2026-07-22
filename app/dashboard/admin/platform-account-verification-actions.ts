@@ -261,3 +261,113 @@ export async function revokePlatformAccount(
   revalidatePath("/dashboard/admin");
   return { ok: true };
 }
+
+// Lets an admin fix a mis-recorded ID directly from the Players panel, for any
+// claim status — not just verified ones (see correctPlatformAccount above,
+// which only handles the already-verified case).
+export async function adminUpdatePlatformAccountId(
+  accountId: string,
+  newPlatformAccountId: string,
+  adminReason: string
+): Promise<{ error?: string; ok?: boolean }> {
+  const adminId = await requireAdmin();
+
+  const platformAccountId = newPlatformAccountId.trim();
+  if (!platformAccountId) return { error: "Platform account ID cannot be empty." };
+
+  const { data: account } = await supabaseAdmin
+    .from("player_platform_accounts")
+    .select("id, platform_account_id, verification_status")
+    .eq("id", accountId)
+    .single();
+  if (!account) return { error: "Account not found." };
+  if (account.verification_status === "verified" && !adminReason.trim()) {
+    return { error: "A reason is required to edit a verified account." };
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabaseAdmin
+    .from("player_platform_accounts")
+    .update({
+      platform_account_id: platformAccountId,
+      admin_note: adminReason.trim() || null,
+      updated_at: now,
+    })
+    .eq("id", accountId);
+
+  if (error) {
+    if (error.code === "23505") return { error: "That platform account ID is already claimed by another player." };
+    return { error: "Failed to update account ID." };
+  }
+
+  await supabaseAdmin.from("player_platform_account_events").insert({
+    account_id: accountId,
+    event_type: "corrected",
+    actor: adminId,
+    detail_json: {
+      admin_reason: adminReason.trim() || null,
+      before: { platform_account_id: account.platform_account_id },
+      after: { platform_account_id: platformAccountId },
+    },
+  });
+
+  revalidatePath("/dashboard/admin");
+  return { ok: true };
+}
+
+// Lets an admin remove a platform-account row directly from the Players panel.
+// Any account that was ever verified (current status "verified", or "revoked"
+// after having been verified) is never hard-deleted — it's soft-revoked instead,
+// per the "verified accounts are never hard-deleted" rule, since past matches
+// may have relied on it for identity certification. Everything else (claimed,
+// pending_verification, rejected, withdrawn) has no certification history to
+// preserve and is deleted outright, freeing the ID for legitimate re-claim.
+export async function adminDeletePlatformAccount(
+  accountId: string,
+  adminReason: string
+): Promise<{ error?: string; ok?: boolean; revoked?: boolean }> {
+  const adminId = await requireAdmin();
+
+  const { data: account } = await supabaseAdmin
+    .from("player_platform_accounts")
+    .select("id, verification_status, verified_at, claimed_verification_replay_path")
+    .eq("id", accountId)
+    .single();
+  if (!account) return { error: "Account not found." };
+
+  const hasVerificationHistory = account.verification_status === "verified" || !!account.verified_at;
+  if (hasVerificationHistory) {
+    if (!adminReason.trim()) return { error: "A reason is required to remove a verified account." };
+    const now = new Date().toISOString();
+    const { error } = await supabaseAdmin
+      .from("player_platform_accounts")
+      .update({ verification_status: "revoked", revoked_by: adminId, revoked_at: now, admin_note: adminReason.trim(), updated_at: now })
+      .eq("id", accountId);
+    if (error) return { error: "Failed to revoke account." };
+
+    await supabaseAdmin.from("player_platform_account_events").insert({
+      account_id: accountId,
+      event_type: "revoked",
+      actor: adminId,
+      detail_json: { admin_note: adminReason.trim() },
+    });
+
+    revalidatePath("/dashboard/admin");
+    return { ok: true, revoked: true };
+  }
+
+  if (account.claimed_verification_replay_path) {
+    await supabaseAdmin.storage
+      .from("platform-verification-replays")
+      .remove([account.claimed_verification_replay_path]);
+  }
+
+  const { error } = await supabaseAdmin
+    .from("player_platform_accounts")
+    .delete()
+    .eq("id", accountId);
+  if (error) return { error: "Failed to delete account." };
+
+  revalidatePath("/dashboard/admin");
+  return { ok: true };
+}

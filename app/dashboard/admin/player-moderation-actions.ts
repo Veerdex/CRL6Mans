@@ -162,6 +162,40 @@ export async function banPlayer(
   return { ok: true };
 }
 
+export async function unkickPlayer(
+  playerId: string
+): Promise<{ ok?: boolean; error?: string }> {
+  const actorRole = await getActorRole();
+
+  const { data: player } = await supabaseAdmin
+    .from("players")
+    .select("discord_id, team_id")
+    .eq("id", playerId)
+    .single();
+
+  const targetRole = player?.discord_id ? await getStaffRole(player.discord_id) : null;
+  if (!canActOn(actorRole, targetRole)) return { error: "You don't have permission to moderate this user." };
+
+  const { error } = await supabaseAdmin
+    .from("players")
+    .update({
+      kick_reason: null,
+      kicked_until: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", playerId);
+  if (error) return { error: error.message };
+
+  if (player?.discord_id && !player.discord_id.startsWith("test_")) {
+    await removeRole(player.discord_id, "Kicked");
+    await timeoutMember(player.discord_id, 0);
+  }
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/players");
+  return { ok: true };
+}
+
 export async function unbanPlayer(
   playerId: string
 ): Promise<{ ok?: boolean; error?: string }> {

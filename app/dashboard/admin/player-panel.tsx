@@ -3,9 +3,17 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updatePlayerData } from "./player-actions";
-import { kickPlayer, banPlayer, unbanPlayer } from "./player-moderation-actions";
+import { kickPlayer, banPlayer, unbanPlayer, unkickPlayer } from "./player-moderation-actions";
+import { adminUpdatePlatformAccountId, adminDeletePlatformAccount } from "./platform-account-verification-actions";
 import type { StaffRole } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
+
+export type PlatformAccountSummary = {
+  id: string;
+  platform: "steam" | "epic" | "playstation" | "xbox" | "switch";
+  platformAccountId: string | null;
+  verificationStatus: string;
+};
 
 export type CombinedPlayer = {
   id: string;
@@ -21,8 +29,128 @@ export type CombinedPlayer = {
   current_2v2: string;
   banReason: string | null;
   kickReason: string | null;
+  kickedUntil: string | null;
+  isKicked: boolean;
   staffRole: StaffRole | null;
+  platformAccounts: PlatformAccountSummary[];
 };
+
+const PLATFORM_LABELS: Record<PlatformAccountSummary["platform"], string> = {
+  steam: "Steam",
+  epic: "Epic Games",
+  playstation: "PlayStation",
+  xbox: "Xbox",
+  switch: "Nintendo Switch",
+};
+
+const STATUS_STYLES: Record<string, string> = {
+  verified: "bg-emerald-900/30 text-emerald-300",
+  claimed: "bg-amber-900/30 text-amber-300",
+  pending_verification: "bg-amber-900/30 text-amber-300",
+  rejected: "bg-red-900/30 text-red-300",
+  withdrawn: "bg-zinc-700/50 text-zinc-400",
+  revoked: "bg-zinc-700/50 text-zinc-400",
+};
+
+function PlatformAccountRow({ account, canModerate }: { account: PlatformAccountSummary; canModerate: boolean }) {
+  const router = useRouter();
+  const [value, setValue] = useState(account.platformAccountId ?? "");
+  const [reason, setReason] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [isPending, startTx] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const isVerified = account.verificationStatus === "verified";
+
+  function handleSaveId() {
+    setError(null);
+    startTx(async () => {
+      const res = await adminUpdatePlatformAccountId(account.id, value, reason);
+      if (res.error) { setError(res.error); return; }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+      router.refresh();
+    });
+  }
+
+  function handleDelete() {
+    setError(null);
+    startTx(async () => {
+      const res = await adminDeletePlatformAccount(account.id, reason);
+      if (res.error) { setError(res.error); return; }
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="bg-zinc-800/60 border border-zinc-700 rounded-lg p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+          {PLATFORM_LABELS[account.platform]} ID
+        </span>
+        <span className={`text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS_STYLES[account.verificationStatus] ?? "text-zinc-400"}`}>
+          {account.verificationStatus.replace(/_/g, " ")}
+        </span>
+      </div>
+      <input
+        type="text"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        disabled={!canModerate}
+        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60"
+      />
+      {canModerate && (
+        <>
+          <input
+            type="text"
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            placeholder={isVerified ? "Reason (required for verified accounts)" : "Reason (optional)"}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleSaveId}
+              disabled={isPending}
+              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+            >
+              {isPending ? "Saving…" : "Save ID"}
+            </button>
+            {confirmingDelete ? (
+              <>
+                <button
+                  onClick={handleDelete}
+                  disabled={isPending}
+                  className="px-3 py-1 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                >
+                  {isPending ? "…" : isVerified ? "Confirm Revoke" : "Confirm Delete"}
+                </button>
+                <button
+                  onClick={() => setConfirmingDelete(false)}
+                  disabled={isPending}
+                  className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setConfirmingDelete(true)}
+                disabled={isPending}
+                className="px-3 py-1 bg-zinc-800 hover:bg-red-900/40 border border-zinc-700 hover:border-red-700/50 text-red-400 text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
+              >
+                {isVerified ? "Revoke" : "Delete"}
+              </button>
+            )}
+            {saved && <span className="text-xs text-emerald-400">Saved</span>}
+            {error && <span className="text-xs text-red-400">{error}</span>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 type ModeAction = "kick" | "ban" | null;
 
@@ -113,6 +241,15 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
     });
   }
 
+  function handleUnkick() {
+    setError(null);
+    startTx(async () => {
+      const res = await unkickPlayer(player.id);
+      if (res.error) { setError(res.error); return; }
+      router.refresh();
+    });
+  }
+
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
       {/* Header row */}
@@ -141,7 +278,7 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
             <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-red-900/40 border-red-700/50 text-red-300">
               banned
             </span>
-          ) : player.kickReason ? (
+          ) : player.isKicked ? (
             <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-amber-900/30 border-amber-700/40 text-amber-300">
               kicked
             </span>
@@ -175,6 +312,15 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
             )
           ) : canModerate ? (
             <>
+              {player.isKicked && (
+                <button
+                  onClick={handleUnkick}
+                  disabled={isPending}
+                  className="px-3 py-1 bg-zinc-800 hover:bg-emerald-900/40 border border-zinc-700 hover:border-emerald-700/50 text-emerald-300 text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
+                >
+                  Lift Kick
+                </button>
+              )}
               <button
                 onClick={() => { setModeAction("kick"); setReason(""); setEditOpen(false); setError(null); }}
                 disabled={isPending || modeAction !== null}
@@ -199,7 +345,10 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
         <p className="text-xs text-red-400/80 px-4 pb-2">Reason: {player.banReason}</p>
       )}
       {!isBanned && player.kickReason && (
-        <p className="text-xs text-amber-400/80 px-4 pb-2">Last kick: {player.kickReason}</p>
+        <p className="text-xs text-amber-400/80 px-4 pb-2">
+          {player.isKicked ? "Kicked" : "Last kick"}: {player.kickReason}
+          {player.isKicked && player.kickedUntil && ` (until ${new Date(player.kickedUntil).toLocaleString()})`}
+        </p>
       )}
 
       {/* Data edit form */}
@@ -207,12 +356,24 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
         <div className="border-t border-zinc-800 px-4 py-4 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Username"    value={username}   onChange={setUsername} />
-            <Field label="Tracker URL" value={trackerUrl} onChange={setTrackerUrl} />
+            <Field label="Tracker URL" value={trackerUrl} onChange={setTrackerUrl} href={trackerUrl || undefined} />
             <Field label="Peak 3v3"    value={peak3v3}    onChange={setPeak3v3} type="number" />
             <Field label="Current 3v3" value={curr3v3}    onChange={setCurr3v3} type="number" />
             <Field label="Peak 2v2"    value={peak2v2}    onChange={setPeak2v2} type="number" />
             <Field label="Current 2v2" value={curr2v2}    onChange={setCurr2v2} type="number" />
           </div>
+
+          {player.platformAccounts.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Platform Accounts</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {player.platformAccounts.map(acc => (
+                  <PlatformAccountRow key={acc.id} account={acc} canModerate={canModerate} />
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
             <button
               onClick={handleSave}
@@ -279,13 +440,34 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
   );
 }
 
+type StatusFilter = "all" | "active" | "kicked" | "banned";
+
 export function PlayerPanel({ players, actorRole }: { players: CombinedPlayer[]; actorRole: StaffRole | null }) {
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
-  const filtered = players.filter(p =>
+  const searched = players.filter(p =>
     p.username.toLowerCase().includes(search.toLowerCase()) ||
     (p.display_name ?? "").toLowerCase().includes(search.toLowerCase())
   );
+
+  const kickedCount = players.filter(p => p.status !== "banned" && p.isKicked).length;
+  const bannedCount = players.filter(p => p.status === "banned").length;
+  const activeCount = players.length - kickedCount - bannedCount;
+
+  const FILTER_OPTIONS: { value: StatusFilter; label: string; count: number }[] = [
+    { value: "all", label: "All", count: players.length },
+    { value: "active", label: "Active", count: activeCount },
+    { value: "kicked", label: "Kicked", count: kickedCount },
+    { value: "banned", label: "Banned", count: bannedCount },
+  ];
+
+  const filtered = searched.filter(p => {
+    if (statusFilter === "active") return p.status !== "banned" && !p.isKicked;
+    if (statusFilter === "kicked") return p.status !== "banned" && p.isKicked;
+    if (statusFilter === "banned") return p.status === "banned";
+    return true;
+  });
 
   const active = filtered.filter(p => p.status !== "banned");
   const banned = filtered.filter(p => p.status === "banned");
@@ -300,6 +482,22 @@ export function PlayerPanel({ players, actorRole }: { players: CombinedPlayer[];
         className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
       />
 
+      <div className="flex items-center gap-2 flex-wrap">
+        {FILTER_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => setStatusFilter(opt.value)}
+            className={`px-3 py-1 text-xs font-medium rounded-lg border transition-colors ${
+              statusFilter === opt.value
+                ? "bg-indigo-600 border-indigo-500 text-white"
+                : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600"
+            }`}
+          >
+            {opt.label} ({opt.count})
+          </button>
+        ))}
+      </div>
+
       {active.length === 0 && banned.length === 0 && (
         <p className="text-zinc-500 text-sm">No players found.</p>
       )}
@@ -312,7 +510,9 @@ export function PlayerPanel({ players, actorRole }: { players: CombinedPlayer[];
 
       {banned.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider pt-2">Banned</p>
+          {statusFilter === "all" && (
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider pt-2">Banned</p>
+          )}
           {banned.map(p => <PlayerRow key={p.id} player={p} actorRole={actorRole} />)}
         </div>
       )}
@@ -321,18 +521,30 @@ export function PlayerPanel({ players, actorRole }: { players: CombinedPlayer[];
 }
 
 function Field({
-  label, value, onChange, type = "text",
+  label, value, onChange, type = "text", href,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   type?: string;
+  href?: string;
 }) {
   return (
     <div>
-      <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
-        {label}
-      </label>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-[10px] font-semibold text-indigo-400 hover:text-indigo-300 uppercase tracking-wider mb-1 underline underline-offset-2 transition-colors w-fit"
+        >
+          {label} ↗
+        </a>
+      ) : (
+        <label className="block text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
+          {label}
+        </label>
+      )}
       <input
         type={type}
         value={value}

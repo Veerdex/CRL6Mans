@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
-import { getAllPendingPlayers, isModerator, isDirector, isCEO, type StaffRole } from "@/app/lib/players";
+import { getAllPendingPlayers, isModerator, isDirector, isCEO, isCurrentlyKicked, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { LeagueControls } from "./league-controls";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
@@ -9,7 +9,7 @@ import { InsightsChart, type InsightsPoint } from "./insights-chart";
 import { FormatEditor, type SeasonFormatConfig } from "../season/format-editor";
 import { CollapsibleSection } from "./collapsible-section";
 import { RegistrationCard } from "./registration-card";
-import { PlayerPanel, type CombinedPlayer } from "./player-panel";
+import { PlayerPanel, type CombinedPlayer, type PlatformAccountSummary } from "./player-panel";
 import { TeamSlotsManager } from "./team-slots-manager";
 import { MatchReporter } from "./match-reporter";
 import { getTier } from "@/app/lib/discord-bot";
@@ -62,11 +62,11 @@ export default async function AdminPage() {
     supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at").eq("status", "pending").order("created_at", { ascending: true }),
     supabaseAdmin.from("tournaments").select("*").order("created_at", { ascending: false }),
     supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
-    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, status, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, ban_reason, kick_reason").in("status", ["approved", "banned"]).order("username"),
+    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, status, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, ban_reason, kick_reason, kicked_until").in("status", ["approved", "banned"]).order("username"),
     supabaseAdmin.from("matches").select("stage, round, discord_channel_id"),
   ]);
 
-  const [{ data: pendingPlatformClaimRows }, { data: verifiedPlatformAccountRows }] = await Promise.all([
+  const [{ data: pendingPlatformClaimRows }, { data: verifiedPlatformAccountRows }, { data: allPlatformAccountRows }] = await Promise.all([
     supabaseAdmin
       .from("player_platform_accounts")
       .select("id, player_id, platform, platform_account_id, claimed_display_name, claimed_tracker_url, claimed_verification_replay_path, admin_note, created_at")
@@ -77,7 +77,23 @@ export default async function AdminPage() {
       .select("id, player_id, platform, platform_account_id, verified_display_name, verification_method, verified_at, valid_from")
       .eq("verification_status", "verified")
       .order("verified_at", { ascending: false }),
+    supabaseAdmin
+      .from("player_platform_accounts")
+      .select("id, player_id, platform, platform_account_id, verification_status")
+      .order("platform"),
   ]);
+
+  const platformAccountsByPlayerId = new Map<string, PlatformAccountSummary[]>();
+  for (const row of allPlatformAccountRows ?? []) {
+    const arr = platformAccountsByPlayerId.get(row.player_id) ?? [];
+    arr.push({
+      id: row.id,
+      platform: row.platform as PlatformAccountSummary["platform"],
+      platformAccountId: row.platform_account_id,
+      verificationStatus: row.verification_status,
+    });
+    platformAccountsByPlayerId.set(row.player_id, arr);
+  }
 
   const platformClaimPlayerIds = [...new Set([
     ...(pendingPlatformClaimRows ?? []).map(r => r.player_id),
@@ -513,7 +529,7 @@ export default async function AdminPage() {
   const currentPreset = (seasonFormat as { preset?: string } | null)?.preset;
   const draftFormatMax = currentPreset ? (FORMAT_MAX_TEAMS[currentPreset] ?? null) : null;
 
-  type RawPlayer = { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null; status: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; ban_reason?: string | null; kick_reason?: string | null };
+  type RawPlayer = { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null; status: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; ban_reason?: string | null; kick_reason?: string | null; kicked_until?: string | null };
   const combinedPlayers: CombinedPlayer[] = ((allPlayers ?? []) as RawPlayer[]).map(p => ({
     id: p.id,
     discord_id: p.discord_id,
@@ -528,7 +544,10 @@ export default async function AdminPage() {
     current_2v2: p.current_2v2 ?? "0",
     banReason: p.ban_reason ?? null,
     kickReason: p.kick_reason ?? null,
+    kickedUntil: p.kicked_until ?? null,
+    isKicked: isCurrentlyKicked(p.kick_reason ?? null, p.kicked_until ?? null),
     staffRole: (staffRoleByDiscordId[p.discord_id] ?? null) as StaffRole | null,
+    platformAccounts: platformAccountsByPlayerId.get(p.id) ?? [],
   }));
   const bannedCount = combinedPlayers.filter(p => p.status === "banned").length;
 
