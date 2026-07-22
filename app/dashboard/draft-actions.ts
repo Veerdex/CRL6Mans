@@ -9,6 +9,7 @@ import { execAutoPick } from "@/app/lib/discord-bot";
 import { isGuildMember } from "@/app/lib/discord-api";
 import { isTrackerStale } from "@/app/lib/tracker";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
+import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
 
 export async function triggerAutoPick(): Promise<{ done: boolean }> {
   // Fired by the draft client when a pick deadline passes. execAutoPick is
@@ -45,6 +46,9 @@ export async function enterDraft(confirmTrackerSame = false): Promise<{ error?: 
     .single();
 
   if (!settings?.draft_open) return { error: "Draft signups are not currently open." };
+
+  if ((await isJoinGateEnabled()) && !(await hasActiveVerifiedPlatformAccount(player.id, new Date())))
+    return { error: "You need a verified platform account before joining the draft. Add one in Settings → Platform Accounts." };
 
   // Minimum MMR gate — qualifies by meeting either the 2v2 or 3v3 threshold.
   const min2v2 = (settings.min_mmr_2v2 as number | null) ?? null;

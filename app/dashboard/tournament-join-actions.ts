@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { isGuildMember } from "@/app/lib/discord-api";
 import { isTrackerStale } from "@/app/lib/tracker";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
+import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
 
 async function currentPlayer() {
   const cookieStore = await cookies();
@@ -28,6 +29,9 @@ export async function joinTournament(tournamentId: string, confirmTrackerSame = 
 
   const inServer = await isGuildMember(player.userId);
   if (!inServer) return { inviteRequired: true };
+
+  if ((await isJoinGateEnabled()) && !(await hasActiveVerifiedPlatformAccount(player.id, new Date())))
+    return { error: "You need a verified platform account before joining. Add one in Settings → Platform Accounts." };
 
   const { data: t } = await supabaseAdmin
     .from("tournaments")

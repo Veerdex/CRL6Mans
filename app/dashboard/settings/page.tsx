@@ -8,6 +8,7 @@ import { NavLayoutToggle } from "./nav-layout-toggle";
 import { NotificationButton } from "@/app/dashboard/notification-button";
 import { NotificationPrefsForm } from "./notification-prefs-form";
 import { DisplayNameForm } from "./display-name-form";
+import { PlatformAccountsSection, type ClaimablePlatform, type PlatformAccountRecord } from "./platform-accounts-form";
 
 export default async function SettingsPage() {
   const cookieStore = await cookies();
@@ -22,7 +23,7 @@ export default async function SettingsPage() {
 
   if (player?.status !== "approved") redirect("/dashboard");
 
-  const [{ data: pendingRow }, { data: rejectedRow }] = await Promise.all([
+  const [{ data: pendingRow }, { data: rejectedRow }, { data: platformAccountRows }] = await Promise.all([
     supabaseAdmin
       .from("player_edit_requests")
       .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at")
@@ -37,6 +38,11 @@ export default async function SettingsPage() {
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    supabaseAdmin
+      .from("player_platform_accounts")
+      .select("id, platform, platform_account_id, claimed_display_name, claimed_tracker_url, verification_status, admin_note")
+      .eq("player_id", player.id)
+      .order("created_at", { ascending: false }),
   ]);
 
   const pending: PendingRequest | null = pendingRow
@@ -52,6 +58,26 @@ export default async function SettingsPage() {
     : null;
 
   const rejected = rejectedRow ? { id: rejectedRow.id, adminNote: rejectedRow.admin_note as string | null } : null;
+
+  const platformAccounts: Record<ClaimablePlatform, PlatformAccountRecord | null> = {
+    steam: null,
+    epic: null,
+    playstation: null,
+    xbox: null,
+    switch: null,
+  };
+  for (const row of platformAccountRows ?? []) {
+    const platform = row.platform as ClaimablePlatform;
+    if (!(platform in platformAccounts) || platformAccounts[platform]) continue;
+    platformAccounts[platform] = {
+      id: row.id,
+      platform_account_id: row.platform_account_id,
+      claimed_display_name: row.claimed_display_name,
+      claimed_tracker_url: row.claimed_tracker_url,
+      verification_status: row.verification_status,
+      admin_note: row.admin_note,
+    };
+  }
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-xl">
@@ -78,6 +104,8 @@ export default async function SettingsPage() {
           discordUsername={session.username ?? ""}
         />
       </div>
+
+      <PlatformAccountsSection accounts={platformAccounts} />
 
       <SettingsForm
         current={{

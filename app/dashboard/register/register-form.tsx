@@ -1,8 +1,9 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { registerPlayer } from "./actions";
+import { SensitiveInfoModal } from "./sensitive-info-modal";
 
 export type ExistingPlayerData = {
   tracker_url: string;
@@ -23,6 +24,24 @@ export function RegisterForm({ isResubmit, existing }: Props) {
   const router = useRouter();
   const [state, action, pending] = useActionState(registerPlayer, { error: "" });
   const [fileError, setFileError] = useState<string>("");
+  const [showSensitiveModal, setShowSensitiveModal] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const bypassModalRef = useRef(false);
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    if (bypassModalRef.current) {
+      bypassModalRef.current = false;
+      return;
+    }
+    e.preventDefault();
+    setShowSensitiveModal(true);
+  };
+
+  const handleConfirm = () => {
+    setShowSensitiveModal(false);
+    bypassModalRef.current = true;
+    formRef.current?.requestSubmit();
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -51,7 +70,7 @@ export function RegisterForm({ isResubmit, existing }: Props) {
   }, [state, router]);
 
   return (
-    <form action={action} className="space-y-6">
+    <form ref={formRef} action={action} onSubmit={handleSubmit} className="space-y-6">
       <div className="space-y-1">
         <label htmlFor="tracker_url" className="block text-sm font-medium text-zinc-300">
           Rocket League Tracker URL
@@ -140,6 +159,12 @@ export function RegisterForm({ isResubmit, existing }: Props) {
       >
         {pending ? "Submitting…" : isResubmit ? "Re-submit Registration" : "Submit Registration"}
       </button>
+
+      <SensitiveInfoModal
+        open={showSensitiveModal}
+        onConfirm={handleConfirm}
+        onCancel={() => setShowSensitiveModal(false)}
+      />
     </form>
   );
 }

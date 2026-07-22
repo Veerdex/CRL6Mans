@@ -145,6 +145,16 @@ export default async function DashboardPage() {
 
       {player?.must_update_tracker && <TrackerUpdateBanner />}
 
+      <a
+        href="https://crl6mans-queue-bot.vercel.app/"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 hover:border-zinc-700 transition-colors"
+      >
+        <span className="text-sm font-semibold text-white">6 Mans Queue Leaderboard</span>
+        <span className="text-zinc-500">↗</span>
+      </a>
+
       {activeTournament && (
         <div className="bg-gradient-to-br from-indigo-950/40 to-zinc-900 border border-indigo-800/40 rounded-xl p-5">
           <div className="flex items-center gap-2">

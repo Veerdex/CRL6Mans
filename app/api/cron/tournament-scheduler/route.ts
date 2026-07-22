@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
 import { execStartDraft, execAutoBalanceTeams, execStartSeason, execFinalizeTeamSignups, processExpiredCheckIns, processExpiredScoreConfirmations, openReadyMatchChannels } from "@/app/lib/discord-bot";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
+import { freezeUnfrozenMatchPredictions } from "@/app/lib/match-predictions";
 
 export const runtime = "nodejs";
 // Draft start / team finalize can do many sequential Discord role calls, so give
@@ -28,6 +29,12 @@ export async function GET(request: Request) {
   // seasons and tournaments alike, so it runs before any active-tournament gating.
   try {
     await processExpiredScoreConfirmations();
+  } catch { /* best-effort */ }
+
+  // Freeze wagers-grid win% for any match that just got both teams assigned,
+  // before it's ever played.
+  try {
+    await freezeUnfrozenMatchPredictions();
   } catch { /* best-effort */ }
 
   // ── 1. Open/close sign-ups for every scheduled tournament (no runtime impact) ──
@@ -75,7 +82,7 @@ export async function GET(request: Request) {
     .select("active_tournament_id, draft_active, season_active, last_coin_grant_at, is_test_season")
     .single();
   let activeId = settings?.active_tournament_id as string | null | undefined;
-  let lastCoinGrantAt = (settings?.last_coin_grant_at as string | null | undefined) ?? null;
+  const lastCoinGrantAt = (settings?.last_coin_grant_at as string | null | undefined) ?? null;
 
   if (!activeId && !settings?.draft_active && !settings?.season_active) {
     const due = (scheduled ?? []).find((t) =>
@@ -191,35 +198,9 @@ export async function GET(request: Request) {
     const res = await execStartSeason();
     fired.push(res.ok ? "season_started" : `season_start_failed:${res.message}`);
     if (res.ok) {
-      // Set pending start-grant flag on all approved players.
-      // Amount = 100 × participants (approved players currently on a team).
-      // Skipped entirely for test tournaments.
-      if (!t.is_test) {
-        try {
-          const { count: participantCount } = await supabaseAdmin
-            .from("players")
-            .select("*", { count: "exact", head: true })
-            .eq("status", "approved")
-            .not("team_id", "is", null);
-          const grant = (participantCount ?? 0) * 100;
-          await Promise.all([
-            supabaseAdmin
-              .from("players")
-              .update({ coin_grant_pending_start: true })
-              .eq("status", "approved"),
-            supabaseAdmin
-              .from("league_settings")
-              .update({ pending_start_coin_amount: grant })
-              .not("id", "is", null),
-          ]);
-          lastCoinGrantAt = new Date().toISOString();
-          await supabaseAdmin
-            .from("league_settings")
-            .update({ last_coin_grant_at: lastCoinGrantAt })
-            .not("id", "is", null);
-          fired.push(`initial_coins_pending:${grant}`);
-        } catch { /* best-effort */ }
-      }
+      // Start-grant (coin_grant_pending_start) is set inside execStartSeason itself
+      // so it fires identically whether the season is started here, via the admin
+      // dashboard, or via the Discord /confirm command.
       pushToAllApproved({
         title: "Season Started!",
         body: "The season is now live. Check the schedule for your upcoming matches.",

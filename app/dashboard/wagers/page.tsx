@@ -7,6 +7,7 @@ import { getTier } from "@/app/lib/discord-bot";
 import { computeMatchPrediction, computeMatchPredictionFromRating, type MatchPrediction } from "./prediction";
 import { WagersClient } from "./wagers-client";
 import { WagesLeaderboardOnly } from "./leaderboard-view";
+import type { OverviewMatch } from "./overview-grid";
 
 const BEST_OF_DEFAULTS: Record<string, number> = {
   standard: 3,
@@ -111,7 +112,9 @@ export default async function WagersPage() {
   // Fetch all matches to correctly compute maxRoundByStage for bestOf
   const { data: allMatches } = await supabaseAdmin
     .from("matches")
-    .select("id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at")
+    .select(
+      "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, predicted_home_win_prob, predicted_away_win_prob",
+    )
     .order("stage")
     .order("round")
     .order("match_number");
@@ -153,7 +156,7 @@ export default async function WagersPage() {
     bestOf: number;
   };
 
-  const matches: MatchBO[] = bettable.map((m) => {
+  function bestOfForMatch(m: { stage: string | null; round: number }): number {
     let bestOf = format?.best_of ?? 3;
     if (m.stage?.startsWith("hybrid")) {
       bestOf = 7;
@@ -162,18 +165,25 @@ export default async function WagersPage() {
       const tier = getTier(m.round, maxRound);
       bestOf = roundBestOf[tier] ?? BEST_OF_DEFAULTS[tier] ?? format?.best_of ?? 3;
     }
-    return {
-      id: m.id,
-      stage: m.stage ?? "",
-      round: m.round,
-      match_number: m.match_number,
-      home_team_id: m.home_team_id!,
-      away_team_id: m.away_team_id!,
-      status: m.status,
-      scheduled_at: m.scheduled_at,
-      bestOf,
-    };
-  });
+    return bestOf;
+  }
+
+  const matches: MatchBO[] = bettable.map((m) => ({
+    id: m.id,
+    stage: m.stage ?? "",
+    round: m.round,
+    match_number: m.match_number,
+    home_team_id: m.home_team_id!,
+    away_team_id: m.away_team_id!,
+    status: m.status,
+    scheduled_at: m.scheduled_at,
+    bestOf: bestOfForMatch(m),
+  }));
+
+  // Grid: every match with both teams assigned, any status. No tournament/season
+  // filter is needed — the matches table is fully cleared at the start of each
+  // new draft (see discord-bot.ts), so it only ever holds the current event's matches.
+  const gridMatchesRaw = (allMatches ?? []).filter((m) => m.home_team_id && m.away_team_id);
 
   // Current stage label
   const stageCounts: Record<string, number> = {};
@@ -184,7 +194,12 @@ export default async function WagersPage() {
   const currentStage = currentStageKey ? formatStageName(currentStageKey) : "";
 
   // Team data
-  const teamIds = [...new Set(matches.flatMap((m) => [m.home_team_id, m.away_team_id]))];
+  const teamIds = [
+    ...new Set([
+      ...matches.flatMap((m) => [m.home_team_id, m.away_team_id]),
+      ...gridMatchesRaw.flatMap((m) => [m.home_team_id as string, m.away_team_id as string]),
+    ]),
+  ];
 
   const [{ data: teamsData }, { data: rosterPlayers }] = await (teamIds.length
     ? Promise.all([
@@ -226,6 +241,51 @@ export default async function WagersPage() {
             m.bestOf,
           );
   }
+
+  // Grid predictions are frozen by the tournament-scheduler cron shortly after a
+  // match gets both teams assigned (see freezeUnfrozenMatchPredictions), so this
+  // never recomputes from current ratings — only reads the stored snapshot. A
+  // match briefly has no snapshot in the window between creation and the next
+  // cron tick; it's simply omitted from the grid until then.
+  const gridMatches: OverviewMatch[] = gridMatchesRaw
+    .filter((m) => m.predicted_home_win_prob != null && m.predicted_away_win_prob != null)
+    .map((m) => ({
+      id: m.id,
+      stage: m.stage ?? "",
+      round: m.round,
+      match_number: m.match_number,
+      status: m.status,
+      home_team_id: m.home_team_id as string,
+      away_team_id: m.away_team_id as string,
+      homeWinProb: Number(m.predicted_home_win_prob),
+      awayWinProb: Number(m.predicted_away_win_prob),
+    }));
+
+  // Per-team coin totals wagered on the grid, combining straight moneyline wagers
+  // with parlay legs (each leg contributes its parent parlay's full stake, not a
+  // split share), across all statuses so settled bets still count.
+  const gridMatchIds = gridMatches.map((m) => m.id);
+  const [{ data: gridWagersRaw }, { data: gridParlayLegsRaw }] = gridMatchIds.length
+    ? await Promise.all([
+        supabaseAdmin.from("wagers").select("match_id, bet_type, amount").in("match_id", gridMatchIds),
+        supabaseAdmin.from("parlay_legs").select("match_id, bet_type, parlay_id").in("match_id", gridMatchIds),
+      ])
+    : [{ data: [] as { match_id: string; bet_type: string; amount: number }[] }, { data: [] as { match_id: string; bet_type: string; parlay_id: string }[] }];
+
+  const parlayIdsForGrid = [...new Set((gridParlayLegsRaw ?? []).map((l) => l.parlay_id))];
+  const { data: gridParlaysRaw } = parlayIdsForGrid.length
+    ? await supabaseAdmin.from("parlays").select("id, amount").in("id", parlayIdsForGrid)
+    : { data: [] as { id: string; amount: number }[] };
+  const parlayAmountById = Object.fromEntries((gridParlaysRaw ?? []).map((p) => [p.id, p.amount]));
+
+  const gridWagerTotals: Record<string, { home: number; away: number }> = {};
+  function addGridWager(matchId: string, betType: string, amount: number) {
+    const t = (gridWagerTotals[matchId] ??= { home: 0, away: 0 });
+    if (betType === "home") t.home += amount;
+    else if (betType === "away") t.away += amount;
+  }
+  for (const w of gridWagersRaw ?? []) addGridWager(w.match_id, w.bet_type, w.amount);
+  for (const l of gridParlayLegsRaw ?? []) addGridWager(l.match_id, l.bet_type, parlayAmountById[l.parlay_id] ?? 0);
 
   // Default to the most competitive match (closest to 50/50 — highest risk to bet)
   const defaultMatchId = matches.reduce((picked, m) => {
@@ -308,6 +368,8 @@ export default async function WagersPage() {
         teams={teams}
         matchPredictions={matchPredictions}
         defaultMatchId={defaultMatchId}
+        gridMatches={gridMatches}
+        gridWagerTotals={gridWagerTotals}
         myWagers={(myWagersData ?? []).map((w) => ({
           match_id: w.match_id,
           bet_type: w.bet_type,

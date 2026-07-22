@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
 
 const ROSTER_MAX = 4; // 3 starters + 1 substitute
 const TEAM_MIN = 3;
@@ -70,6 +71,12 @@ async function tournamentForMember(memberId: string): Promise<string | null> {
   return (ts?.tournament_id as string | null) ?? null;
 }
 
+async function checkJoinGate(playerId: string): Promise<string | null> {
+  if (!(await isJoinGateEnabled())) return null;
+  if (await hasActiveVerifiedPlatformAccount(playerId, new Date())) return null;
+  return "You need a verified platform account before joining a team. Add one in Settings → Platform Accounts.";
+}
+
 function refresh() {
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/tournament");
@@ -83,9 +90,13 @@ export async function createTeam(tournamentId: string, name: string) {
   const trimmed = name.trim();
   if (!trimmed) return { error: "Team name is required." };
   if (trimmed.length > 30) return { error: "Team name is too long (30 char max)." };
+  if (!/^[a-zA-Z0-9 ]+$/.test(trimmed)) return { error: "Team name can only contain letters, numbers, and spaces." };
 
   const existing = await findMyTeam(ctx.playerId, ctx.tournamentId);
   if (existing) return { error: "You're already on a team." };
+
+  const gateError = await checkJoinGate(ctx.playerId);
+  if (gateError) return { error: gateError };
 
   const { data: dup } = await supabaseAdmin
     .from("team_signups")
@@ -197,6 +208,9 @@ export async function respondInvite(memberId: string, accept: boolean) {
 
   const existing = await findMyTeam(ctx.playerId, ctx.tournamentId);
   if (existing) return { error: "You're already on a team." };
+
+  const gateError = await checkJoinGate(ctx.playerId);
+  if (gateError) return { error: gateError };
 
   await supabaseAdmin
     .from("team_signup_members")

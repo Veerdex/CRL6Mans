@@ -22,6 +22,7 @@ export async function updateTeamInfo(formData: FormData) {
   const name = (formData.get("name") as string)?.trim();
   if (name && name.length > 30) return { error: "Team name must be 30 characters or fewer." };
   if (name && /@everyone|@here|<@/i.test(name)) return { error: "Team name cannot contain Discord mentions." };
+  if (name && !/^[a-zA-Z0-9 ]+$/.test(name)) return { error: "Team name can only contain letters, numbers, and spaces." };
   const offsetX = Math.max(0, Math.min(100, parseInt(formData.get("offsetX") as string) || 50));
   const offsetY = Math.max(0, Math.min(100, parseInt(formData.get("offsetY") as string) || 50));
   const logoFile = formData.get("logo") as File | null;

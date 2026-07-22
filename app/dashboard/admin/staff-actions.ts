@@ -6,10 +6,36 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirector, isCEO, isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { addRoleById, removeRoleById } from "@/app/lib/discord-api";
+import { getStaffRoleIdMap } from "@/app/lib/discord-bot";
 
 async function getSession() {
   const cookieStore = await cookies();
   return decrypt(cookieStore.get("session")?.value);
+}
+
+const STAFF_TIERS = ["moderator", "director", "ceo"] as const;
+type StaffTier = (typeof STAFF_TIERS)[number];
+type StaffRoleIdMap = Record<StaffTier, string | null>;
+
+function rolesUpTo(tier: StaffTier): StaffTier[] {
+  return STAFF_TIERS.slice(0, STAFF_TIERS.indexOf(tier) + 1);
+}
+
+// Staff Discord roles are cumulative (a Director also holds Moderator, a CEO
+// holds all three) to match isModerator()/isDirector() treating higher tiers
+// as including lower ones — e.g. so a @Moderator escalation ping still reaches
+// Directors and the CEO.
+async function grantTierRoles(discordId: string, tier: StaffTier, roleIds: StaffRoleIdMap) {
+  for (const t of rolesUpTo(tier)) {
+    if (roleIds[t]) await addRoleById(discordId, roleIds[t]!);
+  }
+}
+
+async function revokeTierRoles(discordId: string, tier: StaffTier, roleIds: StaffRoleIdMap) {
+  for (const t of rolesUpTo(tier)) {
+    if (roleIds[t]) await removeRoleById(discordId, roleIds[t]!);
+  }
 }
 
 export type StaffMember = {
@@ -65,6 +91,9 @@ export async function addStaffMember(
   });
   if (error) return { error: error.message };
 
+  const roleIds = await getStaffRoleIdMap();
+  await grantTierRoles(id, role, roleIds);
+
   revalidatePath("/dashboard/admin");
   return { ok: true };
 }
@@ -93,6 +122,9 @@ export async function removeStaffMember(
     .eq("role", role);
   if (error) return { error: error.message };
 
+  const roleIds = await getStaffRoleIdMap();
+  await revokeTierRoles(discordId, role, roleIds);
+
   revalidatePath("/dashboard/admin");
   return { ok: true };
 }
@@ -119,7 +151,10 @@ export async function transferCEO(
 
   if (existing?.role === "ceo") return { error: "That user is already the CEO." };
 
+  const roleIds = await getStaffRoleIdMap();
+
   // Promote new CEO first — if this fails the current CEO is unchanged.
+  // Cumulative tiers mean promotion only ever adds roles, never removes any.
   if (existing) {
     const { error } = await supabaseAdmin.from("staff_roles").update({ role: "ceo" }).eq("discord_id", id);
     if (error) return { error: error.message };
@@ -132,9 +167,12 @@ export async function transferCEO(
     });
     if (error) return { error: error.message };
   }
+  await grantTierRoles(id, "ceo", roleIds);
 
   // Downgrade current CEO to Director only after new CEO is confirmed.
   await supabaseAdmin.from("staff_roles").update({ role: "director" }).eq("discord_id", session.userId);
+  await grantTierRoles(session.userId, "director", roleIds); // self-heals moderator/director if missing
+  if (roleIds.ceo) await removeRoleById(session.userId, roleIds.ceo);
 
   revalidatePath("/dashboard/admin");
   return { ok: true };

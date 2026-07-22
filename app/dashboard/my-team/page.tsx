@@ -75,6 +75,20 @@ function peakMmr(p: RosterPlayer) {
   return (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2;
 }
 
+// Swaps any subbed-out roster player for their approved substitute, so the "who's
+// playing" list reflects the actual lineup instead of the static roster.
+function mergeWithSubs(
+  roster: { id: string; name: string; rv: number }[],
+  approvedSubs: { player_out_id: string; sub_player_id: string | null }[],
+  subDetails: Record<string, { name: string; rv: number }>,
+): { id: string; name: string; rv: number }[] {
+  const outIds = new Set(approvedSubs.map((r) => r.player_out_id));
+  const subsIn = approvedSubs
+    .filter((r) => r.sub_player_id && subDetails[r.sub_player_id])
+    .map((r) => ({ id: r.sub_player_id as string, ...subDetails[r.sub_player_id as string] }));
+  return [...roster.filter((p) => !outIds.has(p.id)), ...subsIn].sort((a, b) => b.rv - a.rv);
+}
+
 function lbRoundName(round: number, totalLBRounds: number): string {
   const fromEnd = totalLBRounds - round;
   if (fromEnd === 0) return "LB Finals";
@@ -338,9 +352,27 @@ export default async function MyTeamPage() {
   let seriesAwayTeam: SeriesTeamInfo | null = null;
 
   if (seasonActive) {
+    const myApprovedSubs = nextMatch
+      ? ((subRequestsRaw ?? []) as { match_id: string | null; player_out_id: string; sub_player_id: string | null; status: string }[])
+          .filter((r) => r.match_id === nextMatch.id && r.status === "approved")
+      : [];
+    const mySubIds = myApprovedSubs.map((r) => r.sub_player_id).filter((x): x is string => !!x);
+    const { data: mySubPlayersRaw } = mySubIds.length
+      ? await supabaseAdmin
+          .from("players")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
+          .in("id", mySubIds)
+      : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] };
+    const mySubDetails = Object.fromEntries(
+      (mySubPlayersRaw ?? []).map((p) => [p.id, { name: p.display_name ?? p.username, rv: peakMmrSub(p) }])
+    );
+    const myRosterForList = sortedRoster.map((p) => ({ id: p.id, name: p.display_name ?? p.username, rv: Math.round(peakMmr(p)) }));
+    const myPlayingList = mergeWithSubs(myRosterForList, myApprovedSubs, mySubDetails);
+
     const mySeriesTeam: SeriesTeamInfo = {
       id: team.id, name: team.name, logo_url: team.logo_url,
       logo_offset_x: team.logo_offset_x, logo_offset_y: team.logo_offset_y, avgMmr,
+      players: myPlayingList,
     };
     if (nextMatch) {
       const opponentId = nextMatch.home_team_id === teamId ? nextMatch.away_team_id : nextMatch.home_team_id;
@@ -348,17 +380,36 @@ export default async function MyTeamPage() {
       if (opponentId) {
         const oppTeamData = teamMap[opponentId] ?? null;
         const { data: oppRoster } = await supabaseAdmin
-          .from("players").select("peak_2v2, current_2v2, peak_3v3, current_3v3")
+          .from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
           .eq("team_id", opponentId).eq("status", "approved");
-        const oppPlayers = (oppRoster ?? []) as { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[];
+        const oppPlayers = (oppRoster ?? []) as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[];
         const oppAvgMmr = oppPlayers.length
           ? Math.round(oppPlayers.reduce((s, p) => s + (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2, 0) / oppPlayers.length)
           : 0;
+
+        const { data: oppApprovedSubsRaw } = await supabaseAdmin
+          .from("sub_requests")
+          .select("player_out_id, sub_player_id")
+          .eq("team_id", opponentId).eq("match_id", nextMatch.id).eq("status", "approved");
+        const oppApprovedSubs = (oppApprovedSubsRaw ?? []) as { player_out_id: string; sub_player_id: string | null }[];
+        const oppSubIds = oppApprovedSubs.map((r) => r.sub_player_id).filter((x): x is string => !!x);
+        const { data: oppSubPlayersRaw } = oppSubIds.length
+          ? await supabaseAdmin
+              .from("players")
+              .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
+              .in("id", oppSubIds)
+          : { data: [] as typeof oppPlayers };
+        const oppSubDetails = Object.fromEntries(
+          (oppSubPlayersRaw ?? []).map((p) => [p.id, { name: p.display_name ?? p.username, rv: peakMmrSub(p) }])
+        );
+        const oppRosterForList = oppPlayers.map((p) => ({ id: p.id, name: p.display_name ?? p.username, rv: peakMmrSub(p) }));
+        const oppPlayingList = mergeWithSubs(oppRosterForList, oppApprovedSubs, oppSubDetails);
+
         if (oppTeamData) {
           opponentSeriesTeam = {
             id: oppTeamData.id, name: oppTeamData.name, logo_url: oppTeamData.logo_url,
             logo_offset_x: oppTeamData.logo_offset_x, logo_offset_y: oppTeamData.logo_offset_y,
-            avgMmr: oppAvgMmr,
+            avgMmr: oppAvgMmr, players: oppPlayingList,
           };
         }
       }

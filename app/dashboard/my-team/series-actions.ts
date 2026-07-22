@@ -11,6 +11,8 @@ import { execReportMatchResult, getBestOfForMatch, validateSeriesScore, processE
 import { deleteChannel } from "@/app/lib/discord-api";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
+import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
+import { evaluateAndPersistGameCertification, resolveSubmittedGames, resolvePlatformIdMatches, hasBlockingIdentityDiscrepancy } from "@/app/lib/replay-identity-certification";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
 
 // Any approved player on a team can submit/confirm results — not just the captain.
@@ -70,6 +72,22 @@ export async function submitSeriesResult(
       return { error: "One of these replays was already uploaded for another match." };
   }
 
+  // Step 7 whole-match identity gate: swaps in server-persisted, resolver-checked
+  // stats and — only once identity_enforcement_enabled is on — blocks submission
+  // outright when any game failed platform-identity certification.
+  const gate = await resolveSubmittedGames(matchId, games);
+  if (!gate.ok) {
+    await supabaseAdmin.from("matches").update({ identity_status: gate.identityStatus }).eq("id", matchId);
+    pushToAdmins({
+      title: "Identity Review Required",
+      body: `A submitted match result needs admin review before it can be completed.`,
+      url: "/dashboard/admin",
+      tag: "identity-review",
+    }).catch(() => {});
+    return { error: gate.message };
+  }
+  games = gate.games;
+
   const { error } = await supabaseAdmin
     .from("matches")
     .update({
@@ -82,6 +100,16 @@ export async function submitSeriesResult(
     .eq("id", matchId);
 
   if (error) return { error: error.message };
+
+  // Best-effort — identity_status is a visibility column, not load-bearing for
+  // submission, and must not fail the whole request if the migration adding it
+  // hasn't been run against this DB yet. Supabase returns query errors in the
+  // result rather than throwing, so this is deliberately fire-and-forget.
+  try {
+    await supabaseAdmin.from("matches").update({ identity_status: gate.identityStatus }).eq("id", matchId);
+  } catch {
+    // ignored — see comment above
+  }
 
   // Persist replay stats now that the series is being submitted (replace any prior set).
   try {
@@ -151,6 +179,9 @@ export async function confirmSeriesResult(
   if (match.pending_home_score === null) return { error: "No pending result to confirm" };
   if (match.score_submitted_by_team_id === player.team_id)
     return { error: "You cannot confirm your own submission — wait for the opposing captain" };
+
+  if (await hasBlockingIdentityDiscrepancy(matchId))
+    return { error: "This match has an open identity discrepancy and requires admin review before it can be confirmed." };
 
   const { error } = await supabaseAdmin
     .from("matches")
@@ -269,6 +300,12 @@ export async function uploadGameReplay(
   if (!match.home_team_id || !match.away_team_id)
     return { error: "Match is missing team assignments" };
 
+  // Freeze the roster/eligibility snapshot on first replay for this match.
+  // Best-effort: a snapshot failure shouldn't block a player's upload, but it
+  // does mean the Step 6 resolver won't have anything to certify against.
+  const snapshotResult = await ensureMatchIdentitySnapshot(matchId);
+  if (!snapshotResult.ok) console.error(`Failed to create identity snapshot for match ${matchId}: ${snapshotResult.error}`);
+
   // Fetch both rosters once; resolve tracker names for all players in parallel.
   const { data: roster } = await supabaseAdmin
     .from("players")
@@ -353,10 +390,22 @@ export async function uploadGameReplay(
     }
   }
 
-  // Reject the replay if any active player can't be matched to a known tracker name.
-  const unmatched = activePlayers.filter(
+  // Reject the replay if any active player can't be matched to a known tracker name —
+  // unless a verified platform ID rescues them (e.g. a player who renamed since
+  // registering their tracker). See resolvePlatformIdMatches for scope.
+  let unmatched = activePlayers.filter(
     p => !nameToId.has(normalizeName(p.name)),
   );
+  if (unmatched.length > 0) {
+    const rescues = await resolvePlatformIdMatches(matchId, activePlayers);
+    for (const p of unmatched) {
+      const rescue = rescues.get(normalizeName(p.name));
+      if (!rescue) continue;
+      nameToId.set(normalizeName(p.name), rescue.playerId);
+      if (rescue.team === "home") homeTrackerNames.add(normalizeName(p.name));
+    }
+    unmatched = activePlayers.filter(p => !nameToId.has(normalizeName(p.name)));
+  }
   if (unmatched.length > 0) {
     const names = unmatched.map(p => p.name).join(", ");
     return {
@@ -405,6 +454,18 @@ export async function uploadGameReplay(
     shots: p.shots,
     score: p.score,
   }));
+
+  // Identity resolution + certification persistence (Steps 6 + 7). Never
+  // blocks this analyze-time call — the hard block, when enabled, happens at
+  // series submission via resolveSubmittedGames.
+  await evaluateAndPersistGameCertification({
+    matchId,
+    gameNumber,
+    replayId: replayData.replayId,
+    activePlayers,
+    stats,
+    homeTeamWon,
+  });
 
   return { homeTeamWon, replayId: replayData.replayId, stats };
 }

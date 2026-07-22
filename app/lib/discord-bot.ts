@@ -14,6 +14,7 @@ import {
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
 import { teamRatingFromRVs, applyRatingUpdate } from "./rating";
+import { hasBlockingIdentityDiscrepancy } from "./replay-identity-certification";
 
 async function roleMentionByName(
   teamName: string,
@@ -183,15 +184,22 @@ function lobbyCode(seed: string): string {
 }
 
 async function getStaffRoleIds(): Promise<string[]> {
+  const map = await getStaffRoleIdMap();
+  return [map.moderator, map.director, map.ceo].filter((id): id is string => !!id);
+}
+
+// Per-tier lookup (as opposed to getStaffRoleIds' flat list) so callers can add/remove
+// the Discord role matching a specific staff_roles change.
+export async function getStaffRoleIdMap(): Promise<Record<"moderator" | "director" | "ceo", string | null>> {
   const { data } = await supabaseAdmin
     .from("league_settings")
     .select("moderator_role_id, director_role_id, ceo_role_id")
     .single();
-  return [
-    data?.moderator_role_id as string | null,
-    data?.director_role_id  as string | null,
-    data?.ceo_role_id       as string | null,
-  ].filter((id): id is string => !!id);
+  return {
+    moderator: (data?.moderator_role_id as string | null) ?? null,
+    director: (data?.director_role_id as string | null) ?? null,
+    ceo: (data?.ceo_role_id as string | null) ?? null,
+  };
 }
 
 // ─── Dynamic category management ──────────────────────────────────────────────
@@ -805,7 +813,9 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
     .from("league_settings").update({
       draft_active: true, draft_open: false, current_pick: 0,
       draft_phase: "picking", num_teams: numTeams,
-      pick_deadline: new Date(Date.now() + 45 * 1000).toISOString(),
+      // First pick gets an extra 2 minutes on top of the usual 45s so everyone
+      // has time to get to the draft channel before the clock is really live.
+      pick_deadline: new Date(Date.now() + (45 + 120) * 1000).toISOString(),
       updated_at: new Date().toISOString(),
     }).not("id", "is", null).select("id, draft_active");
 
@@ -1236,7 +1246,7 @@ const GROUP_PRESETS = new Set(["group_single_elimination", "group_swiss_single_e
 export async function execStartSeason(): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("season_format, num_teams, draft_active, season_active")
+    .select("season_format, num_teams, draft_active, season_active, active_tournament_id, is_test_season")
     .single();
 
   const format = settings?.season_format as { preset?: string } | null;
@@ -1292,6 +1302,35 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   // whose teams have no earlier unplayed round, so at season start that's round 1;
   // later rounds open automatically as matches are reported (no /openround needed).
   await openReadyMatchChannels();
+
+  // One-time start-grant (100 coins × participants) applies to every season start —
+  // tournament-driven or manual — on top of the separate weekly recurring bonus that
+  // manual seasons also get. Fires here so it's identical regardless of whether the
+  // season was started by the cron's auto-trigger, the admin dashboard button, or the
+  // Discord /confirm command, since all three call this same function.
+  const activeTournamentId = settings?.active_tournament_id as string | null;
+  let isTestRun = !!settings?.is_test_season;
+  if (activeTournamentId) {
+    const { data: t } = await supabaseAdmin
+      .from("tournaments").select("is_test").eq("id", activeTournamentId).single();
+    isTestRun = !!t?.is_test;
+  }
+  if (!isTestRun) {
+    try {
+      const { count: participantCount } = await supabaseAdmin
+        .from("players")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "approved")
+        .not("team_id", "is", null);
+      const grant = (participantCount ?? 0) * 100;
+      await Promise.all([
+        supabaseAdmin.from("players").update({ coin_grant_pending_start: true }).eq("status", "approved"),
+        supabaseAdmin.from("league_settings")
+          .update({ pending_start_coin_amount: grant, last_coin_grant_at: new Date().toISOString() })
+          .not("id", "is", null),
+      ]);
+    } catch { /* best-effort */ }
+  }
 
   const cut = bracketResult.cutTeams ?? 0;
   const playing = numTeams - cut;
@@ -1757,6 +1796,11 @@ export async function processExpiredScoreConfirmations(): Promise<void> {
     .not("score_submitted_at", "is", null)
     .lte("score_submitted_at", cutoff);
   for (const m of matches ?? []) {
+    // Step 8: an auto-confirm must not be able to clear an identity
+    // discrepancy either — leave the match pending for admin review instead
+    // of silently finalizing it once the window elapses.
+    if (await hasBlockingIdentityDiscrepancy(m.id)) continue;
+
     // Atomic claim: only the caller that flips score_confirmed false→true proceeds,
     // so a concurrent cron + client trigger can't both finalize the same match.
     const { data: claimed } = await supabaseAdmin

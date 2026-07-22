@@ -241,6 +241,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (draftActive) priorityHrefs.push("/dashboard/draft");
   if (seasonActive) priorityHrefs.push("/dashboard/season");
 
+  // Stats is a career-wide leaderboard (player_game_stats survives resetSeason),
+  // so once any games have ever been recorded it should stay visible through the
+  // gap between events too, not just while a season/tournament is live.
+  let hasStatsContent = hasActiveContent;
+  if (status === "approved" && !hasActiveContent) {
+    const { count: statsCount } = await supabaseAdmin
+      .from("player_game_stats")
+      .select("*", { count: "exact", head: true })
+      .limit(1);
+    hasStatsContent = (statsCount ?? 0) > 0;
+  }
+
   // Podium nav only shows when there's a non-hidden completed event with a champion.
   let hasPodium = false;
   if (status === "approved") {
@@ -261,7 +273,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       ...(inActiveTournament ? ["tournament"] : []),
       ...(hasTeams ? ["teams"] : []),
       ...(hasPlayers ? ["players"] : []),
-      ...(hasActiveContent ? ["stats"] : []),
+      ...(hasStatsContent ? ["stats"] : []),
       ...(hasPodium ? ["podium"] : []),
       ...(draftActive ? ["draft"] : []),
       ...(seasonActive ? ["season"] : []),

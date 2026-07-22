@@ -7,6 +7,8 @@ import { isModerator } from "@/app/lib/players";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
+import { fetchGlobalVerifiedAccounts } from "@/app/lib/replay-identity-context";
+import { resolveReplayParticipants } from "@/app/lib/replay-identity-resolver";
 
 export type MatchSource = "tracker" | "username" | "display";
 
@@ -140,6 +142,30 @@ export async function analyzeReplayFile(
       matchSource: match?.source ?? null,
     };
   });
+
+  // Shadow-mode identity resolution (Step 6): this tool has no matchId, so it
+  // can only report global platform-account ownership, never eligibility —
+  // there is no expected lineup or kickoff time to check accounts against.
+  try {
+    const activePlayers = replayData.players.filter(p => p.score > 0);
+    const globalVerifiedAccounts = await fetchGlobalVerifiedAccounts(activePlayers);
+    const resolution = resolveReplayParticipants({
+      replayPlayers: activePlayers,
+      expectedLineup: null,
+      currentlyEligiblePlayerIds: new Set(),
+      kickoffAt: null,
+      globalVerifiedAccounts,
+    });
+    // "unexpected-account" will fire for nearly every player until verification
+    // rolls out league-wide, so it's not useful signal yet — only log the
+    // genuinely surprising case: the same verified account claimed twice.
+    const flagged = resolution.players.filter(p => p.type === "duplicate-player");
+    if (flagged.length) {
+      console.warn("[identity-resolver][shadow] test-replay:", JSON.stringify(flagged));
+    }
+  } catch (err) {
+    console.error("[identity-resolver][shadow] failed for test-replay:", err);
+  }
 
   return {
     data: {

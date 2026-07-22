@@ -16,6 +16,11 @@ import { getTier } from "@/app/lib/discord-bot";
 import { DEFAULT_BEST_OF } from "../season/format-editor";
 import { SubRequestCard, type SubRequestCardData } from "./sub-request-card";
 import { PlayerEditRequestCard, type PlayerEditRequestCardData } from "./player-edit-request-card";
+import { PlatformAccountClaimCard, type PlatformAccountClaimCardData } from "./platform-account-claim-card";
+import { PlatformAccountVerifiedCard, type PlatformAccountVerifiedCardData } from "./platform-account-verified-card";
+import { IdentityDiscrepancyCard, type IdentityDiscrepancyCardData } from "./identity-discrepancy-card";
+import { IdentityEnforcementToggle } from "./identity-enforcement-toggle";
+import { JoinGateToggle } from "./join-gate-toggle";
 import { TournamentManager } from "./tournament-manager";
 import type { Tournament, Season } from "./tournament-actions";
 import { InitSettingsButton } from "./init-settings-button";
@@ -60,6 +65,128 @@ export default async function AdminPage() {
     supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, status, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, ban_reason, kick_reason").in("status", ["approved", "banned"]).order("username"),
     supabaseAdmin.from("matches").select("stage, round, discord_channel_id"),
   ]);
+
+  const [{ data: pendingPlatformClaimRows }, { data: verifiedPlatformAccountRows }] = await Promise.all([
+    supabaseAdmin
+      .from("player_platform_accounts")
+      .select("id, player_id, platform, platform_account_id, claimed_display_name, claimed_tracker_url, claimed_verification_replay_path, created_at")
+      .in("verification_status", ["claimed", "pending_verification"])
+      .order("created_at", { ascending: true }),
+    supabaseAdmin
+      .from("player_platform_accounts")
+      .select("id, player_id, platform, platform_account_id, verified_display_name, verification_method, verified_at, valid_from")
+      .eq("verification_status", "verified")
+      .order("verified_at", { ascending: false }),
+  ]);
+
+  const platformClaimPlayerIds = [...new Set([
+    ...(pendingPlatformClaimRows ?? []).map(r => r.player_id),
+    ...(verifiedPlatformAccountRows ?? []).map(r => r.player_id),
+  ])];
+  const { data: platformClaimPlayers } = platformClaimPlayerIds.length
+    ? await supabaseAdmin.from("players").select("id, username, display_name").in("id", platformClaimPlayerIds)
+    : { data: [] as { id: string; username: string; display_name: string | null }[] };
+  const platformClaimPlayerMap = Object.fromEntries((platformClaimPlayers ?? []).map(p => [p.id, p]));
+
+  const platformClaimCards: PlatformAccountClaimCardData[] = await Promise.all(
+    (pendingPlatformClaimRows ?? []).map(async (row) => {
+      const player = platformClaimPlayerMap[row.player_id];
+      let replayDownloadUrl: string | null = null;
+      if (row.claimed_verification_replay_path) {
+        const { data: signed } = await supabaseAdmin.storage
+          .from("platform-verification-replays")
+          .createSignedUrl(row.claimed_verification_replay_path, 60 * 30);
+        replayDownloadUrl = signed?.signedUrl ?? null;
+      }
+      return {
+        id: row.id,
+        platform: row.platform as PlatformAccountClaimCardData["platform"],
+        username: player?.username ?? "Unknown",
+        displayName: player?.display_name ?? null,
+        claimedDisplayName: row.claimed_display_name,
+        claimedTrackerUrl: row.claimed_tracker_url,
+        platformAccountId: row.platform_account_id,
+        replayDownloadUrl,
+        createdAt: row.created_at,
+      };
+    }),
+  );
+
+  const platformVerifiedCards: PlatformAccountVerifiedCardData[] = (verifiedPlatformAccountRows ?? []).map(row => {
+    const player = platformClaimPlayerMap[row.player_id];
+    return {
+      id: row.id,
+      platform: row.platform as PlatformAccountVerifiedCardData["platform"],
+      username: player?.username ?? "Unknown",
+      displayName: player?.display_name ?? null,
+      verifiedDisplayName: row.verified_display_name,
+      platformAccountId: row.platform_account_id,
+      verificationMethod: row.verification_method,
+      verifiedAt: row.verified_at,
+      validFrom: row.valid_from,
+    };
+  });
+
+  const { data: identitySettingsRow } = await supabaseAdmin
+    .from("league_settings")
+    .select("identity_enforcement_enabled, join_gate_enabled")
+    .maybeSingle();
+  const identityEnforcementEnabled = identitySettingsRow?.identity_enforcement_enabled ?? false;
+  const joinGateEnabled = identitySettingsRow?.join_gate_enabled ?? false;
+
+  const { data: openDiscrepancyRows } = await supabaseAdmin
+    .from("replay_identity_discrepancies")
+    .select("id, match_id, game_number, replay_player_name, replay_team, replay_platform, replay_platform_account_id, identity_source, expected_player_id, conflicting_player_id, reason, evidence_json, created_at")
+    .eq("status", "open")
+    .order("created_at", { ascending: true });
+
+  const discrepancyMatchIds = [...new Set((openDiscrepancyRows ?? []).map(r => r.match_id))];
+  const { data: discrepancyMatchRows } = discrepancyMatchIds.length
+    ? await supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round").in("id", discrepancyMatchIds)
+    : { data: [] as { id: string; home_team_id: string | null; away_team_id: string | null; stage: string | null; round: number | null }[] };
+  const discrepancyMatchById = Object.fromEntries((discrepancyMatchRows ?? []).map(m => [m.id, m]));
+
+  const discrepancyTeamIds = [...new Set((discrepancyMatchRows ?? []).flatMap(m => [m.home_team_id, m.away_team_id]).filter((id): id is string => !!id))];
+  const { data: discrepancyTeamRows } = discrepancyTeamIds.length
+    ? await supabaseAdmin.from("teams").select("id, name").in("id", discrepancyTeamIds)
+    : { data: [] as { id: string; name: string }[] };
+  const discrepancyTeamNameById = Object.fromEntries((discrepancyTeamRows ?? []).map(t => [t.id, t.name]));
+
+  const discrepancyPlayerIds = [...new Set((openDiscrepancyRows ?? []).flatMap(r => [r.expected_player_id, r.conflicting_player_id]).filter((id): id is string => !!id))];
+  const { data: discrepancyPlayerRows } = discrepancyPlayerIds.length
+    ? await supabaseAdmin.from("players").select("id, username, display_name").in("id", discrepancyPlayerIds)
+    : { data: [] as { id: string; username: string; display_name: string | null }[] };
+  const discrepancyPlayerById = Object.fromEntries((discrepancyPlayerRows ?? []).map(p => [p.id, p]));
+
+  const discrepancyPlayerLabel = (id: string | null): string | null => {
+    if (!id) return null;
+    const p = discrepancyPlayerById[id];
+    if (!p) return null;
+    return p.display_name ? `${p.display_name} (${p.username})` : p.username;
+  };
+
+  const identityDiscrepancyCards: IdentityDiscrepancyCardData[] = (openDiscrepancyRows ?? []).map(row => {
+    const match = discrepancyMatchById[row.match_id];
+    const homeName = match?.home_team_id ? (discrepancyTeamNameById[match.home_team_id] ?? "TBD") : "TBD";
+    const awayName = match?.away_team_id ? (discrepancyTeamNameById[match.away_team_id] ?? "TBD") : "TBD";
+    const stageLabel = match?.stage ? match.stage.replace(/_/g, " ") : "match";
+    const roundLabel = match?.round != null ? ` r${match.round}` : "";
+    return {
+      id: row.id,
+      matchLabel: `${homeName} vs ${awayName} (${stageLabel}${roundLabel})`,
+      gameNumber: row.game_number,
+      createdAt: row.created_at,
+      replayPlayerName: row.replay_player_name ?? "Unknown",
+      replayTeam: row.replay_team,
+      replayPlatform: row.replay_platform,
+      replayPlatformAccountId: row.replay_platform_account_id,
+      identitySource: row.identity_source,
+      resolutionType: (row.evidence_json as { type?: string } | null)?.type ?? null,
+      expectedPlayerLabel: discrepancyPlayerLabel(row.expected_player_id),
+      conflictingPlayerLabel: discrepancyPlayerLabel(row.conflicting_player_id),
+      reason: row.reason,
+    };
+  });
 
   // Fetch staff roles for all players to support hierarchy-aware kick/ban buttons
   const playerDiscordIds = (allPlayers ?? []).map((p: { discord_id: string }) => p.discord_id).filter(Boolean);
@@ -533,6 +660,51 @@ export default async function AdminPage() {
           <div className="space-y-4">
             {playerEditRequestCards.map(req => (
               <PlayerEditRequestCard key={req.id} request={req} />
+            ))}
+          </div>
+        )}
+      </CollapsibleSection>
+
+      {/* ── Platform Account Claims ── */}
+      <CollapsibleSection title="Platform Account Claims" badge={platformClaimCards.length} defaultOpen={platformClaimCards.length > 0}>
+        {platformClaimCards.length === 0 ? (
+          <p className="text-zinc-400 text-sm">No pending platform account claims.</p>
+        ) : (
+          <div className="space-y-4">
+            {platformClaimCards.map(claim => (
+              <PlatformAccountClaimCard key={claim.id} claim={claim} />
+            ))}
+          </div>
+        )}
+      </CollapsibleSection>
+
+      {/* ── Verified Platform Accounts ── */}
+      <CollapsibleSection title="Verified Platform Accounts" badge={platformVerifiedCards.length} defaultOpen={false}>
+        {platformVerifiedCards.length === 0 ? (
+          <p className="text-zinc-400 text-sm">No verified platform accounts yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {platformVerifiedCards.map(account => (
+              <PlatformAccountVerifiedCard key={account.id} account={account} />
+            ))}
+          </div>
+        )}
+      </CollapsibleSection>
+
+      {/* ── Identity Discrepancies (Director+ toggle, Moderator+ adjudication) ── */}
+      <CollapsibleSection title="Identity Discrepancies" badge={identityDiscrepancyCards.length} defaultOpen={identityDiscrepancyCards.length > 0}>
+        {userIsDirector && (
+          <div className="mb-4 space-y-2">
+            <IdentityEnforcementToggle initialEnabled={identityEnforcementEnabled} />
+            <JoinGateToggle initialEnabled={joinGateEnabled} />
+          </div>
+        )}
+        {identityDiscrepancyCards.length === 0 ? (
+          <p className="text-zinc-400 text-sm">No open identity discrepancies.</p>
+        ) : (
+          <div className="space-y-4">
+            {identityDiscrepancyCards.map(discrepancy => (
+              <IdentityDiscrepancyCard key={discrepancy.id} discrepancy={discrepancy} />
             ))}
           </div>
         )}

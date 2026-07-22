@@ -1,0 +1,19 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2019",
+    "moduleResolution": "node",
+    "noEmit": false,
+    "isolatedModules": false,
+    "outDir": "../.test-build",
+    "rootDir": ".."
+  },
+  "include": [
+    "../next-env.d.ts",
+    "test-replay-identity-resolver.ts",
+    "../app/lib/replay-identity-resolver.ts",
+    "../app/lib/replay-parser.ts",
+    "../app/lib/tracker-name.ts"
+  ]
+}

@@ -44,6 +44,7 @@ export type SeriesTeamInfo = {
   logo_offset_x: number;
   logo_offset_y: number;
   avgMmr: number;
+  players: { id: string; name: string; rv: number }[];
 };
 
 type SlotState =
@@ -118,14 +119,23 @@ function TeamLogo({ team, size }: { team: SeriesTeamInfo | null; size: "sm" | "l
 function TeamColumn({ team, side }: { team: SeriesTeamInfo | null; side: "home" | "away" }) {
   const align = side === "home" ? "items-end text-right" : "items-start text-left";
   return (
-    <div className={`flex flex-col gap-2 min-w-0 w-28 ${align}`}>
+    <div className={`flex flex-col gap-2 min-w-0 w-32 ${align}`}>
       <TeamLogo team={team} size="lg" />
       <p className="text-sm font-semibold text-white truncate max-w-full">
         {team?.name ?? "TBD"}
       </p>
       <p className="text-xs text-zinc-500">
-        {team && team.avgMmr > 0 ? `avg ${team.avgMmr.toLocaleString()} MMR` : "—"}
+        {team && team.avgMmr > 0 ? `avg ${team.avgMmr.toLocaleString()} RV` : "—"}
       </p>
+      {team && team.players.length > 0 && (
+        <div className={`flex flex-col gap-0.5 ${align}`}>
+          {team.players.map((p) => (
+            <p key={p.id} className="text-[11px] text-zinc-400 truncate max-w-full">
+              {p.name} <span className="text-zinc-600">· {p.rv.toLocaleString()}</span>
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

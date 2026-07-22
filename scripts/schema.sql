@@ -429,6 +429,91 @@ create index if not exists player_edit_requests_player_id_idx on player_edit_req
 create index if not exists player_edit_requests_status_idx    on player_edit_requests(status);
 
 -- ─────────────────────────────────────────────
+-- PLATFORM ACCOUNTS  (replay identity verification)
+-- ─────────────────────────────────────────────
+create table if not exists player_platform_accounts (
+  id                          uuid        primary key default gen_random_uuid(),
+  player_id                   uuid        not null references players(id) on delete cascade,
+  platform                    text        not null
+                                          check (platform in ('steam', 'epic', 'playstation', 'xbox', 'switch', 'psynet')),
+  platform_account_id         text,
+  claimed_display_name        text,
+  verified_display_name       text,
+  claimed_tracker_url         text,
+  claimed_verification_replay_path text,
+  verification_status         text        not null default 'claimed'
+                                          check (verification_status in
+                                            ('claimed', 'pending_verification', 'verified', 'rejected', 'withdrawn', 'revoked')),
+  verification_method         text        check (verification_method in
+                                            ('steam_openid', 'epic_oauth', 'official_account_page',
+                                             'console_replay_network', 'admin_live', 'legacy_manual')),
+  verification_replay_sha256  text,
+  verified_by                 text,
+  verified_at                 timestamptz,
+  valid_from                  timestamptz,
+  valid_until                 timestamptz,
+  revoked_by                  text,
+  revoked_at                  timestamptz,
+  admin_note                  text,
+  created_at                  timestamptz not null default now(),
+  updated_at                  timestamptz not null default now(),
+
+  check (
+    verification_status != 'verified'
+    or (
+      platform_account_id is not null
+      and verification_method is not null
+      and verified_by is not null
+      and verified_at is not null
+      and valid_from is not null
+    )
+  ),
+  check (verification_status != 'revoked' or revoked_at is not null)
+);
+
+create index if not exists player_platform_accounts_player_id_idx on player_platform_accounts(player_id);
+create index if not exists player_platform_accounts_platform_idx on player_platform_accounts(platform);
+create index if not exists player_platform_accounts_status_idx   on player_platform_accounts(verification_status);
+
+create unique index if not exists player_platform_accounts_active_id_idx
+  on player_platform_accounts(platform, platform_account_id)
+  where verification_status in ('claimed', 'pending_verification', 'verified')
+    and platform_account_id is not null;
+
+create table if not exists player_platform_account_events (
+  id           uuid        primary key default gen_random_uuid(),
+  account_id   uuid        not null references player_platform_accounts(id) on delete cascade,
+  event_type   text        not null
+                           check (event_type in
+                             ('claimed', 'verification_submitted', 'verified', 'rejected',
+                              'withdrawn', 'revoked', 'corrected', 'note_added')),
+  actor        text        not null,
+  detail_json  jsonb,
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists player_platform_account_events_account_idx on player_platform_account_events(account_id);
+create index if not exists player_platform_account_events_type_idx    on player_platform_account_events(event_type);
+
+-- ─────────────────────────────────────────────
+-- MATCH IDENTITY SNAPSHOTS  (frozen roster/eligibility at kickoff)
+-- ─────────────────────────────────────────────
+create table if not exists match_identity_snapshots (
+  id              uuid        primary key default gen_random_uuid(),
+  match_id        uuid        not null references matches(id) on delete cascade,
+  lineup_mode     text        not null default 'eligible_roster'
+                              check (lineup_mode in ('eligible_roster', 'exact_lineup')),
+  kickoff_at      timestamptz not null,
+  home_team_id    uuid        references teams(id) on delete set null,
+  away_team_id    uuid        references teams(id) on delete set null,
+  roster_json     jsonb       not null,
+  created_at      timestamptz not null default now()
+);
+
+create unique index if not exists match_identity_snapshots_match_id_idx
+  on match_identity_snapshots(match_id);
+
+-- ─────────────────────────────────────────────
 -- GAME SCORES  (Flappy Bird leaderboard)
 -- ─────────────────────────────────────────────
 create table if not exists game_scores (
@@ -481,7 +566,8 @@ alter table seasons add column if not exists hidden_from_home boolean not null d
 insert into storage.buckets (id, name, public)
 values
   ('team-logos',  'team-logos',  true),
-  ('college-ids', 'college-ids', true)
+  ('college-ids', 'college-ids', true),
+  ('platform-verification-replays', 'platform-verification-replays', false)
 on conflict (id) do update set public = excluded.public;
 
 -- ─────────────────────────────────────────────
@@ -504,3 +590,6 @@ alter table player_game_stats        disable row level security;
 alter table push_subscriptions       disable row level security;
 alter table seasons                  disable row level security;
 alter table analytics_events         disable row level security;
+alter table player_platform_accounts       disable row level security;
+alter table player_platform_account_events disable row level security;
+alter table match_identity_snapshots       disable row level security;

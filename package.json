@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:replay-parser": "tsc app/lib/replay-parser.ts scripts/test-replay-parser.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-replay-parser.js",
+    "test:replay-identity-resolver": "tsc -p scripts/tsconfig.test-replay-identity-resolver.json && node --require ./scripts/register-test-path-alias.cjs --test .test-build/scripts/test-replay-identity-resolver.js"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",

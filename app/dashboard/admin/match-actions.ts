@@ -9,6 +9,9 @@ import { execReportMatchResult, getBestOfForMatch, validateSeriesScore } from "@
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
+import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
+import { evaluateAndPersistGameCertification, resolveSubmittedGames, resolvePlatformIdMatches } from "@/app/lib/replay-identity-certification";
+import { pushToAdmins } from "@/app/lib/push";
 
 async function verifyAdmin() {
   const cookieStore = await cookies();
@@ -123,6 +126,12 @@ export async function adminAnalyzeGameReplay(
   if (!match.home_team_id || !match.away_team_id)
     return { error: "Match is missing team assignments" };
 
+  // Freeze the roster/eligibility snapshot on first replay for this match.
+  // Best-effort: a snapshot failure shouldn't block the analysis, but it
+  // does mean the Step 6 resolver won't have anything to certify against.
+  const snapshotResult = await ensureMatchIdentitySnapshot(matchId);
+  if (!snapshotResult.ok) console.error(`Failed to create identity snapshot for match ${matchId}: ${snapshotResult.error}`);
+
   const { data: roster } = await supabaseAdmin
     .from("players")
     .select("id, username, display_name, tracker_url, team_id")
@@ -211,9 +220,19 @@ export async function adminAnalyzeGameReplay(
     else homeTrackerNames.delete(norm);
   }
 
-  const unmatched = activePlayers.filter(
+  let unmatched = activePlayers.filter(
     (p) => !nameToId.has(normalizeName(p.name)),
   );
+  if (unmatched.length > 0) {
+    const rescues = await resolvePlatformIdMatches(matchId, activePlayers);
+    for (const p of unmatched) {
+      const rescue = rescues.get(normalizeName(p.name));
+      if (!rescue) continue;
+      nameToId.set(normalizeName(p.name), rescue.playerId);
+      if (rescue.team === "home") homeTrackerNames.add(normalizeName(p.name));
+    }
+    unmatched = activePlayers.filter((p) => !nameToId.has(normalizeName(p.name)));
+  }
   if (unmatched.length > 0) {
     return { unmatched: unmatched.map((p) => p.name) };
   }
@@ -247,6 +266,20 @@ export async function adminAnalyzeGameReplay(
     score: p.score,
   }));
 
+  // Identity resolution + certification persistence (Steps 6 + 7). Never
+  // blocks this analyze-time call — the hard block, when enabled, happens at
+  // match submission via resolveSubmittedGames. An admin who sees a
+  // mismatch here should fix it via akaNames and re-upload; re-analysis
+  // supersedes the prior certification for the same replay_id.
+  await evaluateAndPersistGameCertification({
+    matchId,
+    gameNumber,
+    replayId: replayData.replayId,
+    activePlayers,
+    stats,
+    homeTeamWon,
+  });
+
   return { homeTeamWon, replayId: replayData.replayId, stats };
 }
 
@@ -278,6 +311,22 @@ export async function reportMatchResult(
     if ((existing ?? []).some((r) => r.match_id !== matchId))
       return { ok: false, message: "One of these replays was already uploaded for another match." };
   }
+
+  // Step 7 whole-match identity gate: swaps in server-persisted, resolver-checked
+  // stats and — only once identity_enforcement_enabled is on — blocks submission
+  // outright when any game failed platform-identity certification.
+  const gate = await resolveSubmittedGames(matchId, games);
+  if (!gate.ok) {
+    await supabaseAdmin.from("matches").update({ identity_status: gate.identityStatus }).eq("id", matchId);
+    pushToAdmins({
+      title: "Identity Review Required",
+      body: `A submitted match result needs admin review before it can be completed.`,
+      url: "/dashboard/admin",
+      tag: "identity-review",
+    }).catch(() => {});
+    return { ok: false, message: gate.message };
+  }
+  games = gate.games;
 
   // Compute goal differential from submitted replay stats when available.
   let goalDiff = 0;
@@ -324,6 +373,8 @@ export async function reportMatchResult(
     );
     if (rows.length) await supabaseAdmin.from("player_game_stats").insert(rows);
   } catch { /* best-effort */ }
+
+  await supabaseAdmin.from("matches").update({ identity_status: gate.identityStatus }).eq("id", matchId);
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/season");

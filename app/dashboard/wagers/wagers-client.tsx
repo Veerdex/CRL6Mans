@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { placeBets, placeParlayBet, resetAllWestsideWages, type BetInput, type ParlayLegInput } from "./actions";
 import { getOULines, getTotalSlots, HOUSE_VIG, type MatchPrediction } from "./prediction";
 import { LeaderboardView, type LeaderboardEntry } from "./leaderboard-view";
+import { MatchOverviewGrid, type OverviewMatch } from "./overview-grid";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -187,6 +188,8 @@ export function WagersClient({
   teams,
   matchPredictions,
   defaultMatchId,
+  gridMatches,
+  gridWagerTotals,
   myWagers: initialWagers,
   myParlays,
   tickerWagers: _tickerWagers,
@@ -202,6 +205,8 @@ export function WagersClient({
   teams: Record<string, Team>;
   matchPredictions: Record<string, MatchPrediction>;
   defaultMatchId: string;
+  gridMatches: OverviewMatch[];
+  gridWagerTotals: Record<string, { home: number; away: number }>;
   myWagers: MyWager[];
   myParlays: MyParlay[];
   tickerWagers: TickerWager[];
@@ -230,6 +235,7 @@ export function WagersClient({
   const [localParlays, setLocalParlays] = useState<MyParlay[]>(myParlays);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showMyBets, setShowMyBets] = useState(false);
+  const [showOverview, setShowOverview] = useState(false);
   const [leaderboardSearch, setLeaderboardSearch] = useState("");
   // Mobile: only one pane is shown at a time (3 columns is desktop-only).
   const [mobileTab, setMobileTab] = useState<"matches" | "market" | "slip">("matches");
@@ -253,6 +259,8 @@ export function WagersClient({
   const selectedMatch = matches.find((m) => m.id === selectedMatchId) ?? matches[0];
 
   useEffect(() => { setError(null); setSuccessMsg(null); }, [selectedMatchId]);
+
+  const bettableMatchIds = useMemo(() => new Set(matches.map((m) => m.id)), [matches]);
 
   const allSelections = useMemo(
     () => Object.entries(betMode === "straight" ? straightSelections : parlaySelections),
@@ -431,15 +439,6 @@ export function WagersClient({
     }
   }
 
-  if (!selectedMatch) {
-    return (
-      <div className="p-6">
-        <h1 className="text-2xl font-bold text-white mb-2">Wagers</h1>
-        <p className="text-zinc-500">No matches available for betting right now.</p>
-      </div>
-    );
-  }
-
   return (
     // pb clears the app's fixed mobile bottom-nav on phones (hidden ≥ md).
     <div className="flex flex-col h-full overflow-hidden pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0">
@@ -451,7 +450,24 @@ export function WagersClient({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
-            onClick={() => { setShowMyBets((v) => !v); setShowLeaderboard(false); setMobileTab("market"); }}
+            onClick={() => { setShowOverview((v) => !v); setShowMyBets(false); setShowLeaderboard(false); setMobileTab("market"); }}
+            title="All Matches"
+            className={[
+              "flex items-center justify-center w-8 h-8 rounded-lg border transition-colors",
+              showOverview
+                ? "bg-indigo-600/20 border-indigo-500 text-indigo-400"
+                : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500",
+            ].join(" ")}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+          </button>
+          <button
+            onClick={() => { setShowMyBets((v) => !v); setShowLeaderboard(false); setShowOverview(false); setMobileTab("market"); }}
             title="My Bets"
             className={[
               "flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-xs font-semibold transition-colors",
@@ -467,7 +483,7 @@ export function WagersClient({
             My Bets
           </button>
           <button
-            onClick={() => { setShowLeaderboard((v) => !v); setShowMyBets(false); setMobileTab("market"); }}
+            onClick={() => { setShowLeaderboard((v) => !v); setShowMyBets(false); setShowOverview(false); setMobileTab("market"); }}
             title="Leaderboard"
             className={[
               "flex items-center justify-center w-8 h-8 rounded-lg border transition-colors",
@@ -532,6 +548,27 @@ export function WagersClient({
         </div>
       )}
 
+      {showOverview ? (
+        <div className="flex-1 min-h-0 overflow-y-auto bg-zinc-900">
+          <MatchOverviewGrid
+            matches={gridMatches}
+            teams={teams}
+            wagerTotals={gridWagerTotals}
+            bettableMatchIds={bettableMatchIds}
+            onSelectMatch={(id) => {
+              setSelectedMatchId(id);
+              setShowOverview(false);
+              setMobileTab("market");
+            }}
+          />
+        </div>
+      ) : !selectedMatch ? (
+        <div className="p-6">
+          <h1 className="text-2xl font-bold text-white mb-2">Wagers</h1>
+          <p className="text-zinc-500">No matches available for betting right now.</p>
+        </div>
+      ) : (
+      <>
       {/* Mobile pane switcher (desktop shows all three panes side-by-side) */}
       <div className="lg:hidden flex border-b border-zinc-800 bg-zinc-950 shrink-0">
         {([
@@ -691,6 +728,8 @@ export function WagersClient({
         />
 
       </div>
+      </>
+      )}
     </div>
   );
 }
