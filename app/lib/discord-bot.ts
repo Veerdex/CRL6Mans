@@ -2,7 +2,7 @@ import { supabaseAdmin } from "./supabase";
 import { isModerator } from "./players";
 import { pushToAllApproved, pushToTeam } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
-import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory } from "./discord-api";
+import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -159,7 +159,8 @@ type MatchChannelContext = {
   playDay: number;
   playHour: number;
   rulesChannelId: string | null;
-  existingChannels: Array<{ id: string; name: string; parent_id?: string | null }>;
+  categoryAnchorId: string | null; // category new match-stage categories get placed right after; null = default to bottom
+  existingChannels: Array<{ id: string; name: string; parent_id?: string | null; type?: number; position?: number }>;
   guildRoles: Array<{ id: string; name: string }>;
   roundBestOf: Record<string, number>;
   maxRoundByStage: Record<string, number>;
@@ -324,6 +325,8 @@ async function getOrCreateStageCategory(
   categoryRound: number | null,
   bucket: string | null,
   categoryCache: Map<string, string>,
+  categoryAnchorId: string | null,
+  existingChannels: Array<{ id: string; type?: number; position?: number }>,
 ): Promise<string | null> {
   // Check in-memory cache first
   const cached = categoryCache.get(label);
@@ -357,6 +360,15 @@ async function getOrCreateStageCategory(
     round: categoryRound,
     bucket,
   });
+
+  // If an anchor is configured, place the new category right after it. No anchor → leave
+  // Discord's default append-to-bottom placement untouched.
+  if (categoryAnchorId) {
+    const anchor = existingChannels.find(c => c.id === categoryAnchorId);
+    if (anchor?.position !== undefined) {
+      await positionCategoryAfter(result.id, anchor.position);
+    }
+  }
 
   categoryCache.set(label, result.id);
   return result.id;
@@ -437,7 +449,7 @@ export async function createMatchChannel(
   } else {
     const { data: settings } = await supabaseAdmin
       .from("league_settings")
-      .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format, active_tournament_id")
+      .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, match_category_anchor_id, season_format, active_tournament_id")
       .single();
     const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
     const [existingChannels, guildRoles, allMatches, staffRoleIds] = await Promise.all([
@@ -456,6 +468,7 @@ export async function createMatchChannel(
       playDay:     settings?.match_play_day   ?? 0,
       playHour:    settings?.match_play_hour  ?? 19,
       rulesChannelId: settings?.rules_channel_id ?? null,
+      categoryAnchorId: settings?.match_category_anchor_id ?? null,
       existingChannels,
       guildRoles,
       roundBestOf: format?.roundBestOf ?? {},
@@ -465,7 +478,7 @@ export async function createMatchChannel(
     };
   }
 
-  const { categoryCache, deadlineDay, playDay, playHour, rulesChannelId, existingChannels, guildRoles, roundBestOf, maxRoundByStage, staffRoleIds, isTournament } = resolvedCtx;
+  const { categoryCache, deadlineDay, playDay, playHour, rulesChannelId, categoryAnchorId, existingChannels, guildRoles, roundBestOf, maxRoundByStage, staffRoleIds, isTournament } = resolvedCtx;
 
   // Determine which Discord category this match belongs to
   let categoryId: string | null = null;
@@ -479,7 +492,7 @@ export async function createMatchChannel(
     const { label, bucket, categoryRound } = computeCategoryInfo(
       matchInfo.stage, matchInfo.round, maxRoundByStage, swissWins, swissLosses
     );
-    categoryId = await getOrCreateStageCategory(label, matchInfo.stage, categoryRound, bucket, categoryCache);
+    categoryId = await getOrCreateStageCategory(label, matchInfo.stage, categoryRound, bucket, categoryCache, categoryAnchorId, existingChannels);
   }
 
   const channelName = `${homeTeamName}-vs-${awayTeamName}`
@@ -1425,6 +1438,18 @@ async function setRulesChannel(userId: string, channelId: string) {
   return reply(`✅ Rules channel set to <#${channelId}>.`);
 }
 
+// Omit `categoryId` to clear the anchor — new match categories then default back to the bottom.
+async function setMatchCategoryAnchor(userId: string, categoryId?: string) {
+  const denied = await adminGuard(userId);
+  if (denied) return denied;
+  const { error } = await supabaseAdmin.from("league_settings")
+    .update({ match_category_anchor_id: categoryId ?? null, updated_at: new Date().toISOString() }).not("id", "is", null);
+  if (error) return reply(`❌ DB error: ${error.message}`);
+  return reply(categoryId
+    ? `✅ New match categories will now be placed right after <#${categoryId}>.`
+    : "✅ Match category anchor cleared — new categories will default to the bottom.");
+}
+
 async function setAnnouncementChannel(userId: string, channelId: string) {
   const denied = await adminGuard(userId);
   if (denied) return denied;
@@ -1462,7 +1487,7 @@ async function openRound(userId: string, roundOverride?: number) {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format, active_tournament_id")
+    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, match_category_anchor_id, season_format, active_tournament_id")
     .single();
 
   const allTeamNames = [...new Set(
@@ -1487,6 +1512,7 @@ async function openRound(userId: string, roundOverride?: number) {
     playDay:        settings?.match_play_day   ?? 0,
     playHour:       settings?.match_play_hour  ?? 19,
     rulesChannelId: settings?.rules_channel_id ?? null,
+    categoryAnchorId: settings?.match_category_anchor_id ?? null,
     existingChannels,
     guildRoles,
     roundBestOf: format?.roundBestOf ?? {},
@@ -1611,7 +1637,7 @@ export async function openReadyMatchChannels(): Promise<void> {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, season_format, active_tournament_id")
+    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, match_category_anchor_id, season_format, active_tournament_id")
     .single();
   const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
   const isTournament = !!(settings?.active_tournament_id as string | null | undefined);
@@ -1631,6 +1657,7 @@ export async function openReadyMatchChannels(): Promise<void> {
     playDay: settings?.match_play_day ?? 0,
     playHour: settings?.match_play_hour ?? 19,
     rulesChannelId: settings?.rules_channel_id ?? null,
+    categoryAnchorId: settings?.match_category_anchor_id ?? null,
     existingChannels,
     guildRoles,
     roundBestOf: format?.roundBestOf ?? {},
@@ -2729,6 +2756,10 @@ export async function handleCommand(interaction: Interaction) {
     case "removerole":        return removeRoleCmd(userId, String(opt(interaction, "user")), String(opt(interaction, "role")));
     case "setruleschannel":   return setRulesChannel(userId, interaction.channel_id ?? "");
     case "setannouncement":   return setAnnouncementChannel(userId, interaction.channel_id ?? "");
+    case "setmatchcategoryanchor": {
+      const categoryId = opt(interaction, "category");
+      return setMatchCategoryAnchor(userId, categoryId ? String(categoryId) : undefined);
+    }
     case "openround": {
       const w = opt(interaction, "round");
       return openRound(userId, w ? Number(w) : undefined);

@@ -56,6 +56,14 @@ const commands = [
     ...ADMIN_ONLY,
   },
   {
+    name: "setmatchcategoryanchor",
+    description: "Place new match categories right after this category — omit to reset to default (bottom) (admin only)",
+    options: [
+      { name: "category", description: "Existing category to anchor new match categories after", type: 7, channel_types: [4], required: false },
+    ],
+    ...ADMIN_ONLY,
+  },
+  {
     name: "syncroles",
     description: "Create missing Discord roles and assign them to all players based on current DB state (admin only)",
     ...ADMIN_ONLY,

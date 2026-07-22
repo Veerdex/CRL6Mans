@@ -3,11 +3,17 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DiscordMarkdownPreview } from "./discord-markdown-preview";
-import { postAnnouncement, clearAnnouncement, checkAnnouncementMentions } from "./announcement-actions";
+import { postAnnouncement, clearAnnouncement, checkAnnouncementMentions, type AnnouncementDestination } from "./announcement-actions";
 
 type MentionCheck =
   | { forText: string; annotated: string }
   | { forText: string; error: string };
+
+const DESTINATIONS: Array<{ value: AnnouncementDestination; label: string }> = [
+  { value: "both", label: "Website + Discord" },
+  { value: "website", label: "Website only" },
+  { value: "discord", label: "Discord only" },
+];
 
 const SYNTAX_HINTS: Array<[string, string]> = [
   ["**bold**", "Bold"],
@@ -22,15 +28,18 @@ const SYNTAX_HINTS: Array<[string, string]> = [
 
 export function AnnouncementManager({
   initialText,
+  initialDestination,
   channelConfigured,
   postedAt,
 }: {
   initialText: string;
+  initialDestination: AnnouncementDestination;
   channelConfigured: boolean;
   postedAt: string | null;
 }) {
   const router = useRouter();
   const [text, setText] = useState(initialText);
+  const [destination, setDestination] = useState<AnnouncementDestination>(initialDestination);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -48,7 +57,7 @@ export function AnnouncementManager({
     setError(null);
     setStatus(null);
     start(async () => {
-      const res = await postAnnouncement(text);
+      const res = await postAnnouncement(text, destination);
       if (res.error) setError(res.error);
       else {
         setStatus("Announcement posted.");
@@ -81,10 +90,29 @@ export function AnnouncementManager({
       {postedAt && (
         <p className="text-xs text-zinc-500">Currently live since {new Date(postedAt).toLocaleString()}.</p>
       )}
-      <p className="text-xs text-zinc-500">
-        Every post to Discord always starts with <code className="text-zinc-400">@everyone</code>. Reference a role or member with <code className="text-zinc-400">@name</code> and a channel with <code className="text-zinc-400">#channel-name</code> — matching ones are converted to real mentions/links.
-      </p>
-      <div className="grid md:grid-cols-2 gap-5">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Post to</span>
+        <div className="flex rounded-lg border border-zinc-700 overflow-hidden">
+          {DESTINATIONS.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setDestination(value)}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                destination === value ? "bg-indigo-600 text-white" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {destination !== "website" && (
+        <p className="text-xs text-zinc-500">
+          Every post to Discord always starts with <code className="text-zinc-400">@everyone</code>. Reference a role or member with <code className="text-zinc-400">@name</code> and a channel with <code className="text-zinc-400">#channel-name</code> — matching ones are converted to real mentions/links.
+        </p>
+      )}
+      <div className={`grid gap-5 ${destination === "website" ? "" : "md:grid-cols-2"}`}>
         <div className="space-y-2">
           <textarea
             value={text}
@@ -101,6 +129,7 @@ export function AnnouncementManager({
             ))}
           </div>
         </div>
+        {destination !== "website" && (
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Discord Preview</p>
@@ -132,6 +161,7 @@ export function AnnouncementManager({
             </p>
           )}
         </div>
+        )}
       </div>
       <div className="flex items-center gap-3 flex-wrap">
         <button

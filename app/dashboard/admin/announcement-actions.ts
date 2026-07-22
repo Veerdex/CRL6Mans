@@ -136,7 +136,12 @@ function stripMarkdownForPush(text: string): string {
     .trim();
 }
 
-export async function postAnnouncement(text: string): Promise<{ ok?: boolean; error?: string }> {
+export type AnnouncementDestination = "website" | "discord" | "both";
+
+export async function postAnnouncement(
+  text: string,
+  destination: AnnouncementDestination,
+): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
   if (!(await isDirector(session.userId))) return { error: "Only Directors can post announcements." };
@@ -154,6 +159,7 @@ export async function postAnnouncement(text: string): Promise<{ ok?: boolean; er
     .from("league_settings")
     .update({
       announcement_text: trimmed,
+      announcement_destination: destination,
       announcement_posted_at: new Date().toISOString(),
       announcement_posted_by: session.userId,
       updated_at: new Date().toISOString(),
@@ -161,17 +167,19 @@ export async function postAnnouncement(text: string): Promise<{ ok?: boolean; er
     .not("id", "is", null);
   if (error) return { error: error.message };
 
-  if (channelId) {
+  if (destination !== "website" && channelId) {
     const resolvedBody = await resolveMentions(trimmed);
     await sendChannelMessage(channelId, `@everyone\n${resolvedBody}`);
   }
 
-  await pushToAllApproved({
-    title: "Announcement",
-    body: stripMarkdownForPush(trimmed).slice(0, 150),
-    url: "/dashboard",
-    category: "announcement",
-  });
+  if (destination !== "discord") {
+    await pushToAllApproved({
+      title: "Announcement",
+      body: stripMarkdownForPush(trimmed).slice(0, 150),
+      url: "/dashboard",
+      category: "announcement",
+    });
+  }
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
@@ -187,6 +195,7 @@ export async function clearAnnouncement(): Promise<{ ok?: boolean; error?: strin
     .from("league_settings")
     .update({
       announcement_text: null,
+      announcement_destination: "both",
       announcement_posted_at: null,
       announcement_posted_by: null,
       updated_at: new Date().toISOString(),

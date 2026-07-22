@@ -155,7 +155,7 @@ export async function getGuildRoles(): Promise<Array<{ id: string; name: string 
   return fetchRoles();
 }
 
-export async function getGuildChannels(): Promise<Array<{ id: string; name: string; parent_id?: string | null }>> {
+export async function getGuildChannels(): Promise<Array<{ id: string; name: string; parent_id?: string | null; type?: number; position?: number }>> {
   if (!GUILD_ID || !BOT_TOKEN) return [];
   const res = await fetch(`${API}/guilds/${GUILD_ID}/channels`, { headers: botHeaders() });
   return res.ok ? res.json() : [];
@@ -400,6 +400,19 @@ export async function createCategory(
   }
   const channel: { id: string } = await res.json();
   return { id: channel.id };
+}
+
+// Places a just-created category right after `afterPosition` in Discord's category ordering.
+// Discord breaks position ties by channel ID (creation order), so giving the new category the
+// same position value as the anchor sorts it immediately after (the anchor was created earlier,
+// so its ID always sorts first) — without needing to touch or renumber any other category.
+export async function positionCategoryAfter(categoryId: string, afterPosition: number): Promise<void> {
+  if (!GUILD_ID || !BOT_TOKEN) return;
+  await fetch(`${API}/guilds/${GUILD_ID}/channels`, {
+    method: "PATCH",
+    headers: botHeaders(true),
+    body: JSON.stringify([{ id: categoryId, position: afterPosition }]),
+  });
 }
 
 // Fetch or create all named roles in one batch. Returns name → id map.

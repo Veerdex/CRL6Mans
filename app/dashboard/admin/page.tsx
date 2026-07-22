@@ -62,7 +62,7 @@ export default async function AdminPage() {
 
   const [pending, { data: settings }, { count: enteredCount }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allPlayers }, { data: allMatchStages }] = await Promise.all([
     getAllPendingPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_posted_at").maybeSingle(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at").maybeSingle(),
     supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
@@ -925,10 +925,11 @@ export default async function AdminPage() {
           title="Announcements"
           value={settings?.announcement_text ? 1 : undefined}
           defaultOpen={false}
-          description="Post a league-wide announcement — it shows at the top of every player's dashboard home, sends a push notification, and posts to the configured Discord channel (set via /setannouncement). There's no history; posting replaces whatever is currently live."
+          description="Post a league-wide announcement to the website banner, the configured Discord channel (set via /setannouncement), or both. There's no history; posting replaces whatever is currently live."
         >
           <AnnouncementManager
             initialText={(settings?.announcement_text as string | null) ?? ""}
+            initialDestination={(settings?.announcement_destination as "website" | "discord" | "both" | null) ?? "both"}
             channelConfigured={!!settings?.announcement_channel_id}
             postedAt={(settings?.announcement_posted_at as string | null) ?? null}
           />

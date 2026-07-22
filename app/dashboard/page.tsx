@@ -22,7 +22,7 @@ export default async function DashboardPage() {
       .select("id, status, draft_entered, display_name, must_update_tracker")
       .eq("discord_id", session.userId)
       .single(),
-    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, announcement_text").single(),
+    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, announcement_text, announcement_destination").single(),
     supabaseAdmin
       .from("players")
       .select("id")
@@ -144,7 +144,9 @@ export default async function DashboardPage() {
         <p className="text-sm text-zinc-400 mt-1">Welcome back, {player?.display_name ?? session.username}</p>
       </div>
 
-      {settings?.announcement_text && <AnnouncementBanner text={settings.announcement_text} />}
+      {settings?.announcement_text && settings.announcement_destination !== "discord" && (
+        <AnnouncementBanner text={settings.announcement_text} />
+      )}
 
       {player?.must_update_tracker && <TrackerUpdateBanner />}
 
