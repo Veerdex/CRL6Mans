@@ -8,6 +8,7 @@ import { AdminNotificationToggles } from "./admin-notification-toggles";
 import { InsightsChart, type InsightsPoint } from "./insights-chart";
 import { FormatEditor, type SeasonFormatConfig } from "../season/format-editor";
 import { CollapsibleSection } from "./collapsible-section";
+import { EmptySectionsProvider } from "./empty-sections-context";
 import { RegistrationCard } from "./registration-card";
 import { PlayerPanel, type CombinedPlayer, type PlatformAccountSummary } from "./player-panel";
 import { TeamSlotsManager } from "./team-slots-manager";
@@ -33,7 +34,11 @@ import { canonicalStage, stageName, STAGE_ORDER, expectedStageRounds, type Round
 async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean; userIsDirector: boolean }) {
   const staff = await getStaffList();
   return (
-    <CollapsibleSection title="Staff Management" defaultOpen={false}>
+    <CollapsibleSection
+      title="Staff Management"
+      defaultOpen={false}
+      description="Grant or revoke moderator, director, and CEO roles for staff members. A staff member's role determines which players they can moderate — moderators can only act on non-staff, directors can act on moderators too, and CEOs can act on anyone."
+    >
       <StaffManager staff={staff} userIsCEO={userIsCEO} userIsDirector={userIsDirector} />
     </CollapsibleSection>
   );
@@ -586,6 +591,7 @@ export default async function AdminPage() {
   }
 
   return (
+    <EmptySectionsProvider>
     <div className="p-4 sm:p-6 lg:p-8 space-y-12">
 
       {/* ── Missing settings row warning ── */}
@@ -602,19 +608,32 @@ export default async function AdminPage() {
       )}
 
       {/* ── Insights ── */}
-      <CollapsibleSection title="Insights" defaultOpen={false}>
+      <CollapsibleSection
+        title="Insights"
+        defaultOpen={false}
+        description="Weekly trends for site visits, registrations, and draft joins over the last year. Use it to see whether traffic actually converts into sign-ups, and whether sign-ups convert into drafted players."
+      >
         <InsightsChart data={insightsData} />
       </CollapsibleSection>
 
       {/* ── Notifications ── */}
-      <CollapsibleSection title="Notifications" defaultOpen={false}>
+      <CollapsibleSection
+        title="Notifications"
+        defaultOpen={false}
+        description="Controls which admin push notifications you personally receive (new sub requests, escalations, pending registrations, etc). This only affects your own device — it doesn't change what players or other staff receive."
+      >
         <AdminNotificationToggles
           initial={(settings?.admin_notification_prefs as Record<string, boolean> | null) ?? {}}
         />
       </CollapsibleSection>
 
       {/* ── Players ── */}
-      <CollapsibleSection title="Players" badge={combinedPlayers.length} defaultOpen={false}>
+      <CollapsibleSection
+        title="Players"
+        badge={combinedPlayers.length}
+        defaultOpen={false}
+        description="Every approved and banned player, with MMR, tracker links, staff role, and platform accounts. From here you can edit a player's data, kick or ban them, or reverse a ban — subject to the staff hierarchy."
+      >
         <PlayerPanel players={combinedPlayers} actorRole={actorRole} />
         {bannedCount > 0 && (
           <p className="mt-3 text-xs text-red-400/60">{bannedCount} banned player{bannedCount !== 1 ? "s" : ""} shown below active players.</p>
@@ -622,7 +641,12 @@ export default async function AdminPage() {
       </CollapsibleSection>
 
       {/* ── Team Slots (Director+) ── */}
-      {userIsDirector && <CollapsibleSection title="Team Slots" badge={(teamSlots ?? []).length} defaultOpen={false}>
+      {userIsDirector && <CollapsibleSection
+        title="Team Slots"
+        badge={(teamSlots ?? []).length}
+        defaultOpen={false}
+        description="Reserve and order the named team slots that a draft or auto-balance assigns players into, and download every uploaded team logo as one ZIP. Slots exist independently of whether a season is currently active."
+      >
         <div className="mb-5">
           <a
             href="/api/admin/download-logos"
@@ -642,12 +666,24 @@ export default async function AdminPage() {
       </CollapsibleSection>}
 
       {/* ── Match Reporting ── */}
-      <CollapsibleSection title="Match Reporting" badge={matchRows.length} defaultOpen={false}>
+      <CollapsibleSection
+        title="Match Reporting"
+        badge={matchRows.length}
+        defaultOpen={false}
+        isEmpty={matchRows.length === 0}
+        description="Report scores for scheduled matches, including per-game replay uploads that get parsed for scoreboard stats. Only matches with both teams already assigned show up here."
+      >
         <MatchReporter matches={matchRows} />
       </CollapsibleSection>
 
       {/* ── Sub Requests ── */}
-      <CollapsibleSection title="Sub Requests" badge={subRequestCards.length} defaultOpen={subRequestCards.length > 0}>
+      <CollapsibleSection
+        title="Sub Requests"
+        badge={subRequestCards.length}
+        defaultOpen={subRequestCards.length > 0}
+        isEmpty={subRequestCards.length === 0}
+        description="Substitution requests that a team escalated to admin review, typically because the opposing team didn't accept or reject in time. Review the out/sub player details and approve or deny each one."
+      >
         {subRequestCards.length === 0 ? (
           <p className="text-zinc-400 text-sm">No pending sub requests.</p>
         ) : (
@@ -664,6 +700,8 @@ export default async function AdminPage() {
         title="Registrations & Platform Claims"
         badge={pending.length + platformClaimCards.length}
         defaultOpen={pending.length > 0 || platformClaimCards.length > 0}
+        isEmpty={pending.length === 0 && platformClaimCards.length === 0}
+        description="New player sign-ups awaiting approval or rejection, plus platform account claims (Steam, Epic, console) awaiting verification. A player needs both an approved registration and, once enforcement is on, a verified account to fully participate."
       >
         {pending.length === 0 && platformClaimCards.length === 0 ? (
           <p className="text-zinc-400 text-sm">No pending registrations or platform account claims.</p>
@@ -690,7 +728,13 @@ export default async function AdminPage() {
       </CollapsibleSection>
 
       {/* ── Profile Change Requests ── */}
-      <CollapsibleSection title="Profile Change Requests" badge={playerEditRequestCards.length} defaultOpen={playerEditRequestCards.length > 0}>
+      <CollapsibleSection
+        title="Profile Change Requests"
+        badge={playerEditRequestCards.length}
+        defaultOpen={playerEditRequestCards.length > 0}
+        isEmpty={playerEditRequestCards.length === 0}
+        description="Player-submitted edits to their tracker URL or MMR values, shown alongside their current live values so you can compare before approving or rejecting. Nothing changes on the player's profile until you approve it."
+      >
         {playerEditRequestCards.length === 0 ? (
           <p className="text-zinc-400 text-sm">No pending profile change requests.</p>
         ) : (
@@ -703,7 +747,13 @@ export default async function AdminPage() {
       </CollapsibleSection>
 
       {/* ── Verified Platform Accounts ── */}
-      <CollapsibleSection title="Verified Platform Accounts" badge={platformVerifiedCards.length} defaultOpen={false}>
+      <CollapsibleSection
+        title="Verified Platform Accounts"
+        badge={platformVerifiedCards.length}
+        defaultOpen={false}
+        isEmpty={platformVerifiedCards.length === 0}
+        description="A read-only record of platform accounts that have already passed verification, along with who verified them, when, and by what method (OAuth, replay evidence, or manual admin review)."
+      >
         {platformVerifiedCards.length === 0 ? (
           <p className="text-zinc-400 text-sm">No verified platform accounts yet.</p>
         ) : (
@@ -716,7 +766,12 @@ export default async function AdminPage() {
       </CollapsibleSection>
 
       {/* ── Identity Discrepancies (Director+ toggle, Moderator+ adjudication) ── */}
-      <CollapsibleSection title="Identity Discrepancies" badge={identityDiscrepancyCards.length} defaultOpen={identityDiscrepancyCards.length > 0}>
+      <CollapsibleSection
+        title="Identity Discrepancies"
+        badge={identityDiscrepancyCards.length}
+        defaultOpen={identityDiscrepancyCards.length > 0}
+        description="Flags cases where a submitted replay's platform account doesn't match the expected roster — wrong account, wrong team, or an unverifiable ID. Also houses the identity enforcement and join-gate toggles for directors."
+      >
         {userIsDirector && (
           <div className="mb-4 space-y-2">
             <IdentityEnforcementToggle initialEnabled={identityEnforcementEnabled} />
@@ -735,7 +790,13 @@ export default async function AdminPage() {
       </CollapsibleSection>
 
       {/* ── Schedule Approvals ── */}
-      <CollapsibleSection title="Schedule Approvals" badge={scheduleOverrideCards.length} defaultOpen={scheduleOverrideCards.length > 0}>
+      <CollapsibleSection
+        title="Schedule Approvals"
+        badge={scheduleOverrideCards.length}
+        defaultOpen={scheduleOverrideCards.length > 0}
+        isEmpty={scheduleOverrideCards.length === 0}
+        description="Match times that both teams agreed on outside their normal scheduled window (day, week, or hour). Approve to lock the time in, or reject to send the teams back to propose another."
+      >
         {scheduleOverrideCards.length === 0 ? (
           <p className="text-zinc-400 text-sm">No match times awaiting approval.</p>
         ) : (
@@ -759,6 +820,7 @@ export default async function AdminPage() {
           title="Scheduling"
           badge={schedulingUnscheduledCount || undefined}
           defaultOpen={schedulingUnscheduledCount > 0}
+          description="Set the play window and deadline for each round of the active season, per stage. The badge counts rounds that don't have a schedule set yet."
         >
           {schedulingSections.length === 0 ? (
             <p className="text-sm text-zinc-500">No rounds found. Start the season to generate the bracket.</p>
@@ -778,7 +840,11 @@ export default async function AdminPage() {
 
       {/* ── Tournaments (Director+) ── */}
       {userIsDirector && (
-        <CollapsibleSection title="Tournaments" badge={(tournaments ?? []).filter((t: Tournament) => t.status === "scheduled" || t.status === "active").length}>
+        <CollapsibleSection
+          title="Tournaments"
+          badge={(tournaments ?? []).filter((t: Tournament) => t.status === "scheduled" || t.status === "active").length}
+          description="Create and launch standalone tournaments (separate from the main season), track their signup/draft/active phases, and browse the archive of completed seasons and tournaments."
+        >
           <TournamentManager
             tournaments={(tournaments ?? []) as Tournament[]}
             seasons={(seasons ?? []) as Season[]}
@@ -789,7 +855,10 @@ export default async function AdminPage() {
       )}
 
       {/* ── Season Settings (Director+) ── */}
-      {userIsDirector && <CollapsibleSection title="Season Settings">
+      {userIsDirector && <CollapsibleSection
+        title="Season Settings"
+        description="Configure the season's format, bracket preset, and participant count. These lock automatically once the season goes active, so changes need to happen before it starts."
+      >
         <div className="space-y-6">
           <div>
             <div className="flex items-center gap-3 mb-4">
@@ -812,7 +881,10 @@ export default async function AdminPage() {
 
       {/* ── League Controls (Director+) ── */}
       {userIsDirector && (
-        <CollapsibleSection title="League Controls">
+        <CollapsibleSection
+          title="League Controls"
+          description="Core league-wide toggles: open/close the draft, set match scheduling defaults, MMR floors, and testing mode. These affect every player in the league, not just one section."
+        >
           <LeagueControls
             draftOpen={settings?.draft_open ?? false}
             matchDeadlineDay={settings?.match_deadline_day ?? 2}
@@ -836,6 +908,7 @@ export default async function AdminPage() {
       )}
 
     </div>
+    </EmptySectionsProvider>
   );
 }
 

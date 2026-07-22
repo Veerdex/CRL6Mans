@@ -1,16 +1,22 @@
 "use client";
 
 import { useState } from "react";
+import { useShowEmptySections } from "./empty-sections-context";
 
 interface Props {
   title: string;
   badge?: number;
   defaultOpen?: boolean;
+  isEmpty?: boolean;
+  description?: string;
   children: React.ReactNode;
 }
 
-export function CollapsibleSection({ title, badge, defaultOpen = true, children }: Props) {
+export function CollapsibleSection({ title, badge, defaultOpen = true, isEmpty = false, description, children }: Props) {
   const [open, setOpen] = useState(defaultOpen);
+  const showEmptySections = useShowEmptySections();
+
+  if (isEmpty && !showEmptySections) return null;
 
   return (
     <section>
@@ -19,7 +25,31 @@ export function CollapsibleSection({ title, badge, defaultOpen = true, children 
           onClick={() => setOpen((v) => !v)}
           className="flex items-center gap-3 flex-1 text-left group min-w-0"
         >
-          <h2 className="text-lg font-semibold text-white flex-1 truncate">{title}</h2>
+          <span className="flex items-center gap-2 flex-1 min-w-0">
+            <h2 className="text-lg font-semibold text-white flex-1 truncate min-w-0">{title}</h2>
+            {description && (
+              <span className="relative group/tip shrink-0 hidden md:inline-flex">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-zinc-600 group-hover/tip:text-zinc-400"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="11" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                <span className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-72 max-w-[80vw] rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-normal leading-relaxed text-zinc-300 opacity-0 shadow-lg transition-opacity duration-150 group-hover/tip:opacity-100">
+                  {description}
+                </span>
+              </span>
+            )}
+          </span>
           {!!badge && (
             <span className="text-xs font-medium bg-indigo-600 text-white px-2 py-0.5 rounded-full shrink-0">
               {badge}
