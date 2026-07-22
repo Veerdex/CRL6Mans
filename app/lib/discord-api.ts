@@ -334,12 +334,19 @@ export async function sendDm(userId: string, content: string): Promise<void> {
   if (!msgRes.ok) console.error(`[sendDm] user=${userId} failed to send message status=${msgRes.status}`, await msgRes.text());
 }
 
-export async function sendChannelMessage(channelId: string, content: string): Promise<void> {
+export type DiscordEmbed = {
+  color?: number;
+  description?: string;
+  fields?: Array<{ name: string; value: string; inline?: boolean }>;
+  footer?: { text: string };
+};
+
+export async function sendChannelMessage(channelId: string, content: string, embeds?: DiscordEmbed[]): Promise<void> {
   if (!BOT_TOKEN) return;
   const res = await fetch(`${API}/channels/${channelId}/messages`, {
     method: "POST",
     headers: botHeaders(true),
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, ...(embeds ? { embeds } : {}) }),
   });
   if (!res.ok) console.error(`[sendChannelMessage] channel=${channelId} status=${res.status}`, await res.text());
 }

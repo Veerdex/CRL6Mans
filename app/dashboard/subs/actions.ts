@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { sendChannelMessage, getGuildRoles } from "@/app/lib/discord-api";
+import { sendChannelMessage, getGuildRoles, type DiscordEmbed } from "@/app/lib/discord-api";
 import { roleMention } from "@/app/lib/match-notifications";
 import { pushToAdmins, pushToTeam } from "@/app/lib/push";
 
@@ -24,16 +24,18 @@ function peakMmr(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; c
   return (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2;
 }
 
-function rankBlock(label: string, p: RankRow): string {
+function rankField(label: string, p: RankRow): { name: string; value: string; inline: true } {
   const rv = Math.round(peakMmr(p));
-  return (
-    `**${label}: ${p.username}**\n` +
-    `• All Time Peak 2v2: ${Number(p.peak_2v2).toLocaleString()}\n` +
-    `• Season Peak 2v2: ${Number(p.current_2v2).toLocaleString()}\n` +
-    `• All Time Peak 3v3: ${Number(p.peak_3v3).toLocaleString()}\n` +
-    `• Season Peak 3v3: ${Number(p.current_3v3).toLocaleString()}\n` +
-    `• Rank Value: ${rv.toLocaleString()}`
-  );
+  return {
+    name: `${label}: ${p.username}`,
+    value:
+      `• All Time Peak 2v2: ${Number(p.peak_2v2).toLocaleString()}\n` +
+      `• Season Peak 2v2: ${Number(p.current_2v2).toLocaleString()}\n` +
+      `• All Time Peak 3v3: ${Number(p.peak_3v3).toLocaleString()}\n` +
+      `• Season Peak 3v3: ${Number(p.current_3v3).toLocaleString()}\n` +
+      `• Rank Value: ${rv.toLocaleString()}`,
+    inline: true,
+  };
 }
 
 // Match row with both teams + channel, used for routing/notifications.
@@ -183,11 +185,16 @@ export async function submitSubRequest(
         getGuildRoles(),
       ]);
       const oppMention = oppName ? await roleMention(oppName, roles) : "";
+      const embed: DiscordEmbed = {
+        color: 0xe88a24,
+        fields: [rankField("Out", playerOut), rankField("Sub", sub)],
+        ...(reason ? { description: `**Reason:** ${reason}` } : {}),
+        footer: { text: "Head to the website to accept or reject this substitution." },
+      };
       await sendChannelMessage(
         match.discord_channel_id,
-        `${oppMention} ⚠️ **${myName ?? "A team"}** requested a substitution.\n\n` +
-          `${rankBlock("Out", playerOut)}\n\n${rankBlock("Sub", sub)}\n\n` +
-          `${reason ? `Reason: ${reason}\n` : ""}Head to the website to **accept or reject** this substitution.`,
+        `${oppMention} ⚠️ **${myName ?? "A team"}** requested a substitution.`,
+        [embed],
       );
     }
   } catch { /* best-effort */ }

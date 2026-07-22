@@ -563,9 +563,9 @@ export function WagersClient({
           />
         </div>
       ) : !selectedMatch && !showMyBets && !showLeaderboard ? (
-        <div className="p-6">
-          <h1 className="text-2xl font-bold text-white mb-2">Wagers</h1>
-          <p className="text-zinc-500">No matches available for betting right now.</p>
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center p-6">
+          <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3">Wagers</h1>
+          <p className="text-zinc-500 text-lg sm:text-xl">No matches available for betting right now.</p>
         </div>
       ) : (
       <>
