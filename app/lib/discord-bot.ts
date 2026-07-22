@@ -43,6 +43,9 @@ type Interaction = {
 };
 
 const reply = (content: string) => ({ type: 4, data: { content } });
+// Visible only to the invoking user — used for every /admin subcommand so staff-only
+// output (role IDs, checklist gaps, disconnect/wipe results) never leaks into the channel.
+const ephemeralReply = (content: string) => ({ type: 4, data: { content, flags: 64 } });
 
 // Pace Discord channel/category create & delete operations so bulk work (season
 // start, /openround, and especially match simulation) stays under Discord's
@@ -71,17 +74,17 @@ function adminSubcommand(i: Interaction): { name: string; opts: SubOption[] } {
 }
 
 async function adminGuard(userId: string) {
-  if (!(await isModerator(userId))) return reply("❌ You don't have permission to use this command.");
+  if (!(await isModerator(userId))) return ephemeralReply("❌ You don't have permission to use this command.");
   return null;
 }
 
 async function directorGuard(userId: string) {
-  if (!(await isDirector(userId))) return reply("❌ This command requires Director permissions or higher.");
+  if (!(await isDirector(userId))) return ephemeralReply("❌ This command requires Director permissions or higher.");
   return null;
 }
 
 async function ceoGuard(userId: string) {
-  if (!(await isCEO(userId))) return reply("❌ This command requires CEO permissions.");
+  if (!(await isCEO(userId))) return ephemeralReply("❌ This command requires CEO permissions.");
   return null;
 }
 
@@ -96,13 +99,13 @@ const STAFF_ROLE_ID_COLUMN = {
 async function setStaffRoleId(userId: string, roleId: string, tier: "moderator" | "director" | "ceo") {
   const denied = await adminGuard(userId);
   if (denied) return denied;
-  if (!roleId) return reply("❌ You must specify a role.");
+  if (!roleId) return ephemeralReply("❌ You must specify a role.");
   const { error } = await supabaseAdmin.from("league_settings")
     .update({ [STAFF_ROLE_ID_COLUMN[tier]]: roleId, updated_at: new Date().toISOString() })
     .not("id", "is", null);
-  if (error) return reply(`❌ Failed to save: ${error.message}`);
+  if (error) return ephemeralReply(`❌ Failed to save: ${error.message}`);
   const title = tier === "ceo" ? "CEO" : tier === "director" ? "Director" : "Moderator";
-  return reply(`✅ ${title} role set to <@&${roleId}>. The bot will use it for staff pings.`);
+  return ephemeralReply(`✅ ${title} role set to <@&${roleId}>. The bot will use it for staff pings.`);
 }
 
 // Stores the role granted on registration approval (and stripped on ban). Until
@@ -110,12 +113,12 @@ async function setStaffRoleId(userId: string, roleId: string, tier: "moderator" 
 async function setRegisteredRoleId(userId: string, roleId: string) {
   const denied = await adminGuard(userId);
   if (denied) return denied;
-  if (!roleId) return reply("❌ You must specify a role.");
+  if (!roleId) return ephemeralReply("❌ You must specify a role.");
   const { error } = await supabaseAdmin.from("league_settings")
     .update({ registered_role_id: roleId, updated_at: new Date().toISOString() })
     .not("id", "is", null);
-  if (error) return reply(`❌ Failed to save: ${error.message}`);
-  return reply(
+  if (error) return ephemeralReply(`❌ Failed to save: ${error.message}`);
+  return ephemeralReply(
     `✅ Registered role set to <@&${roleId}>. Players will get it when their registration is approved.\n` +
     `Make sure the bot's own role is **above** it in the server's role list, or Discord will reject the assignment.`
   );
@@ -1412,12 +1415,12 @@ async function playerInfo(username: string) {
 async function setDraftChannel(userId: string, channelId: string) {
   const denied = await adminGuard(userId);
   if (denied) return denied;
-  if (!channelId) return reply("❌ Provide a channel ID.");
+  if (!channelId) return ephemeralReply("❌ Provide a channel ID.");
 
   await supabaseAdmin.from("league_settings")
     .update({ draft_channel_id: channelId, updated_at: new Date().toISOString() }).not("id", "is", null);
 
-  return reply(`✅ Draft channel set to <#${channelId}>. The draft will post there.`);
+  return ephemeralReply(`✅ Draft channel set to <#${channelId}>. The draft will post there.`);
 }
 
 async function pickPlayer(userId: string, playerUsername: string) {
@@ -1459,8 +1462,8 @@ async function setRulesChannel(userId: string, channelId: string) {
   if (denied) return denied;
   const { error } = await supabaseAdmin.from("league_settings")
     .update({ rules_channel_id: channelId, updated_at: new Date().toISOString() }).not("id", "is", null);
-  if (error) return reply(`❌ DB error: ${error.message}`);
-  return reply(`✅ Rules channel set to <#${channelId}>.`);
+  if (error) return ephemeralReply(`❌ DB error: ${error.message}`);
+  return ephemeralReply(`✅ Rules channel set to <#${channelId}>.`);
 }
 
 // Omit `categoryId` to clear the anchor — new match categories then default back to the bottom.
@@ -1469,8 +1472,8 @@ async function setMatchCategoryAnchor(userId: string, categoryId?: string) {
   if (denied) return denied;
   const { error } = await supabaseAdmin.from("league_settings")
     .update({ match_category_anchor_id: categoryId ?? null, updated_at: new Date().toISOString() }).not("id", "is", null);
-  if (error) return reply(`❌ DB error: ${error.message}`);
-  return reply(categoryId
+  if (error) return ephemeralReply(`❌ DB error: ${error.message}`);
+  return ephemeralReply(categoryId
     ? `✅ New match categories will now be placed right after <#${categoryId}>.`
     : "✅ Match category anchor cleared — new categories will default to the bottom.");
 }
@@ -1480,8 +1483,8 @@ async function setAnnouncementChannel(userId: string, channelId: string) {
   if (denied) return denied;
   const { error } = await supabaseAdmin.from("league_settings")
     .update({ announcement_channel_id: channelId, updated_at: new Date().toISOString() }).not("id", "is", null);
-  if (error) return reply(`❌ DB error: ${error.message}`);
-  return reply(`✅ Announcement channel set to <#${channelId}>.`);
+  if (error) return ephemeralReply(`❌ DB error: ${error.message}`);
+  return ephemeralReply(`✅ Announcement channel set to <#${channelId}>.`);
 }
 
 // Reports what's still missing before the Discord server is fully wired up for the
@@ -1509,8 +1512,8 @@ async function adminChecklist(userId: string) {
   if (!settings?.registered_role_id) missing.push("Registered role — run `/admin setregisteredrole`");
   if (!teamCount) missing.push("No team slots exist yet — add them from the dashboard admin panel");
 
-  if (!missing.length) return reply("✅ Nothing missing — the server looks fully configured.");
-  return reply(`⚠️ **Setup checklist — ${missing.length} item(s) remaining:**\n${missing.map(m => `• ${m}`).join("\n")}`);
+  if (!missing.length) return ephemeralReply("✅ Nothing missing — the server looks fully configured.");
+  return ephemeralReply(`⚠️ **Setup checklist — ${missing.length} item(s) remaining:**\n${missing.map(m => `• ${m}`).join("\n")}`);
 }
 
 // DB-only: clears every guild-scoped Discord ID reference so a stale server's channel/role
@@ -1520,7 +1523,7 @@ async function adminChecklist(userId: string) {
 async function adminDisconnect(userId: string, confirm: string) {
   const denied = await ceoGuard(userId);
   if (denied) return denied;
-  if (confirm !== "CONFIRM DISCONNECT") return reply('❌ Type exactly: "CONFIRM DISCONNECT"');
+  if (confirm !== "CONFIRM DISCONNECT") return ephemeralReply('❌ Type exactly: "CONFIRM DISCONNECT"');
 
   await Promise.all([
     supabaseAdmin.from("league_settings").update({
@@ -1534,7 +1537,7 @@ async function adminDisconnect(userId: string, confirm: string) {
     supabaseAdmin.from("match_discord_categories").delete().not("id", "is", null),
   ]);
 
-  return { ok: true, message: "✅ Disconnected. All Discord channel/role/category references cleared from the database — no changes were made in the Discord server itself. Run `/admin checklist` to see what to reconfigure." };
+  return ephemeralReply("✅ Disconnected. All Discord channel/role/category references cleared from the database — no changes were made in the Discord server itself. Run `/admin checklist` to see what to reconfigure.");
 }
 
 // Clears live game/season data so the website starts fresh, without touching staff roles,
@@ -1544,7 +1547,7 @@ async function adminDisconnect(userId: string, confirm: string) {
 async function adminWipe(userId: string, confirm: string, clearHistory: boolean) {
   const denied = await ceoGuard(userId);
   if (denied) return denied;
-  if (confirm !== "CONFIRM WIPE") return reply('❌ Type exactly: "CONFIRM WIPE"');
+  if (confirm !== "CONFIRM WIPE") return ephemeralReply('❌ Type exactly: "CONFIRM WIPE"');
 
   await deleteMatchChannels();
   await voidAllPendingWagers();
@@ -1581,10 +1584,7 @@ async function adminWipe(userId: string, confirm: string, clearHistory: boolean)
 
   if (clearHistory) await supabaseAdmin.from("seasons").delete().not("id", "is", null);
 
-  return {
-    ok: true,
-    message: `✅ Wiped. All teams, matches, and season/draft state cleared — the website is a clean slate.${clearHistory ? " Completed-season history was also cleared." : " Completed-season history was preserved (pass clear_history:true to also clear it)."}`,
-  };
+  return ephemeralReply(`✅ Wiped. All teams, matches, and season/draft state cleared — the website is a clean slate.${clearHistory ? " Completed-season history was also cleared." : " Completed-season history was preserved (pass clear_history:true to also clear it)."}`);
 }
 
 async function openRound(userId: string, roundOverride?: number) {
@@ -1600,13 +1600,13 @@ async function openRound(userId: string, roundOverride?: number) {
     .not("home_team_id", "is", null)
     .not("away_team_id", "is", null);
 
-  if (!pending?.length) return reply("❌ No upcoming matches without channels found.");
+  if (!pending?.length) return ephemeralReply("❌ No upcoming matches without channels found.");
 
   // Use provided round or auto-detect: lowest round number that has no channels yet
   const targetRound = roundOverride ?? Math.min(...pending.map(m => m.round));
   const matches = pending.filter(m => m.round === targetRound);
 
-  if (!matches.length) return reply(`❌ No matches found for round ${targetRound}.`);
+  if (!matches.length) return ephemeralReply(`❌ No matches found for round ${targetRound}.`);
 
   const teamIds = [...new Set(matches.flatMap(m => [m.home_team_id!, m.away_team_id!]))];
   const { data: teamsData } = await supabaseAdmin.from("teams").select("id, name").in("id", teamIds);
@@ -1670,12 +1670,12 @@ async function openRound(userId: string, roundOverride?: number) {
     }
   }
 
-  if (firstError && created === 0 && skipped === 0) return reply(`❌ ${firstError}`);
+  if (firstError && created === 0 && skipped === 0) return ephemeralReply(`❌ ${firstError}`);
   const parts: string[] = [];
   if (created > 0) parts.push(`✅ Created **${created}** channel${created === 1 ? "" : "s"} for Round ${targetRound}`);
   if (skipped > 0) parts.push(`ℹ️ **${skipped}** already exist`);
   if (firstError) parts.push(`⚠️ ${firstError}`);
-  return reply(parts.join(" · ") || "ℹ️ Nothing to do.");
+  return ephemeralReply(parts.join(" · ") || "ℹ️ Nothing to do.");
 }
 
 // Format-agnostic auto channel creation. Opens a Discord channel for every
@@ -2086,7 +2086,7 @@ async function syncRoles(userId: string) {
   if (denied) return denied;
 
   const { data: teams } = await supabaseAdmin.from("teams").select("id").limit(1);
-  if (!teams?.length) return reply("❌ No teams found in the database.");
+  if (!teams?.length) return ephemeralReply("❌ No teams found in the database.");
 
   const { assigned, roleNames, warnings } = await execSyncRoles();
   const lines = [
@@ -2094,7 +2094,7 @@ async function syncRoles(userId: string) {
     `• Players updated: **${assigned}**`,
     ...warnings.map(w => `⚠️ ${w}`),
   ];
-  return reply((warnings.length ? "⚠️ Partial sync" : "✅ Roles synced") + "\n" + lines.join("\n"));
+  return ephemeralReply((warnings.length ? "⚠️ Partial sync" : "✅ Roles synced") + "\n" + lines.join("\n"));
 }
 
 async function diagRoles(userId: string) {
@@ -2109,7 +2109,7 @@ async function diagRoles(userId: string) {
     .maybeSingle();
 
   if (!player) {
-    return reply(
+    return ephemeralReply(
       `❌ No player record found for your Discord ID (\`${userId}\`).\n` +
       `You must register on the website so your Discord ID is saved to the database.`
     );
@@ -2150,21 +2150,21 @@ async function diagRoles(userId: string) {
     }
   }
 
-  return reply(lines.join("\n"));
+  return ephemeralReply(lines.join("\n"));
 }
 
 async function assignRole(userId: string, targetUserId: string, roleId: string) {
   const denied = await adminGuard(userId);
   if (denied) return denied;
   await addRoleById(targetUserId, roleId);
-  return reply(`✅ Role assigned to <@${targetUserId}>.`);
+  return ephemeralReply(`✅ Role assigned to <@${targetUserId}>.`);
 }
 
 async function removeRoleCmd(userId: string, targetUserId: string, roleId: string) {
   const denied = await adminGuard(userId);
   if (denied) return denied;
   await removeRoleById(targetUserId, roleId);
-  return reply(`✅ Role removed from <@${targetUserId}>.`);
+  return ephemeralReply(`✅ Role removed from <@${targetUserId}>.`);
 }
 
 // Sets a team into a match slot and marks it scheduled if both teams are now set.
@@ -2891,7 +2891,7 @@ export async function handleCommand(interaction: Interaction) {
       case "checklist":  return adminChecklist(userId);
       case "disconnect": return adminDisconnect(userId, String(sOpt("confirm")));
       case "wipe":       return adminWipe(userId, String(sOpt("confirm")), sOpt("clear_history") === true);
-      default:           return reply("Unknown admin subcommand.");
+      default:           return ephemeralReply("Unknown admin subcommand.");
     }
   }
 
