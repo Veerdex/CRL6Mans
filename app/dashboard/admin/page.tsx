@@ -9,6 +9,7 @@ import { InsightsChart, type InsightsPoint } from "./insights-chart";
 import { FormatEditor, type SeasonFormatConfig } from "../season/format-editor";
 import { CollapsibleSection } from "./collapsible-section";
 import { EmptySectionsProvider } from "./empty-sections-context";
+import { AdminTabsProvider, AdminTabsBar, AdminTabSection } from "./admin-tabs";
 import { RegistrationCard } from "./registration-card";
 import { PlayerPanel, type CombinedPlayer, type PlatformAccountSummary } from "./player-panel";
 import { TeamSlotsManager } from "./team-slots-manager";
@@ -592,6 +593,7 @@ export default async function AdminPage() {
 
   return (
     <EmptySectionsProvider>
+    <AdminTabsProvider>
     <div className="p-4 sm:p-6 lg:p-8 space-y-12">
 
       {/* ── Missing settings row warning ── */}
@@ -607,6 +609,9 @@ export default async function AdminPage() {
         </div>
       )}
 
+      <AdminTabsBar labels={["Overview", "Players & Staff", "Match Ops", "Approvals", "Season & League"]} />
+
+      <AdminTabSection tab={0}>
       {/* ── Insights ── */}
       <CollapsibleSection
         title="Insights"
@@ -626,7 +631,9 @@ export default async function AdminPage() {
           initial={(settings?.admin_notification_prefs as Record<string, boolean> | null) ?? {}}
         />
       </CollapsibleSection>
+      </AdminTabSection>
 
+      <AdminTabSection tab={1}>
       {/* ── Players ── */}
       <CollapsibleSection
         title="Players"
@@ -639,7 +646,9 @@ export default async function AdminPage() {
           <p className="mt-3 text-xs text-red-400/60">{bannedCount} banned player{bannedCount !== 1 ? "s" : ""} shown below active players.</p>
         )}
       </CollapsibleSection>
+      </AdminTabSection>
 
+      <AdminTabSection tab={0}>
       {/* ── Team Slots (Director+) ── */}
       {userIsDirector && <CollapsibleSection
         title="Team Slots"
@@ -664,7 +673,9 @@ export default async function AdminPage() {
         </div>
         <TeamSlotsManager teams={(teamSlots ?? []) as { id: string; name: string; discord_role_id: string | null; slot_number: number | null }[]} />
       </CollapsibleSection>}
+      </AdminTabSection>
 
+      <AdminTabSection tab={2}>
       {/* ── Match Reporting ── */}
       <CollapsibleSection
         title="Match Reporting"
@@ -694,7 +705,9 @@ export default async function AdminPage() {
           </div>
         )}
       </CollapsibleSection>
+      </AdminTabSection>
 
+      <AdminTabSection tab={3}>
       {/* ── Registrations & Platform Claims ── */}
       <CollapsibleSection
         title="Registrations & Platform Claims"
@@ -764,7 +777,9 @@ export default async function AdminPage() {
           </div>
         )}
       </CollapsibleSection>
+      </AdminTabSection>
 
+      <AdminTabSection tab={1}>
       {/* ── Identity Discrepancies (Director+ toggle, Moderator+ adjudication) ── */}
       <CollapsibleSection
         title="Identity Discrepancies"
@@ -788,7 +803,9 @@ export default async function AdminPage() {
           </div>
         )}
       </CollapsibleSection>
+      </AdminTabSection>
 
+      <AdminTabSection tab={2}>
       {/* ── Schedule Approvals ── */}
       <CollapsibleSection
         title="Schedule Approvals"
@@ -810,10 +827,14 @@ export default async function AdminPage() {
           </div>
         )}
       </CollapsibleSection>
+      </AdminTabSection>
 
+      <AdminTabSection tab={1}>
       {/* ── Staff Management ── */}
       <StaffSection userIsCEO={userIsCEO} userIsDirector={userIsDirector} />
+      </AdminTabSection>
 
+      <AdminTabSection tab={4}>
       {/* ── Scheduling (Director+, visible whenever a season is active) ── */}
       {userIsDirector && seasonActive && (
         <CollapsibleSection
@@ -906,8 +927,10 @@ export default async function AdminPage() {
           />
         </CollapsibleSection>
       )}
+      </AdminTabSection>
 
     </div>
+    </AdminTabsProvider>
     </EmptySectionsProvider>
   );
 }
