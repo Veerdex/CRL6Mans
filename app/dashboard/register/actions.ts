@@ -28,7 +28,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
 
   const inServer = await isGuildMember(session.userId);
   if (!inServer) {
-    const inviteUrl = process.env.NEXT_PUBLIC_DISCORD_INVITE_URL ?? process.env.DISCORD_INVITE_URL;
+    const inviteUrl = process.env.NEXT_PUBLIC_DISCORD_INVITE_URL?.trim() || process.env.DISCORD_INVITE_URL?.trim();
     return {
       error: inviteUrl
         ? `You must join the Discord server before registering. Join here: ${inviteUrl}`
@@ -151,7 +151,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     tag: "registration",
   }, "registrations").catch(() => {});
 
-  const inviteUrl = process.env.DISCORD_INVITE_URL;
+  const inviteUrl = process.env.DISCORD_INVITE_URL?.trim();
   if (inviteUrl) {
     sendDm(
       session.userId,

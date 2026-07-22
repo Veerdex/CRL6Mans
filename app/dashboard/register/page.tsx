@@ -20,7 +20,7 @@ export default async function RegisterPage() {
 
   const inServer = await isGuildMember(session.userId);
   if (!inServer) {
-    const inviteUrl = process.env.NEXT_PUBLIC_DISCORD_INVITE_URL ?? process.env.DISCORD_INVITE_URL ?? null;
+    const inviteUrl = process.env.NEXT_PUBLIC_DISCORD_INVITE_URL?.trim() || process.env.DISCORD_INVITE_URL?.trim() || null;
     return (
       <div className="p-8 max-w-xl">
         <h1 className="text-2xl font-bold text-white mb-2">Join the Discord First</h1>

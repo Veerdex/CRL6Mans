@@ -89,7 +89,7 @@ export default function DraftCard({
           <div className="ml-4 mt-2 p-3 bg-indigo-950/60 border border-indigo-700/50 rounded-lg text-xs text-indigo-200 flex flex-col gap-1.5">
             <span className="font-semibold">You must be in the Discord server to enter the draft.</span>
             <a
-              href={process.env.NEXT_PUBLIC_DISCORD_INVITE_URL ?? "#"}
+              href={process.env.NEXT_PUBLIC_DISCORD_INVITE_URL?.trim() || "#"}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 underline font-medium"
