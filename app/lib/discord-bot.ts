@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "./supabase";
-import { isModerator } from "./players";
+import { isModerator, isDirector, isCEO } from "./players";
 import { pushToAllApproved, pushToTeam } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
 import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter } from "./discord-api";
@@ -24,13 +24,17 @@ async function roleMentionByName(
   return role ? `<@&${role.id}>` : `**${teamName}**`;
 }
 
-type Option = { name: string; value: string | number; focused?: boolean };
+type Option = { name: string; value: string | number | boolean; focused?: boolean };
+// Discord nests a subcommand's own options one level deeper, under the subcommand entry
+// itself — e.g. for `/admin disconnect confirm:...`, data.options[0] is `{ name: "disconnect",
+// options: [{ name: "confirm", value: "..." }] }`.
+type SubOption = Option & { options?: Option[] };
 type Interaction = {
   channel_id?: string;
   channel?: { id: string; name?: string };
   data: {
     name?: string;
-    options?: Option[];
+    options?: SubOption[];
     custom_id?: string;
     components?: Array<{ type: number; components: Array<{ custom_id: string; value: string }> }>;
   };
@@ -51,12 +55,33 @@ function getUserId(i: Interaction) {
   return i.member?.user.id ?? i.user?.id ?? "";
 }
 
-function opt(i: Interaction, name: string): string | number {
-  return i.data.options?.find((o) => o.name === name)?.value ?? "";
+function optFrom(options: SubOption[] | undefined, name: string): string | number | boolean {
+  return options?.find((o) => o.name === name)?.value ?? "";
+}
+
+function opt(i: Interaction, name: string): string | number | boolean {
+  return optFrom(i.data.options, name);
+}
+
+// For a top-level `/admin <subcommand>` invocation, resolves which subcommand was
+// picked and that subcommand's own options (Discord nests them one level deeper).
+function adminSubcommand(i: Interaction): { name: string; opts: SubOption[] } {
+  const sub = i.data.options?.[0];
+  return { name: sub?.name ?? "", opts: sub?.options ?? [] };
 }
 
 async function adminGuard(userId: string) {
   if (!(await isModerator(userId))) return reply("❌ You don't have permission to use this command.");
+  return null;
+}
+
+async function directorGuard(userId: string) {
+  if (!(await isDirector(userId))) return reply("❌ This command requires Director permissions or higher.");
+  return null;
+}
+
+async function ceoGuard(userId: string) {
+  if (!(await isCEO(userId))) return reply("❌ This command requires CEO permissions.");
   return null;
 }
 
@@ -1459,6 +1484,109 @@ async function setAnnouncementChannel(userId: string, channelId: string) {
   return reply(`✅ Announcement channel set to <#${channelId}>.`);
 }
 
+// Reports what's still missing before the Discord server is fully wired up for the
+// website — run after /admin disconnect, or on a brand-new server, to see what's left.
+async function adminChecklist(userId: string) {
+  const denied = await directorGuard(userId);
+  if (denied) return denied;
+
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings")
+    .select("rules_channel_id, announcement_channel_id, draft_channel_id, moderator_role_id, director_role_id, ceo_role_id, registered_role_id")
+    .single();
+
+  const { count: teamCount } = await supabaseAdmin
+    .from("teams").select("id", { count: "exact", head: true });
+
+  const missing: string[] = [];
+  if (!settings) missing.push("`league_settings` row is missing entirely (should always have exactly one row)");
+  if (!settings?.rules_channel_id) missing.push("Rules channel — run `/setruleschannel` in the target channel");
+  if (!settings?.announcement_channel_id) missing.push("Announcement channel — run `/setannouncement` in the target channel");
+  if (!settings?.draft_channel_id) missing.push("Draft channel — run `/setdraftchannel` in the target channel");
+  if (!settings?.moderator_role_id) missing.push("Moderator role — run `/admin setmoderatorid`");
+  if (!settings?.director_role_id) missing.push("Director role — run `/admin setdirectorid`");
+  if (!settings?.ceo_role_id) missing.push("CEO role — run `/admin setceoid`");
+  if (!settings?.registered_role_id) missing.push("Registered role — run `/admin setregisteredrole`");
+  if (!teamCount) missing.push("No team slots exist yet — add them from the dashboard admin panel");
+
+  if (!missing.length) return reply("✅ Nothing missing — the server looks fully configured.");
+  return reply(`⚠️ **Setup checklist — ${missing.length} item(s) remaining:**\n${missing.map(m => `• ${m}`).join("\n")}`);
+}
+
+// DB-only: clears every guild-scoped Discord ID reference so a stale server's channel/role
+// IDs don't linger after switching which Discord server the bot is invited to. Makes no
+// Discord API calls itself and never touches staff_roles or player Discord IDs, since those
+// are global user IDs, not scoped to any one guild.
+async function adminDisconnect(userId: string, confirm: string) {
+  const denied = await ceoGuard(userId);
+  if (denied) return denied;
+  if (confirm !== "CONFIRM DISCONNECT") return reply('❌ Type exactly: "CONFIRM DISCONNECT"');
+
+  await Promise.all([
+    supabaseAdmin.from("league_settings").update({
+      rules_channel_id: null, announcement_channel_id: null, match_category_anchor_id: null,
+      match_category_id: null, draft_channel_id: null, moderator_role_id: null,
+      director_role_id: null, ceo_role_id: null, registered_role_id: null,
+      updated_at: new Date().toISOString(),
+    }).not("id", "is", null),
+    supabaseAdmin.from("teams").update({ discord_role_id: null }).not("id", "is", null),
+    supabaseAdmin.from("matches").update({ discord_channel_id: null }).not("id", "is", null),
+    supabaseAdmin.from("match_discord_categories").delete().not("id", "is", null),
+  ]);
+
+  return { ok: true, message: "✅ Disconnected. All Discord channel/role/category references cleared from the database — no changes were made in the Discord server itself. Run `/admin checklist` to see what to reconfigure." };
+}
+
+// Clears live game/season data so the website starts fresh, without touching staff roles,
+// player registration, or any of the Discord-connection config /admin disconnect owns.
+// player_game_stats rows cascade-delete automatically with their parent match (DB constraint),
+// regardless of clearHistory — clearHistory only additionally clears the completed-seasons archive.
+async function adminWipe(userId: string, confirm: string, clearHistory: boolean) {
+  const denied = await ceoGuard(userId);
+  if (denied) return denied;
+  if (confirm !== "CONFIRM WIPE") return reply('❌ Type exactly: "CONFIRM WIPE"');
+
+  await deleteMatchChannels();
+  await voidAllPendingWagers();
+
+  const { data: allPlayers } = await supabaseAdmin
+    .from("players").select("discord_id").not("discord_id", "is", null);
+  const realDiscordIds = (allPlayers ?? [])
+    .map(p => p.discord_id as string)
+    .filter(id => id && !id.startsWith("test_"));
+  const { data: allTeams } = await supabaseAdmin.from("teams").select("discord_role_id");
+  const guildRoles = await getGuildRoles();
+  const roleIdsToStrip = [
+    ...guildRoles.filter(r => r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft").map(r => r.id),
+    ...(allTeams ?? []).map(t => t.discord_role_id).filter((id): id is string => !!id),
+  ];
+  await stripRoleIdsFromMembers(realDiscordIds, roleIdsToStrip);
+
+  await Promise.all([
+    supabaseAdmin.from("sub_requests").delete().not("id", "is", null),
+    supabaseAdmin.from("matches").delete().not("id", "is", null),
+    supabaseAdmin.from("teams").delete().not("id", "is", null),
+  ]);
+  await supabaseAdmin.from("players").update({
+    team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null,
+    in_active_draft: false, must_update_tracker: false, coin_grant_pending_start: false,
+    coin_grant_pending_weekly: false,
+  }).not("id", "is", null);
+  await supabaseAdmin.from("league_settings").update({
+    draft_open: false, draft_signups_closed: false, draft_active: false, season_active: false,
+    is_test_season: false, num_teams: 0, current_pick: 0, draft_phase: null,
+    nominated_player_id: null, current_bid: null, current_bid_team_id: null, current_bid_time: null,
+    pick_deadline: null, pending_start_coin_amount: 0, updated_at: new Date().toISOString(),
+  }).not("id", "is", null);
+
+  if (clearHistory) await supabaseAdmin.from("seasons").delete().not("id", "is", null);
+
+  return {
+    ok: true,
+    message: `✅ Wiped. All teams, matches, and season/draft state cleared — the website is a clean slate.${clearHistory ? " Completed-season history was also cleared." : " Completed-season history was preserved (pass clear_history:true to also clear it)."}`,
+  };
+}
+
 async function openRound(userId: string, roundOverride?: number) {
   const denied = await adminGuard(userId);
   if (denied) return denied;
@@ -2740,26 +2868,38 @@ export async function handleCommand(interaction: Interaction) {
   const userId = getUserId(interaction);
   const name = interaction.data.name;
 
+  if (name === "admin") {
+    const sub = adminSubcommand(interaction);
+    const sOpt = (n: string) => optFrom(sub.opts, n);
+
+    switch (sub.name) {
+      case "setdraftchannel": return setDraftChannel(userId, interaction.channel_id ?? "");
+      case "syncroles":         return syncRoles(userId);
+      case "diagroles":         return diagRoles(userId);
+      case "setmoderatorid":    return setStaffRoleId(userId, String(sOpt("role")), "moderator");
+      case "setdirectorid":     return setStaffRoleId(userId, String(sOpt("role")), "director");
+      case "setceoid":          return setStaffRoleId(userId, String(sOpt("role")), "ceo");
+      case "setregisteredrole": return setRegisteredRoleId(userId, String(sOpt("role")));
+      case "assignrole":        return assignRole(userId, String(sOpt("user")), String(sOpt("role")));
+      case "removerole":        return removeRoleCmd(userId, String(sOpt("user")), String(sOpt("role")));
+      case "setruleschannel":   return setRulesChannel(userId, interaction.channel_id ?? "");
+      case "setannouncement":   return setAnnouncementChannel(userId, interaction.channel_id ?? "");
+      case "setmatchcategoryanchor": {
+        const categoryId = sOpt("category");
+        return setMatchCategoryAnchor(userId, categoryId ? String(categoryId) : undefined);
+      }
+      case "checklist":  return adminChecklist(userId);
+      case "disconnect": return adminDisconnect(userId, String(sOpt("confirm")));
+      case "wipe":       return adminWipe(userId, String(sOpt("confirm")), sOpt("clear_history") === true);
+      default:           return reply("Unknown admin subcommand.");
+    }
+  }
+
   switch (name) {
     case "totalplayers":  return totalPlayers();
     case "totalusers":    return totalUsers();
     case "playerinfo":    return playerInfo(String(opt(interaction, "username")));
-    case "setdraftchannel": return setDraftChannel(userId, interaction.channel_id ?? "");
     case "pick":          return pickPlayer(userId, String(opt(interaction, "player")));
-    case "syncroles":         return syncRoles(userId);
-    case "diagroles":         return diagRoles(userId);
-    case "setmoderatorid":    return setStaffRoleId(userId, String(opt(interaction, "role")), "moderator");
-    case "setdirectorid":     return setStaffRoleId(userId, String(opt(interaction, "role")), "director");
-    case "setceoid":          return setStaffRoleId(userId, String(opt(interaction, "role")), "ceo");
-    case "setregisteredrole": return setRegisteredRoleId(userId, String(opt(interaction, "role")));
-    case "assignrole":        return assignRole(userId, String(opt(interaction, "user")), String(opt(interaction, "role")));
-    case "removerole":        return removeRoleCmd(userId, String(opt(interaction, "user")), String(opt(interaction, "role")));
-    case "setruleschannel":   return setRulesChannel(userId, interaction.channel_id ?? "");
-    case "setannouncement":   return setAnnouncementChannel(userId, interaction.channel_id ?? "");
-    case "setmatchcategoryanchor": {
-      const categoryId = opt(interaction, "category");
-      return setMatchCategoryAnchor(userId, categoryId ? String(categoryId) : undefined);
-    }
     case "openround": {
       const w = opt(interaction, "round");
       return openRound(userId, w ? Number(w) : undefined);

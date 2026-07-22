@@ -3,7 +3,10 @@ import { after } from "next/server";
 import nacl from "tweetnacl";
 import { handleCommand, handleAutocomplete, handleModalSubmit } from "@/app/lib/discord-bot";
 
-const DEFERRED_COMMANDS = new Set(["openround", "syncroles"]);
+const DEFERRED_COMMANDS = new Set(["openround"]);
+// Subcommands of /admin that are slow enough to need deferral (matched against
+// interaction.data.options[0].name, since Discord nests subcommand names one level deep).
+const DEFERRED_ADMIN_SUBCOMMANDS = new Set(["syncroles"]);
 const DEFERRED_MODALS = new Set(["confirm_startdraft", "confirm_enddraft", "confirm_startseason"]);
 
 function verify(publicKey: string, signature: string, timestamp: string, body: string): boolean {
@@ -94,9 +97,10 @@ export async function POST(req: NextRequest) {
   // Slash commands
   if (interaction.type === 2) {
     const name = interaction.data?.name;
+    const subName = name === "admin" ? interaction.data?.options?.[0]?.name : undefined;
 
     // Long-running commands: acknowledge immediately, run in background via after()
-    if (DEFERRED_COMMANDS.has(name)) {
+    if (DEFERRED_COMMANDS.has(name) || (subName && DEFERRED_ADMIN_SUBCOMMANDS.has(subName))) {
       const token: string = interaction.token;
       after(async () => {
         try {
