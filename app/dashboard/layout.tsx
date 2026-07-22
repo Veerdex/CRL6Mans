@@ -4,7 +4,8 @@ import { decrypt } from "@/app/lib/session";
 import { getPlayerInfo, getStaffRole, hasMfaEnabled } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import NavLink from "./nav-link";
-import { TopNav } from "./top-nav";
+import { TopNav, type TopNavEntry } from "./top-nav";
+import { SidebarNavGroup } from "./sidebar-nav-group";
 import { APP_NAME } from "@/app/lib/constants";
 import MobileNav from "./mobile-nav";
 import { ServiceWorkerRegistrar } from "./sw-register";
@@ -119,6 +120,41 @@ const ALL_NAV: Record<string, NavItem> = {
     icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>,
   },
 };
+
+// Related tabs are collapsed under a category so the flat nav list doesn't
+// keep growing as features get added. A group only renders as a dropdown
+// when 2+ of its keys are actually present for the current user/state —
+// a lone survivor is shown as a plain top-level item instead.
+const NAV_GROUPS: { label: string; icon: React.ReactNode; keys: string[] }[] = [
+  { label: "Play", icon: ALL_NAV.tournament.icon, keys: ["tournament", "draft", "season", "schedule"] },
+  { label: "League", icon: ALL_NAV.players.icon, keys: ["teams", "players", "stats", "podium"] },
+];
+
+function groupNavKeys(keys: string[]): TopNavEntry[] {
+  const consumed = new Set<string>();
+  const result: TopNavEntry[] = [];
+  for (const key of keys) {
+    if (consumed.has(key)) continue;
+    const group = NAV_GROUPS.find((g) => g.keys.includes(key));
+    if (!group) {
+      consumed.add(key);
+      result.push(ALL_NAV[key]);
+      continue;
+    }
+    group.keys.forEach((k) => consumed.add(k));
+    const groupItems = group.keys.filter((k) => keys.includes(k)).map((k) => ALL_NAV[k]);
+    if (groupItems.length <= 1) {
+      if (groupItems.length === 1) result.push(groupItems[0]);
+    } else {
+      result.push({ label: group.label, icon: group.icon, items: groupItems });
+    }
+  }
+  return result;
+}
+
+function isNavGroup(entry: TopNavEntry): entry is Extract<TopNavEntry, { items: NavItem[] }> {
+  return "items" in entry;
+}
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
@@ -300,9 +336,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (admin) navKeys.push("admin", "testreplay");
 
   const BOTTOM_KEYS = new Set(["settings", "admin", "testreplay"]);
-  const mainNavItems = navKeys.filter((k) => !BOTTOM_KEYS.has(k)).map((k) => ALL_NAV[k]);
+  const mainNavKeys = navKeys.filter((k) => !BOTTOM_KEYS.has(k));
+  const mainNavItems = mainNavKeys.map((k) => ALL_NAV[k]);
   const bottomNavItems = navKeys.filter((k) => BOTTOM_KEYS.has(k)).map((k) => ALL_NAV[k]);
   const navItems = [...mainNavItems, ...bottomNavItems];
+  // Grouped view for desktop only — mobile keeps the flat list above since it
+  // already has its own bottom-tab + "More" sheet pattern.
+  const groupedMainNav = groupNavKeys(mainNavKeys);
 
   const avatarUrl = session?.avatar
     ? `https://cdn.discordapp.com/avatars/${session.userId}/${session.avatar}.png`
@@ -319,7 +359,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {/* Top bar — desktop only */}
         <header className="app-topbar hidden md:flex items-center gap-3 px-4 h-14 bg-zinc-900 border-b border-zinc-800 shrink-0">
           <span className="text-lg font-bold tracking-tight shrink-0">{APP_NAME}</span>
-          <TopNav items={mainNavItems} />
+          <TopNav items={groupedMainNav} />
           <div className="flex items-center gap-1 shrink-0">
             <NotificationButton />
             {bottomNavItems.map((item) => (
@@ -376,12 +416,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
 
         <nav className="flex-1 p-3 space-y-1">
-          {mainNavItems.map((item) => (
-            <NavLink key={item.href} href={item.href}>
-              {item.icon}
-              {item.label}
-            </NavLink>
-          ))}
+          {groupedMainNav.map((entry) =>
+            isNavGroup(entry) ? (
+              <SidebarNavGroup key={`group:${entry.label}`} label={entry.label} icon={entry.icon} items={entry.items} />
+            ) : (
+              <NavLink key={entry.href} href={entry.href}>
+                {entry.icon}
+                {entry.label}
+              </NavLink>
+            )
+          )}
         </nav>
 
         {status === "pending" && (
