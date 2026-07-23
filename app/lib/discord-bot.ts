@@ -414,11 +414,16 @@ export async function cleanupStageCategoryIfComplete(stage: string, round: numbe
     .neq("status", "completed");
   if (count !== 0) return;
 
-  const { data: cats } = await supabaseAdmin
+  // Some stages (hybrid semifinals/grand final, DE grand final) always have a single
+  // round and are stored with categoryRound: null instead of the match round — match
+  // that same key here, or the category lookup below never finds anything to delete.
+  const { categoryRound } = computeCategoryInfo(stage, round, {});
+  let catQuery = supabaseAdmin
     .from("match_discord_categories")
     .select("id, discord_category_id")
-    .eq("stage", stage)
-    .eq("round", round);
+    .eq("stage", stage);
+  catQuery = categoryRound !== null ? catQuery.eq("round", categoryRound) : catQuery.is("round", null);
+  const { data: cats } = await catQuery;
   if (!cats?.length) return;
 
   const catDiscordIds = new Set(cats.map(c => c.discord_category_id));
