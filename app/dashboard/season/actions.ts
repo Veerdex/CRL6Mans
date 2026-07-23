@@ -24,15 +24,19 @@ import { openReadyMatchChannels } from "@/app/lib/discord-bot";
 
 // Director-gated stage/round advance: runs the bracket-server builder, then opens
 // Discord channels for any newly-ready matches (so rounds flow without /openround).
+// In testing mode, bypasses the previous round's schedule deadline the same way
+// Simulate does, so admins can advance stages/rounds back-to-back without waiting
+// out real-world round windows.
 async function runStageAdvance(
   fn: () => Promise<{ error?: string; ok?: boolean }>,
 ): Promise<{ error?: string; ok?: boolean }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
+  const testingMode = cookieStore.get("testing_mode")?.value === "1";
 
   const result = await fn();
-  if (result.ok) await openReadyMatchChannels();
+  if (result.ok) await openReadyMatchChannels({ ignoreScheduleDeadline: testingMode });
   revalidatePath("/dashboard/season");
   return result;
 }
