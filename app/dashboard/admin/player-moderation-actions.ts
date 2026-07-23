@@ -18,14 +18,6 @@ async function getActorRole(): Promise<StaffRole> {
   return role;
 }
 
-async function assertModerator() {
-  const cookieStore = await cookies();
-  const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId) redirect("/dashboard");
-  const role = await getStaffRole(session.userId);
-  if (!role || !(await hasMfaEnabled(session.userId))) redirect("/dashboard");
-}
-
 function canActOn(actorRole: StaffRole, targetRole: StaffRole | null): boolean {
   if (actorRole === "ceo") return true;
   if (actorRole === "director") return targetRole !== "director" && targetRole !== "ceo";
@@ -202,13 +194,16 @@ export async function unkickPlayer(
 export async function unbanPlayer(
   playerId: string
 ): Promise<{ ok?: boolean; error?: string }> {
-  await assertModerator();
+  const actorRole = await getActorRole();
 
   const { data: player } = await supabaseAdmin
     .from("players")
     .select("discord_id")
     .eq("id", playerId)
     .single();
+
+  const targetRole = player?.discord_id ? await getStaffRole(player.discord_id) : null;
+  if (!canActOn(actorRole, targetRole)) return { error: "You don't have permission to moderate this user." };
 
   // Wipe their profile data — they must re-register from scratch when they rejoin
   const { error } = await supabaseAdmin
