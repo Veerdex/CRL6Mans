@@ -284,6 +284,7 @@ alter table league_settings add column if not exists moderator_role_id     text;
 alter table league_settings add column if not exists director_role_id      text;
 alter table league_settings add column if not exists ceo_role_id           text;
 alter table league_settings add column if not exists updated_at            timestamptz not null default now();
+alter table league_settings add column if not exists last_platform_replay_cleanup_at timestamptz;
 
 -- ─────────────────────────────────────────────
 -- TOURNAMENTS

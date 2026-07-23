@@ -4,6 +4,7 @@ import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
 import { execStartDraft, execAutoBalanceTeams, execStartSeason, execFinalizeTeamSignups, processExpiredCheckIns, processExpiredScoreConfirmations, openReadyMatchChannels } from "@/app/lib/discord-bot";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 import { freezeUnfrozenMatchPredictions } from "@/app/lib/match-predictions";
+import { cleanupOrphanedVerificationReplays } from "@/app/lib/platform-account-cleanup";
 
 export const runtime = "nodejs";
 // Draft start / team finalize can do many sequential Discord role calls, so give
@@ -79,7 +80,7 @@ export async function GET(request: Request) {
   // ── 2. Activation: promote a due tournament to the single live one ──
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("active_tournament_id, draft_active, season_active, last_coin_grant_at, is_test_season")
+    .select("active_tournament_id, draft_active, season_active, last_coin_grant_at, is_test_season, last_platform_replay_cleanup_at")
     .single();
   let activeId = settings?.active_tournament_id as string | null | undefined;
   const lastCoinGrantAt = (settings?.last_coin_grant_at as string | null | undefined) ?? null;
@@ -121,6 +122,19 @@ export async function GET(request: Request) {
         fired.push("weekly_coins_pending");
       } catch { /* best-effort */ }
     }
+  }
+
+  // Sweep orphaned platform-verification-replay uploads at most every 6 hours —
+  // no need to hit storage on every per-minute tick.
+  const lastCleanupAt = (settings?.last_platform_replay_cleanup_at as string | null | undefined) ?? null;
+  if (!lastCleanupAt || now - new Date(lastCleanupAt).getTime() >= 6 * 60 * 60 * 1000) {
+    try {
+      const { removed } = await cleanupOrphanedVerificationReplays();
+      if (removed) fired.push(`replay_cleanup:${removed}`);
+      await supabaseAdmin.from("league_settings")
+        .update({ last_platform_replay_cleanup_at: new Date().toISOString() })
+        .not("id", "is", null);
+    } catch { /* best-effort */ }
   }
 
   if (!activeId) return NextResponse.json({ ok: true, fired });
