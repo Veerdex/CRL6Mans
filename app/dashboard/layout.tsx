@@ -14,6 +14,7 @@ import { NotificationButton } from "./notification-button";
 import { PullToRefresh } from "./pull-to-refresh";
 import { PwaDesktopHint } from "./pwa-desktop-hint";
 import { CoinGrantToast } from "./coin-grant-toast";
+import { TeamCutToast } from "./team-cut-toast";
 import { LogoutButton } from "./logout-button";
 
 type NavItem = { href: string; label: string; icon: React.ReactNode };
@@ -176,12 +177,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // ── Claim pending coin grants on visit ────────────────────────────────────
   let coinGrantStart = 0;
   let coinGrantWeekly = 0;
+  let teamSignupMessage: string | null = null;
   if (playerInfo.status === "approved" && session?.userId) {
     const { data: playerCoins } = await supabaseAdmin
       .from("players")
-      .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly")
+      .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly, team_signup_not_selected, team_signup_too_few_players")
       .eq("discord_id", session.userId)
       .single();
+
+    if (playerCoins?.team_signup_not_selected) {
+      teamSignupMessage = "Your team didn't make the cutoff for the last tournament you signed up for.";
+      await supabaseAdmin.from("players").update({ team_signup_not_selected: false }).eq("id", playerCoins.id);
+    } else if (playerCoins?.team_signup_too_few_players) {
+      teamSignupMessage = "Your team didn't reach the 3-player minimum in time, so it wasn't entered in the last tournament.";
+      await supabaseAdmin.from("players").update({ team_signup_too_few_players: false }).eq("id", playerCoins.id);
+    }
 
     const pendingStart = playerCoins?.coin_grant_pending_start ?? false;
     const pendingWeekly = playerCoins?.coin_grant_pending_weekly ?? false;
@@ -379,6 +389,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </main>
         <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
+        <TeamCutToast message={teamSignupMessage} />
 
         {/* Bottom bar — desktop only */}
         <footer className="app-bottombar hidden md:flex items-center justify-between gap-4 px-4 h-12 bg-zinc-900 border-t border-zinc-800 shrink-0">
@@ -488,6 +499,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
       </main>
       <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
+      <TeamCutToast message={teamSignupMessage} />
 
       <MobileNav items={navItems} username={session?.username ?? "Unknown"} displayName={playerInfo.displayName} avatarUrl={avatarUrl} status={status} priorityHrefs={priorityHrefs} />
     </div>

@@ -93,6 +93,8 @@ alter table players add column if not exists theme              text not null de
 alter table players add column if not exists nav_layout         text not null default 'sidebar';
 alter table players add column if not exists updated_at         timestamptz not null default now();
 alter table players add column if not exists created_at         timestamptz not null default now();
+alter table players add column if not exists team_signup_not_selected boolean not null default false;
+alter table players add column if not exists team_signup_too_few_players boolean not null default false;
 
 alter table players alter column theme set default 'crl6mans';
 alter table players drop constraint if exists players_theme_check;

@@ -117,6 +117,16 @@ export async function pushToAllApproved(payload: PushPayload) {
   if (data?.length) await sendToSubscriptions(data, payload);
 }
 
+export async function pushToDiscordIds(discordIds: string[], payload: PushPayload) {
+  if (!discordIds.length) return;
+  if (!(await notificationsEnabled())) return;
+  const { data } = await supabaseAdmin
+    .from("push_subscriptions")
+    .select("endpoint, p256dh, auth")
+    .in("discord_id", discordIds);
+  if (data?.length) await sendToSubscriptions(data, payload);
+}
+
 export async function pushToTeam(teamId: string, payload: PushPayload) {
   if (!(await notificationsEnabled())) return;
   const { data: players } = await supabaseAdmin

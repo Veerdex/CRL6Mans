@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "./supabase";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked } from "./players";
-import { pushToAllApproved, pushToTeam } from "./push";
+import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
 import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember } from "./discord-api";
 import {
@@ -1070,12 +1070,14 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
 export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("active_tournament_id, num_teams, season_active")
+    .select("active_tournament_id, num_teams, season_active, season_format")
     .single();
   if (settings?.season_active) return { ok: false, message: "❌ Season already active." };
   const tid = settings?.active_tournament_id as string | null | undefined;
   if (!tid) return { ok: false, message: "❌ No active tournament." };
   const teamLimit: number = settings?.num_teams ?? 0;
+  const format = settings?.season_format as { preset?: string } | null;
+  const minTeams = PRESET_MIN_TEAMS[format?.preset ?? ""] ?? 4;
 
   const { data: signups } = await supabaseAdmin
     .from("team_signups")
@@ -1086,19 +1088,20 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
   if (signupIds.length)
     await supabaseAdmin.from("team_signup_members").delete().in("team_signup_id", signupIds).eq("status", "invited");
 
+  const signupTeams = (signups ?? []).map((s) => {
+    const accepted = (s.team_signup_members as { player_id: string; status: string }[])
+      .filter((m) => m.status === "accepted");
+    return {
+      name: s.name,
+      creator: s.creator_player_id as string,
+      formed_at: s.formed_at as string | null,
+      created_at: s.created_at as string,
+      memberIds: accepted.map((m) => m.player_id),
+    };
+  });
+
   // Valid = 3+ accepted; ordered by when they first reached the minimum (then creation).
-  const valid = (signups ?? [])
-    .map((s) => {
-      const accepted = (s.team_signup_members as { player_id: string; status: string }[])
-        .filter((m) => m.status === "accepted");
-      return {
-        name: s.name,
-        creator: s.creator_player_id as string,
-        formed_at: s.formed_at as string | null,
-        created_at: s.created_at as string,
-        memberIds: accepted.map((m) => m.player_id),
-      };
-    })
+  const valid = signupTeams
     .filter((t) => t.memberIds.length >= 3)
     .sort((a, b) => {
       const fa = a.formed_at ? new Date(a.formed_at).getTime() : Infinity;
@@ -1106,6 +1109,22 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
       if (fa !== fb) return fa - fb;
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     });
+
+  // Teams that never reached the 3-player minimum — never entered, regardless of
+  // whether the tournament as a whole proceeds or gets cancelled below.
+  const tooFew = signupTeams.filter((t) => t.memberIds.length > 0 && t.memberIds.length < 3);
+  if (tooFew.length) {
+    const tooFewPlayerIds = tooFew.flatMap((t) => t.memberIds);
+    await supabaseAdmin.from("players").update({ team_signup_too_few_players: true }).in("id", tooFewPlayerIds);
+    const { data: tooFewPlayers } = await supabaseAdmin
+      .from("players").select("discord_id").in("id", tooFewPlayerIds);
+    pushToDiscordIds((tooFewPlayers ?? []).map((p) => p.discord_id as string).filter(Boolean), {
+      title: "Team Incomplete",
+      body: "Your team didn't reach the 3-player minimum by the sign-up deadline, so it wasn't entered.",
+      url: "/dashboard",
+      tag: "team-signup-too-few",
+    }).catch(() => {});
+  }
 
   const { data: allPreTeams } = await supabaseAdmin
     .from("teams").select("id, discord_role_id, slot_number").not("slot_number", "is", null).order("slot_number");
@@ -1115,9 +1134,63 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
 
   const capacity = teamLimit > 0 ? Math.min(teamLimit, numberedTeams.length) : numberedTeams.length;
   const kept = valid.slice(0, capacity);
-  if (kept.length === 0) return { ok: false, message: "❌ No valid teams (each needs at least 3 players)." };
+
+  // Not enough valid teams to actually run the format: cancel outright instead of
+  // leaving the tournament to sit here forever (season start would just keep
+  // silently failing the numTeams < min check every cron tick otherwise).
+  if (kept.length < minTeams) {
+    const allAcceptedPlayerIds = Array.from(new Set(signupTeams.flatMap((t) => t.memberIds)));
+
+    await supabaseAdmin.from("tournaments").update({
+      status: "cancelled",
+      summary: { cancellationReason: `Not enough teams signed up (${kept.length} of ${minTeams} required).` },
+      updated_at: new Date().toISOString(),
+    }).eq("id", tid);
+    await supabaseAdmin.from("team_signups").delete().eq("tournament_id", tid);
+    await supabaseAdmin.from("league_settings")
+      .update({ active_tournament_id: null, updated_at: new Date().toISOString() })
+      .not("id", "is", null);
+
+    const message = `Only ${kept.length} valid team(s) signed up (need ${minTeams}+). Tournament cancelled.`;
+    pushToAdmins({
+      title: "Tournament Cancelled — Not Enough Teams",
+      body: message,
+      url: "/dashboard/admin",
+      tag: "tournament-cancelled-admin",
+    }).catch(() => {});
+
+    if (allAcceptedPlayerIds.length) {
+      const { data: notifyPlayers } = await supabaseAdmin
+        .from("players").select("discord_id").in("id", allAcceptedPlayerIds);
+      pushToDiscordIds((notifyPlayers ?? []).map((p) => p.discord_id as string).filter(Boolean), {
+        title: "Tournament Cancelled",
+        body: "Not enough teams signed up in time, so the tournament has been cancelled.",
+        url: "/dashboard",
+        tag: "tournament-cancelled",
+      }).catch(() => {});
+    }
+
+    return { ok: true, message: `⚠️ ${message}` };
+  }
 
   const teamsToUse = numberedTeams.slice(0, kept.length);
+
+  // Valid teams that reached 3+ members but missed the capacity cutoff — tell them
+  // now (push) and leave a one-time notice for next dashboard load (in case they
+  // miss the push).
+  const cut = valid.slice(capacity);
+  if (cut.length) {
+    const cutPlayerIds = cut.flatMap((t) => t.memberIds);
+    await supabaseAdmin.from("players").update({ team_signup_not_selected: true }).in("id", cutPlayerIds);
+    const { data: cutPlayers } = await supabaseAdmin
+      .from("players").select("discord_id").in("id", cutPlayerIds);
+    pushToDiscordIds((cutPlayers ?? []).map((p) => p.discord_id as string).filter(Boolean), {
+      title: "Not Selected",
+      body: "Your team signed up in time but didn't make the cutoff for this tournament.",
+      url: "/dashboard",
+      tag: "team-signup-cut",
+    }).catch(() => {});
+  }
 
   // ── DB writes ──
   await supabaseAdmin.from("players").update({ team_id: null, is_captain: false, in_active_draft: false }).eq("status", "approved");
