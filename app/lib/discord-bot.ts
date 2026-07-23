@@ -631,6 +631,11 @@ export async function createMatchChannel(
     } else if (scheduleType === "range" && (rangeDays ?? 1) <= 1) {
       scheduleLines = `Play any time on: <t:${realPlayTs}:D>\nMatch Deadline (end of day): <t:${realDeadlineTs}:F>`;
       coordinateLine = `- This match must be played on this day — coordinate a time that works for both teams.`;
+    } else if (scheduleType === "custom") {
+      scheduleLines = (rangeDays ?? 1) <= 1
+        ? `Window: <t:${realPlayTs}:D>\nMatch Deadline (end of day): <t:${realDeadlineTs}:F>`
+        : `Window: between <t:${realPlayTs}:D> and <t:${realDeadlineTs}:D>\nMatch Deadline: <t:${realDeadlineTs}:F>`;
+      coordinateLine = `- This match requires admin approval — an admin will confirm your match time individually.`;
     } else {
       // multi-day range / fallback
       scheduleLines = `Play any time between <t:${realPlayTs}:D> and <t:${realDeadlineTs}:D>, before the deadline.\nMatch Deadline: <t:${realDeadlineTs}:F>`;
