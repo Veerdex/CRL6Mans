@@ -7,6 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirector } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { cleanupStageCategoryIfComplete, openReadyMatchChannels } from "@/app/lib/discord-bot";
+import { deleteChannel } from "@/app/lib/discord-api";
 import {
   DE_WINNERS, DE_LOSERS, DE_GF,
   getDEWBRounds, getDELBRounds,
@@ -658,20 +659,29 @@ export async function simulateMatch(): Promise<{ error?: string; ok?: boolean }>
   return { ok: true };
 }
 
-// After simulating matches, reconcile Discord the same way a real report does (minus
-// the result messages and push notifications): delete the category + channels for any
-// round that just completed, then open channels for the next ready matches.
+// After simulating matches, reconcile Discord the same way a real report does: delete
+// each simulated match's own channel immediately (like execReportMatchResult), delete
+// the category for any round that's now fully complete, then open channels for the
+// next ready matches. The schedule deadline gate is bypassed here — simulate is a
+// testing tool and shouldn't require waiting out real-world round windows the way
+// real player-reported matches do.
 async function deleteChannelsForBatch(matchIds: string[]): Promise<void> {
   if (matchIds.length) {
     const { data: ms } = await supabaseAdmin
-      .from("matches").select("stage, round").in("id", matchIds);
-    const pairs = new Set((ms ?? []).map((m) => `${m.stage} ${m.round}`));
+      .from("matches").select("id, stage, round, discord_channel_id").in("id", matchIds);
+    for (const m of ms ?? []) {
+      if (m.discord_channel_id) {
+        await deleteChannel(m.discord_channel_id);
+        await supabaseAdmin.from("matches").update({ discord_channel_id: null }).eq("id", m.id);
+      }
+    }
+    const pairs = new Set((ms ?? []).map((m) => `${m.stage} ${m.round}`));
     for (const p of pairs) {
-      const [stage, round] = p.split(" ");
+      const [stage, round] = p.split(" ");
       await cleanupStageCategoryIfComplete(stage, Number(round));
     }
   }
-  await openReadyMatchChannels();
+  await openReadyMatchChannels({ ignoreScheduleDeadline: true });
 }
 
 export async function simulateRound(): Promise<{ error?: string; ok?: boolean }> {

@@ -1698,7 +1698,8 @@ async function openRound(userId: string, roundOverride?: number) {
 // that already have a channel are skipped, and createMatchChannel creates the
 // match's category lazily only if one doesn't already exist. Called after every
 // match report and every round/stage generation, replacing the need for /openround.
-export async function openReadyMatchChannels(): Promise<void> {
+export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: boolean }): Promise<void> {
+  const ignoreScheduleDeadline = opts?.ignoreScheduleDeadline ?? false;
   const { data: allMatches } = await supabaseAdmin
     .from("matches")
     .select("id, home_team_id, away_team_id, round, match_number, stage, status, discord_channel_id, scheduled_at, admin_scheduled, home_checked_in, away_checked_in, checkin_deadline");
@@ -1767,7 +1768,7 @@ export async function openReadyMatchChannels(): Promise<void> {
     const cs = (m.stage as string).startsWith("group_") ? "group" : (m.stage as string);
     if (round1ManualStartPending && (m.round as number) === 1 && cs === firstStage) return false;
     if (!scheduleMap.has(`${cs}:${m.round}`)) return false;
-    if ((m.round as number) > 1) {
+    if (!ignoreScheduleDeadline && (m.round as number) > 1) {
       const prev = scheduleMap.get(`${cs}:${(m.round as number) - 1}`);
       if (prev && new Date(prev.deadline_at).getTime() > now) return false;
     }
