@@ -23,6 +23,19 @@ function phaseRank(canonStage: string): number {
   return 3; // single_elimination, de_*, hybrid_* — the final bracket phase
 }
 
+// Explicit feeder-round dependencies within a "concurrent" phase: unlike other
+// same-phase sub-bracket pairs, these specific rounds have their team slots left
+// null at bracket-creation time and only filled once the feeder round's matches
+// actually complete (see generateDEQualifierInserts / generateDEMatchInserts /
+// generateHybridMatchInserts in bracket.ts) — so they can't really run concurrently
+// with their feeder despite phaseRank treating the pair as same-phase.
+const FEEDER_DEPENDENCIES: { dependent: { stage: string; round: number }; feeder: { stage: string; round: number } }[] = [
+  { dependent: { stage: "deq_losers", round: 1 }, feeder: { stage: "deq_winners", round: 1 } },
+  { dependent: { stage: "de_losers", round: 1 }, feeder: { stage: "de_winners", round: 1 } },
+  { dependent: { stage: "hybrid_lb", round: 3 }, feeder: { stage: "hybrid_ub", round: 1 } },
+  { dependent: { stage: "hybrid8_lb", round: 2 }, feeder: { stage: "hybrid8_ub", round: 1 } },
+];
+
 async function verifyAdmin() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
@@ -343,6 +356,34 @@ export async function setRoundSchedule(params: {
           return { ok: false, error: `Must start after the ${stageName(oStage)} stage finishes.` };
         if (oPhase > myPhase && myEndMs > oStartMs)
           return { ok: false, error: `Must finish before the ${stageName(oStage)} stage begins.` };
+      }
+    }
+
+    // Feeder-round dependencies that phaseRank's coarse same-phase check misses
+    // (see FEEDER_DEPENDENCIES comment).
+    for (const pair of FEEDER_DEPENDENCIES) {
+      if (pair.dependent.stage === stage && pair.dependent.round === round) {
+        const fRow = (others ?? []).find(
+          (o) => (o.stage as string) === pair.feeder.stage && (o.round as number) === pair.feeder.round,
+        );
+        if (fRow) {
+          const fStartMs = windowStartMs(new Date(fRow.play_at as string).getTime(), fRow.schedule_type as string, tz);
+          const fEndMs = fStartMs + windowLenMs(fRow.schedule_type as string, fRow.range_days as number | null);
+          if (fEndMs > myStartMs) {
+            return { ok: false, error: `Must start after ${stageName(pair.feeder.stage)} round ${pair.feeder.round}'s window ends.` };
+          }
+        }
+      }
+      if (pair.feeder.stage === stage && pair.feeder.round === round) {
+        const dRow = (others ?? []).find(
+          (o) => (o.stage as string) === pair.dependent.stage && (o.round as number) === pair.dependent.round,
+        );
+        if (dRow) {
+          const dStartMs = windowStartMs(new Date(dRow.play_at as string).getTime(), dRow.schedule_type as string, tz);
+          if (myEndMs > dStartMs) {
+            return { ok: false, error: `Must finish before ${stageName(pair.dependent.stage)} round ${pair.dependent.round} begins.` };
+          }
+        }
       }
     }
   }
