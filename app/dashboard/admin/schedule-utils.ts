@@ -1,6 +1,6 @@
 // Pure utilities for round scheduling — no server dependencies, safe to import anywhere.
 
-export type ScheduleType = "range" | "specific" | "weekly";
+export type ScheduleType = "range" | "specific" | "weekly" | "custom";
 
 export type RoundScheduleRow = {
   stage: string;

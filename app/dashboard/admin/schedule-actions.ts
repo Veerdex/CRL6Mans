@@ -206,7 +206,7 @@ export async function setRoundSchedule(params: {
   await verifyAdmin();
 
   const { tournamentId, stage, round, scheduleType, dateStr } = params;
-  const rangeDays = scheduleType === "range" ? Math.max(1, Math.floor(params.rangeDays ?? 1))
+  const rangeDays = scheduleType === "range" || scheduleType === "custom" ? Math.max(1, Math.floor(params.rangeDays ?? 1))
     : scheduleType === "weekly" ? 7
     : null;
   const tz = params.timeZone || FALLBACK_TZ;

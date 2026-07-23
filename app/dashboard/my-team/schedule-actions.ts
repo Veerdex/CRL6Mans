@@ -107,10 +107,13 @@ export async function proposeMatchTime(
   // Out-of-window proposals are still sent to the opponent, but flagged so they
   // require admin approval after the opponent confirms. Rescheduling an admin-pinned
   // match always needs admin approval (treated like a fixed "specific" time), and the
-  // proposal supersedes the pin.
+  // proposal supersedes the pin. A "custom" round requires the admin to sign off on
+  // every match regardless of window, since per-match times are admin-set by design.
   const adminSched = await getAdminSchedule(match.stage, match.round);
+  const isCustomRound = adminSched?.type === "custom";
   const adminRequired = match.admin_scheduled
     ? true
+    : isCustomRound ? true
     : adminSched ? !isInWindow(dt.getTime(), adminSched) : false;
 
   const { error } = await supabaseAdmin
@@ -137,7 +140,9 @@ export async function proposeMatchTime(
       const ts = Math.floor(dt.getTime() / 1000);
       const verb = match.scheduled_at ? "proposed a new" : "proposed a";
       const note = adminRequired
-        ? "\n⚠️ This time is **outside the scheduled window**, so it will need admin approval after you confirm."
+        ? isCustomRound
+          ? "\nThis round requires admin approval for every match time, so it will need admin sign-off after you confirm."
+          : "\n⚠️ This time is **outside the scheduled window**, so it will need admin approval after you confirm."
         : "\nHead to the website to confirm or suggest a different time.";
       await notifyMatchChannel(
         matchId,

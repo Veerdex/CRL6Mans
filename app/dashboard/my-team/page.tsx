@@ -540,7 +540,7 @@ export default async function MyTeamPage() {
             scheduleAccepted: sd?.schedule_accepted ?? false,
             scheduleAdminRequired: sd?.schedule_admin_required ?? false,
             adminPinned:     sd?.admin_scheduled ?? false,
-            adminScheduleType: (adminSched?.type as "range" | "specific" | undefined) ?? null,
+            adminScheduleType: (adminSched?.type as "range" | "specific" | "weekly" | "custom" | undefined) ?? null,
             adminPlayAt:     adminSched?.playAt ?? null,
             adminDeadlineAt: adminSched?.deadlineAt ?? null,
             adminRangeDays:  adminSched?.rangeDays ?? null,

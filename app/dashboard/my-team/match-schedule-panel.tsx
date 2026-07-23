@@ -15,7 +15,7 @@ export type SchedulableMatch = {
   scheduleAccepted: boolean;
   scheduleAdminRequired: boolean;
   adminPinned: boolean; // admin set a fixed time for this specific match
-  adminScheduleType: "range" | "specific" | null;
+  adminScheduleType: "range" | "specific" | "weekly" | "custom" | null;
   adminPlayAt: string | null;
   adminDeadlineAt: string | null;
   adminRangeDays: number | null;
@@ -28,15 +28,16 @@ export type SchedulableMatch = {
 
 const CHECKIN_WINDOW_MS = 10 * 60 * 1000;
 
-// Mirrors the server-side window check so we can warn before submitting. A range is
-// just the stored [playAt, deadlineAt] instant range (zone-independent).
+// Mirrors the server-side window check so we can warn before submitting. Any
+// non-"specific" type (range, weekly, custom) is just the stored [playAt, deadlineAt]
+// instant range (zone-independent).
 function inAdminWindow(
   ms: number,
-  type: "range" | "specific",
+  type: "range" | "specific" | "weekly" | "custom",
   playAt: string,
   deadlineAt: string,
 ): boolean {
-  if (type === "range") {
+  if (type !== "specific") {
     return ms >= new Date(playAt).getTime() && ms <= new Date(deadlineAt).getTime();
   }
   return ms === new Date(playAt).getTime();
@@ -88,9 +89,13 @@ function windowNote(match: SchedulableMatch): string | null {
   if (!t) return null;
   // An admin-pinned individual match is a fixed time, not a free window.
   if (match.adminPinned && match.scheduledAt) return `Admin scheduled this match for ${formatDateTime(match.scheduledAt)}.`;
-  if (t === "range") {
-    if ((adminRangeDays ?? 1) <= 1) return `Scheduled window: any time on ${formatLocalDate(adminPlayAt!)} (your local time).`;
-    return `Scheduled window: any time ${formatWeekRange(adminPlayAt!, adminDeadlineAt!)} (your local time).`;
+  if (t !== "specific") {
+    const windowText = (adminRangeDays ?? 1) <= 1
+      ? `any time on ${formatLocalDate(adminPlayAt!)} (your local time)`
+      : `any time ${formatWeekRange(adminPlayAt!, adminDeadlineAt!)} (your local time)`;
+    return t === "custom"
+      ? `Scheduled window: ${windowText}. Every match in this round needs admin approval.`
+      : `Scheduled window: ${windowText}.`;
   }
   return `Admin set this match for ${formatDateTime(adminPlayAt!)}.`;
 }
@@ -127,10 +132,13 @@ function MatchScheduleRow({
   const admin = match.adminScheduleType;
   // A "specific" round OR an admin-pinned individual match is a fixed, confirmed time.
   const adminLocked = admin === "specific" || match.adminPinned;
-  // A range is a *window*: the admin only set a play window (the window-start time
-  // and default play hour are recommendations, not a fixed time), so teams still pick a
-  // time within it — unless this specific match was pinned by the admin.
-  const isWindow = admin === "range" && !match.adminPinned;
+  // A window type (range, weekly, custom) means the admin only set a play window (the
+  // window-start time and default play hour are recommendations, not a fixed time), so
+  // teams still pick a time within it — unless this specific match was pinned by the admin.
+  const isWindow = admin !== null && admin !== "specific" && !match.adminPinned;
+  // A "custom" round requires admin sign-off on every match regardless of window —
+  // the admin sets each match's time individually by design.
+  const isCustomRound = admin === "custom";
 
   const weProposed = match.proposedByTeamId === teamId;
   const theyProposed = !!match.proposedByTeamId && !weProposed;
@@ -169,7 +177,7 @@ function MatchScheduleRow({
     const dt = new Date(dtValue);
     if (dt.getTime() <= Date.now()) { setError("Must be in the future."); return; }
     setError(null);
-    if (admin && !inAdminWindow(dt.getTime(), admin, match.adminPlayAt!, match.adminDeadlineAt!)) {
+    if (isCustomRound || (admin && !inAdminWindow(dt.getTime(), admin, match.adminPlayAt!, match.adminDeadlineAt!))) {
       setShowOutOfWindow(true);
       return;
     }
@@ -322,9 +330,13 @@ function MatchScheduleRow({
       {/* Out-of-window confirmation popup */}
       {showOutOfWindow && (
         <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 p-3 space-y-2">
-          <p className="text-xs text-amber-200 font-medium">⚠️ Outside the scheduled window</p>
+          <p className="text-xs text-amber-200 font-medium">
+            {isCustomRound ? "⚠️ Requires admin approval" : "⚠️ Outside the scheduled window"}
+          </p>
           <p className="text-[11px] text-amber-200/80">
-            {note} This time needs admin approval. Your opponent will be asked to confirm first, then an admin reviews it.
+            {isCustomRound
+              ? "This round requires admin approval for every match. Your opponent will be asked to confirm first, then an admin reviews it."
+              : <>{note} This time needs admin approval. Your opponent will be asked to confirm first, then an admin reviews it.</>}
           </p>
           <div className="flex items-center gap-3">
             <button
@@ -360,9 +372,13 @@ function MatchScheduleRow({
 
           {showOutOfWindow ? (
             <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 p-3 space-y-2">
-              <p className="text-xs text-amber-200 font-medium">⚠️ Outside the scheduled window</p>
+              <p className="text-xs text-amber-200 font-medium">
+                {isCustomRound ? "⚠️ Requires admin approval" : "⚠️ Outside the scheduled window"}
+              </p>
               <p className="text-[11px] text-amber-200/80">
-                This time needs admin approval. Your opponent confirms first, then an admin reviews it.
+                {isCustomRound
+                  ? "This round requires admin approval for every match. Your opponent confirms first, then an admin reviews it."
+                  : "This time needs admin approval. Your opponent confirms first, then an admin reviews it."}
               </p>
               <div className="flex items-center gap-3">
                 <button

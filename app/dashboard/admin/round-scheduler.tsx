@@ -50,6 +50,7 @@ const SCHEDULE_TYPE_LABELS: Record<ScheduleType, string> = {
   range: "Range",
   specific: "Specific",
   weekly: "Weekly",
+  custom: "Custom",
 };
 
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -57,6 +58,7 @@ const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "
 function scheduleTypeLabel(s: RoundScheduleRow): string {
   if (s.scheduleType === "range") return `Range (${s.rangeDays ?? 1}d)`;
   if (s.scheduleType === "weekly") return "Weekly (7d)";
+  if (s.scheduleType === "custom") return `Custom (${s.rangeDays ?? 1}d)`;
   return SCHEDULE_TYPE_LABELS[s.scheduleType];
 }
 
@@ -163,10 +165,12 @@ function MatchPinRow({
   match,
   minStr,
   maxStr,
+  isCustom,
 }: {
   match: RoundMatchInfo;
   minStr: string;
   maxStr: string;
+  isCustom: boolean;
 }) {
   const [val, setVal] = useState(match.scheduledAt && match.adminScheduled ? isoToLocalDateTimeInput(match.scheduledAt) : "");
   const [pending, startTransition] = useTransition();
@@ -220,7 +224,7 @@ function MatchPinRow({
           ) : match.hasProposal ? (
             <span className="text-[10px] text-amber-400">Teams negotiating</span>
           ) : (
-            <span className="text-[10px] text-zinc-600">Undecided — teams negotiate</span>
+            <span className="text-[10px] text-zinc-600">{isCustom ? "Undecided — admin must set" : "Undecided — teams negotiate"}</span>
           )}
           {match.adminScheduled && !pending && (
             <button onClick={clear} className="text-[11px] text-zinc-500 hover:text-zinc-300 underline">Clear</button>
@@ -242,13 +246,16 @@ function MatchPinList({
 }) {
   const minStr = isoToLocalDateTimeInput(schedule.playAt);
   const maxStr = isoToLocalDateTimeInput(schedule.deadlineAt);
+  const isCustom = schedule.scheduleType === "custom";
   return (
     <div className="mt-1 ml-2 border-l-2 border-zinc-800 pl-2">
       <p className="text-[10px] text-zinc-600 pl-2 py-1">
-        Times must fall within the window ({localTimeShort(schedule.playAt)} – {localTimeShort(schedule.deadlineAt)}, your local time). Undecided matches let the teams pick.
+        {isCustom
+          ? `Custom round — every match must be scheduled individually within the window (${localTimeShort(schedule.playAt)} – ${localTimeShort(schedule.deadlineAt)}, your local time).`
+          : `Times must fall within the window (${localTimeShort(schedule.playAt)} – ${localTimeShort(schedule.deadlineAt)}, your local time). Undecided matches let the teams pick.`}
       </p>
       {matches.map((m) => (
-        <MatchPinRow key={m.id} match={m} minStr={minStr} maxStr={maxStr} />
+        <MatchPinRow key={m.id} match={m} minStr={minStr} maxStr={maxStr} isCustom={isCustom} />
       ))}
     </div>
   );
@@ -292,7 +299,10 @@ function RoundRow({
 
   // Per-match scheduling is available once the round has a window set, the type is a
   // window (not a single fixed time), and more than one match exists for the round.
-  const canExpand = !!schedule && schedule.scheduleType !== "specific" && (matches?.length ?? 0) > 1;
+  // A "custom" round always requires per-match scheduling — the admin sets every
+  // match's time individually, so it's available even for a single-match round.
+  const isCustomType = schedule?.scheduleType === "custom";
+  const canExpand = !!schedule && schedule.scheduleType !== "specific" && (matches?.length ?? 0) > (isCustomType ? 0 : 1);
 
   const canChain = round > 1 && !!prevSchedule && prevSchedule.scheduleType !== "specific" && type !== "specific";
 
@@ -343,7 +353,7 @@ function RoundRow({
         stage,
         round,
         scheduleType: opts.schedType,
-        rangeDays: opts.schedType === "range" ? opts.days : opts.schedType === "weekly" ? 7 : null,
+        rangeDays: opts.schedType === "range" || opts.schedType === "custom" ? opts.days : opts.schedType === "weekly" ? 7 : null,
         dateStr: opts.useChain ? "" : opts.date,
         timeZone: browserTz(),
       });
@@ -487,6 +497,7 @@ function RoundRow({
         >
           <option value="range">Range</option>
           <option value="weekly">Weekly</option>
+          <option value="custom">Custom</option>
           <option value="specific">Specific</option>
         </select>
 
@@ -529,7 +540,7 @@ function RoundRow({
               className={inputBase}
               disabled={pending}
             />
-            {type === "range" && (
+            {(type === "range" || type === "custom") && (
               <span className="flex items-center gap-1 text-[10px] text-zinc-600">
                 {playHour % 12 || 12}{playHour >= 12 ? "PM" : "AM"} <ZoneLabel />
               </span>
@@ -543,8 +554,8 @@ function RoundRow({
           </div>
         )}
 
-        {/* Range day-count — editable regardless of follow, since follow only infers the start date */}
-        {type === "range" && (
+        {/* Range/custom day-count — editable regardless of follow, since follow only infers the start date */}
+        {(type === "range" || type === "custom") && (
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-zinc-500">for</span>
             <input

@@ -72,7 +72,7 @@ export function ScheduleCalendar({ entries }: { entries: CalEntry[] }) {
   const evs: Ev[] = entries
     .map((e) => {
       const start = dayBucket(e.playAt);
-      const span = e.scheduleType === "range" ? (e.rangeDays ?? 1) : 1;
+      const span = e.scheduleType !== "specific" ? (e.rangeDays ?? 1) : 1;
       return { ...e, start, end: start + (span - 1) * DAY, span, specific: e.scheduleType === "specific", lane: 0, colorIdx: 0 };
     })
     .sort((a, b) => a.start - b.start || b.span - a.span);

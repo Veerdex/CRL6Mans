@@ -579,7 +579,7 @@ export default async function AdminPage() {
       const cs = canonicalStage(m.stage);
       const sched = (roundScheduleRows ?? []).find((s) => s.stage === cs && s.round === m.round);
       const windowNote = sched
-        ? sched.schedule_type === "range" ? "must be within the scheduled window"
+        ? sched.schedule_type !== "specific" ? "must be within the scheduled window"
           : "a specific time was set"
         : null;
       return {
