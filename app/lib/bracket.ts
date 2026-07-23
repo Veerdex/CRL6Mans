@@ -220,8 +220,9 @@ export function computeSwissRecords(
 }
 
 // Pair active teams for the next Swiss round.
-// Teams grouped by W-L record, sorted Buchholz desc, paired top-half vs bottom-half.
-// Rematches avoided by swapping within bucket.
+// Teams grouped by W-L record, sorted Buchholz desc, paired sequentially by rank
+// (1v2, 3v4, ...) within each bucket. Rematches avoided via backtracking, falling
+// back to allowing one only when no rematch-free pairing exists for the bucket.
 export function pairSwissRound(
   records: SwissRecord[],
   advanceWins = SWISS_ADVANCE_WINS,
@@ -347,6 +348,52 @@ export function generateSwissNextRoundInserts(
     home_score: null,
     away_score: null,
     status: "scheduled",
+  }));
+}
+
+// Match count per round for an entire Swiss stage, given a race-to-`advanceWins`-
+// wins/`eliminateLosses`-losses format. A bucket of `c` active teams at record w-l
+// always splits exactly c/2 winners to w+1-l and c/2 losers to w-l+1 — which teams
+// depends on results, but how many never does — so every round's slot count is
+// knowable the moment the stage starts, before a single game is played.
+export function computeSwissRoundSizes(
+  n: number,
+  advanceWins = SWISS_ADVANCE_WINS,
+  eliminateLosses = SWISS_ELIMINATE_LOSSES
+): number[] {
+  const sizes: number[] = [];
+  let buckets = new Map<string, number>([["0-0", n]]);
+  while (true) {
+    let roundMatches = 0;
+    const next = new Map<string, number>();
+    for (const [key, count] of buckets) {
+      if (count <= 0) continue;
+      const [w, l] = key.split("-").map(Number);
+      const half = count / 2;
+      roundMatches += half;
+      if (w + 1 < advanceWins) next.set(`${w + 1}-${l}`, (next.get(`${w + 1}-${l}`) ?? 0) + half);
+      if (l + 1 < eliminateLosses) next.set(`${w}-${l + 1}`, (next.get(`${w}-${l + 1}`) ?? 0) + half);
+    }
+    if (roundMatches === 0) break;
+    sizes.push(roundMatches);
+    buckets = next;
+  }
+  return sizes;
+}
+
+// Placeholder rows (no teams assigned yet) for a future Swiss round, so admins can
+// pin match times before pairings are known. Backfilled in place by
+// buildAndSaveNextSwissRound once the prior round resolves.
+export function generateSwissPlaceholderInserts(roundNum: number, count: number): BracketMatchInsert[] {
+  return Array.from({ length: count }, (_, i) => ({
+    round: roundNum,
+    match_number: i + 1,
+    stage: SWISS_STAGE,
+    home_team_id: null,
+    away_team_id: null,
+    home_score: null,
+    away_score: null,
+    status: "pending",
   }));
 }
 

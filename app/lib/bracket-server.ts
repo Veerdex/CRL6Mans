@@ -10,6 +10,7 @@ import {
   SWISS_STAGE, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES, SWISS8_ADVANCE_WINS, SWISS8_ELIMINATE_LOSSES,
   computeSwissRecords, generateSwissR1Inserts,
   generateSwissNextRoundInserts, seedSwissQualifiers,
+  computeSwissRoundSizes, generateSwissPlaceholderInserts,
   SE_QUALIFIER, generateSEQualifierInserts,
   DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS, generateDEQualifierInserts,
   HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, generateHybridMatchInserts,
@@ -59,6 +60,27 @@ function makeSwissR1Inserts(pairs: { homeId: string; awayId: string }[]): Bracke
     home_team_id: p.homeId, away_team_id: p.awayId,
     home_score: null, away_score: null, status: "scheduled",
   }));
+}
+
+// Inserts a Swiss stage's R1 pairings plus deterministic placeholder rows (null
+// team_ids) for every later round, so admins can schedule per-match times ahead of
+// pairings. Round match counts only depend on team count and the advance/eliminate
+// thresholds (computeSwissRoundSizes), never on who wins, so the whole stage's slot
+// structure is knowable upfront — buildAndSaveNextSwissRound backfills each
+// placeholder round's team_ids once that round's pairing actually resolves.
+async function insertSwissR1WithPlaceholders(
+  r1Inserts: BracketMatchInsert[],
+  n: number,
+  advanceWins: number,
+  eliminateLosses: number,
+): Promise<{ error?: string }> {
+  const roundSizes = computeSwissRoundSizes(n, advanceWins, eliminateLosses);
+  const inserts = [...r1Inserts];
+  for (let r = 2; r <= roundSizes.length; r++) {
+    inserts.push(...generateSwissPlaceholderInserts(r, roundSizes[r - 1]));
+  }
+  const { error } = await supabaseAdmin.from("matches").insert(inserts);
+  return { error: error?.message };
 }
 
 // Build a set of canonical "A:B" (lexicographic) keys from completed match history.
@@ -319,17 +341,20 @@ export async function buildAndSaveSwissFromGroups(): Promise<{ error?: string; o
   const seededWithGroup = qualified.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
   const pairs = pairCrossGroupR1(seededWithGroup);
   const inserts = makeSwissR1Inserts(pairs);
-  const { error } = await supabaseAdmin.from("matches").insert(inserts);
-  if (error) return { error: error.message };
+  const { error } = await insertSwissR1WithPlaceholders(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+  if (error) return { error };
   return { ok: true };
 }
 
-// Build the next Swiss round from existing Swiss match results.
+// Build the next Swiss round from existing Swiss match results. Rounds beyond the
+// current one may already exist as placeholder rows (null team_ids, from
+// insertSwissR1WithPlaceholders) — if so, this backfills them in place rather than
+// inserting new rows, so any time an admin already pinned on a placeholder survives.
 export async function buildAndSaveNextSwissRound(): Promise<{ error?: string; ok?: boolean }> {
   const [{ data: swissMatches }, { data: settings }] = await Promise.all([
     supabaseAdmin
       .from("matches")
-      .select("round, match_number, home_team_id, away_team_id, home_score, away_score, status")
+      .select("id, round, match_number, home_team_id, away_team_id, home_score, away_score, status")
       .eq("stage", SWISS_STAGE)
       .order("round").order("match_number"),
     supabaseAdmin.from("league_settings").select("season_format").single(),
@@ -341,8 +366,13 @@ export async function buildAndSaveNextSwissRound(): Promise<{ error?: string; ok
   const advanceWins = isHybrid8 ? SWISS8_ADVANCE_WINS : SWISS_ADVANCE_WINS;
   const eliminateLosses = isHybrid8 ? SWISS8_ELIMINATE_LOSSES : SWISS_ELIMINATE_LOSSES;
 
-  const currentRound = Math.max(...swissMatches.map(m => m.round));
-  const currentRoundMatches = swissMatches.filter(m => m.round === currentRound);
+  // Placeholder rows for future rounds have no teams yet — only paired rounds count
+  // toward "current round," or the stage would look complete the instant it starts.
+  const pairedMatches = swissMatches.filter(m => m.home_team_id && m.away_team_id);
+  if (!pairedMatches.length) return { error: "No Swiss matches found." };
+
+  const currentRound = Math.max(...pairedMatches.map(m => m.round));
+  const currentRoundMatches = pairedMatches.filter(m => m.round === currentRound);
   const pending = currentRoundMatches.filter(m => m.status !== "completed");
   if (pending.length > 0) return { error: `${pending.length} match${pending.length === 1 ? "" : "es"} in round ${currentRound} still pending.` };
 
@@ -355,11 +385,27 @@ export async function buildAndSaveNextSwissRound(): Promise<{ error?: string; ok
   const active = records.filter(r => r.wins < advanceWins && r.losses < eliminateLosses);
   if (active.length === 0) return { error: "Swiss stage is complete — no active teams." };
 
-  const inserts = generateSwissNextRoundInserts(records, currentRound + 1, advanceWins, eliminateLosses);
+  const nextRound = currentRound + 1;
+  const inserts = generateSwissNextRoundInserts(records, nextRound, advanceWins, eliminateLosses);
   if (!inserts.length) return { error: "Could not generate pairings for next round." };
 
-  const { error } = await supabaseAdmin.from("matches").insert(inserts);
-  if (error) return { error: error.message };
+  const placeholders = swissMatches
+    .filter(m => m.round === nextRound && !m.home_team_id && !m.away_team_id)
+    .sort((a, b) => a.match_number - b.match_number);
+
+  if (placeholders.length >= inserts.length) {
+    for (let i = 0; i < inserts.length; i++) {
+      const { error } = await supabaseAdmin.from("matches").update({
+        home_team_id: inserts[i].home_team_id,
+        away_team_id: inserts[i].away_team_id,
+        status: "scheduled",
+      }).eq("id", placeholders[i].id);
+      if (error) return { error: error.message };
+    }
+  } else {
+    const { error } = await supabaseAdmin.from("matches").insert(inserts);
+    if (error) return { error: error.message };
+  }
   return { ok: true };
 }
 
@@ -449,8 +495,8 @@ export async function buildAndSaveSwissFromSEQualifier(): Promise<{ error?: stri
   // Avoid rematches from the SE qualifier stage.
   const playedPairs = buildPlayedSet(seqMatches);
   const inserts = generateSwissR1Inserts(seeded, playedPairs);
-  const { error } = await supabaseAdmin.from("matches").insert(inserts);
-  if (error) return { error: error.message };
+  const { error } = await insertSwissR1WithPlaceholders(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+  if (error) return { error };
   return { ok: true };
 }
 
@@ -515,8 +561,8 @@ export async function buildAndSaveSwissFromDEQualifier(): Promise<{ error?: stri
   // Avoid rematches from the DE qualifier stage.
   const playedPairs = buildPlayedSet(deqMatches);
   const inserts = generateSwissR1Inserts(seeded, playedPairs);
-  const { error } = await supabaseAdmin.from("matches").insert(inserts);
-  if (error) return { error: error.message };
+  const { error } = await insertSwissR1WithPlaceholders(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+  if (error) return { error };
   return { ok: true };
 }
 
@@ -557,8 +603,8 @@ export async function buildAndSaveSwissFromGroupsHybrid(): Promise<{ error?: str
   const seededWithGroup = swissSeeds.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
   const pairs = pairCrossGroupR1(seededWithGroup);
   const inserts = makeSwissR1Inserts(pairs);
-  const { error } = await supabaseAdmin.from("matches").insert(inserts);
-  if (error) return { error: error.message };
+  const { error } = await insertSwissR1WithPlaceholders(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+  if (error) return { error };
   return { ok: true };
 }
 
@@ -649,8 +695,8 @@ export async function buildAndSaveSwissFromGroupsHybrid8(): Promise<{ error?: st
   const seededWithGroup = swissSeeds.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
   const pairs = pairCrossGroupR1(seededWithGroup);
   const inserts = makeSwissR1Inserts(pairs);
-  const { error } = await supabaseAdmin.from("matches").insert(inserts);
-  if (error) return { error: error.message };
+  const { error } = await insertSwissR1WithPlaceholders(inserts, 8, SWISS8_ADVANCE_WINS, SWISS8_ELIMINATE_LOSSES);
+  if (error) return { error };
   return { ok: true };
 }
 
