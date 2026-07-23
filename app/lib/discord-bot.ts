@@ -98,7 +98,9 @@ const STAFF_ROLE_ID_COLUMN = {
 } as const;
 
 async function setStaffRoleId(userId: string, roleId: string, tier: "moderator" | "director" | "ceo") {
-  const denied = await adminGuard(userId);
+  // Setting which Discord role represents Director/CEO is CEO-only; the
+  // Moderator-role mapping is one notch lower, at Director+.
+  const denied = tier === "moderator" ? await directorGuard(userId) : await ceoGuard(userId);
   if (denied) return denied;
   if (!roleId) return ephemeralReply("❌ You must specify a role.");
   const { error } = await supabaseAdmin.from("league_settings")
@@ -112,7 +114,7 @@ async function setStaffRoleId(userId: string, roleId: string, tier: "moderator" 
 // Stores the role granted on registration approval (and stripped on ban). Until
 // this is set the bot resolves a role named "Registered" by name instead.
 async function setRegisteredRoleId(userId: string, roleId: string) {
-  const denied = await adminGuard(userId);
+  const denied = await directorGuard(userId);
   if (denied) return denied;
   if (!roleId) return ephemeralReply("❌ You must specify a role.");
   const { error } = await supabaseAdmin.from("league_settings")
@@ -1506,7 +1508,7 @@ async function playerInfo(username: string) {
 }
 
 async function setDraftChannel(userId: string, channelId: string) {
-  const denied = await adminGuard(userId);
+  const denied = await directorGuard(userId);
   if (denied) return denied;
   if (!channelId) return ephemeralReply("❌ Provide a channel ID.");
 
@@ -1551,7 +1553,7 @@ async function pickPlayer(userId: string, playerUsername: string) {
 }
 
 async function setRulesChannel(userId: string, channelId: string) {
-  const denied = await adminGuard(userId);
+  const denied = await directorGuard(userId);
   if (denied) return denied;
   const { error } = await supabaseAdmin.from("league_settings")
     .update({ rules_channel_id: channelId, updated_at: new Date().toISOString() }).not("id", "is", null);
@@ -1561,7 +1563,7 @@ async function setRulesChannel(userId: string, channelId: string) {
 
 // Omit `categoryId` to clear the anchor — new match categories then default back to the bottom.
 async function setMatchCategoryAnchor(userId: string, categoryId?: string) {
-  const denied = await adminGuard(userId);
+  const denied = await directorGuard(userId);
   if (denied) return denied;
   const { error } = await supabaseAdmin.from("league_settings")
     .update({ match_category_anchor_id: categoryId ?? null, updated_at: new Date().toISOString() }).not("id", "is", null);
@@ -1572,7 +1574,7 @@ async function setMatchCategoryAnchor(userId: string, categoryId?: string) {
 }
 
 async function setAnnouncementChannel(userId: string, channelId: string) {
-  const denied = await adminGuard(userId);
+  const denied = await directorGuard(userId);
   if (denied) return denied;
   const { error } = await supabaseAdmin.from("league_settings")
     .update({ announcement_channel_id: channelId, updated_at: new Date().toISOString() }).not("id", "is", null);
