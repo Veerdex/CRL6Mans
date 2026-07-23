@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isModeratorVerified, isDirectorVerified } from "@/app/lib/players";
+import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { buildResolverContext } from "@/app/lib/replay-identity-context";
 import { resolveReplayParticipants } from "@/app/lib/replay-identity-resolver";
@@ -27,7 +27,7 @@ function isResolutionType(value: string): value is DiscrepancyResolution {
 async function requireAdmin(): Promise<string> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isModeratorVerified(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
   return session.userId;
 }
 
