@@ -1473,6 +1473,10 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
+function site() {
+  return ephemeralReply("🔗 https://crl6mans-queue-bot.vercel.app/");
+}
+
 async function totalPlayers() {
   const { count } = await supabaseAdmin
     .from("players").select("*", { count: "exact", head: true }).eq("status", "approved");
@@ -3057,6 +3061,7 @@ export async function handleCommand(interaction: Interaction) {
   }
 
   switch (name) {
+    case "site":          return site();
     case "totalplayers":  return totalPlayers();
     case "totalusers":    return totalUsers();
     case "playerinfo":    return playerInfo(String(opt(interaction, "username")));

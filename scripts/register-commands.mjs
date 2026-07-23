@@ -127,6 +127,10 @@ const commands = [
     ],
   },
   {
+    name: "site",
+    description: "Get the link to the CRL 6Mans website",
+  },
+  {
     name: "pick",
     description: "Pick a player for your team during the snake draft",
     options: [
