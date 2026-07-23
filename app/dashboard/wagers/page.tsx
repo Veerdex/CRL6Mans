@@ -235,11 +235,7 @@ export default async function WagersPage() {
     matchPredictions[m.id] =
       hRating != null && aRating != null
         ? computeMatchPredictionFromRating(hRating, aRating, m.bestOf)
-        : computeMatchPrediction(
-            rvsByTeam[m.home_team_id] ?? [],
-            rvsByTeam[m.away_team_id] ?? [],
-            m.bestOf,
-          );
+        : computeMatchPrediction(rvsByTeam[m.home_team_id] ?? [], rvsByTeam[m.away_team_id] ?? [], m.bestOf);
   }
 
   // Grid predictions are frozen by the tournament-scheduler cron shortly after a

@@ -13,7 +13,7 @@ import {
   getRoundName, GROUP_STAGE_PREFIX, parseGroupNum,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
-import { teamRatingFromRVs, applyRatingUpdate } from "./rating";
+import { teamRatingFromRVs, applyRatingUpdate, teamRatingDeltaFromRVChange } from "./rating";
 import { hasBlockingIdentityDiscrepancy } from "./replay-identity-certification";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 
@@ -721,7 +721,8 @@ function rankValue(p: { peak_2v2: string; current_2v2: string; peak_3v3: string;
 // with the wager predictor); this layer only reads/writes season_rating.
 // Full spec: wagers-prediction-explainer.txt
 
-// Lazy-initialises a team's season_rating from its current roster RVs.
+// Lazy-initialises a team's season_rating from its current roster RVs. The
+// roster-aggregation power mean is fixed regardless of stage — see rating.ts.
 async function initTeamSeasonRating(teamId: string): Promise<number> {
   const { data: players } = await supabaseAdmin
     .from("players")
@@ -732,9 +733,47 @@ async function initTeamSeasonRating(teamId: string): Promise<number> {
   return teamRatingFromRVs(rvs);
 }
 
+type RankFields = { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string };
+
+// Applies the marginal effect of one player's RV change (e.g. an approved
+// profile-edit request) to their team's season_rating. No-ops if the team
+// hasn't played yet (season_rating still null) — the next match's lazy init
+// will pick up the new RV directly. See teamRatingDeltaFromRVChange in
+// rating.ts for why this is exact and safe to call per-edit regardless of
+// how many other edits happen before or after it.
+export async function applyPlayerRVChangeToTeamRating(
+  playerId: string,
+  teamId: string,
+  oldFields: RankFields,
+  newFields: RankFields,
+): Promise<void> {
+  const { data: team } = await supabaseAdmin.from("teams").select("season_rating").eq("id", teamId).single();
+  if (!team || team.season_rating == null) return;
+
+  const { data: roster } = await supabaseAdmin
+    .from("players")
+    .select("id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .eq("team_id", teamId)
+    .eq("status", "approved");
+
+  const rvFor = (p: { id: string } & RankFields, fields: RankFields) =>
+    p.id === playerId ? rankValue(fields) : rankValue(p);
+
+  const oldRVs = (roster ?? []).map((p) => rvFor(p, oldFields));
+  const newRVs = (roster ?? []).map((p) => rvFor(p, newFields));
+
+  const delta = teamRatingDeltaFromRVChange(oldRVs, newRVs);
+  await supabaseAdmin
+    .from("teams")
+    .update({ season_rating: Number(team.season_rating) + delta })
+    .eq("id", teamId);
+}
+
 // Applies the game-share Elo update to both teams after a series result.
 // homeScore/awayScore are games won in the series; the update is exactly
-// zero-sum, so goal differential no longer feeds the rating.
+// zero-sum, so goal differential no longer feeds the rating. Applied
+// identically regardless of stage — independent of the hidden
+// PREDICTION_CONFIDENCE used on the display/wager-odds path.
 async function applySeasonRatingUpdate(
   homeTeamId: string,
   awayTeamId: string,

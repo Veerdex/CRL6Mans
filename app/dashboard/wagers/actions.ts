@@ -221,11 +221,7 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
   const oddsMap = new Map<string, MatchOdds>();
   for (const match of matches ?? []) {
     if (match.home_team_id && match.away_team_id) {
-      const odds = await computeServerOdds(
-        match.home_team_id,
-        match.away_team_id,
-        match.best_of ?? 3,
-      );
+      const odds = await computeServerOdds(match.home_team_id, match.away_team_id, match.best_of ?? 3);
       if (odds) oddsMap.set(match.id, odds);
     }
   }
@@ -342,11 +338,7 @@ export async function placeParlayBet(
   const oddsMap = new Map<string, MatchOdds>();
   for (const match of matches ?? []) {
     if (match.home_team_id && match.away_team_id) {
-      const odds = await computeServerOdds(
-        match.home_team_id,
-        match.away_team_id,
-        match.best_of ?? 3,
-      );
+      const odds = await computeServerOdds(match.home_team_id, match.away_team_id, match.best_of ?? 3);
       if (odds) oddsMap.set(match.id, odds);
     }
   }

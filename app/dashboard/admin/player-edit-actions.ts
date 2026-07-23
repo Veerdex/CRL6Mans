@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { applyPlayerRVChangeToTeamRating } from "@/app/lib/discord-bot";
 
 async function assertAdmin() {
   const cookieStore = await cookies();
@@ -27,6 +28,12 @@ export async function approvePlayerEditRequest(
 
   if (!req) return { error: "Request not found or already resolved." };
 
+  const { data: player } = await supabaseAdmin
+    .from("players")
+    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .eq("id", req.player_id)
+    .single();
+
   const { error: updateErr } = await supabaseAdmin
     .from("players")
     .update({
@@ -42,6 +49,25 @@ export async function approvePlayerEditRequest(
     .eq("id", req.player_id);
 
   if (updateErr) return { error: updateErr.message };
+
+  if (player?.team_id) {
+    await applyPlayerRVChangeToTeamRating(
+      req.player_id,
+      player.team_id,
+      {
+        peak_2v2:    player.peak_2v2,
+        current_2v2: player.current_2v2,
+        peak_3v3:    player.peak_3v3,
+        current_3v3: player.current_3v3,
+      },
+      {
+        peak_2v2:    req.peak_2v2,
+        current_2v2: req.current_2v2,
+        peak_3v3:    req.peak_3v3,
+        current_3v3: req.current_3v3,
+      },
+    ).catch(() => {});
+  }
 
   await supabaseAdmin
     .from("player_edit_requests")
