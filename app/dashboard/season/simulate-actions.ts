@@ -65,7 +65,9 @@ async function simulateSingleMatch(match: {
 // ── Group stage helpers ───────────────────────────────────────────────────────
 
 async function getReadyGroupMatches() {
-  // Find all scheduled group matches ordered by group then round
+  // Find all scheduled group matches ordered by round first so simulation proceeds
+  // round-by-round across all groups, matching real production pacing (all groups
+  // play round 1 before any group plays round 2).
   const { data } = await supabaseAdmin
     .from("matches")
     .select("id, round, match_number, home_team_id, away_team_id, stage")
@@ -73,8 +75,8 @@ async function getReadyGroupMatches() {
     .not("home_team_id", "is", null)
     .not("away_team_id", "is", null)
     .is("home_score", null)
-    .order("stage", { ascending: true })
     .order("round", { ascending: true })
+    .order("stage", { ascending: true })
     .order("match_number", { ascending: true });
   return data ?? [];
 }
