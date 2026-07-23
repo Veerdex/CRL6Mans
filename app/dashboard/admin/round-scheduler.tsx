@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition, useEffect, useRef } from "react";
 import { setRoundSchedule, deleteRoundSchedule, pinMatchTime, clearMatchTime, startFirstRound } from "./schedule-actions";
 import { stageName, type ScheduleType, type RoundScheduleRow } from "./schedule-utils";
 import { LocalTime } from "../local-time";
@@ -173,6 +173,7 @@ function MatchPinRow({
   isCustom: boolean;
 }) {
   const [val, setVal] = useState(match.scheduledAt && match.adminScheduled ? isoToLocalDateTimeInput(match.scheduledAt) : "");
+  const committedRef = useRef(val);
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
 
@@ -181,7 +182,8 @@ function MatchPinRow({
     : `Match ${match.matchNumber}`;
 
   function pin(dt: string) {
-    if (!dt) return;
+    if (!dt || dt === committedRef.current) return;
+    committedRef.current = dt;
     setErr(null);
     startTransition(async () => {
       const res = await pinMatchTime(match.id, dt, browserTz());
@@ -191,6 +193,7 @@ function MatchPinRow({
   function clear() {
     setErr(null);
     setVal("");
+    committedRef.current = "";
     startTransition(async () => {
       const res = await clearMatchTime(match.id);
       if (!res.ok) setErr(res.error ?? "Failed.");
@@ -214,7 +217,8 @@ function MatchPinRow({
             value={val}
             min={minStr}
             max={maxStr}
-            onChange={(e) => { setVal(e.target.value); pin(e.target.value); }}
+            onChange={(e) => setVal(e.target.value)}
+            onBlur={(e) => pin(e.target.value)}
             className={inputBase}
             disabled={pending}
           />
@@ -318,6 +322,7 @@ function RoundRow({
   const [dateStr, setDateStr] = useState(
     schedule && !initialChain ? playAtToInputStr(schedule.playAt, schedule.scheduleType) : ""
   );
+  const committedDateRef = useRef(dateStr);
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
@@ -377,7 +382,7 @@ function RoundRow({
     setErr(null);
     // Switching to/from specific changes the input format; reset so user re-enters
     const formatChanged = (type === "specific") !== (next === "specific");
-    if (formatChanged) setDateStr("");
+    if (formatChanged) { setDateStr(""); committedDateRef.current = ""; }
     if (next === "specific" && chain) {
       setChain(false);
       startTransition(async () => {
@@ -399,6 +404,7 @@ function RoundRow({
     if (chain) {
       setChain(false);
       setDateStr("");
+      committedDateRef.current = "";
       startTransition(async () => {
         const res = await deleteRoundSchedule({ tournamentId, stage, round });
         if (!res.ok) setErr(res.error ?? "Failed.");
@@ -409,10 +415,14 @@ function RoundRow({
     }
   }
 
-  function handleDateChange(val: string) {
+  function handleDateInput(val: string) {
     setDateStr(val);
     setErr(null);
-    if (!val) return;
+  }
+
+  function commitDateChange(val: string) {
+    if (!val || val === committedDateRef.current) return;
+    committedDateRef.current = val;
     if (type === "weekly") {
       const werr = weeklyDateError(val);
       if (werr) { setErr(werr); return; }
@@ -431,6 +441,7 @@ function RoundRow({
     setErr(null);
     setChain(false);
     setDateStr("");
+    committedDateRef.current = "";
     startTransition(async () => {
       const res = await deleteRoundSchedule({ tournamentId, stage, round });
       if (!res.ok) setErr(res.error ?? "Failed.");
@@ -536,7 +547,8 @@ function RoundRow({
               value={dateStr}
               min={type === "weekly" ? nearestWeekdayOnOrAfter(new Date(), requiredWeekday) : undefined}
               step={type === "weekly" ? 7 : undefined}
-              onChange={(e) => handleDateChange(e.target.value)}
+              onChange={(e) => handleDateInput(e.target.value)}
+              onBlur={(e) => commitDateChange(e.target.value)}
               className={inputBase}
               disabled={pending}
             />
