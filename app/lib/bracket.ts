@@ -720,6 +720,30 @@ export function generateHybridMatchInserts(
   return inserts;
 }
 
+// Placeholder-only hybrid bracket — the 4-UB/8-LB shape is fixed by the format
+// itself (not derived from team count), so it never depends on who the seeds are.
+// Backfilled in place once group winners and Swiss qualifiers are known.
+export function generateHybridPlaceholderInserts(): BracketMatchInsert[] {
+  const inserts: BracketMatchInsert[] = [];
+  for (let i = 0; i < 2; i++) {
+    inserts.push({ round: 1, match_number: i + 1, stage: HYBRID_UB, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  }
+  for (let i = 0; i < 4; i++) {
+    inserts.push({ round: 1, match_number: i + 1, stage: HYBRID_LB, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  }
+  for (let m = 1; m <= 2; m++) {
+    inserts.push({ round: 2, match_number: m, stage: HYBRID_LB, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  }
+  for (let m = 1; m <= 2; m++) {
+    inserts.push({ round: 3, match_number: m, stage: HYBRID_LB, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  }
+  for (let m = 1; m <= 2; m++) {
+    inserts.push({ round: 1, match_number: m, stage: HYBRID_SF, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  }
+  inserts.push({ round: 1, match_number: 1, stage: HYBRID_GF, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  return inserts;
+}
+
 // 8-team hybrid: 4 UB seeds (group 1sts) + 4 LB seeds (Swiss top 4).
 //   hybrid8_ub  R1: UB QF (4→2, losers drop directly to LB R2 / LB QF)
 //   hybrid8_lb  R1: LB R1 (4→2)
@@ -779,6 +803,26 @@ export function generateHybrid8MatchInserts(
   return inserts;
 }
 
+// Placeholder-only hybrid8 bracket — fixed 4-UB/4-LB shape, backfilled once group
+// winners and Swiss qualifiers are known.
+export function generateHybrid8PlaceholderInserts(): BracketMatchInsert[] {
+  const inserts: BracketMatchInsert[] = [];
+  for (let i = 0; i < 2; i++) {
+    inserts.push({ round: 1, match_number: i + 1, stage: HYBRID8_UB, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  }
+  for (let i = 0; i < 2; i++) {
+    inserts.push({ round: 1, match_number: i + 1, stage: HYBRID8_LB, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  }
+  for (let m = 1; m <= 2; m++) {
+    inserts.push({ round: 2, match_number: m, stage: HYBRID8_LB, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  }
+  for (let m = 1; m <= 2; m++) {
+    inserts.push({ round: 1, match_number: m, stage: HYBRID8_SF, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  }
+  inserts.push({ round: 1, match_number: 1, stage: HYBRID8_GF, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending" });
+  return inserts;
+}
+
 export function generateSEMatchInserts(
   teams: { id: string }[],
   stage = "single_elimination"
@@ -807,6 +851,29 @@ export function generateSEMatchInserts(
   }
 
   for (let r = 2; r <= numRounds; r++) {
+    const count = size / Math.pow(2, r);
+    for (let m = 1; m <= count; m++) {
+      inserts.push({
+        round: r, match_number: m,
+        home_team_id: null, away_team_id: null,
+        home_score: null, away_score: null,
+        status: "pending", stage,
+      });
+    }
+  }
+
+  return inserts;
+}
+
+// Placeholder-only SE bracket (seed count known, seeds themselves are not) — same
+// round/match-number shape generateSEMatchInserts would produce for `n` teams, but
+// every row is an empty "pending" slot. Backfilled in place once seeds are known.
+export function generateSEPlaceholderInserts(n: number, stage = "single_elimination"): BracketMatchInsert[] {
+  const size = nextPow2(n);
+  const numRounds = Math.log2(size);
+  const inserts: BracketMatchInsert[] = [];
+
+  for (let r = 1; r <= numRounds; r++) {
     const count = size / Math.pow(2, r);
     for (let m = 1; m <= count; m++) {
       inserts.push({

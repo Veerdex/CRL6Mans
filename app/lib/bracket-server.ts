@@ -1,7 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
 import {
-  generateSEMatchInserts, generateDEMatchInserts,
+  generateSEMatchInserts, generateDEMatchInserts, generateSEPlaceholderInserts,
   DE_WINNERS, DE_LOSERS, wbLoserTarget,
   nextPow2, getSeedOrder,
   getNumGroups, getGroupStage, parseGroupNum,
@@ -13,8 +13,8 @@ import {
   computeSwissRoundSizes, generateSwissPlaceholderInserts,
   SE_QUALIFIER, generateSEQualifierInserts,
   DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS, generateDEQualifierInserts,
-  HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, generateHybridMatchInserts,
-  HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF, generateHybrid8MatchInserts,
+  HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, generateHybridMatchInserts, generateHybridPlaceholderInserts,
+  HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF, generateHybrid8MatchInserts, generateHybrid8PlaceholderInserts,
   type BracketMatchInsert,
 } from "./bracket";
 import type { SeasonFormatConfig } from "@/app/dashboard/season/format-editor";
@@ -68,19 +68,56 @@ function makeSwissR1Inserts(pairs: { homeId: string; awayId: string }[]): Bracke
 // thresholds (computeSwissRoundSizes), never on who wins, so the whole stage's slot
 // structure is knowable upfront — buildAndSaveNextSwissRound backfills each
 // placeholder round's team_ids once that round's pairing actually resolves.
-async function insertSwissR1WithPlaceholders(
+// Backfill round-1 pairings for `stage` into placeholder rows pre-created the moment
+// the stage's size became knowable (e.g. at group-stage build time, long before the
+// predecessor stage finishes) — updating in place rather than inserting fresh rows,
+// since later rounds' placeholders already exist too. Falls back to a plain insert
+// (optionally with extra rows, e.g. later-round placeholders) for stages/seasons
+// that never got early placeholders — i.e. any season built before this shipped.
+async function saveRoundOne(
+  stage: string,
+  r1Inserts: BracketMatchInsert[],
+  fallbackExtraInserts: BracketMatchInsert[] = [],
+): Promise<{ error?: string }> {
+  const { data: existing } = await supabaseAdmin
+    .from("matches")
+    .select("id, match_number")
+    .eq("stage", stage).eq("round", 1)
+    .is("home_team_id", null)
+    .order("match_number");
+
+  const placeholders = existing ?? [];
+  if (placeholders.length >= r1Inserts.length) {
+    for (let i = 0; i < r1Inserts.length; i++) {
+      const { error } = await supabaseAdmin.from("matches").update({
+        home_team_id: r1Inserts[i].home_team_id,
+        away_team_id: r1Inserts[i].away_team_id,
+        home_score: r1Inserts[i].home_score,
+        away_score: r1Inserts[i].away_score,
+        status: r1Inserts[i].status,
+      }).eq("id", placeholders[i].id);
+      if (error) return { error: error.message };
+    }
+    return {};
+  }
+
+  const { error } = await supabaseAdmin.from("matches").insert([...r1Inserts, ...fallbackExtraInserts]);
+  return { error: error?.message };
+}
+
+// Same as saveRoundOne, but for the Swiss stage specifically, where the fallback
+// path also needs placeholders for every round after round 1.
+async function saveSwissRoundOne(
   r1Inserts: BracketMatchInsert[],
   n: number,
   advanceWins: number,
   eliminateLosses: number,
 ): Promise<{ error?: string }> {
   const roundSizes = computeSwissRoundSizes(n, advanceWins, eliminateLosses);
-  const inserts = [...r1Inserts];
-  for (let r = 2; r <= roundSizes.length; r++) {
-    inserts.push(...generateSwissPlaceholderInserts(r, roundSizes[r - 1]));
-  }
-  const { error } = await supabaseAdmin.from("matches").insert(inserts);
-  return { error: error?.message };
+  const laterRounds = roundSizes
+    .slice(1)
+    .flatMap((count, i) => generateSwissPlaceholderInserts(i + 2, count));
+  return saveRoundOne(SWISS_STAGE, r1Inserts, laterRounds);
 }
 
 // Build a set of canonical "A:B" (lexicographic) keys from completed match history.
@@ -225,7 +262,60 @@ async function buildGroupMatches(
 
   const { error } = await supabaseAdmin.from("matches").insert(inserts);
   if (error) return { error: error.message };
+
+  const downstream = downstreamPlaceholdersForGroupFormat(format.preset, n, numGroups, format);
+  if (downstream.length) {
+    const { error: dsError } = await supabaseAdmin.from("matches").insert(downstream);
+    if (dsError) return { error: dsError.message };
+  }
+
   return { ok: true };
+}
+
+// Pre-create every downstream stage's match skeleton the moment its size becomes
+// knowable — for group-fed formats, that's the instant groups are built, since
+// qualifier/Swiss/hybrid slot counts depend only on num_teams and format, never on
+// group results. Lets admins pin match times for Swiss/SE/hybrid rounds before a
+// single group game is played; the buildAndSaveXFromGroups/FromSwiss functions
+// backfill these rows in place once real pairings are known.
+function downstreamPlaceholdersForGroupFormat(
+  preset: string | undefined,
+  n: number,
+  numGroups: number,
+  format: SeasonFormatConfig,
+): BracketMatchInsert[] {
+  if (preset === "group_single_elimination") {
+    const totalAdv = format.groupMaxAdvancing ?? Math.floor((n * 3) / 4);
+    const qualifiersPerGroup = Math.max(1, Math.round(totalAdv / numGroups));
+    return generateSEPlaceholderInserts(qualifiersPerGroup * numGroups, "single_elimination");
+  }
+  if (preset === "group_swiss_single_elimination") {
+    const swissN = Math.floor(16 / numGroups) * numGroups;
+    const roundSizes = computeSwissRoundSizes(swissN, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+    const swissInserts = roundSizes.flatMap((count, i) => generateSwissPlaceholderInserts(i + 1, count));
+    return [...swissInserts, ...generateSEPlaceholderInserts(8, "single_elimination")];
+  }
+  if (preset === "group_swiss_hybrid") {
+    const roundSizes = computeSwissRoundSizes(16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+    const swissInserts = roundSizes.flatMap((count, i) => generateSwissPlaceholderInserts(i + 1, count));
+    return [...swissInserts, ...generateHybridPlaceholderInserts()];
+  }
+  if (preset === "group_swiss_hybrid_8") {
+    const roundSizes = computeSwissRoundSizes(8, SWISS8_ADVANCE_WINS, SWISS8_ELIMINATE_LOSSES);
+    const swissInserts = roundSizes.flatMap((count, i) => generateSwissPlaceholderInserts(i + 1, count));
+    return [...swissInserts, ...generateHybrid8PlaceholderInserts()];
+  }
+  return [];
+}
+
+// Swiss (fixed 16 seeds) + SE final (fixed 8 qualifiers) placeholder skeleton for the
+// SE-qualifier and DE-qualifier formats — both narrow to exactly 16 survivors and
+// exactly 8 SE-final qualifiers regardless of who wins, so this can be built the
+// moment the qualifier bracket itself is created.
+function swissAndSEFinalPlaceholders(): BracketMatchInsert[] {
+  const roundSizes = computeSwissRoundSizes(16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+  const swissInserts = roundSizes.flatMap((count, i) => generateSwissPlaceholderInserts(i + 1, count));
+  return [...swissInserts, ...generateSEPlaceholderInserts(8, "single_elimination")];
 }
 
 // Called by the admin after group stage is complete to generate the SE bracket.
@@ -272,10 +362,15 @@ export async function buildAndSaveSEFromGroups(): Promise<{ error?: string; ok?:
   const qualified = seedGroupQualifiers(groupStandings, qualifiersPerGroup);
   if (qualified.length < 2) return { error: "Not enough qualifiers to build SE bracket." };
 
-  // Insert SE matches
+  // Backfill the placeholder bracket scaffolded at group-build time (or insert fresh
+  // for seasons built before that shipped).
   const seInserts = generateSEMatchInserts(qualified);
-  const { error: insertError } = await supabaseAdmin.from("matches").insert(seInserts);
-  if (insertError) return { error: insertError.message };
+  const { error: insertError } = await saveRoundOne(
+    "single_elimination",
+    seInserts.filter(m => m.round === 1),
+    seInserts.filter(m => m.round > 1),
+  );
+  if (insertError) return { error: insertError };
 
   // Advance SE R1 byes
   const { data: byeMatches } = await supabaseAdmin
@@ -341,15 +436,16 @@ export async function buildAndSaveSwissFromGroups(): Promise<{ error?: string; o
   const seededWithGroup = qualified.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
   const pairs = pairCrossGroupR1(seededWithGroup);
   const inserts = makeSwissR1Inserts(pairs);
-  const { error } = await insertSwissR1WithPlaceholders(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+  const { error } = await saveSwissRoundOne(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
   if (error) return { error };
   return { ok: true };
 }
 
 // Build the next Swiss round from existing Swiss match results. Rounds beyond the
 // current one may already exist as placeholder rows (null team_ids, from
-// insertSwissR1WithPlaceholders) — if so, this backfills them in place rather than
-// inserting new rows, so any time an admin already pinned on a placeholder survives.
+// saveSwissRoundOne or the group/qualifier-stage scaffolding) — if so, this backfills
+// them in place rather than inserting new rows, so any time an admin already pinned
+// on a placeholder survives.
 export async function buildAndSaveNextSwissRound(): Promise<{ error?: string; ok?: boolean }> {
   const [{ data: swissMatches }, { data: settings }] = await Promise.all([
     supabaseAdmin
@@ -433,8 +529,12 @@ export async function buildAndSaveSEFromSwiss(): Promise<{ error?: string; ok?: 
   const qualified = avoidR1Rematches(seeded, swissPlayedPairs);
 
   const seInserts = generateSEMatchInserts(qualified);
-  const { error: insertError } = await supabaseAdmin.from("matches").insert(seInserts);
-  if (insertError) return { error: insertError.message };
+  const { error: insertError } = await saveRoundOne(
+    "single_elimination",
+    seInserts.filter(m => m.round === 1),
+    seInserts.filter(m => m.round > 1),
+  );
+  if (insertError) return { error: insertError };
 
   // Advance SE R1 byes
   const { data: byeMatches } = await supabaseAdmin
@@ -495,7 +595,7 @@ export async function buildAndSaveSwissFromSEQualifier(): Promise<{ error?: stri
   // Avoid rematches from the SE qualifier stage.
   const playedPairs = buildPlayedSet(seqMatches);
   const inserts = generateSwissR1Inserts(seeded, playedPairs);
-  const { error } = await insertSwissR1WithPlaceholders(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+  const { error } = await saveSwissRoundOne(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
   if (error) return { error };
   return { ok: true };
 }
@@ -561,7 +661,7 @@ export async function buildAndSaveSwissFromDEQualifier(): Promise<{ error?: stri
   // Avoid rematches from the DE qualifier stage.
   const playedPairs = buildPlayedSet(deqMatches);
   const inserts = generateSwissR1Inserts(seeded, playedPairs);
-  const { error } = await insertSwissR1WithPlaceholders(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+  const { error } = await saveSwissRoundOne(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
   if (error) return { error };
   return { ok: true };
 }
@@ -603,7 +703,7 @@ export async function buildAndSaveSwissFromGroupsHybrid(): Promise<{ error?: str
   const seededWithGroup = swissSeeds.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
   const pairs = pairCrossGroupR1(seededWithGroup);
   const inserts = makeSwissR1Inserts(pairs);
-  const { error } = await insertSwissR1WithPlaceholders(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
+  const { error } = await saveSwissRoundOne(inserts, 16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
   if (error) return { error };
   return { ok: true };
 }
@@ -656,8 +756,20 @@ export async function buildAndSaveHybridFromSwiss(): Promise<{ error?: string; o
   // Pass Swiss match history so LB R1 avoids rematches from Swiss stage.
   const swissPlayedPairs = buildPlayedSet(swissMatches);
   const inserts = generateHybridMatchInserts(ubSeeds, lbSeeds.slice(0, 8), swissPlayedPairs);
-  const { error } = await supabaseAdmin.from("matches").insert(inserts);
-  if (error) return { error: error.message };
+
+  const { error: ubError } = await saveRoundOne(
+    HYBRID_UB,
+    inserts.filter(m => m.stage === HYBRID_UB),
+  );
+  if (ubError) return { error: ubError };
+
+  const { error: lbError } = await saveRoundOne(
+    HYBRID_LB,
+    inserts.filter(m => m.stage === HYBRID_LB && m.round === 1),
+    inserts.filter(m => m.stage !== HYBRID_UB && !(m.stage === HYBRID_LB && m.round === 1)),
+  );
+  if (lbError) return { error: lbError };
+
   return { ok: true };
 }
 
@@ -695,7 +807,7 @@ export async function buildAndSaveSwissFromGroupsHybrid8(): Promise<{ error?: st
   const seededWithGroup = swissSeeds.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
   const pairs = pairCrossGroupR1(seededWithGroup);
   const inserts = makeSwissR1Inserts(pairs);
-  const { error } = await insertSwissR1WithPlaceholders(inserts, 8, SWISS8_ADVANCE_WINS, SWISS8_ELIMINATE_LOSSES);
+  const { error } = await saveSwissRoundOne(inserts, 8, SWISS8_ADVANCE_WINS, SWISS8_ELIMINATE_LOSSES);
   if (error) return { error };
   return { ok: true };
 }
@@ -745,8 +857,20 @@ export async function buildAndSaveHybrid8FromSwiss(): Promise<{ error?: string; 
   if (ubSeeds.length !== 4) return { error: `Expected 4 UB seeds (group 1sts), got ${ubSeeds.length}.` };
 
   const inserts = generateHybrid8MatchInserts(ubSeeds, lbSeeds.slice(0, 4));
-  const { error } = await supabaseAdmin.from("matches").insert(inserts);
-  if (error) return { error: error.message };
+
+  const { error: ubError } = await saveRoundOne(
+    HYBRID8_UB,
+    inserts.filter(m => m.stage === HYBRID8_UB),
+  );
+  if (ubError) return { error: ubError };
+
+  const { error: lbError } = await saveRoundOne(
+    HYBRID8_LB,
+    inserts.filter(m => m.stage === HYBRID8_LB && m.round === 1),
+    inserts.filter(m => m.stage !== HYBRID8_UB && !(m.stage === HYBRID8_LB && m.round === 1)),
+  );
+  if (lbError) return { error: lbError };
+
   return { ok: true };
 }
 
@@ -836,6 +960,12 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
           .update({ [slot]: bye.home_team_id, status: "scheduled" }).eq("id", next.id);
       }
     }
+
+    // The qualifier bracket always narrows to exactly 16 (regardless of who wins),
+    // so Swiss and the SE final can be scaffolded now, before any qualifier is played.
+    const { error: dsError } = await supabaseAdmin.from("matches").insert(swissAndSEFinalPlaceholders());
+    if (dsError) return { error: dsError.message };
+
     return { ok: true, cutTeams };
   }
 
@@ -879,6 +1009,11 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
           .update({ status: "completed", home_score: 0, away_score: 0 }).eq("id", m.id);
       }
     }
+
+    // The qualifier bracket always narrows to exactly 16 (regardless of who wins),
+    // so Swiss and the SE final can be scaffolded now, before any qualifier is played.
+    const { error: dsError } = await supabaseAdmin.from("matches").insert(swissAndSEFinalPlaceholders());
+    if (dsError) return { error: dsError.message };
 
     return { ok: true, cutTeams };
   }
