@@ -15,8 +15,7 @@ import { GuestAccountPanel, type GuestAccount } from "./guest-account-panel";
 import { DraftPoolPanel, type DraftPoolEntry, type DraftPoolTournamentGroup } from "./draft-pool-panel";
 import { TeamSlotsManager } from "./team-slots-manager";
 import { MatchReporter } from "./match-reporter";
-import { getTier } from "@/app/lib/discord-bot";
-import { DEFAULT_BEST_OF, PRESETS } from "../season/format-constants";
+import { resolveBestOf, type RoundBestOfConfig, type BestOf, PRESETS } from "../season/format-constants";
 import { SubRequestCard, type SubRequestCardData } from "./sub-request-card";
 import { PlayerEditRequestCard, type PlayerEditRequestCardData } from "./player-edit-request-card";
 import { PlatformAccountClaimCard, type PlatformAccountClaimCardData } from "./platform-account-claim-card";
@@ -424,16 +423,14 @@ export default async function AdminPage() {
   }
 
   // Compute best-of per match from season_format
-  const sfFormat = settings?.season_format as { roundBestOf?: Record<string, number>; best_of?: number } | null;
-  const roundBestOf = sfFormat?.roundBestOf ?? {};
+  const sfFormat = settings?.season_format as { roundBestOf?: RoundBestOfConfig; best_of?: number } | null;
+  const fallbackBestOf = (sfFormat?.best_of ?? 3) as BestOf;
   const maxRoundByStage: Record<string, number> = {};
   for (const m of allMatchStages ?? []) {
     maxRoundByStage[m.stage] = Math.max(maxRoundByStage[m.stage] ?? 0, m.round);
   }
   function matchBestOf(stage: string, round: number): number {
-    if (stage.startsWith("hybrid")) return 7; // hybrid bracket is always BO7
-    const tier = getTier(round, maxRoundByStage[stage] ?? round);
-    return roundBestOf[tier] ?? DEFAULT_BEST_OF[tier as keyof typeof DEFAULT_BEST_OF] ?? sfFormat?.best_of ?? 3;
+    return resolveBestOf(stage, round, maxRoundByStage, sfFormat?.roundBestOf, fallbackBestOf);
   }
 
   const matchRows = (scheduledMatches ?? []).map(m => ({
@@ -675,9 +672,11 @@ export default async function AdminPage() {
     ? (settings.num_teams as number)
     : Math.floor((enteredCount ?? 0) / 3);
 
+  // Number of pre-created team slots — caps how many teams the draft can actually
+  // build regardless of player pool size.
+  const teamSlotCount = (teamSlots ?? []).filter((t) => t.slot_number != null).length;
   // Actual feasible max teams from the player pool alone (slot count is a separate concern).
   // Shown in the top-right of the Start Draft / Auto Draft cards.
-  const teamSlotCount = (teamSlots ?? []).filter((t) => t.slot_number != null).length;
   const draftCurrentMax = Math.floor((enteredCount ?? 0) / 3);
 
   // The selected format's team ceiling (e.g. 32 for hybrid, 64 for group, null for SE/DE).
@@ -1155,6 +1154,7 @@ export default async function AdminPage() {
             testingMode={testingMode}
             notificationsEnabled={notificationsEnabled}
             draftCurrentMax={draftCurrentMax}
+            teamSlotCount={teamSlotCount}
             draftFormatMax={draftFormatMax}
             seasonFormatLabel={seasonFormatLabel}
             isTestSeason={(settings?.is_test_season as boolean | null) ?? false}

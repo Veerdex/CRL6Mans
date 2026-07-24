@@ -28,6 +28,7 @@ interface LeagueControlsProps {
   testingMode: boolean;
   notificationsEnabled: boolean;
   draftCurrentMax: number;
+  teamSlotCount: number;
   draftFormatMax: number | null;
   seasonFormatLabel: string;
   isTestSeason: boolean;
@@ -59,7 +60,7 @@ const COMMANDS: Record<ActionKey, { label: string; code: string; description: st
   },
 };
 
-export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, draftFormatMax, seasonFormatLabel, isTestSeason, isCEO }: LeagueControlsProps) {
+export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, teamSlotCount, draftFormatMax, seasonFormatLabel, isTestSeason, isCEO }: LeagueControlsProps) {
   const [isPending, startTransition] = useTransition();
   const [active, setActive] = useState<ActionKey | null>(null);
   const [codeInput, setCodeInput] = useState("");
@@ -120,17 +121,20 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
     }
   };
 
+  const effectiveMaxTeams = Math.min(draftCurrentMax, teamSlotCount);
+
   const pendingDraftTeamCount = (() => {
     const parsed = maxTeamsInput.trim() === "" ? null : parseInt(maxTeamsInput, 10);
-    return parsed && parsed > 0 ? Math.min(parsed, draftCurrentMax) : draftCurrentMax;
+    const poolCapped = parsed && parsed > 0 ? Math.min(parsed, draftCurrentMax) : draftCurrentMax;
+    return Math.min(poolCapped, teamSlotCount);
   })();
 
   const handleConfirm = () => {
     if (!active) return;
     startTransition(async () => {
       let result: { ok?: boolean; message?: string; error?: string };
-      if (active === "startdraft") result = await adminStartDraft(codeInput, maxTeamsInput);
-      else if (active === "autodraft") result = await adminAutoBalance(codeInput, maxTeamsInput);
+      if (active === "startdraft") result = await adminStartDraft(codeInput, String(pendingDraftTeamCount));
+      else if (active === "autodraft") result = await adminAutoBalance(codeInput, String(pendingDraftTeamCount));
       else if (active === "enddraft") result = await adminEndDraft(codeInput);
       else result = await adminStartSeason(codeInput);
 
@@ -297,12 +301,15 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
                       min={2}
                       value={maxTeamsInput}
                       onChange={(e) => setMaxTeamsInput(e.target.value)}
-                      placeholder={`Max (${draftCurrentMax})`}
+                      placeholder={`Max (${effectiveMaxTeams})`}
                       className="w-full bg-zinc-900 border border-zinc-600 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     />
                     <p className="text-[11px] text-zinc-500">
-                      {`Leave blank to make the maximum (${draftCurrentMax} team${draftCurrentMax === 1 ? "" : "s"}) from players currently in the draft.`}
-                      {draftFormatMax != null && draftFormatMax < draftCurrentMax
+                      {`Leave blank to make the maximum (${effectiveMaxTeams} team${effectiveMaxTeams === 1 ? "" : "s"}) from players currently in the draft.`}
+                      {teamSlotCount < draftCurrentMax
+                        ? ` Limited by ${teamSlotCount} team slot${teamSlotCount === 1 ? "" : "s"}.`
+                        : ""}
+                      {draftFormatMax != null && draftFormatMax < effectiveMaxTeams
                         ? ` This format supports at most ${draftFormatMax}.`
                         : ""}
                     </p>

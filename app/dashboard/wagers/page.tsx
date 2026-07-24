@@ -3,18 +3,11 @@ import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { getTier } from "@/app/lib/discord-bot";
+import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 import { computeMatchPrediction, computeMatchPredictionFromRating, type MatchPrediction } from "./prediction";
 import { WagersClient } from "./wagers-client";
 import { WagesLeaderboardOnly } from "./leaderboard-view";
 import type { OverviewMatch } from "./overview-grid";
-
-const BEST_OF_DEFAULTS: Record<string, number> = {
-  standard: 3,
-  quarterfinals: 3,
-  semifinals: 3,
-  finals: 3,
-};
 
 function formatStageName(stage: string): string {
   if (stage.startsWith("group_")) return "Groups";
@@ -132,9 +125,9 @@ export default async function WagersPage() {
   }
 
   const format = ls?.season_format as
-    | { roundBestOf?: Record<string, number>; best_of?: number }
+    | { roundBestOf?: RoundBestOfConfig; best_of?: number }
     | null;
-  const roundBestOf = format?.roundBestOf ?? {};
+  const fallbackBestOf = (format?.best_of ?? 3) as BestOf;
 
   // Only matches with a confirmed future scheduled time are bettable. Unscheduled
   // matches (scheduled_at null) are hidden — their outcome may already be known or
@@ -163,15 +156,8 @@ export default async function WagersPage() {
   };
 
   function bestOfForMatch(m: { stage: string | null; round: number }): number {
-    let bestOf = format?.best_of ?? 3;
-    if (m.stage?.startsWith("hybrid")) {
-      bestOf = 7;
-    } else if (m.stage) {
-      const maxRound = maxRoundByStage[m.stage] ?? m.round;
-      const tier = getTier(m.round, maxRound);
-      bestOf = roundBestOf[tier] ?? BEST_OF_DEFAULTS[tier] ?? format?.best_of ?? 3;
-    }
-    return bestOf;
+    if (!m.stage) return fallbackBestOf;
+    return resolveBestOf(m.stage, m.round, maxRoundByStage, format?.roundBestOf, fallbackBestOf);
   }
 
   const matches: MatchBO[] = bettable.map((m) => ({

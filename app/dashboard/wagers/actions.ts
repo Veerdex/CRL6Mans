@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { getBestOfForMatch } from "@/app/lib/discord-bot";
 import {
   computeMatchPredictionFromRating,
   computeMatchPrediction,
@@ -217,7 +218,7 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
   const matchIds = [...new Set(bets.map((b) => b.matchId))];
   const { data: matches } = await supabaseAdmin
     .from("matches")
-    .select("id, status, scheduled_at, home_team_id, away_team_id, best_of, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in")
+    .select("id, status, scheduled_at, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in")
     .in("id", matchIds);
 
   for (const matchId of matchIds) {
@@ -231,11 +232,13 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
     }
   }
 
-  // Compute server-side odds for each match so the client cannot supply its own multiplier
+  // Compute server-side odds for each match so the client cannot supply its own multiplier.
+  // best_of isn't a stored column — it's derived from stage/round/format, same as everywhere else.
   const oddsMap = new Map<string, MatchOdds>();
   for (const match of matches ?? []) {
     if (match.home_team_id && match.away_team_id) {
-      const odds = await computeServerOdds(match.home_team_id, match.away_team_id, match.best_of ?? 3);
+      const bestOf = await getBestOfForMatch(match.id);
+      const odds = await computeServerOdds(match.home_team_id, match.away_team_id, bestOf);
       if (odds) oddsMap.set(match.id, odds);
     }
   }
@@ -343,7 +346,7 @@ export async function placeParlayBet(
   const matchIds = [...new Set(legs.map((l) => l.matchId))];
   const { data: matches } = await supabaseAdmin
     .from("matches")
-    .select("id, status, scheduled_at, home_team_id, away_team_id, best_of, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in")
+    .select("id, status, scheduled_at, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in")
     .in("id", matchIds);
 
   for (const matchId of matchIds) {
@@ -357,11 +360,13 @@ export async function placeParlayBet(
     }
   }
 
-  // Compute server-side odds for each match so the client cannot supply its own multipliers
+  // Compute server-side odds for each match so the client cannot supply its own multipliers.
+  // best_of isn't a stored column — it's derived from stage/round/format, same as everywhere else.
   const oddsMap = new Map<string, MatchOdds>();
   for (const match of matches ?? []) {
     if (match.home_team_id && match.away_team_id) {
-      const odds = await computeServerOdds(match.home_team_id, match.away_team_id, match.best_of ?? 3);
+      const bestOf = await getBestOfForMatch(match.id);
+      const odds = await computeServerOdds(match.home_team_id, match.away_team_id, bestOf);
       if (odds) oddsMap.set(match.id, odds);
     }
   }

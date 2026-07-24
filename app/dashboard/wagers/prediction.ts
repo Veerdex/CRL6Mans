@@ -56,6 +56,7 @@ function scorelineBreakdown(
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function getOULines(bestOf: number): number[] {
+  if (bestOf <= 1) return [];
   if (bestOf <= 3) return [2.5];
   if (bestOf <= 5) return [3.5, 4.5];
   return [4.5, 5.5, 6.5];

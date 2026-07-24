@@ -887,3 +887,43 @@ export function generateSEPlaceholderInserts(n: number, stage = "single_eliminat
 
   return inserts;
 }
+
+// ── Best-of tiering ────────────────────────────────────────────────────────────
+
+export type RoundTier = "standard" | "quarterfinals" | "semifinals" | "finals";
+
+// How close a round is to the deciding round of its own bracket/stage — used to
+// scale series length up (BO3 → BO5 → BO7) as stakes rise.
+export function getTier(round: number, totalRounds: number): RoundTier {
+  const fromFinal = totalRounds - round;
+  if (fromFinal === 0) return "finals";
+  if (fromFinal === 1) return "semifinals";
+  if (fromFinal === 2) return "quarterfinals";
+  return "standard";
+}
+
+// Which user-configurable best-of "slot" a physical DB stage string belongs to.
+// Multiple physical stage strings can share one slot — a double-elimination
+// bracket's winners/losers/grand-final rows are all one "Double Elimination"
+// settings block. Some presets also reuse the same literal stage string in a
+// different role (the terminal bracket of a qualifier→Swiss→SE format is
+// stage="single_elimination", the same string the plain SE preset uses) — that's
+// fine since only one preset's stages ever exist in a tournament at a time.
+// Hybrid stages return null: their series length is fixed at BO7, not configurable.
+export type StageSlotKey =
+  | "group"
+  | "swiss"
+  | "se_qualifier"
+  | "de_qualifier"
+  | "single_elimination"
+  | "double_elimination";
+
+export function getStageSlotKey(stage: string): StageSlotKey | null {
+  if (stage.startsWith(GROUP_STAGE_PREFIX)) return "group";
+  if (stage === SWISS_STAGE) return "swiss";
+  if (stage === SE_QUALIFIER) return "se_qualifier";
+  if (stage === DE_QUALIFIER_WINNERS || stage === DE_QUALIFIER_LOSERS) return "de_qualifier";
+  if (stage === DE_WINNERS || stage === DE_LOSERS || stage === DE_GF) return "double_elimination";
+  if (stage === "single_elimination") return "single_elimination";
+  return null;
+}

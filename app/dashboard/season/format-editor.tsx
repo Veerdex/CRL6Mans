@@ -10,6 +10,10 @@ import {
   type SeasonFormatConfig,
   type StageType,
   type PresetDef,
+  type StageSlotKey,
+  type StageBestOfConfig,
+  type RoundBestOfConfig,
+  type StageSlotDef,
   PRESETS,
   TIER_LABELS,
   BO_OPTIONS,
@@ -19,6 +23,9 @@ import {
   TIER_ORDER,
   DEFAULT_BEST_OF,
   applyBestOfCascade,
+  STAGE_SLOTS_BY_PRESET,
+  defaultStageBestOf,
+  defaultRoundBestOfForPreset,
 } from "./format-constants";
 
 export type {
@@ -26,6 +33,10 @@ export type {
   RoundTier,
   BestOf,
   SeasonFormatConfig,
+  StageSlotKey,
+  StageBestOfConfig,
+  RoundBestOfConfig,
+  StageSlotDef,
 };
 export {
   PRESETS,
@@ -37,6 +48,9 @@ export {
   TIER_ORDER,
   DEFAULT_BEST_OF,
   applyBestOfCascade,
+  STAGE_SLOTS_BY_PRESET,
+  defaultStageBestOf,
+  defaultRoundBestOfForPreset,
 };
 
 type StageInfo = {
@@ -330,10 +344,22 @@ export function FormatEditor({
   );
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [roundBestOf, setRoundBestOf] = useState<Record<RoundTier, BestOf>>({
-    ...DEFAULT_BEST_OF,
+  const [roundBestOf, setRoundBestOf] = useState<RoundBestOfConfig>(() => ({
+    ...(initialFormat?.preset ? defaultRoundBestOfForPreset(initialFormat.preset) : {}),
     ...(initialFormat?.roundBestOf ?? {}),
-  });
+  }));
+
+  function setFlatSlot(key: StageSlotKey, value: BestOf) {
+    setRoundBestOf((prev) => ({ ...prev, [key]: { mode: "flat", value } }));
+  }
+
+  function setTieredSlot(key: StageSlotKey, tier: RoundTier, value: BestOf) {
+    setRoundBestOf((prev) => {
+      const existing = prev[key];
+      const currentTiers = existing?.mode === "tiered" ? existing.tiers : DEFAULT_BEST_OF;
+      return { ...prev, [key]: { mode: "tiered", tiers: applyBestOfCascade(currentTiers, tier, value) } };
+    });
+  }
 
   const selectedPreset = PRESETS.find((p) => p.id === selected);
   const hasGroupStage =
@@ -346,12 +372,18 @@ export function FormatEditor({
   const parsedGroupRounds = groupRoundsInput.trim() === "" ? null : parseInt(groupRoundsInput, 10);
   const effectiveGroupRounds = parsedGroupRounds !== null && !isNaN(parsedGroupRounds) ? parsedGroupRounds : null;
 
+  const currentSlots = selected ? STAGE_SLOTS_BY_PRESET[selected] : [];
+
   const hasUnsavedChanges =
     selected !== (initialFormat?.preset ?? null) ||
     (hasGroupStage && seedingMethod !== (initialFormat?.groupSeedingMethod ?? "balanced")) ||
     (hasGroupStage && effectiveMaxAdvancing !== (initialFormat?.groupMaxAdvancing ?? null)) ||
     (hasGroupStage && effectiveGroupRounds !== (initialFormat?.groupRounds ?? null)) ||
-    TIER_ORDER.some((tier) => roundBestOf[tier] !== (initialFormat?.roundBestOf?.[tier] ?? DEFAULT_BEST_OF[tier]));
+    currentSlots.some((slot) => {
+      const cur = roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
+      const init = initialFormat?.roundBestOf?.[slot.key] ?? defaultStageBestOf(slot.kind);
+      return JSON.stringify(cur) !== JSON.stringify(init);
+    });
 
   let maxAdvancingError: string | null = null;
   if (hasGroupStage && !groupAdvancingFixed && effectiveMaxAdvancing !== null) {
@@ -396,7 +428,11 @@ export function FormatEditor({
   const handleSave = () => {
     if (!selected) return;
     startTransition(async () => {
-      const config: SeasonFormatConfig = { preset: selected, roundBestOf };
+      const trimmedRoundBestOf: RoundBestOfConfig = {};
+      for (const slot of STAGE_SLOTS_BY_PRESET[selected]) {
+        trimmedRoundBestOf[slot.key] = roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
+      }
+      const config: SeasonFormatConfig = { preset: selected, roundBestOf: trimmedRoundBestOf };
       if (hasGroupStage) {
         config.groupSeedingMethod = seedingMethod;
         if (!groupAdvancingFixed) config.groupMaxAdvancing = effectiveMaxAdvancing;
@@ -424,7 +460,7 @@ export function FormatEditor({
       Math.max(selectedPreset.minTeams, previewTeams),
       initialFormat.groupMaxAdvancing ?? null
     );
-    const savedBestOf: Record<RoundTier, BestOf> = { ...DEFAULT_BEST_OF, ...(initialFormat.roundBestOf ?? {}) };
+    const readOnlySlots = STAGE_SLOTS_BY_PRESET[selectedPreset.id];
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -438,12 +474,26 @@ export function FormatEditor({
           )}
         </div>
         <StageFlow stages={readOnlyStages} />
-        <div className="flex flex-wrap gap-x-6 gap-y-1">
-          {TIER_ORDER.map((tier) => (
-            <span key={tier} className="text-xs text-zinc-500">
-              {TIER_LABELS[tier]}: <span className="text-zinc-300">BO{savedBestOf[tier]}</span>
-            </span>
-          ))}
+        <div className="space-y-1.5">
+          {readOnlySlots.map((slot) => {
+            const slotConfig = initialFormat.roundBestOf?.[slot.key] ?? defaultStageBestOf(slot.kind);
+            return (
+              <div key={slot.key} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+                <span className="text-zinc-400 font-medium">{slot.label}:</span>
+                {slotConfig.mode === "flat" ? (
+                  <span className="text-zinc-300">BO{slotConfig.value}</span>
+                ) : (
+                  <span className="flex flex-wrap gap-x-4 gap-y-1">
+                    {TIER_ORDER.map((tier) => (
+                      <span key={tier} className="text-zinc-500">
+                        {TIER_LABELS[tier]}: <span className="text-zinc-300">BO{slotConfig.tiers[tier]}</span>
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -486,6 +536,9 @@ export function FormatEditor({
                 const hi = preset.maxTeams ?? 64;
                 const clamped = Math.max(lo, Math.min(hi, n));
                 if (clamped !== n) setPreviewTeamsRaw(String(clamped));
+                // Re-seed slots for the new preset, preserving values for slot
+                // keys shared with the previous preset (e.g. "single_elimination").
+                setRoundBestOf((prev) => ({ ...defaultRoundBestOfForPreset(preset.id), ...prev }));
               }}
               className={`text-left p-4 rounded-xl border transition-all ${
                 isSelected
@@ -589,33 +642,58 @@ export function FormatEditor({
         </div>
       )}
 
-      {/* Best Of settings */}
-      {selected && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
-          <p className="text-sm font-medium text-zinc-300">Best Of Settings</p>
-          {TIER_ORDER.map((tier) => (
-            <div key={tier} className="flex items-center gap-4">
-              <span className="text-xs text-zinc-500 w-24 sm:w-36 shrink-0">{TIER_LABELS[tier]}</span>
-              <div className="flex gap-2">
-                {BO_OPTIONS.map((bo) => (
-                  <button
-                    key={bo}
-                    onClick={() => setRoundBestOf((prev) => applyBestOfCascade(prev, tier, bo))}
-                    className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-                      roundBestOf[tier] === bo
-                        ? "border-indigo-500 bg-indigo-900/50 text-white"
-                        : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
-                    }`}
-                  >
-                    <span className="sm:hidden">{bo}</span>
-                    <span className="hidden sm:inline">BO{bo}</span>
-                  </button>
-                ))}
+      {/* Best Of settings — one block per independently-configurable stage */}
+      {selected && currentSlots.map((slot) => {
+        const slotConfig = roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
+        return (
+          <div key={slot.key} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
+            <p className="text-sm font-medium text-zinc-300">{slot.label} — Best Of Settings</p>
+            {slotConfig.mode === "flat" ? (
+              <div className="flex items-center gap-4">
+                <span className="text-xs text-zinc-500 w-24 sm:w-36 shrink-0">Every match</span>
+                <div className="flex gap-2">
+                  {BO_OPTIONS.map((bo) => (
+                    <button
+                      key={bo}
+                      onClick={() => setFlatSlot(slot.key, bo)}
+                      className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                        slotConfig.value === bo
+                          ? "border-indigo-500 bg-indigo-900/50 text-white"
+                          : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
+                      }`}
+                    >
+                      <span className="sm:hidden">{bo}</span>
+                      <span className="hidden sm:inline">BO{bo}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ) : (
+              TIER_ORDER.map((tier) => (
+                <div key={tier} className="flex items-center gap-4">
+                  <span className="text-xs text-zinc-500 w-24 sm:w-36 shrink-0">{TIER_LABELS[tier]}</span>
+                  <div className="flex gap-2">
+                    {BO_OPTIONS.map((bo) => (
+                      <button
+                        key={bo}
+                        onClick={() => setTieredSlot(slot.key, tier, bo)}
+                        className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                          slotConfig.tiers[tier] === bo
+                            ? "border-indigo-500 bg-indigo-900/50 text-white"
+                            : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
+                        }`}
+                      >
+                        <span className="sm:hidden">{bo}</span>
+                        <span className="hidden sm:inline">BO{bo}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        );
+      })}
 
       {/* Stage visualization */}
       {stageInfos.length > 0 && (

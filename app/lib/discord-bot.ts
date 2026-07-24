@@ -16,6 +16,7 @@ import { buildAndSaveBracket } from "./bracket-server";
 import { teamRatingFromRVs, applyRatingUpdate, teamRatingDeltaFromRVChange } from "./rating";
 import { hasBlockingIdentityDiscrepancy } from "./replay-identity-certification";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
+import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 
 async function roleMentionByName(
   teamName: string,
@@ -151,16 +152,6 @@ function weekdayTimestampFrom(baseMs: number, targetDay: number, hourPT: number,
 
 type ChannelResult = { created: true } | { created: false; skipped?: true; error?: string };
 
-const BEST_OF_DEFAULTS: Record<string, number> = { standard: 3, quarterfinals: 3, semifinals: 3, finals: 3 };
-
-export function getTier(round: number, totalRounds: number): string {
-  const fromFinal = totalRounds - round;
-  if (fromFinal === 0) return "finals";
-  if (fromFinal === 1) return "semifinals";
-  if (fromFinal === 2) return "quarterfinals";
-  return "standard";
-}
-
 export function validateSeriesScore(home: number, away: number, bestOf: number): string | null {
   const winsNeeded = Math.ceil(bestOf / 2);
   if (Math.max(home, away) !== winsNeeded)
@@ -173,15 +164,13 @@ export async function getBestOfForMatch(matchId: string): Promise<number> {
     supabaseAdmin.from("matches").select("stage, round").eq("id", matchId).single(),
     supabaseAdmin.from("league_settings").select("season_format").single(),
   ]);
-  const format = settings?.season_format as { roundBestOf?: Record<string, number>; best_of?: number } | null;
-  const roundBestOf = format?.roundBestOf ?? {};
-  if (!match?.stage) return format?.best_of ?? 3;
-  if (match.stage.startsWith("hybrid")) return 7; // hybrid bracket is always BO7
+  const format = settings?.season_format as { roundBestOf?: RoundBestOfConfig; best_of?: number } | null;
+  const fallbackBestOf = (format?.best_of ?? 3) as BestOf;
+  if (!match?.stage) return fallbackBestOf;
   const { data: stageRows } = await supabaseAdmin
     .from("matches").select("round").eq("stage", match.stage);
   const maxRound = Math.max(...(stageRows ?? []).map((m: { round: number }) => m.round), match.round);
-  const tier = getTier(match.round, maxRound);
-  return roundBestOf[tier] ?? BEST_OF_DEFAULTS[tier] ?? format?.best_of ?? 3;
+  return resolveBestOf(match.stage, match.round, { [match.stage]: maxRound }, format?.roundBestOf, fallbackBestOf);
 }
 
 type MatchChannelContext = {
@@ -193,7 +182,7 @@ type MatchChannelContext = {
   categoryAnchorId: string | null; // category new match-stage categories get placed right after; null = default to bottom
   existingChannels: Array<{ id: string; name: string; parent_id?: string | null; type?: number; position?: number }>;
   guildRoles: Array<{ id: string; name: string }>;
-  roundBestOf: Record<string, number>;
+  roundBestOf: RoundBestOfConfig;
   maxRoundByStage: Record<string, number>;
   staffRoleIds: string[]; // moderator/director/ceo Discord role IDs — can view all match channels
   isTournament: boolean;
@@ -487,7 +476,7 @@ export async function createMatchChannel(
       .from("league_settings")
       .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, match_category_anchor_id, season_format, active_tournament_id")
       .single();
-    const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
+    const format = settings?.season_format as { roundBestOf?: RoundBestOfConfig } | null;
     const [existingChannels, guildRoles, allMatches, staffRoleIds] = await Promise.all([
       getGuildChannels(),
       getGuildRoles(),
@@ -579,13 +568,7 @@ export async function createMatchChannel(
 
   let bestOf = 3;
   if (matchInfo) {
-    if (matchInfo.stage.startsWith("hybrid")) {
-      bestOf = 7; // hybrid bracket is always BO7
-    } else {
-      const totalRounds = maxRoundByStage[matchInfo.stage] ?? matchInfo.round;
-      const tier = getTier(matchInfo.round, totalRounds);
-      bestOf = roundBestOf[tier] ?? BEST_OF_DEFAULTS[tier] ?? 3;
-    }
+    bestOf = resolveBestOf(matchInfo.stage, matchInfo.round, maxRoundByStage, roundBestOf, 3);
   }
 
   // For standalone seasons, look up this round's admin schedule so the message matches
@@ -1768,7 +1751,7 @@ async function openRound(userId: string, roundOverride?: number) {
   )];
   await ensureRoles(allTeamNames);
 
-  const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
+  const format = settings?.season_format as { roundBestOf?: RoundBestOfConfig } | null;
   const [existingChannels, guildRoles, allMatchRows, staffRoleIds] = await Promise.all([
     getGuildChannels(),
     getGuildRoles(),
@@ -1921,7 +1904,7 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
     .from("league_settings")
     .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, match_category_anchor_id, season_format, active_tournament_id")
     .single();
-  const format = settings?.season_format as { roundBestOf?: Record<string, number> } | null;
+  const format = settings?.season_format as { roundBestOf?: RoundBestOfConfig } | null;
   const isTournament = !!(settings?.active_tournament_id as string | null | undefined);
 
   const [existingChannels, guildRoles, staffRoleIds] = await Promise.all([

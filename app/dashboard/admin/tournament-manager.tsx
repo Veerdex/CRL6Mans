@@ -23,6 +23,9 @@ import {
   type RoundTier,
   type BestOf,
   type SeasonFormatConfig,
+  type PresetId,
+  type StageSlotDef,
+  type RoundBestOfConfig,
   TIER_ORDER,
   TIER_LABELS,
   BO_OPTIONS,
@@ -31,7 +34,16 @@ import {
   getNumGroups,
   getDefaultGroupAdvancing,
   getDefaultGroupRounds,
+  STAGE_SLOTS_BY_PRESET,
+  defaultStageBestOf,
+  defaultRoundBestOfForPreset,
 } from "@/app/dashboard/season/format-editor";
+
+// STAGE_SLOTS_BY_PRESET is keyed by the strict PresetId union; form.preset/sf.preset
+// are plain strings from DB rows, so every lookup goes through this guarded helper.
+function slotsForPreset(preset: string): StageSlotDef[] {
+  return STAGE_SLOTS_BY_PRESET[preset as PresetId] ?? [];
+}
 import { LocalTime } from "@/app/dashboard/local-time";
 
 // ── Preset list ─────────────────────────────────────────────────────────────
@@ -115,36 +127,45 @@ function deRounds(teams: number): number {
 // Swiss runs until every team reaches 3 wins or 3 losses → at most 5 rounds, all standard.
 const SWISS_ROUNDS = 5;
 
+function slotFlatBO(config: RoundBestOfConfig, key: "group" | "swiss"): BestOf {
+  const c = config[key];
+  return c?.mode === "flat" ? c.value : 3;
+}
+function slotTiers(config: RoundBestOfConfig, key: "single_elimination" | "double_elimination" | "se_qualifier" | "de_qualifier"): Record<RoundTier, BestOf> {
+  const c = config[key];
+  return c?.mode === "tiered" ? c.tiers : DEFAULT_BEST_OF;
+}
+
 function computeStageSchedule(
   preset: string,
   teams: number,
   groupMaxAdvancing: number | null,
-  bof: Record<RoundTier, BestOf>,
+  config: RoundBestOfConfig,
   groupRounds: number | null = null,
 ): StageScheduleEntry[] {
   if (teams < 2) return [];
 
-  const std = gapMin(bof.standard);
-  const qf  = gapMin(bof.quarterfinals);
-  const sf  = gapMin(bof.semifinals);
-  const fin = gapMin(bof.finals);
+  const groupStd = gapMin(slotFlatBO(config, "group"));
+  const swissStd = gapMin(slotFlatBO(config, "swiss"));
+  // Hybrid brackets are hardcoded to BO7 (see resolveBestOf) — not a configurable slot.
+  const hybridGap = gapMin(7);
 
-  const groups = { key: "groups", label: "Groups", estimatedMinutes: (groupRounds ?? groupStageRounds(teams)) * std };
-  const swiss  = { key: "swiss", label: "Swiss", estimatedMinutes: SWISS_ROUNDS * std };
-  const se8    = { key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(3, bof) }; // 8→1: QF+SF+Final
+  const groups = { key: "groups", label: "Groups", estimatedMinutes: (groupRounds ?? groupStageRounds(teams)) * groupStd };
+  const swiss  = { key: "swiss", label: "Swiss", estimatedMinutes: SWISS_ROUNDS * swissStd };
+  const se8    = { key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(3, slotTiers(config, "single_elimination")) }; // 8→1: QF+SF+Final
 
   switch (preset) {
     case "single_elimination":
-      return [{ key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(log2ceil(teams), bof) }];
+      return [{ key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(log2ceil(teams), slotTiers(config, "single_elimination")) }];
 
     case "double_elimination":
-      return [{ key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(deRounds(teams), bof) }];
+      return [{ key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(deRounds(teams), slotTiers(config, "double_elimination")) }];
 
     case "group_single_elimination": {
       const adv = groupMaxAdvancing ?? getDefaultGroupAdvancing(teams);
       return [
         groups,
-        { key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(log2ceil(adv), bof) },
+        { key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(log2ceil(adv), slotTiers(config, "single_elimination")) },
       ];
     }
 
@@ -152,26 +173,26 @@ function computeStageSchedule(
       return [groups, swiss, se8];
 
     case "group_swiss_hybrid":
-      // 5 wall-clock rounds: (UB QF ‖ LB R1), LB R2, LB QF, SF, GF
+      // 5 wall-clock rounds: (UB QF ‖ LB R1), LB R2, LB QF, SF, GF — all BO7.
       return [
         groups,
         swiss,
-        { key: "hybrid", label: "Hybrid(12)", estimatedMinutes: std + std + qf + sf + fin },
+        { key: "hybrid", label: "Hybrid(12)", estimatedMinutes: hybridGap * 5 },
       ];
 
     case "group_swiss_hybrid_8":
-      // 4 wall-clock rounds: (UB QF ‖ LB R1), LB QF, SF, GF
+      // 4 wall-clock rounds: (UB QF ‖ LB R1), LB QF, SF, GF — all BO7.
       return [
         groups,
         swiss,
-        { key: "hybrid", label: "Hybrid(8)", estimatedMinutes: std + qf + sf + fin },
+        { key: "hybrid", label: "Hybrid(8)", estimatedMinutes: hybridGap * 4 },
       ];
 
     case "se_swiss_single_elimination": {
       // SE qualifier narrows N → 16: log2(N) − log2(16) rounds.
       const qualRounds = Math.max(1, log2ceil(teams) - 4);
       return [
-        { key: "se_qualifier", label: "SE Qualifier", estimatedMinutes: qualRounds * std },
+        { key: "se_qualifier", label: "SE Qualifier", estimatedMinutes: seRoundsDuration(qualRounds, slotTiers(config, "se_qualifier")) },
         swiss,
         se8,
       ];
@@ -182,7 +203,7 @@ function computeStageSchedule(
       const k = Math.max(1, log2ceil(teams) - 3);
       const qualRounds = Math.max(k, 2 * (k - 1));
       return [
-        { key: "de_qualifier", label: "DE Qualifier", estimatedMinutes: qualRounds * std },
+        { key: "de_qualifier", label: "DE Qualifier", estimatedMinutes: seRoundsDuration(qualRounds, slotTiers(config, "de_qualifier")) },
         swiss,
         se8,
       ];
@@ -235,7 +256,7 @@ type FormState = {
   minMmr2v2: string;
   minMmr3v3: string;
   preset: string;
-  roundBestOf: Record<RoundTier, BestOf>;
+  roundBestOf: RoundBestOfConfig;
   groupSeedingMethod: "balanced" | "random";
   groupMaxAdvancing: string;
   groupRounds: string;
@@ -256,7 +277,7 @@ const EMPTY_FORM: FormState = {
   minMmr2v2: "",
   minMmr3v3: "",
   preset: "single_elimination",
-  roundBestOf: { ...DEFAULT_BEST_OF },
+  roundBestOf: defaultRoundBestOfForPreset("single_elimination"),
   groupSeedingMethod: "balanced",
   groupMaxAdvancing: "",
   groupRounds: "",
@@ -320,9 +341,13 @@ export function TournamentManager({
   const displayStages = computeStageSchedule(form.preset, previewCount, groupMaxAdvParsed, form.roundBestOf, groupRoundsParsed);
 
   const buildInput = (): TournamentInput => {
+    const trimmedRoundBestOf: RoundBestOfConfig = {};
+    for (const slot of slotsForPreset(form.preset)) {
+      trimmedRoundBestOf[slot.key] = form.roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
+    }
     const season_format: SeasonFormatConfig = {
       preset: form.preset as SeasonFormatConfig["preset"],
-      roundBestOf: form.roundBestOf,
+      roundBestOf: trimmedRoundBestOf,
     };
     if (hasGroupStage) {
       season_format.groupSeedingMethod = form.groupSeedingMethod;
@@ -428,7 +453,7 @@ export function TournamentManager({
     const fmt = t.season_format as SeasonFormatConfig | null;
     const preset = fmt?.preset ?? "single_elimination";
     const tTeams = t.min_teams || 0;
-    const tBof = { ...DEFAULT_BEST_OF, ...(fmt?.roundBestOf ?? {}) };
+    const tBof = { ...defaultRoundBestOfForPreset(preset as PresetId), ...(fmt?.roundBestOf ?? {}) };
     const tGroupAdv = fmt?.groupMaxAdvancing ?? null;
     const tGroupRounds = fmt?.groupRounds ?? null;
     const tStages = computeStageSchedule(preset, tTeams, tGroupAdv, tBof, tGroupRounds);
@@ -599,7 +624,15 @@ export function TournamentManager({
               onChange={(e) => {
                 const p = e.target.value;
                 const d = FORMAT_TEAM_DEFAULTS[p] ?? { min: "4" };
-                setForm(f => ({ ...f, preset: p, minTeams: d.min, stageStarts: emptyStarts(p) }));
+                setForm(f => ({
+                  ...f,
+                  preset: p,
+                  minTeams: d.min,
+                  stageStarts: emptyStarts(p),
+                  // Re-seed slots for the new preset, preserving values for slot
+                  // keys shared with the previous preset (e.g. "single_elimination").
+                  roundBestOf: { ...defaultRoundBestOfForPreset(p as PresetId), ...f.roundBestOf },
+                }));
               }}
             >
               {PRESETS.map((p) => (
@@ -687,23 +720,23 @@ export function TournamentManager({
           </div>
         )}
 
-        {/* Best Of settings */}
-        {(() => {
-          const bof: Record<RoundTier, BestOf> = form.roundBestOf ?? { ...DEFAULT_BEST_OF };
+        {/* Best Of settings — one block per independently-configurable stage */}
+        {slotsForPreset(form.preset).map((slot) => {
+          const slotConfig = form.roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
           return (
-            <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
-              <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Best Of Settings</p>
-              {TIER_ORDER.map((tier) => (
-                <div key={tier} className="flex items-center gap-4">
-                  <span className="text-xs text-zinc-500 w-24 sm:w-36 shrink-0">{TIER_LABELS[tier]}</span>
+            <div key={slot.key} className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
+              <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">{slot.label} — Best Of</p>
+              {slotConfig.mode === "flat" ? (
+                <div className="flex items-center gap-4">
+                  <span className="text-xs text-zinc-500 w-24 sm:w-36 shrink-0">Every match</span>
                   <div className="flex gap-2">
                     {BO_OPTIONS.map((bo) => (
                       <button
                         key={bo}
                         type="button"
-                        onClick={() => setForm(f => ({ ...f, roundBestOf: applyBestOfCascade(f.roundBestOf ?? { ...DEFAULT_BEST_OF }, tier, bo) }))}
+                        onClick={() => setForm(f => ({ ...f, roundBestOf: { ...f.roundBestOf, [slot.key]: { mode: "flat", value: bo } } }))}
                         className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-                          bof[tier] === bo
+                          slotConfig.value === bo
                             ? "border-indigo-500 bg-indigo-900/50 text-white"
                             : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
                         }`}
@@ -714,10 +747,37 @@ export function TournamentManager({
                     ))}
                   </div>
                 </div>
-              ))}
+              ) : (
+                TIER_ORDER.map((tier) => (
+                  <div key={tier} className="flex items-center gap-4">
+                    <span className="text-xs text-zinc-500 w-24 sm:w-36 shrink-0">{TIER_LABELS[tier]}</span>
+                    <div className="flex gap-2">
+                      {BO_OPTIONS.map((bo) => (
+                        <button
+                          key={bo}
+                          type="button"
+                          onClick={() => setForm(f => {
+                            const existing = f.roundBestOf[slot.key];
+                            const currentTiers = existing?.mode === "tiered" ? existing.tiers : DEFAULT_BEST_OF;
+                            return { ...f, roundBestOf: { ...f.roundBestOf, [slot.key]: { mode: "tiered", tiers: applyBestOfCascade(currentTiers, tier, bo) } } };
+                          })}
+                          className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                            slotConfig.tiers[tier] === bo
+                              ? "border-indigo-500 bg-indigo-900/50 text-white"
+                              : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
+                          }`}
+                        >
+                          <span className="sm:hidden">{bo}</span>
+                          <span className="hidden sm:inline">BO{bo}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           );
-        })()}
+        })}
 
         {/* Stage schedule */}
         {stages.length > 0 && (
@@ -830,7 +890,7 @@ export function TournamentManager({
                 sf.preset,
                 t.min_teams || 0,
                 sf.groupMaxAdvancing ?? null,
-                { ...DEFAULT_BEST_OF, ...(sf.roundBestOf ?? {}) },
+                { ...defaultRoundBestOfForPreset(sf.preset as PresetId), ...(sf.roundBestOf ?? {}) },
                 sf.groupRounds ?? null,
               )
             : [];
@@ -862,7 +922,13 @@ export function TournamentManager({
                 {sf?.preset && (
                   <p className="text-xs text-zinc-500 mt-1">
                     <span className="text-zinc-400">{PRESETS.find(p => p.id === sf.preset)?.name ?? sf.preset}</span>
-                    {TIER_ORDER.map(tier => ` · ${TIER_LABELS[tier]}: BO${sf.roundBestOf?.[tier] ?? DEFAULT_BEST_OF[tier]}`).join("")}
+                    {slotsForPreset(sf.preset).map((slot) => {
+                      const sc = sf.roundBestOf?.[slot.key] ?? defaultStageBestOf(slot.kind);
+                      const text = sc.mode === "flat"
+                        ? `BO${sc.value}`
+                        : TIER_ORDER.map(t => `${TIER_LABELS[t]} BO${sc.tiers[t]}`).join(", ");
+                      return ` · ${slot.label}: ${text}`;
+                    }).join("")}
                   </p>
                 )}
                 {t.status === "completed" && summary && (

@@ -57,7 +57,6 @@ const db = createClient(url, key);
 // app/dashboard/wagers/prediction.ts (crl-game-share-elo-v1) ──
 const JOIN_POINT_RV = 1850, JOIN_VALUE = 1758.38, ABOVE_SLOPE = 0.91;
 const POWER_MEAN_P = 9.0, PER_GAME_SCALE = 650, ELO_CONFIDENCE = 1.5, RATING_K = 35;
-const BEST_OF_DEFAULTS = { standard: 3, quarterfinals: 3, semifinals: 3, finals: 3 };
 
 // Tiebreaker for matches sharing a created_at (same bulk bracket insert) — lower
 // sorts earlier. WB before LB before grand final; anything unlisted (group,
@@ -137,6 +136,30 @@ function getTier(round, totalRounds) {
   return "standard";
 }
 
+// Ported from getStageSlotKey/resolveBestOf in app/lib/bracket.ts and
+// app/dashboard/season/format-constants.ts — kept in sync by hand since this
+// script is plain JS and can't import those TS modules directly.
+function getStageSlotKey(stage) {
+  if (stage.startsWith("group_")) return "group";
+  if (stage === "swiss") return "swiss";
+  if (stage === "se_qualifier") return "se_qualifier";
+  if (stage === "deq_winners" || stage === "deq_losers") return "de_qualifier";
+  if (stage === "de_winners" || stage === "de_losers" || stage === "de_grand_final") return "double_elimination";
+  if (stage === "single_elimination") return "single_elimination";
+  return null;
+}
+function resolveBestOf(stage, round, maxRoundByStage, config, fallback = 3) {
+  if (stage?.startsWith("hybrid")) return 7;
+  if (!stage) return fallback;
+  const slotKey = getStageSlotKey(stage);
+  const slotConfig = slotKey ? config?.[slotKey] : undefined;
+  if (!slotConfig) return fallback;
+  if (slotConfig.mode === "flat") return slotConfig.value;
+  const totalRounds = maxRoundByStage[stage] ?? round;
+  const tier = getTier(round, totalRounds);
+  return slotConfig.tiers[tier] ?? fallback;
+}
+
 async function preseasonRatings() {
   const { data: players } = await db
     .from("players")
@@ -168,13 +191,10 @@ async function loadCompletedMatches() {
     maxRoundByStage[m.stage] = Math.max(maxRoundByStage[m.stage] ?? 0, m.round);
   }
   const format = settings?.season_format ?? null;
-  const roundBestOf = format?.roundBestOf ?? {};
+  const fallbackBestOf = format?.best_of ?? 3;
 
   function bestOfForMatch(m) {
-    if (m.stage?.startsWith("hybrid")) return 7;
-    if (!m.stage) return format?.best_of ?? 3;
-    const tier = getTier(m.round, maxRoundByStage[m.stage] ?? m.round);
-    return roundBestOf[tier] ?? BEST_OF_DEFAULTS[tier] ?? format?.best_of ?? 3;
+    return resolveBestOf(m.stage, m.round, maxRoundByStage, format?.roundBestOf, fallbackBestOf);
   }
 
   const completed = (allMatches ?? [])

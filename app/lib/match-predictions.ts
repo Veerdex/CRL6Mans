@@ -1,13 +1,6 @@
 import { supabaseAdmin } from "./supabase";
-import { getTier } from "./discord-bot";
+import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 import { computeMatchPrediction, computeMatchPredictionFromRating } from "@/app/dashboard/wagers/prediction";
-
-const BEST_OF_DEFAULTS: Record<string, number> = {
-  standard: 3,
-  quarterfinals: 3,
-  semifinals: 3,
-  finals: 3,
-};
 
 function rvOf(p: {
   peak_2v2: string | null;
@@ -55,20 +48,13 @@ export async function freezeUnfrozenMatchPredictions(): Promise<void> {
   }
 
   const format = ls?.season_format as
-    | { roundBestOf?: Record<string, number>; best_of?: number }
+    | { roundBestOf?: RoundBestOfConfig; best_of?: number }
     | null;
-  const roundBestOf = format?.roundBestOf ?? {};
+  const fallbackBestOf = (format?.best_of ?? 3) as BestOf;
 
   function bestOfForMatch(m: { stage: string | null; round: number }): number {
-    let bestOf = format?.best_of ?? 3;
-    if (m.stage?.startsWith("hybrid")) {
-      bestOf = 7;
-    } else if (m.stage) {
-      const maxRound = maxRoundByStage[m.stage] ?? m.round;
-      const tier = getTier(m.round, maxRound);
-      bestOf = roundBestOf[tier] ?? BEST_OF_DEFAULTS[tier] ?? format?.best_of ?? 3;
-    }
-    return bestOf;
+    if (!m.stage) return fallbackBestOf;
+    return resolveBestOf(m.stage, m.round, maxRoundByStage, format?.roundBestOf, fallbackBestOf);
   }
 
   const teamIds = [...new Set(unfrozen.flatMap((m) => [m.home_team_id as string, m.away_team_id as string]))];
