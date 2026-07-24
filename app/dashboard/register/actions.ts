@@ -169,13 +169,10 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     tag: "registration",
   }, "registrations").catch(() => {});
 
-  const inviteUrl = process.env.DISCORD_INVITE_URL?.trim();
-  if (inviteUrl) {
-    sendDm(
-      session.userId,
-      `👋 Thanks for registering for ${APP_NAME}! Your registration is pending admin review.\n\nJoin our Discord server to stay up to date: ${inviteUrl}`
-    ).catch(() => {});
-  }
+  sendDm(
+    session.userId,
+    `👋 Thanks for registering for ${APP_NAME}! Your registration is pending admin review.`
+  ).catch(() => {});
 
   return { success: true, error: "" };
 }
