@@ -522,9 +522,16 @@ export async function resetSeason() {
   // Delete Discord match channels before wiping the DB
   await deleteMatchChannels();
 
-  // Refund and void any bets still pending — the matches they reference are about
+  // Refund any bets still pending — the matches they reference are about
   // to be deleted, so nothing will ever settle them otherwise.
   await voidAllPendingWagers();
+
+  // Clear all bet history (pending/won/lost/push/void alike) — matches are about
+  // to be deleted so every wager/parlay would be left referencing a dead match_id,
+  // and "My Bets" has no season boundary of its own to hide stale entries behind.
+  await supabaseAdmin.from("parlay_legs").delete().not("id", "is", null);
+  await supabaseAdmin.from("parlays").delete().not("id", "is", null);
+  await supabaseAdmin.from("wagers").delete().not("id", "is", null);
 
   // Delete matches and reset team stats — team slots (name, discord_role_id) are preserved
   await supabaseAdmin.from("sub_requests").delete().not("id", "is", null);
