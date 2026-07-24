@@ -172,10 +172,18 @@ export default async function WagersPage() {
     bestOf: bestOfForMatch(m),
   }));
 
-  // Grid: every match with both teams assigned, any status. No tournament/season
-  // filter is needed — the matches table is fully cleared at the start of each
-  // new draft (see discord-bot.ts), so it only ever holds the current event's matches.
-  const gridMatchesRaw = (allMatches ?? []).filter((m) => m.home_team_id && m.away_team_id);
+  // Grid: only matches actually bettable right now (mirrors the `bettable` filter
+  // above) plus already-completed ones. A group stage schedules every round's
+  // matchup upfront since both teams are known from the start, so filtering on
+  // "both teams assigned" alone would surface the entire group schedule at once —
+  // scoping to scheduled_at > now (or completed) keeps the grid to what the
+  // betting tab actually lets you act on.
+  const gridMatchesRaw = (allMatches ?? []).filter(
+    (m) =>
+      m.home_team_id &&
+      m.away_team_id &&
+      (m.status === "completed" || (m.scheduled_at && new Date(m.scheduled_at).getTime() > now)),
+  );
 
   // Current stage label
   const stageCounts: Record<string, number> = {};
@@ -274,6 +282,17 @@ export default async function WagersPage() {
   }
   for (const w of gridWagersRaw ?? []) addGridWager(w.match_id, w.bet_type, w.amount);
   for (const l of gridParlayLegsRaw ?? []) addGridWager(l.match_id, l.bet_type, parlayAmountById[l.parlay_id] ?? 0);
+
+  // Upcoming matches surface before completed ones; within each group, the
+  // most-bet match (highest combined coins across both sides) comes first.
+  gridMatches.sort((a, b) => {
+    const aCompleted = a.status === "completed" ? 1 : 0;
+    const bCompleted = b.status === "completed" ? 1 : 0;
+    if (aCompleted !== bCompleted) return aCompleted - bCompleted;
+    const aTotal = (gridWagerTotals[a.id]?.home ?? 0) + (gridWagerTotals[a.id]?.away ?? 0);
+    const bTotal = (gridWagerTotals[b.id]?.home ?? 0) + (gridWagerTotals[b.id]?.away ?? 0);
+    return bTotal - aTotal;
+  });
 
   // Default to the most competitive match (closest to 50/50 — highest risk to bet)
   const defaultMatchId = matches.reduce((picked, m) => {
