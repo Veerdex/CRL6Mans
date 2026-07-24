@@ -12,7 +12,7 @@ import { AdminTabsProvider, AdminTabsBar, AdminTabSection } from "./admin-tabs";
 import { RegistrationCard } from "./registration-card";
 import { PlayerPanel, type CombinedPlayer, type PlatformAccountSummary } from "./player-panel";
 import { GuestAccountPanel, type GuestAccount } from "./guest-account-panel";
-import { DraftPoolPanel, type DraftPoolEntry } from "./draft-pool-panel";
+import { DraftPoolPanel, type DraftPoolEntry, type DraftPoolTournamentGroup } from "./draft-pool-panel";
 import { TeamSlotsManager } from "./team-slots-manager";
 import { MatchReporter } from "./match-reporter";
 import { getTier } from "@/app/lib/discord-bot";
@@ -26,7 +26,6 @@ import { IdentityEnforcementToggle } from "./identity-enforcement-toggle";
 import { JoinGateToggle } from "./join-gate-toggle";
 import { TournamentManager } from "./tournament-manager";
 import type { Tournament, Season } from "./tournament-actions";
-import type { TournamentSignupData } from "./tournament-signups-panel";
 import { InitSettingsButton } from "./init-settings-button";
 import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
@@ -143,9 +142,14 @@ export default async function AdminPage() {
     : { data: [] as { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null }[] };
   const signupPlayerMap = new Map((signupPlayerRows ?? []).map((p) => [p.id, p]));
 
-  const tournamentSignups: Record<string, TournamentSignupData> = {};
-  for (const tid of scheduledTournamentIds) {
-    tournamentSignups[tid] = {
+  const scheduledTournamentById = new Map((tournaments ?? []).map((t) => [t.id as string, t]));
+
+  const draftPoolTournamentGroups: DraftPoolTournamentGroup[] = scheduledTournamentIds.map((tid) => {
+    const t = scheduledTournamentById.get(tid);
+    return {
+      tournamentId: tid,
+      tournamentName: t?.name ?? "Tournament",
+      joinMode: (t?.join_mode ?? "players") as "players" | "teams",
       playerEntries: (entryRows ?? [])
         .filter((r) => r.tournament_id === tid)
         .map((r) => {
@@ -174,7 +178,7 @@ export default async function AdminPage() {
           }),
         })),
     };
-  }
+  }).filter((g) => g.playerEntries.length > 0 || g.teamSignups.length > 0);
 
   const platformClaimCards: PlatformAccountClaimCardData[] = await Promise.all(
     (pendingPlatformClaimRows ?? []).map(async (row) => {
@@ -1089,7 +1093,6 @@ export default async function AdminPage() {
             seasons={(seasons ?? []) as Season[]}
             hasActive={!!settings?.active_tournament_id}
             testingMode={testingMode}
-            signups={tournamentSignups}
           />
         </CollapsibleSection>
       )}
@@ -1123,11 +1126,11 @@ export default async function AdminPage() {
       {userIsDirector && (
         <CollapsibleSection
           title="Draft Pool"
-          value={enteredCount}
+          value={enteredCount + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0)}
           defaultOpen={false}
-          description="Everyone currently signed up for the draft ('Enter Draft' on the dashboard). Remove a player from the pool before the draft starts if they need to be pulled from signups."
+          description="Everyone currently signed up to play — the season's 'Enter Draft' pool plus sign-ups for any scheduled standalone tournaments (player or team mode). Remove an entrant before its draft/tournament starts if they need to be pulled from signups."
         >
-          <DraftPoolPanel entries={(draftPoolRows ?? []) as DraftPoolEntry[]} />
+          <DraftPoolPanel entries={(draftPoolRows ?? []) as DraftPoolEntry[]} tournamentGroups={draftPoolTournamentGroups} />
         </CollapsibleSection>
       )}
 
