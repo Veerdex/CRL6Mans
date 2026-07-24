@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate, setIsTestSeason } from "./league-actions";
 import { auditMatchChannels, applyChannelChanges, type ChannelAuditItem, type ChannelAuditResult } from "./channel-debug-actions";
 import { ExportAndResetSeasonButton } from "./export-pdf-button";
@@ -29,9 +29,12 @@ interface LeagueControlsProps {
   notificationsEnabled: boolean;
   draftCurrentMax: number;
   draftFormatMax: number | null;
+  seasonFormatLabel: string;
   isTestSeason: boolean;
   isCEO: boolean;
 }
+
+const FINAL_CONFIRM_COOLDOWN_SECONDS = 3;
 
 const COMMANDS: Record<ActionKey, { label: string; code: string; description: string }> = {
   startdraft: {
@@ -56,11 +59,13 @@ const COMMANDS: Record<ActionKey, { label: string; code: string; description: st
   },
 };
 
-export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, draftFormatMax, isTestSeason, isCEO }: LeagueControlsProps) {
+export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, draftFormatMax, seasonFormatLabel, isTestSeason, isCEO }: LeagueControlsProps) {
   const [isPending, startTransition] = useTransition();
   const [active, setActive] = useState<ActionKey | null>(null);
   const [codeInput, setCodeInput] = useState("");
   const [maxTeamsInput, setMaxTeamsInput] = useState("");
+  const [pendingFinalConfirm, setPendingFinalConfirm] = useState<ActionKey | null>(null);
+  const [finalConfirmCooldown, setFinalConfirmCooldown] = useState(0);
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
   const [localDraftOpen, setLocalDraftOpen] = useState(draftOpen);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -83,6 +88,14 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
   const [min2v2, setMin2v2] = useState(minMmr2v2 != null ? String(minMmr2v2) : "");
   const [min3v3, setMin3v3] = useState(minMmr3v3 != null ? String(minMmr3v3) : "");
 
+  useEffect(() => {
+    if (!pendingFinalConfirm) return;
+    const id = setInterval(() => {
+      setFinalConfirmCooldown((c) => (c <= 1 ? 0 : c - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [pendingFinalConfirm]);
+
   const showFeedback = (msg: string | undefined, ok: boolean) => {
     setFeedback({ msg: msg ?? "", ok });
     setTimeout(() => setFeedback(null), 5000);
@@ -93,6 +106,24 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
     setCodeInput("");
     setMaxTeamsInput("");
   };
+
+  const requiresFinalWarning = (key: ActionKey) =>
+    key === "startdraft" || key === "autodraft" || key === "startseason";
+
+  const requestConfirm = () => {
+    if (!active) return;
+    if (requiresFinalWarning(active)) {
+      setFinalConfirmCooldown(FINAL_CONFIRM_COOLDOWN_SECONDS);
+      setPendingFinalConfirm(active);
+    } else {
+      handleConfirm();
+    }
+  };
+
+  const pendingDraftTeamCount = (() => {
+    const parsed = maxTeamsInput.trim() === "" ? null : parseInt(maxTeamsInput, 10);
+    return parsed && parsed > 0 ? parsed : draftFormatMax ?? draftCurrentMax;
+  })();
 
   const handleConfirm = () => {
     if (!active) return;
@@ -283,14 +314,14 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
                   type="text"
                   value={codeInput}
                   onChange={(e) => setCodeInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && codeInput === cmd.code) handleConfirm(); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && codeInput === cmd.code) requestConfirm(); }}
                   placeholder={cmd.code}
                   className="w-full bg-zinc-900 border border-zinc-600 rounded-lg px-2 py-1.5 text-xs font-mono text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                   autoFocus
                 />
                 <div className="flex gap-2">
                   <button
-                    onClick={handleConfirm}
+                    onClick={requestConfirm}
                     disabled={isPending || codeInput !== cmd.code}
                     className="flex-1 py-1.5 bg-red-700 hover:bg-red-600 disabled:opacity-40 text-white text-xs font-medium rounded-lg transition-colors"
                   >
@@ -414,6 +445,40 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
               </button>
               <button
                 onClick={() => setShowTrackerForce(false)}
+                className="flex-1 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Final warning modal — gates Start Draft / Auto Draft / Start Season behind a 3-second cooldown */}
+      {pendingFinalConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-red-700/60 rounded-xl p-6 max-w-sm w-full mx-4 space-y-4 shadow-2xl">
+            <h3 className="text-base font-semibold text-red-300">{COMMANDS[pendingFinalConfirm].label}</h3>
+            {(pendingFinalConfirm === "startdraft" || pendingFinalConfirm === "autodraft") ? (
+              <p className="text-sm text-zinc-300 leading-relaxed">
+                <span className="font-semibold text-white">{pendingDraftTeamCount} teams</span> will be created. Is this right?
+              </p>
+            ) : (
+              <p className="text-sm text-zinc-300 leading-relaxed">
+                The season will run as <span className="font-semibold text-white">{seasonFormatLabel}</span>. Is this right?
+              </p>
+            )}
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => { setPendingFinalConfirm(null); handleConfirm(); }}
+                disabled={isPending || finalConfirmCooldown > 0}
+                className="flex-1 px-4 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                {isPending ? "Running…" : finalConfirmCooldown > 0 ? `Confirm (${finalConfirmCooldown})` : "Confirm"}
+              </button>
+              <button
+                onClick={() => setPendingFinalConfirm(null)}
+                disabled={isPending}
                 className="flex-1 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
               >
                 Cancel

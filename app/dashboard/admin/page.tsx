@@ -6,7 +6,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { LeagueControls } from "./league-controls";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
 import { InsightsChart, type InsightsPoint } from "./insights-chart";
-import { FormatEditor, type SeasonFormatConfig } from "../season/format-editor";
+import { FormatEditor, type SeasonFormatConfig, PRESETS } from "../season/format-editor";
 import { CollapsibleSection } from "./collapsible-section";
 import { AdminTabsProvider, AdminTabsBar, AdminTabSection } from "./admin-tabs";
 import { RegistrationCard } from "./registration-card";
@@ -614,6 +614,9 @@ export default async function AdminPage() {
   };
   const currentPreset = (seasonFormat as { preset?: string } | null)?.preset;
   const draftFormatMax = currentPreset ? (FORMAT_MAX_TEAMS[currentPreset] ?? null) : null;
+  const seasonFormatLabel = currentPreset
+    ? (PRESETS.find((p) => p.id === currentPreset)?.name ?? currentPreset)
+    : "No format configured";
 
   type RawPlayer = { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null; status: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; ban_reason?: string | null; kick_reason?: string | null; kicked_until?: string | null };
   const combinedPlayers: CombinedPlayer[] = ((allPlayers ?? []) as RawPlayer[]).map(p => ({
@@ -1024,6 +1027,7 @@ export default async function AdminPage() {
             notificationsEnabled={notificationsEnabled}
             draftCurrentMax={draftCurrentMax}
             draftFormatMax={draftFormatMax}
+            seasonFormatLabel={seasonFormatLabel}
             isTestSeason={(settings?.is_test_season as boolean | null) ?? false}
             isCEO={userIsCEO}
           />

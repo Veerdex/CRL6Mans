@@ -49,7 +49,7 @@ type StageInfo = {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const PRESETS: PresetDef[] = [
+export const PRESETS: PresetDef[] = [
   {
     id: "single_elimination",
     name: "Single Elimination",

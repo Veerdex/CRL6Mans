@@ -89,6 +89,7 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmDqTeamId, setConfirmDqTeamId] = useState<string | null>(null);
+  const [dqConfirmText, setDqConfirmText] = useState("");
   const [swapSource, setSwapSource] = useState<SwapSelection | null>(null);
   const [swapTarget, setSwapTarget] = useState<SwapSelection | null>(null);
   const [swapError, setSwapError] = useState<string | null>(null);
@@ -115,6 +116,7 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
     startTransition(async () => {
       await disqualifyTeam(teamId);
       setConfirmDqTeamId(null);
+      setDqConfirmText("");
       router.refresh();
     });
   }
@@ -254,25 +256,15 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
                   )}
                 </span>
               ) : isConfirmingDq ? (
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-xs text-zinc-400">DQ team?</span>
-                  <button
-                    onClick={() => handleDisqualify(team.id)}
-                    disabled={isPending}
-                    className="px-2 py-1 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg"
-                  >
-                    Yes
-                  </button>
-                  <button
-                    onClick={() => setConfirmDqTeamId(null)}
-                    className="px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs rounded-lg"
-                  >
-                    Cancel
-                  </button>
-                </div>
+                <button
+                  onClick={() => { setConfirmDqTeamId(null); setDqConfirmText(""); }}
+                  className="shrink-0 px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs rounded-lg"
+                >
+                  Cancel
+                </button>
               ) : (
                 <button
-                  onClick={() => setConfirmDqTeamId(team.id)}
+                  onClick={() => { setConfirmDqTeamId(team.id); setDqConfirmText(""); }}
                   className="shrink-0 text-[10px] font-bold text-red-500 hover:text-red-400 border border-red-800/50 hover:border-red-600/60 rounded px-2 py-1 transition-colors uppercase tracking-wide"
                   title="Disqualify team"
                 >
@@ -280,6 +272,32 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
                 </button>
               )}
             </div>
+
+            {/* Disqualify confirmation — requires typing the team name to avoid mis-clicks */}
+            {isConfirmingDq && (
+              <div className="px-5 py-3 border-b border-zinc-800 bg-red-950/20 space-y-2">
+                <p className="text-xs text-zinc-300">
+                  Type <span className="font-semibold text-white">{team.name}</span> to confirm disqualification.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={dqConfirmText}
+                    onChange={(e) => setDqConfirmText(e.target.value)}
+                    placeholder={team.name}
+                    autoFocus
+                    className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-red-600"
+                  />
+                  <button
+                    onClick={() => handleDisqualify(team.id)}
+                    disabled={isPending || dqConfirmText.trim().toLowerCase() !== team.name.trim().toLowerCase()}
+                    className="shrink-0 px-3 py-1.5 bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg"
+                  >
+                    {isPending ? "Disqualifying…" : "Disqualify"}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Roster */}
             <div className="divide-y divide-zinc-800">
