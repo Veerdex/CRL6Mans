@@ -11,7 +11,8 @@ import {
   payoutMultiplier,
 } from "./prediction";
 
-// Testing-only: zero out every approved player's Westside Wages. Guarded by both
+// Testing-only: zero out every eligible account's Westside Wages (everyone but
+// rejected — unregistered/pending/approved can all wager). Guarded by both
 // director status and the testing_mode cookie so it can't run in a live event.
 export async function resetAllWestsideWages(): Promise<{ ok?: boolean; error?: string }> {
   const cookieStore = await cookies();
@@ -20,7 +21,7 @@ export async function resetAllWestsideWages(): Promise<{ ok?: boolean; error?: s
   if (!(await isDirectorVerified(session.userId))) return { error: "Not authorized" };
   if (cookieStore.get("testing_mode")?.value !== "1") return { error: "Testing mode is not enabled." };
 
-  await supabaseAdmin.from("players").update({ crl_coins: 0 }).eq("status", "approved");
+  await supabaseAdmin.from("accounts").update({ crl_coins: 0 }).in("status", ["unregistered", "pending", "approved"]);
 
   revalidatePath("/dashboard/wagers");
   return { ok: true };
@@ -179,13 +180,26 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
     batchSlots.add(key);
   }
 
-  const { data: player } = await supabaseAdmin
-    .from("players")
-    .select("id, crl_coins, status, team_id")
+  // Wagering eligibility/balance live on accounts (Tier 1) so unregistered and
+  // pending guests can bet too — only rejected accounts are excluded. team_id
+  // (Tier 3, only set for rostered players) is looked up separately since a
+  // guest has no players row at all.
+  const { data: account } = await supabaseAdmin
+    .from("accounts")
+    .select("id, crl_coins, status")
     .eq("discord_id", session.userId)
     .single();
 
-  if (!player || player.status !== "approved") return { error: "Player not found or not approved" };
+  if (!account || account.status === "rejected") {
+    return { error: "Player not found or not eligible to bet" };
+  }
+
+  const { data: player } = await supabaseAdmin
+    .from("players")
+    .select("team_id")
+    .eq("discord_id", session.userId)
+    .single();
+  const teamId = player?.team_id ?? null;
 
   // Cap on simultaneous pending bets
   const { count: pendingBetCount } = await supabaseAdmin
@@ -198,7 +212,7 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
   }
 
   const totalCost = bets.reduce((s, b) => s + b.amount, 0);
-  if ((player.crl_coins ?? 0) < totalCost) return { error: "Insufficient Westside Wages" };
+  if ((account.crl_coins ?? 0) < totalCost) return { error: "Insufficient Westside Wages" };
 
   const matchIds = [...new Set(bets.map((b) => b.matchId))];
   const { data: matches } = await supabaseAdmin
@@ -212,7 +226,7 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
     const closed = isBettingClosed(match);
     if (closed) return { error: closed };
     // Players cannot bet on a match their own team is in — they control its result reporting.
-    if (player.team_id && (match.home_team_id === player.team_id || match.away_team_id === player.team_id)) {
+    if (teamId && (match.home_team_id === teamId || match.away_team_id === teamId)) {
       return { error: "You cannot bet on a match your own team is playing in." };
     }
   }
@@ -262,9 +276,9 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
       })),
     ),
     supabaseAdmin
-      .from("players")
-      .update({ crl_coins: (player.crl_coins ?? 0) - totalCost })
-      .eq("id", player.id),
+      .from("accounts")
+      .update({ crl_coins: (account.crl_coins ?? 0) - totalCost })
+      .eq("id", account.id),
   ]);
 
   return {};
@@ -297,13 +311,22 @@ export async function placeParlayBet(
     parlaySlots.add(key);
   }
 
-  const { data: player } = await supabaseAdmin
-    .from("players")
-    .select("id, crl_coins, status, team_id")
+  const { data: account } = await supabaseAdmin
+    .from("accounts")
+    .select("id, crl_coins, status")
     .eq("discord_id", session.userId)
     .single();
 
-  if (!player || player.status !== "approved") return { error: "Player not found or not approved" };
+  if (!account || account.status === "rejected") {
+    return { error: "Player not found or not eligible to bet" };
+  }
+
+  const { data: player } = await supabaseAdmin
+    .from("players")
+    .select("team_id")
+    .eq("discord_id", session.userId)
+    .single();
+  const teamId = player?.team_id ?? null;
 
   // Cap on simultaneous pending parlays
   const { count: pendingParlayCount } = await supabaseAdmin
@@ -315,7 +338,7 @@ export async function placeParlayBet(
     return { error: `You can have at most ${MAX_PENDING_PARLAYS} pending parlays.` };
   }
 
-  if ((player.crl_coins ?? 0) < amount) return { error: "Insufficient Westside Wages" };
+  if ((account.crl_coins ?? 0) < amount) return { error: "Insufficient Westside Wages" };
 
   const matchIds = [...new Set(legs.map((l) => l.matchId))];
   const { data: matches } = await supabaseAdmin
@@ -329,7 +352,7 @@ export async function placeParlayBet(
     const closed = isBettingClosed(match);
     if (closed) return { error: closed };
     // Players cannot bet on a match their own team is in — they control its result reporting.
-    if (player.team_id && (match.home_team_id === player.team_id || match.away_team_id === player.team_id)) {
+    if (teamId && (match.home_team_id === teamId || match.away_team_id === teamId)) {
       return { error: "You cannot include a match your own team is playing in." };
     }
   }
@@ -375,9 +398,9 @@ export async function placeParlayBet(
       })),
     ),
     supabaseAdmin
-      .from("players")
-      .update({ crl_coins: (player.crl_coins ?? 0) - amount })
-      .eq("id", player.id),
+      .from("accounts")
+      .update({ crl_coins: (account.crl_coins ?? 0) - amount })
+      .eq("id", account.id),
   ]);
 
   return {};

@@ -63,27 +63,38 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     }
   }
 
-  // Look up any existing registration so we can check status and fall back to its image
-  const { data: existing } = await supabaseAdmin
-    .from("players")
-    .select("status, college_image_url, kick_reason, kicked_until")
+  // Look up the Tier 1 account so we can check status and fall back to any
+  // existing Tier 2 registration image
+  const { data: account } = await supabaseAdmin
+    .from("accounts")
+    .select("id, status, kick_reason, kicked_until")
     .eq("discord_id", session.userId)
     .single();
 
+  if (!account) {
+    return { error: "Account not found. Please log out and log in again." };
+  }
+
   // Guard against corrupting approved/pending records via direct POST
-  if (existing?.status === "approved") {
+  if (account.status === "approved") {
     return { error: "Your registration is already approved." };
   }
-  if (existing?.status === "pending") {
+  if (account.status === "pending") {
     return { error: "Your registration is already pending review." };
   }
-  if (existing?.status === "rejected" && isCurrentlyKicked(existing.kick_reason, existing.kicked_until)) {
+  if (account.status === "rejected" && isCurrentlyKicked(account.kick_reason, account.kicked_until)) {
     return {
-      error: existing.kick_reason
-        ? `You can't re-register yet: ${existing.kick_reason}`
+      error: account.kick_reason
+        ? `You can't re-register yet: ${account.kick_reason}`
         : "You can't re-register yet. Please try again later.",
     };
   }
+
+  const { data: existingPending } = await supabaseAdmin
+    .from("pending_players")
+    .select("college_image_url")
+    .eq("account_id", account.id)
+    .single();
 
   let collegeImageUrl: string;
   let uploadedFileName: string | null = null;
@@ -109,17 +120,14 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
 
     uploadedFileName = fileName;
     collegeImageUrl = urlData.publicUrl;
-  } else if (existing?.college_image_url) {
-    collegeImageUrl = existing.college_image_url;
+  } else if (existingPending?.college_image_url) {
+    collegeImageUrl = existingPending.college_image_url;
   } else {
     return { error: "College enrollment proof is required." };
   }
 
-  const { error: dbError } = await supabaseAdmin.from("players").upsert({
-    discord_id:        session.userId,
-    username:          session.username,
-    avatar:            session.avatar,
-    status:            "pending",
+  const { error: dbError } = await supabaseAdmin.from("pending_players").upsert({
+    account_id:        account.id,
     tracker_url:       trackerUrl,
     peak_3v3:          peak3v3,
     current_3v3:       current3v3,
@@ -129,7 +137,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     sub_willing:       subWilling,
     tracker_confirmed_at: new Date().toISOString(),
     updated_at:        new Date().toISOString(),
-  }, { onConflict: "discord_id" });
+  }, { onConflict: "account_id" });
 
   if (dbError) {
     console.error("DB insert error:", dbError);
@@ -137,6 +145,16 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     if (uploadedFileName) {
       await supabaseAdmin.storage.from("college-ids").remove([uploadedFileName]);
     }
+    return { error: "Failed to submit registration. Please try again." };
+  }
+
+  const { error: statusError } = await supabaseAdmin
+    .from("accounts")
+    .update({ status: "pending", updated_at: new Date().toISOString() })
+    .eq("id", account.id);
+
+  if (statusError) {
+    console.error("DB status update error:", statusError);
     return { error: "Failed to submit registration. Please try again." };
   }
 

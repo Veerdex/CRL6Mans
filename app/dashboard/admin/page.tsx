@@ -215,17 +215,20 @@ export default async function AdminPage() {
     };
   });
 
-  const { data: wagerBalancePlayers } = await supabaseAdmin
-    .from("players")
+  // crl_coins/username/display_name live on accounts (Tier 1) now. Scoped to
+  // approved accounts only — id is still players.id-compatible since
+  // players.id = accounts.id for every approved player (see adjustPlayerBalance).
+  const { data: wagerBalanceAccounts } = await supabaseAdmin
+    .from("accounts")
     .select("id, username, display_name, crl_coins")
     .eq("status", "approved")
     .order("crl_coins", { ascending: false });
 
-  const wagerBalanceRows: BalanceRow[] = (wagerBalancePlayers ?? []).map(p => ({
-    id: p.id,
-    username: p.username,
-    displayName: p.display_name,
-    balance: p.crl_coins ?? 0,
+  const wagerBalanceRows: BalanceRow[] = (wagerBalanceAccounts ?? []).map(a => ({
+    id: a.id,
+    username: a.username,
+    displayName: a.display_name,
+    balance: a.crl_coins ?? 0,
   }));
 
   const { data: rawAdjustmentRows } = await supabaseAdmin

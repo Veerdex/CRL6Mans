@@ -58,14 +58,65 @@ export async function approvePlayerWithEdits(
   await assertAdmin();
   const mmrError = validateMmrFields(fields);
   if (mmrError) return { error: mmrError };
-  const { data, error } = await supabaseAdmin
-    .from("players")
-    .update({ ...pickEditableFields(fields), status: "approved", updated_at: new Date().toISOString() })
-    .eq("id", id)
+  const editable = pickEditableFields(fields);
+  const now = new Date().toISOString();
+
+  const { data: account } = await supabaseAdmin
+    .from("accounts")
     .select("discord_id")
+    .eq("id", id)
     .single();
-  if (error) return { error: error.message };
-  if (data?.discord_id) await addRegisteredRole(data.discord_id);
+  if (!account?.discord_id) return { error: "Account not found." };
+
+  // Tier 2 (pending_players) stays the source of truth for MMR/tracker going
+  // forward. college_image_url/sub_willing/tracker_confirmed_at are read back
+  // here so the new Tier 3 row can seed from them below.
+  const { data: pending, error: pendingError } = await supabaseAdmin
+    .from("pending_players")
+    .update({
+      peak_3v3: editable.peak_3v3,
+      current_3v3: editable.current_3v3,
+      peak_2v2: editable.peak_2v2,
+      current_2v2: editable.current_2v2,
+      tracker_url: editable.tracker_url,
+      updated_at: now,
+    })
+    .eq("account_id", id)
+    .select("college_image_url, sub_willing, tracker_confirmed_at")
+    .single();
+  if (pendingError) return { error: pendingError.message };
+
+  // Tier 3 (players) is created here, id = account id. Many not-yet-migrated
+  // call sites (draft/bracket/team-balancing logic) still read MMR straight off
+  // `players`, so those columns are mirrored here rather than left at defaults.
+  const { error: insertError } = await supabaseAdmin.from("players").upsert(
+    {
+      id,
+      account_id: id,
+      discord_id: account.discord_id,
+      username: editable.username,
+      status: "approved",
+      peak_3v3: editable.peak_3v3,
+      current_3v3: editable.current_3v3,
+      peak_2v2: editable.peak_2v2,
+      current_2v2: editable.current_2v2,
+      tracker_url: editable.tracker_url,
+      college_image_url: pending?.college_image_url ?? "",
+      sub_willing: pending?.sub_willing ?? false,
+      tracker_confirmed_at: pending?.tracker_confirmed_at ?? null,
+      updated_at: now,
+    },
+    { onConflict: "id" }
+  );
+  if (insertError) return { error: insertError.message };
+
+  const { error: statusError } = await supabaseAdmin
+    .from("accounts")
+    .update({ username: editable.username, status: "approved", updated_at: now })
+    .eq("id", id);
+  if (statusError) return { error: statusError.message };
+
+  await addRegisteredRole(account.discord_id);
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard", "layout");
   return { ok: true };
@@ -78,7 +129,7 @@ export async function rejectPlayer(
 ): Promise<{ error?: string; ok?: boolean }> {
   await assertAdmin();
   const { error } = await supabaseAdmin
-    .from("players")
+    .from("accounts")
     .update({ status: "rejected", updated_at: new Date().toISOString() })
     .eq("id", id)
     .eq("status", "pending");
@@ -105,11 +156,35 @@ export async function updatePlayerData(
   await assertAdmin();
   const mmrError = validateMmrFields(fields);
   if (mmrError) return { error: mmrError };
+  const editable = pickEditableFields(fields);
+  const now = new Date().toISOString();
+
+  const { error: pendingError } = await supabaseAdmin
+    .from("pending_players")
+    .update({
+      peak_3v3: editable.peak_3v3,
+      current_3v3: editable.current_3v3,
+      peak_2v2: editable.peak_2v2,
+      current_2v2: editable.current_2v2,
+      tracker_url: editable.tracker_url,
+      updated_at: now,
+    })
+    .eq("account_id", id);
+  if (pendingError) return { error: pendingError.message };
+
+  // Mirrored onto `players` too — see approvePlayerWithEdits for why.
   const { error } = await supabaseAdmin
     .from("players")
-    .update({ ...pickEditableFields(fields), updated_at: new Date().toISOString() })
+    .update({ ...editable, updated_at: now })
     .eq("id", id);
   if (error) return { error: error.message };
+
+  const { error: accountError } = await supabaseAdmin
+    .from("accounts")
+    .update({ username: editable.username, updated_at: now })
+    .eq("id", id);
+  if (accountError) return { error: accountError.message };
+
   revalidatePath("/dashboard/admin");
   return { ok: true };
 }

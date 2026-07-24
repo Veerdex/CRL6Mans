@@ -1497,7 +1497,10 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
         .not("team_id", "is", null);
       const grant = (participantCount ?? 0) * 100;
       await Promise.all([
-        supabaseAdmin.from("players").update({ coin_grant_pending_start: true }).eq("status", "approved"),
+        // Flagged on accounts (Tier 1), not players, so unregistered/pending guests
+        // get the start grant too — only "rejected" is excluded, matching the
+        // wagering gate (accounts.status !== "rejected").
+        supabaseAdmin.from("accounts").update({ coin_grant_pending_start: true }).in("status", ["unregistered", "pending", "approved"]),
         supabaseAdmin.from("league_settings")
           .update({ pending_start_coin_amount: grant, last_coin_grant_at: new Date().toISOString() })
           .not("id", "is", null),
@@ -1708,8 +1711,10 @@ async function adminWipe(userId: string, confirm: string, clearHistory: boolean)
   ]);
   await supabaseAdmin.from("players").update({
     team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null,
-    in_active_draft: false, must_update_tracker: false, coin_grant_pending_start: false,
-    coin_grant_pending_weekly: false,
+    in_active_draft: false, must_update_tracker: false,
+  }).not("id", "is", null);
+  await supabaseAdmin.from("accounts").update({
+    coin_grant_pending_start: false, coin_grant_pending_weekly: false,
   }).not("id", "is", null);
   await supabaseAdmin.from("league_settings").update({
     draft_open: false, draft_signups_closed: false, draft_active: false, season_active: false,

@@ -525,7 +525,7 @@ export function WagersClient({
             <div className="space-y-1.5">
               <p className="text-lg font-bold text-red-400">Reset all Westside Wages?</p>
               <p className="text-sm text-zinc-400">
-                This sets <span className="font-semibold text-white">every approved player&apos;s</span> balance to 🪙 0. This can&apos;t be undone.
+                This sets <span className="font-semibold text-white">every approved and pending player&apos;s</span> balance to 🪙 0. This can&apos;t be undone.
               </p>
             </div>
             <div className="flex gap-2">

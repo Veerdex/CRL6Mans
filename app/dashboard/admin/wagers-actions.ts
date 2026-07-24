@@ -38,18 +38,23 @@ export async function adjustPlayerBalance(
   if (!Number.isInteger(amount) || amount === 0) return { error: "Enter a non-zero whole number." };
   if (!reason.trim()) return { error: "A reason is required." };
 
-  const { data: player } = await supabaseAdmin
-    .from("players")
+  // crl_coins lives on accounts (Tier 1) now. playerId here is still an
+  // approved player's players.id, which is always equal to accounts.id
+  // (players.id = accounts.id by construction — see approvePlayerWithEdits),
+  // so wager_balance_adjustments.player_id (an FK into players(id)) keeps
+  // resolving correctly with no change to that table.
+  const { data: account } = await supabaseAdmin
+    .from("accounts")
     .select("id, crl_coins")
     .eq("id", playerId)
     .single();
-  if (!player) return { error: "Player not found." };
+  if (!account) return { error: "Player not found." };
 
-  const current = player.crl_coins ?? 0;
+  const current = account.crl_coins ?? 0;
   const balanceAfter = applyClamped(current, amount);
 
   const { error } = await supabaseAdmin
-    .from("players")
+    .from("accounts")
     .update({ crl_coins: balanceAfter })
     .eq("id", playerId);
   if (error) return { error: "Failed to update balance." };
@@ -79,21 +84,21 @@ export async function bulkAdjustAllBalances(
   if (!Number.isInteger(amount) || amount === 0) return { error: "Enter a non-zero whole number." };
   if (!reason.trim()) return { error: "A reason is required." };
 
-  const { data: players } = await supabaseAdmin
-    .from("players")
+  const { data: accounts } = await supabaseAdmin
+    .from("accounts")
     .select("id, crl_coins")
     .eq("status", "approved");
-  if (!players?.length) return { error: "No approved players found." };
+  if (!accounts?.length) return { error: "No approved players found." };
 
   const batchId = crypto.randomUUID();
-  const updates = players.map(p => {
-    const current = p.crl_coins ?? 0;
+  const updates = accounts.map(a => {
+    const current = a.crl_coins ?? 0;
     const balanceAfter = applyClamped(current, amount);
-    return { id: p.id, balanceAfter, applied: balanceAfter - current };
+    return { id: a.id, balanceAfter, applied: balanceAfter - current };
   });
 
   await Promise.all(
-    updates.map(u => supabaseAdmin.from("players").update({ crl_coins: u.balanceAfter }).eq("id", u.id)),
+    updates.map(u => supabaseAdmin.from("accounts").update({ crl_coins: u.balanceAfter }).eq("id", u.id)),
   );
 
   await supabaseAdmin.from("wager_balance_adjustments").insert(

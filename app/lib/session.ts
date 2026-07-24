@@ -15,7 +15,7 @@ type SessionPayload = {
   avatar: string | null;
   expiresAt: Date;
   // Monotonically incremented on ban/kick to allow server-side invalidation.
-  // Requires: ALTER TABLE players ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0;
+  // Requires: ALTER TABLE accounts ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0;
   sessionVersion: number;
 };
 
@@ -67,13 +67,13 @@ export async function deleteSession() {
 // verifySessionCurrent. Call after banning or kicking a player.
 export async function invalidatePlayerSessions(discordId: string): Promise<void> {
   const { data } = await supabaseAdmin
-    .from("players")
+    .from("accounts")
     .select("session_version")
     .eq("discord_id", discordId)
     .single();
   const next = ((data?.session_version as number | null) ?? 0) + 1;
   await supabaseAdmin
-    .from("players")
+    .from("accounts")
     .update({ session_version: next })
     .eq("discord_id", discordId);
 }
@@ -83,7 +83,7 @@ export async function invalidatePlayerSessions(discordId: string): Promise<void>
 // Returns true when the column doesn't exist yet (graceful degradation).
 export async function verifySessionCurrent(payload: SessionPayload): Promise<boolean> {
   const { data } = await supabaseAdmin
-    .from("players")
+    .from("accounts")
     .select("session_version")
     .eq("discord_id", payload.userId)
     .single();

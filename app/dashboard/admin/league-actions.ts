@@ -507,10 +507,17 @@ export async function resetSeason() {
   await supabaseAdmin.from("matches").delete().not("id", "is", null);
   await supabaseAdmin.from("teams").update({ wins: 0, losses: 0, is_locked: false }).not("id", "is", null);
 
-  // Reset all player assignments, draft entries, and pending coin grants
+  // Reset all player assignments and draft entries
   await supabaseAdmin
     .from("players")
-    .update({ team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null, in_active_draft: false, must_update_tracker: false, coin_grant_pending_start: false, coin_grant_pending_weekly: false })
+    .update({ team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null, in_active_draft: false, must_update_tracker: false })
+    .not("id", "is", null);
+
+  // Pending coin grants live on accounts (Tier 1) — clear for everyone, not just
+  // roster players, since unregistered/pending guests can accrue them too.
+  await supabaseAdmin
+    .from("accounts")
+    .update({ coin_grant_pending_start: false, coin_grant_pending_weekly: false })
     .not("id", "is", null);
 
   // Strip all team-related Discord roles from every real player so nobody keeps

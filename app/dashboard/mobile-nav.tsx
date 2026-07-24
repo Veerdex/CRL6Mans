@@ -139,11 +139,6 @@ export default function MobileNav({ items, username, displayName, avatarUrl, sta
               })}
             </div>
 
-            {status === "pending" && (
-              <div className="mt-3 px-3 py-2 bg-yellow-900/40 border border-yellow-700/50 rounded-lg text-xs text-yellow-300">
-                Registration pending admin review.
-              </div>
-            )}
             {status === "rejected" && (
               <div className="mt-3 px-3 py-2 bg-red-900/40 border border-red-700/50 rounded-lg text-xs text-red-300">
                 Registration rejected. You may re-submit.

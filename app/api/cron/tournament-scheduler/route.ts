@@ -111,10 +111,13 @@ export async function GET(request: Request) {
     const lastGrantTime = lastCoinGrantAt ? new Date(lastCoinGrantAt).getTime() : 0;
     if (now - lastGrantTime >= 7 * 24 * 60 * 60 * 1000) {
       try {
+        // Flagged on accounts (Tier 1) so unregistered/pending guests get the
+        // weekly grant too — only "rejected" is excluded, matching the
+        // wagering gate (accounts.status !== "rejected").
         await supabaseAdmin
-          .from("players")
+          .from("accounts")
           .update({ coin_grant_pending_weekly: true })
-          .eq("status", "approved");
+          .in("status", ["unregistered", "pending", "approved"]);
         await supabaseAdmin
           .from("league_settings")
           .update({ last_coin_grant_at: new Date().toISOString() })

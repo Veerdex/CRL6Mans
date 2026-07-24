@@ -82,37 +82,39 @@ export async function GET(request: NextRequest) {
       return safeRedirect(request, "/login?error=auth_failed");
     }
 
-    // Keep avatar + Discord 2FA status in sync. Discord's mfa_enabled reflects
-    // whether the account CURRENTLY has 2FA — re-read on every login so a staff
-    // member who disables 2FA loses the website's admin gate on their next refresh.
-    await supabaseAdmin
-      .from("players")
-      .update({
-        avatar: user.avatar ?? null,
-        mfa_enabled: !!user.mfa_enabled,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("discord_id", user.id);
-
-    const { data: player } = await supabaseAdmin
-      .from("players")
+    // Find-or-create the Tier 1 account on every login, regardless of
+    // registration status. Keep avatar + Discord 2FA status in sync — Discord's
+    // mfa_enabled reflects whether the account CURRENTLY has 2FA — re-read on
+    // every login so a staff member who disables 2FA loses the website's admin
+    // gate on their next refresh.
+    const { data: account } = await supabaseAdmin
+      .from("accounts")
+      .upsert(
+        {
+          discord_id: user.id,
+          username: user.username,
+          avatar: user.avatar ?? null,
+          mfa_enabled: !!user.mfa_enabled,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "discord_id" }
+      )
       .select("theme, nav_layout, session_version")
-      .eq("discord_id", user.id)
       .single();
 
     // Embed the current session_version so it can be validated on revocation.
-    const sessionVersion = (player?.session_version as number | null) ?? 0;
+    const sessionVersion = (account?.session_version as number | null) ?? 0;
     await createSession(user.id, user.username, user.avatar ?? null, sessionVersion);
 
-    // Mirror the player's saved theme + nav layout into cookies for no-flash SSR.
-    const saved = player?.theme;
+    // Mirror the account's saved theme + nav layout into cookies for no-flash SSR.
+    const saved = account?.theme;
     const theme = saved === "dark" || saved === "light" || saved === "crl6mans" ? saved : "crl6mans";
     const isProduction = process.env.NODE_ENV === "production";
     cookieStore.set("theme", theme, {
       path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax",
       secure: isProduction,
     });
-    const navLayout = player?.nav_layout === "topbar" ? "topbar" : "sidebar";
+    const navLayout = account?.nav_layout === "topbar" ? "topbar" : "sidebar";
     cookieStore.set("nav_layout", navLayout, {
       path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax",
       secure: isProduction,

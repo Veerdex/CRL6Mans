@@ -29,9 +29,68 @@ export function isCurrentlyKicked(kickReason: string | null, kickedUntil: string
   return new Date(kickedUntil).getTime() > Date.now();
 }
 
+// ── Tiered account model ────────────────────────────────────────────────────
+// Tier 1 `accounts` is the source of truth for `status`/`display_name`/etc.
+// and exists for every Discord login, regardless of registration status.
+// Tier 2 `pending_players` (MMR/tracker) and Tier 3 `players` (team/draft)
+// are additive rows keyed by `account_id`, present only once someone has
+// registered / been approved respectively. A full `Player` is just the
+// join of whichever tiers exist for a given account.
+
+type AccountRow = {
+  id: string;
+  discord_id: string;
+  username: string | null;
+  display_name: string | null;
+  avatar: string | null;
+  status: PlayerStatus;
+  created_at: string;
+};
+
+type PendingPlayerRow = {
+  account_id: string;
+  tracker_url: string;
+  peak_3v3: string;
+  current_3v3: string;
+  peak_2v2: string;
+  current_2v2: string;
+  college_image_url: string;
+  created_at: string;
+};
+
+type TierThreePlayerRow = {
+  account_id: string;
+  team_id: string | null;
+  draft_entered: boolean;
+};
+
+function toPlayer(
+  account: AccountRow,
+  pending: PendingPlayerRow | null,
+  tier3: TierThreePlayerRow | null
+): Player {
+  return {
+    id: account.id,
+    discord_id: account.discord_id,
+    username: account.username ?? "",
+    display_name: account.display_name,
+    avatar: account.avatar,
+    status: account.status,
+    peak_3v3: pending?.peak_3v3 ?? "0",
+    current_3v3: pending?.current_3v3 ?? "0",
+    peak_2v2: pending?.peak_2v2 ?? "0",
+    current_2v2: pending?.current_2v2 ?? "0",
+    tracker_url: pending?.tracker_url ?? "",
+    college_image_url: pending?.college_image_url ?? "",
+    draft_entered: tier3?.draft_entered ?? false,
+    created_at: pending?.created_at ?? account.created_at,
+    team_id: tier3?.team_id ?? null,
+  };
+}
+
 export async function getPlayerStatus(discordId: string): Promise<PlayerStatus> {
   const { data } = await supabaseAdmin
-    .from("players")
+    .from("accounts")
     .select("status")
     .eq("discord_id", discordId)
     .single();
@@ -45,25 +104,54 @@ export async function getPlayerInfo(discordId: string): Promise<{
   teamId: string | null;
   displayName: string | null;
 }> {
-  const { data } = await supabaseAdmin
-    .from("players")
-    .select("status, team_id, display_name")
+  const { data: account } = await supabaseAdmin
+    .from("accounts")
+    .select("id, status, display_name")
     .eq("discord_id", discordId)
     .single();
+  if (!account) return { status: "unregistered", teamId: null, displayName: null };
+
+  let teamId: string | null = null;
+  if (account.status === "approved" || account.status === "banned") {
+    const { data: player } = await supabaseAdmin
+      .from("players")
+      .select("team_id")
+      .eq("account_id", account.id)
+      .single();
+    teamId = player?.team_id ?? null;
+  }
+
   return {
-    status: (data?.status as PlayerStatus) ?? "unregistered",
-    teamId: data?.team_id ?? null,
-    displayName: (data?.display_name as string | null) ?? null,
+    status: account.status as PlayerStatus,
+    teamId,
+    displayName: (account.display_name as string | null) ?? null,
   };
 }
 
 export async function getApprovedPlayers(): Promise<Player[]> {
-  const { data } = await supabaseAdmin
-    .from("players")
-    .select("*")
+  const { data: accounts } = await supabaseAdmin
+    .from("accounts")
+    .select("id, discord_id, username, display_name, avatar, status, created_at")
     .eq("status", "approved");
+  if (!accounts || accounts.length === 0) return [];
 
-  return (data ?? []).sort((a, b) => {
+  const accountIds = accounts.map((a) => a.id);
+  const [{ data: pendingRows }, { data: playerRows }] = await Promise.all([
+    supabaseAdmin
+      .from("pending_players")
+      .select("account_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, college_image_url, created_at")
+      .in("account_id", accountIds),
+    supabaseAdmin.from("players").select("account_id, team_id, draft_entered").in("account_id", accountIds),
+  ]);
+
+  const pendingByAccount = new Map((pendingRows ?? []).map((r) => [r.account_id, r as PendingPlayerRow]));
+  const tier3ByAccount = new Map((playerRows ?? []).map((r) => [r.account_id, r as TierThreePlayerRow]));
+
+  const players = accounts.map((a) =>
+    toPlayer(a as AccountRow, pendingByAccount.get(a.id) ?? null, tier3ByAccount.get(a.id) ?? null)
+  );
+
+  return players.sort((a, b) => {
     const aRv = (Number(a.peak_2v2) + Number(a.current_2v2)) * 0.3 + (Number(a.peak_3v3) + Number(a.current_3v3)) * 0.2;
     const bRv = (Number(b.peak_2v2) + Number(b.current_2v2)) * 0.3 + (Number(b.peak_3v3) + Number(b.current_3v3)) * 0.2;
     return bRv - aRv;
@@ -71,23 +159,34 @@ export async function getApprovedPlayers(): Promise<Player[]> {
 }
 
 export async function getAllPendingPlayers(): Promise<Player[]> {
-  const { data } = await supabaseAdmin
-    .from("players")
-    .select("*")
-    .eq("status", "pending")
+  const { data: pendingRows } = await supabaseAdmin
+    .from("pending_players")
+    .select("account_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, college_image_url, created_at")
     .order("created_at", { ascending: true });
+  if (!pendingRows || pendingRows.length === 0) return [];
 
-  return data ?? [];
+  const accountIds = pendingRows.map((r) => r.account_id);
+  const { data: accounts } = await supabaseAdmin
+    .from("accounts")
+    .select("id, discord_id, username, display_name, avatar, status, created_at")
+    .eq("status", "pending")
+    .in("id", accountIds);
+
+  const accountById = new Map((accounts ?? []).map((a) => [a.id, a as AccountRow]));
+
+  return pendingRows
+    .filter((r) => accountById.has(r.account_id))
+    .map((r) => toPlayer(accountById.get(r.account_id)!, r as PendingPlayerRow, null));
 }
 
 export async function updatePlayerStatus(
-  playerId: string,
+  accountId: string,
   status: "approved" | "rejected"
 ): Promise<{ discordId: string | null }> {
   const { data } = await supabaseAdmin
-    .from("players")
+    .from("accounts")
     .update({ status, updated_at: new Date().toISOString() })
-    .eq("id", playerId)
+    .eq("id", accountId)
     .select("discord_id")
     .single();
   return { discordId: data?.discord_id ?? null };
@@ -151,7 +250,7 @@ export async function isCEO(discordId: string): Promise<boolean> {
 // member's Discord account has 2FA enabled as a prerequisite for holding that
 // role — it doesn't force a live 2FA challenge on this site's own OAuth login,
 // and it does nothing for this site's own session cookie once issued. So the
-// website enforces its own check against `players.mfa_enabled`, refreshed from
+// website enforces its own check against `accounts.mfa_enabled`, refreshed from
 // Discord's `mfa_enabled` field on every login (see the OAuth callback).
 //
 // These *Verified variants are for gating the acting user's own permissions on
@@ -163,7 +262,7 @@ export async function isCEO(discordId: string): Promise<boolean> {
 // checks — those are a separate surface this task doesn't cover.
 export async function hasMfaEnabled(discordId: string): Promise<boolean> {
   const { data } = await supabaseAdmin
-    .from("players")
+    .from("accounts")
     .select("mfa_enabled")
     .eq("discord_id", discordId)
     .single();

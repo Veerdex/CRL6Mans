@@ -55,27 +55,30 @@ export default async function WagersPage() {
 
   const testingMode = cookieStore.get("testing_mode")?.value === "1" && (await isDirectorVerified(session.userId));
 
-  const [{ data: ls }, { data: playerRow }, { data: leaderboardData }] = await Promise.all([
+  // crl_coins/status/username all live on accounts (Tier 1) now, so unregistered
+  // and pending guests show up here too — only rejected accounts are excluded,
+  // matching the wagers server actions' eligibility gate.
+  const [{ data: ls }, { data: accountRow }, { data: leaderboardData }] = await Promise.all([
     supabaseAdmin
       .from("league_settings")
       .select("active_tournament_id, season_active, season_format")
       .single(),
     supabaseAdmin
-      .from("players")
+      .from("accounts")
       .select("id, status, crl_coins, username")
       .eq("discord_id", session.userId)
       .single(),
     supabaseAdmin
-      .from("players")
+      .from("accounts")
       .select("username, display_name, crl_coins")
-      .eq("status", "approved")
+      .in("status", ["unregistered", "pending", "approved"])
       .order("crl_coins", { ascending: false }),
   ]);
 
   // Viewing is open to every logged-in player regardless of registration status;
-  // placing bets is still gated to approved players in the wagers server actions.
-  const coinBalance = playerRow?.crl_coins ?? 0;
-  const currentUsername = playerRow?.username ?? session.username ?? "";
+  // placing bets is gated to non-rejected accounts in the wagers server actions.
+  const coinBalance = accountRow?.crl_coins ?? 0;
+  const currentUsername = accountRow?.username ?? session.username ?? "";
 
   const activeTournamentId = (ls?.active_tournament_id as string | null) ?? null;
   const seasonActive = ls?.season_active ?? false;
@@ -345,10 +348,12 @@ export default async function WagersPage() {
     .order("placed_at", { ascending: false })
     .limit(100);
 
+  // wagers.player_id is a raw discord_id (guests can place wagers without a
+  // players row), so the ticker's display info is looked up on accounts.
   const tickerPlayerIds = [...new Set((tickerRaw ?? []).map((w) => w.player_id))];
   const { data: tickerPlayersData } = tickerPlayerIds.length
     ? await supabaseAdmin
-        .from("players")
+        .from("accounts")
         .select("discord_id, username, display_name")
         .in("discord_id", tickerPlayerIds)
     : { data: [] };

@@ -175,28 +175,25 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (playerInfo.status === "banned") redirect("/login");
 
   // ── Claim pending coin grants on visit ────────────────────────────────────
+  // crl_coins/coin_grant_pending_* live on accounts (Tier 1) so unregistered
+  // and pending guests can wager too, not just approved players. Rejected
+  // accounts are excluded to match the wagering gate (accounts.status !== "rejected").
+  // team_signup_not_selected/too_few_players stay on players (Tier 3) — they
+  // only make sense for someone who was actually on a roster.
   let coinGrantStart = 0;
   let coinGrantWeekly = 0;
   let teamSignupMessage: string | null = null;
-  if (playerInfo.status === "approved" && session?.userId) {
-    const { data: playerCoins } = await supabaseAdmin
-      .from("players")
-      .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly, team_signup_not_selected, team_signup_too_few_players")
+  if (playerInfo.status !== "rejected" && session?.userId) {
+    const { data: accountCoins } = await supabaseAdmin
+      .from("accounts")
+      .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly")
       .eq("discord_id", session.userId)
       .single();
 
-    if (playerCoins?.team_signup_not_selected) {
-      teamSignupMessage = "Your team didn't make the cutoff for the last tournament you signed up for.";
-      await supabaseAdmin.from("players").update({ team_signup_not_selected: false }).eq("id", playerCoins.id);
-    } else if (playerCoins?.team_signup_too_few_players) {
-      teamSignupMessage = "Your team didn't reach the 3-player minimum in time, so it wasn't entered in the last tournament.";
-      await supabaseAdmin.from("players").update({ team_signup_too_few_players: false }).eq("id", playerCoins.id);
-    }
+    const pendingStart = accountCoins?.coin_grant_pending_start ?? false;
+    const pendingWeekly = accountCoins?.coin_grant_pending_weekly ?? false;
 
-    const pendingStart = playerCoins?.coin_grant_pending_start ?? false;
-    const pendingWeekly = playerCoins?.coin_grant_pending_weekly ?? false;
-
-    if ((pendingStart || pendingWeekly) && playerCoins) {
+    if ((pendingStart || pendingWeekly) && accountCoins) {
       const { data: ls } = await supabaseAdmin
         .from("league_settings")
         .select("pending_start_coin_amount")
@@ -208,15 +205,31 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
       if (total > 0) {
         await supabaseAdmin
-          .from("players")
+          .from("accounts")
           .update({
-            crl_coins: (playerCoins.crl_coins ?? 0) + total,
+            crl_coins: (accountCoins.crl_coins ?? 0) + total,
             coin_grant_pending_start: false,
             coin_grant_pending_weekly: false,
           })
-          .eq("id", playerCoins.id);
+          .eq("id", accountCoins.id);
         coinGrantStart = startAmount;
         coinGrantWeekly = weeklyAmount;
+      }
+    }
+
+    if (playerInfo.status === "approved") {
+      const { data: playerFlags } = await supabaseAdmin
+        .from("players")
+        .select("id, team_signup_not_selected, team_signup_too_few_players")
+        .eq("discord_id", session.userId)
+        .single();
+
+      if (playerFlags?.team_signup_not_selected) {
+        teamSignupMessage = "Your team didn't make the cutoff for the last tournament you signed up for.";
+        await supabaseAdmin.from("players").update({ team_signup_not_selected: false }).eq("id", playerFlags.id);
+      } else if (playerFlags?.team_signup_too_few_players) {
+        teamSignupMessage = "Your team didn't reach the 3-player minimum in time, so it wasn't entered in the last tournament.";
+        await supabaseAdmin.from("players").update({ team_signup_too_few_players: false }).eq("id", playerFlags.id);
       }
     }
   }
@@ -329,6 +342,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
     "settings",
   ];
 
+  // Pending and unregistered are surfaced identically — both get the
+  // "register" nav link and no other distinguishing chrome.
   let navKeys: string[];
   if (status === "approved") {
     navKeys = [
@@ -342,8 +357,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
       ...(hasActiveContent ? ["schedule"] : []),
       "game",
     ];
-  } else if (status === "pending") {
-    navKeys = ["home", ...commonExtras, "game"];
   } else {
     navKeys = ["home", "register", ...commonExtras, "game"];
   }
@@ -443,12 +456,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
             )
           )}
         </nav>
-
-        {status === "pending" && (
-          <div className="mx-3 mb-3 px-3 py-2 bg-yellow-900/40 border border-yellow-700/50 rounded-lg text-xs text-yellow-300">
-            Registration pending admin review.
-          </div>
-        )}
 
         {status === "rejected" && (
           <div className="mx-3 mb-3 px-3 py-2 bg-red-900/40 border border-red-700/50 rounded-lg text-xs text-red-300">
