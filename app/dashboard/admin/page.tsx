@@ -6,7 +6,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { LeagueControls } from "./league-controls";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
 import { InsightsChart, type InsightsPoint } from "./insights-chart";
-import { FormatEditor, type SeasonFormatConfig, PRESETS } from "../season/format-editor";
+import { FormatEditor, type SeasonFormatConfig } from "../season/format-editor";
 import { CollapsibleSection } from "./collapsible-section";
 import { AdminTabsProvider, AdminTabsBar, AdminTabSection } from "./admin-tabs";
 import { RegistrationCard } from "./registration-card";
@@ -14,7 +14,7 @@ import { PlayerPanel, type CombinedPlayer, type PlatformAccountSummary } from ".
 import { TeamSlotsManager } from "./team-slots-manager";
 import { MatchReporter } from "./match-reporter";
 import { getTier } from "@/app/lib/discord-bot";
-import { DEFAULT_BEST_OF } from "../season/format-editor";
+import { DEFAULT_BEST_OF, PRESETS } from "../season/format-constants";
 import { SubRequestCard, type SubRequestCardData } from "./sub-request-card";
 import { PlayerEditRequestCard, type PlayerEditRequestCardData } from "./player-edit-request-card";
 import { PlatformAccountClaimCard, type PlatformAccountClaimCardData } from "./platform-account-claim-card";
