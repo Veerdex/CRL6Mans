@@ -10,13 +10,23 @@ export default async function RegisterPage() {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const { data: existing } = await supabaseAdmin
-    .from("players")
-    .select("status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, college_image_url, sub_willing")
+  // Registration status lives on accounts (Tier 1) now; tracker/MMR fields
+  // to pre-fill a resubmission live on pending_players (Tier 2).
+  const { data: account } = await supabaseAdmin
+    .from("accounts")
+    .select("id, status")
     .eq("discord_id", session.userId)
     .single();
 
-  if (existing?.status === "approved") redirect("/dashboard");
+  if (account?.status === "approved") redirect("/dashboard");
+
+  const { data: existing } = account
+    ? await supabaseAdmin
+        .from("pending_players")
+        .select("tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, college_image_url, sub_willing")
+        .eq("account_id", account.id)
+        .single()
+    : { data: null };
 
   const inServer = await isGuildMember(session.userId);
   if (!inServer) {
@@ -42,7 +52,7 @@ export default async function RegisterPage() {
     );
   }
 
-  if (existing?.status === "pending") {
+  if (account?.status === "pending") {
     return (
       <div className="p-8 max-w-xl">
         <h1 className="text-2xl font-bold text-white mb-2">Registration Pending</h1>
@@ -54,7 +64,7 @@ export default async function RegisterPage() {
     );
   }
 
-  const isResubmit = existing?.status === "rejected";
+  const isResubmit = account?.status === "rejected";
   const existingData: ExistingPlayerData | null = isResubmit && existing
     ? {
         tracker_url:       existing.tracker_url,

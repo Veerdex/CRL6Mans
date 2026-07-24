@@ -18,13 +18,18 @@ export default async function TournamentPage() {
     supabaseAdmin.from("league_settings").select("active_tournament_id, draft_active, season_active").single(),
   ]);
 
-  if (!player) redirect("/dashboard");
+  // Unregistered/pending guests have no players row yet (Tier 3 is
+  // approval-only), but they can still browse open tournaments — only
+  // joining actually requires approved status (see tournament-join-actions.ts).
+  const playerId = player?.id ?? null;
+  const teamId = player?.team_id ?? null;
 
-  // What has this player joined?
-  const [{ data: entries }, { data: memberships }] = await Promise.all([
-    supabaseAdmin.from("tournament_entries").select("tournament_id").eq("player_id", player.id),
-    supabaseAdmin.from("team_signup_members").select("team_signup_id, status").eq("player_id", player.id).eq("status", "accepted"),
-  ]);
+  const [{ data: entries }, { data: memberships }] = playerId
+    ? await Promise.all([
+        supabaseAdmin.from("tournament_entries").select("tournament_id").eq("player_id", playerId),
+        supabaseAdmin.from("team_signup_members").select("team_signup_id, status").eq("player_id", playerId).eq("status", "accepted"),
+      ])
+    : [{ data: [] }, { data: [] }];
   const entryTids = new Set((entries ?? []).map((e) => e.tournament_id as string));
   let teamTids = new Set<string>();
   if ((memberships ?? []).length) {
@@ -44,7 +49,7 @@ export default async function TournamentPage() {
 
   const active = (tournaments ?? []).find((t) => t.status === "active") ?? null;
   const activeId = settings?.active_tournament_id as string | null | undefined;
-  const inActive = !!active && (joinedTids.has(active.id) || (!!player.team_id && active.id === activeId));
+  const inActive = !!active && (joinedTids.has(active.id) || (!!teamId && active.id === activeId));
 
   // Upcoming tournaments the player has joined (scheduled only)
   const upcomingJoined = (tournaments ?? []).filter((t) => t.status === "scheduled" && joinedTids.has(t.id));
@@ -63,7 +68,7 @@ export default async function TournamentPage() {
   for (const t of upcomingJoined.filter((t) => t.join_mode === "teams")) {
     const tsNow = Date.now();
     const withinWindow = t.draft_open_at && tsNow >= new Date(t.draft_open_at).getTime() && (!t.draft_close_at || tsNow < new Date(t.draft_close_at).getTime());
-    teamViews[t.id] = await getTeamSignupView(player.id, t.id, !!t.signups_open || !!withinWindow);
+    teamViews[t.id] = await getTeamSignupView(playerId as string, t.id, !!t.signups_open || !!withinWindow);
   }
 
   const phase = active
@@ -95,7 +100,7 @@ export default async function TournamentPage() {
                 View Season
               </Link>
             )}
-            {player.team_id && (
+            {teamId && (
               <Link href="/dashboard/my-team" className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium rounded-lg">
                 My Team
               </Link>
