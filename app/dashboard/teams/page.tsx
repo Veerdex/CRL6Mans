@@ -57,28 +57,17 @@ export default async function TeamsPage({
     );
   }
 
-  // All tournament/draft participants — passed to AdminTeamsManager for "Add Player".
-  // Includes team_id so the component can exclude players already on the target team.
+  // All approved players not currently on a team — passed to AdminTeamsManager as the
+  // bench swap pool, regardless of whether they entered the active tournament/draft.
   type AvailablePlayer = { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; team_id: string | null };
   let availablePlayers: AvailablePlayer[] = [];
   if (userIsAdmin) {
-    if (entryPlayerIds && entryPlayerIds.size > 0) {
-      const { data: participants } = await supabaseAdmin
-        .from("players")
-        .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, team_id")
-        .in("id", Array.from(entryPlayerIds))
-        .eq("status", "approved")
-        .is("team_id", null);
-      availablePlayers = (participants ?? []) as AvailablePlayer[];
-    } else if (settings?.season_active) {
-      const { data: participants } = await supabaseAdmin
-        .from("players")
-        .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, team_id")
-        .eq("status", "approved")
-        .eq("draft_entered", true)
-        .is("team_id", null);
-      availablePlayers = (participants ?? []) as AvailablePlayer[];
-    }
+    const { data: participants } = await supabaseAdmin
+      .from("players")
+      .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, team_id")
+      .eq("status", "approved")
+      .is("team_id", null);
+    availablePlayers = (participants ?? []) as AvailablePlayer[];
   }
 
   // Group players by team
