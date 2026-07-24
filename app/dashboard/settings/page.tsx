@@ -93,7 +93,7 @@ export default async function SettingsPage() {
       <p className="text-zinc-400 text-sm mb-8">
         {isApproved
           ? "MMR and tracker changes require admin approval. Substitute availability is applied instantly."
-          : "Platform account claims and MMR/tracker edits unlock once your registration is approved."}
+          : "Notifications, nickname, platform account claims, and MMR/tracker edits unlock once your registration is approved."}
       </p>
       <div className="mb-4">
         <ThemeToggle initial={player?.theme === "dark" || player?.theme === "light" ? player.theme : "crl6mans"} />
@@ -103,16 +103,28 @@ export default async function SettingsPage() {
       </div>
       <div className="mb-6 space-y-3">
         <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Notifications</p>
-        <NotificationButton />
-        <NotificationPrefsForm
-          initialPrefs={(player?.notification_prefs as Record<string, boolean> | null) ?? {}}
-        />
+        {isApproved ? (
+          <>
+            <NotificationButton />
+            <NotificationPrefsForm
+              initialPrefs={(player?.notification_prefs as Record<string, boolean> | null) ?? {}}
+            />
+          </>
+        ) : (
+          <p className="text-xs text-zinc-500">Available once your registration is approved.</p>
+        )}
       </div>
       <div className="mb-6">
-        <DisplayNameForm
-          current={(player?.display_name as string | null) ?? null}
-          discordUsername={session.username ?? ""}
-        />
+        {isApproved ? (
+          <DisplayNameForm
+            current={(player?.display_name as string | null) ?? null}
+            discordUsername={session.username ?? ""}
+          />
+        ) : (
+          <p className="text-xs text-zinc-500">
+            Your display name will be your Discord username ({session.username}) until you&apos;re approved.
+          </p>
+        )}
       </div>
 
       {isApproved && player && (

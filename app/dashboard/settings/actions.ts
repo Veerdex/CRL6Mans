@@ -135,6 +135,14 @@ export async function saveNotificationPrefs(
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
+  const { data: player } = await supabaseAdmin
+    .from("players")
+    .select("status")
+    .eq("discord_id", session.userId)
+    .single();
+
+  if (player?.status !== "approved") redirect("/dashboard");
+
   const { error } = await supabaseAdmin
     .from("players")
     .update({ notification_prefs: prefs, updated_at: new Date().toISOString() })
@@ -209,7 +217,7 @@ export async function saveDisplayName(
     .eq("discord_id", session.userId)
     .single();
 
-  if (isCurrentlyKicked(player?.kick_reason ?? null, player?.kicked_until ?? null)) redirect("/dashboard");
+  if (player?.status !== "approved" || isCurrentlyKicked(player?.kick_reason ?? null, player?.kicked_until ?? null)) redirect("/dashboard");
 
   const display_name = raw.length > 0 ? raw : null;
 
