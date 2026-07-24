@@ -72,7 +72,10 @@ export default async function WagersPage() {
       .order("crl_coins", { ascending: false }),
   ]);
 
-  if (!playerRow || playerRow.status !== "approved") redirect("/dashboard");
+  // Viewing is open to every logged-in player regardless of registration status;
+  // placing bets is still gated to approved players in the wagers server actions.
+  const coinBalance = playerRow?.crl_coins ?? 0;
+  const currentUsername = playerRow?.username ?? session.username ?? "";
 
   const activeTournamentId = (ls?.active_tournament_id as string | null) ?? null;
   const seasonActive = ls?.season_active ?? false;
@@ -91,8 +94,8 @@ export default async function WagersPage() {
       <div className="h-full overflow-y-auto">
         <WagesLeaderboardOnly
           entries={leaderboard}
-          currentUsername={playerRow.username ?? ""}
-          balance={playerRow.crl_coins ?? 0}
+          currentUsername={currentUsername}
+          balance={coinBalance}
         />
       </div>
     );
@@ -383,8 +386,8 @@ export default async function WagersPage() {
           placed_at: w.placed_at,
         }))}
         tickerPlayers={tickerPlayers}
-        coinBalance={playerRow.crl_coins ?? 0}
-        currentUsername={playerRow.username ?? ""}
+        coinBalance={coinBalance}
+        currentUsername={currentUsername}
         testingMode={testingMode}
         leaderboard={leaderboard}
       />

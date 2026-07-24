@@ -301,7 +301,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // so once any games have ever been recorded it should stay visible through the
   // gap between events too, not just while a season/tournament is live.
   let hasStatsContent = hasActiveContent;
-  if (status === "approved" && !hasActiveContent) {
+  if (!hasActiveContent) {
     const { count: statsCount } = await supabaseAdmin
       .from("player_game_stats")
       .select("*", { count: "exact", head: true })
@@ -310,16 +310,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   // Podium nav only shows when there's a non-hidden completed event with a champion.
-  let hasPodium = false;
-  if (status === "approved") {
-    const [{ data: podSeasons }, { data: podTournaments }] = await Promise.all([
-      supabaseAdmin.from("seasons").select("summary").eq("hidden_from_home", false).limit(20),
-      supabaseAdmin.from("tournaments").select("summary").eq("status", "completed").eq("hidden_from_home", false).limit(20),
-    ]);
-    const anyChamp = (rows: { summary: unknown }[] | null) =>
-      (rows ?? []).some((r) => !!(r.summary as { champion?: string | null } | null)?.champion);
-    hasPodium = anyChamp(podSeasons) || anyChamp(podTournaments);
-  }
+  const [{ data: podSeasons }, { data: podTournaments }] = await Promise.all([
+    supabaseAdmin.from("seasons").select("summary").eq("hidden_from_home", false).limit(20),
+    supabaseAdmin.from("tournaments").select("summary").eq("status", "completed").eq("hidden_from_home", false).limit(20),
+  ]);
+  const anyChamp = (rows: { summary: unknown }[] | null) =>
+    (rows ?? []).some((r) => !!(r.summary as { champion?: string | null } | null)?.champion);
+  const hasPodium = anyChamp(podSeasons) || anyChamp(podTournaments);
+
+  // Players/Stats/Podium/Wagers/Settings are visible to every logged-in player
+  // regardless of registration status — Settings itself renders a reduced view
+  // for non-approved players (see settings/page.tsx).
+  const commonExtras = [
+    ...(hasPlayers ? ["players"] : []),
+    ...(hasStatsContent ? ["stats"] : []),
+    ...(hasPodium ? ["podium"] : []),
+    "wagers", // always visible — Westside Wages standings persist between events
+    "settings",
+  ];
 
   let navKeys: string[];
   if (status === "approved") {
@@ -328,19 +336,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
       ...(teamId ? ["myteam"] : []),
       ...(inActiveTournament ? ["tournament"] : []),
       ...(hasTeams ? ["teams"] : []),
-      ...(hasPlayers ? ["players"] : []),
-      ...(hasStatsContent ? ["stats"] : []),
-      ...(hasPodium ? ["podium"] : []),
+      ...commonExtras,
       ...(draftActive ? ["draft"] : []),
       ...(seasonActive ? ["season"] : []),
       ...(hasActiveContent ? ["schedule"] : []),
-      "wagers", // always visible — Westside Wages standings persist between events
-      "settings", "game",
+      "game",
     ];
   } else if (status === "pending") {
-    navKeys = ["home", "game"];
+    navKeys = ["home", ...commonExtras, "game"];
   } else {
-    navKeys = ["home", "register", "game"];
+    navKeys = ["home", "register", ...commonExtras, "game"];
   }
   // Onboarding tab — shown until the player dismisses it ("I got it!").
   if (!welcomeSeen) navKeys.unshift("welcome");

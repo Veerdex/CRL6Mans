@@ -209,7 +209,7 @@ export async function saveDisplayName(
     .eq("discord_id", session.userId)
     .single();
 
-  if (player?.status !== "approved" || isCurrentlyKicked(player?.kick_reason ?? null, player?.kicked_until ?? null)) redirect("/dashboard");
+  if (isCurrentlyKicked(player?.kick_reason ?? null, player?.kicked_until ?? null)) redirect("/dashboard");
 
   const display_name = raw.length > 0 ? raw : null;
 

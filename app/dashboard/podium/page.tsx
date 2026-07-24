@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
-import { getPlayerInfo, isCurrentlyKicked } from "@/app/lib/players";
+import { isCurrentlyKicked } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import type { TopStats } from "@/app/lib/game-stats";
 import { PodiumClient, type RichPlayer, type Accolade } from "./podium-client";
@@ -18,8 +18,6 @@ export default async function PodiumPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
-  const { status } = await getPlayerInfo(session.userId);
-  if (status !== "approved") redirect("/dashboard");
 
   const [{ data: recentSeasons }, { data: recentTournaments }] = await Promise.all([
     supabaseAdmin

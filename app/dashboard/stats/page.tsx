@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
-import { getPlayerInfo } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { StatsTable, type PlayerStatRow } from "./stats-table";
 
@@ -9,9 +8,6 @@ export default async function StatsPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
-
-  const { status } = await getPlayerInfo(session.userId);
-  if (status !== "approved") redirect("/dashboard");
 
   const [{ data: statsRaw }, { data: playersRaw }, { data: teamsRaw }] = await Promise.all([
     supabaseAdmin
