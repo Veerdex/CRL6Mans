@@ -18,6 +18,7 @@ import {
   type TournamentInput,
 } from "./tournament-actions";
 import { addBulkTournamentTestUsers } from "./league-actions";
+import { TournamentSignupsPanel, type TournamentSignupData } from "./tournament-signups-panel";
 import { ExportCompletedPdfButton, ExportAndCompletePdfButton } from "./export-pdf-button";
 import {
   type RoundTier,
@@ -279,11 +280,13 @@ export function TournamentManager({
   seasons,
   hasActive,
   testingMode = false,
+  signups = {},
 }: {
   tournaments: Tournament[];
   seasons: Season[];
   hasActive: boolean;
   testingMode?: boolean;
+  signups?: Record<string, TournamentSignupData>;
 }) {
   const [isPending, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -836,6 +839,7 @@ export function TournamentManager({
             : [];
 
           return (
+            <div className="space-y-3">
             <div className="flex items-start gap-3 flex-wrap">
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-zinc-500 mt-1">
@@ -925,6 +929,13 @@ export function TournamentManager({
                   </button>
                 )}
               </div>
+            </div>
+            {t.status === "scheduled" && signups[t.id] && (
+              <div className="border-t border-zinc-800 pt-3">
+                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Sign-ups</p>
+                <TournamentSignupsPanel tournamentId={t.id} data={signups[t.id]} />
+              </div>
+            )}
             </div>
           );
         };

@@ -11,6 +11,8 @@ import { CollapsibleSection } from "./collapsible-section";
 import { AdminTabsProvider, AdminTabsBar, AdminTabSection } from "./admin-tabs";
 import { RegistrationCard } from "./registration-card";
 import { PlayerPanel, type CombinedPlayer, type PlatformAccountSummary } from "./player-panel";
+import { GuestAccountPanel, type GuestAccount } from "./guest-account-panel";
+import { DraftPoolPanel, type DraftPoolEntry } from "./draft-pool-panel";
 import { TeamSlotsManager } from "./team-slots-manager";
 import { MatchReporter } from "./match-reporter";
 import { getTier } from "@/app/lib/discord-bot";
@@ -24,6 +26,7 @@ import { IdentityEnforcementToggle } from "./identity-enforcement-toggle";
 import { JoinGateToggle } from "./join-gate-toggle";
 import { TournamentManager } from "./tournament-manager";
 import type { Tournament, Season } from "./tournament-actions";
+import type { TournamentSignupData } from "./tournament-signups-panel";
 import { InitSettingsButton } from "./init-settings-button";
 import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
@@ -33,6 +36,8 @@ import { canonicalStage, stageName, STAGE_ORDER, expectedStageRounds, type Round
 import { WagersBalanceTable, type BalanceRow } from "./wagers-balance-table";
 import { WagersBulkForm } from "./wagers-bulk-form";
 import { AnnouncementManager } from "./announcement-manager";
+import { GameLeaderboardPanel } from "./game-leaderboard-panel";
+import { getAllGameScores } from "../game/actions";
 
 async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean; userIsDirector: boolean }) {
   const staff = await getStaffList();
@@ -60,19 +65,23 @@ export default async function AdminPage() {
   const testingMode           = userIsDirector && cookieStore.get("testing_mode")?.value === "1";
   const notificationsEnabled  = cookieStore.get("notifications_disabled")?.value !== "1";
 
-  const [pending, { data: settings }, { count: enteredCount }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allPlayers }, { data: allMatchStages }] = await Promise.all([
+  const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }] = await Promise.all([
     getAllPendingPlayers(),
     supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending").maybeSingle(),
-    supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true),
+    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
     supabaseAdmin.from("sub_requests").select("id, team_id, player_out_id, sub_player_id, sub_player_ids, reason, admin_note, requested_by_discord_id, created_at").eq("status", "escalated").order("created_at", { ascending: true }),
     supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at").eq("status", "pending").order("created_at", { ascending: true }),
     supabaseAdmin.from("tournaments").select("*").order("created_at", { ascending: false }),
     supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
-    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, status, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, ban_reason, kick_reason, kicked_until").in("status", ["approved", "banned"]).order("username"),
+    supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar, status, ban_reason, kick_reason, kicked_until, created_at").order("username"),
     supabaseAdmin.from("matches").select("stage, round, discord_channel_id"),
+    supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2"),
   ]);
+
+  type RawPlayerRow = { account_id: string; team_id: string | null; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null };
+  const playersByAccountId = new Map(((playerRows ?? []) as RawPlayerRow[]).map(p => [p.account_id, p]));
 
   const [{ data: pendingPlatformClaimRows }, { data: verifiedPlatformAccountRows }, { data: allPlatformAccountRows }] = await Promise.all([
     supabaseAdmin
@@ -111,6 +120,61 @@ export default async function AdminPage() {
     ? await supabaseAdmin.from("players").select("id, username, display_name").in("id", platformClaimPlayerIds)
     : { data: [] as { id: string; username: string; display_name: string | null }[] };
   const platformClaimPlayerMap = Object.fromEntries((platformClaimPlayers ?? []).map(p => [p.id, p]));
+
+  const scheduledTournamentIds = (tournaments ?? [])
+    .filter((t) => t.status === "scheduled")
+    .map((t) => t.id as string);
+
+  type RawTeamSignupRow = { id: string; tournament_id: string; name: string; team_signup_members: { id: string; player_id: string; status: string }[] };
+
+  const [{ data: entryRows }, { data: teamSignupRows }] = scheduledTournamentIds.length
+    ? await Promise.all([
+        supabaseAdmin.from("tournament_entries").select("tournament_id, player_id").in("tournament_id", scheduledTournamentIds),
+        supabaseAdmin.from("team_signups").select("id, tournament_id, name, team_signup_members(id, player_id, status)").in("tournament_id", scheduledTournamentIds),
+      ])
+    : [{ data: [] as { tournament_id: string; player_id: string }[] }, { data: [] as RawTeamSignupRow[] }];
+
+  const signupPlayerIds = [...new Set([
+    ...(entryRows ?? []).map((r) => r.player_id),
+    ...((teamSignupRows ?? []) as RawTeamSignupRow[]).flatMap((s) => s.team_signup_members.map((m) => m.player_id)),
+  ])];
+  const { data: signupPlayerRows } = signupPlayerIds.length
+    ? await supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar").in("id", signupPlayerIds)
+    : { data: [] as { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null }[] };
+  const signupPlayerMap = new Map((signupPlayerRows ?? []).map((p) => [p.id, p]));
+
+  const tournamentSignups: Record<string, TournamentSignupData> = {};
+  for (const tid of scheduledTournamentIds) {
+    tournamentSignups[tid] = {
+      playerEntries: (entryRows ?? [])
+        .filter((r) => r.tournament_id === tid)
+        .map((r) => {
+          const p = signupPlayerMap.get(r.player_id);
+          return {
+            playerId: r.player_id,
+            discordId: p?.discord_id ?? "",
+            username: p?.username ?? "Unknown",
+            displayName: p?.display_name ?? null,
+            avatar: p?.avatar ?? null,
+          };
+        }),
+      teamSignups: ((teamSignupRows ?? []) as RawTeamSignupRow[])
+        .filter((s) => s.tournament_id === tid)
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          members: s.team_signup_members.map((m) => {
+            const p = signupPlayerMap.get(m.player_id);
+            return {
+              playerId: m.player_id,
+              status: m.status,
+              username: p?.username ?? "Unknown",
+              displayName: p?.display_name ?? null,
+            };
+          }),
+        })),
+    };
+  }
 
   const platformClaimCards: PlatformAccountClaimCardData[] = await Promise.all(
     (pendingPlatformClaimRows ?? []).map(async (row) => {
@@ -231,6 +295,8 @@ export default async function AdminPage() {
     balance: a.crl_coins ?? 0,
   }));
 
+  const gameScores = await getAllGameScores();
+
   const { data: rawAdjustmentRows } = await supabaseAdmin
     .from("wager_balance_adjustments")
     .select("batch_id, scope, player_id, amount, reason, actor, created_at")
@@ -294,10 +360,10 @@ export default async function AdminPage() {
     return a.display_name ? `${a.display_name} (${a.username})` : a.username;
   };
 
-  // Fetch staff roles for all players to support hierarchy-aware kick/ban buttons
-  const playerDiscordIds = (allPlayers ?? []).map((p: { discord_id: string }) => p.discord_id).filter(Boolean);
-  const { data: staffRows } = playerDiscordIds.length
-    ? await supabaseAdmin.from("staff_roles").select("discord_id, role").in("discord_id", playerDiscordIds)
+  // Fetch staff roles for all accounts to support hierarchy-aware kick/ban buttons
+  const accountDiscordIds = (allAccounts ?? []).map((a: { discord_id: string }) => a.discord_id).filter(Boolean);
+  const { data: staffRows } = accountDiscordIds.length
+    ? await supabaseAdmin.from("staff_roles").select("discord_id, role").in("discord_id", accountDiscordIds)
     : { data: [] };
   const staffRoleByDiscordId = Object.fromEntries((staffRows ?? []).map((r: { discord_id: string; role: string }) => [r.discord_id, r.role]));
 
@@ -322,7 +388,7 @@ export default async function AdminPage() {
         .in("match_id", matchIds)
     : { data: [] as { match_id: string; sub_player_id: string | null; sub_player_ids: string[] | null }[] };
 
-  const approvedRoster = (allPlayers ?? []).filter((p: { status: string }) => p.status === "approved");
+  const approvedRoster = (allAccounts ?? []).filter((a: { status: string }) => a.status === "approved");
   const optionById = new Map<string, EligibleOption>(
     approvedRoster.map((p: { id: string; username: string; display_name: string | null }) => [
       p.id,
@@ -330,13 +396,14 @@ export default async function AdminPage() {
     ]),
   );
   const optionsByTeam = new Map<string, EligibleOption[]>();
-  for (const p of approvedRoster as { id: string; team_id: string | null }[]) {
-    if (!p.team_id) continue;
+  for (const p of approvedRoster as { id: string }[]) {
+    const teamId = playersByAccountId.get(p.id)?.team_id;
+    if (!teamId) continue;
     const opt = optionById.get(p.id);
     if (!opt) continue;
-    const arr = optionsByTeam.get(p.team_id) ?? [];
+    const arr = optionsByTeam.get(teamId) ?? [];
     arr.push(opt);
-    optionsByTeam.set(p.team_id, arr);
+    optionsByTeam.set(teamId, arr);
   }
   const subsByMatch = new Map<string, string[]>();
   for (const s of approvedSubsForMatches ?? []) {
@@ -486,6 +553,8 @@ export default async function AdminPage() {
         : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").is("tournament_id", null))
     : { data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string; range_days: number | null }[] };
 
+  const enteredCount = (draftPoolRows ?? []).length;
+
   type MatchStageRow = { stage: string; round: number; discord_channel_id: string | null };
   const matchStageRows = (allMatchStages ?? []) as MatchStageRow[];
 
@@ -621,27 +690,58 @@ export default async function AdminPage() {
     ? (PRESETS.find((p) => p.id === currentPreset)?.name ?? currentPreset)
     : "No format configured";
 
-  type RawPlayer = { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null; status: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; ban_reason?: string | null; kick_reason?: string | null; kicked_until?: string | null };
-  const combinedPlayers: CombinedPlayer[] = ((allPlayers ?? []) as RawPlayer[]).map(p => ({
-    id: p.id,
-    discord_id: p.discord_id,
-    username: p.username,
-    display_name: p.display_name ?? null,
-    avatar: p.avatar,
-    status: p.status as "approved" | "banned",
-    tracker_url: p.tracker_url ?? "",
-    peak_3v3: p.peak_3v3 ?? "0",
-    current_3v3: p.current_3v3 ?? "0",
-    peak_2v2: p.peak_2v2 ?? "0",
-    current_2v2: p.current_2v2 ?? "0",
-    banReason: p.ban_reason ?? null,
-    kickReason: p.kick_reason ?? null,
-    kickedUntil: p.kicked_until ?? null,
-    isKicked: isCurrentlyKicked(p.kick_reason ?? null, p.kicked_until ?? null),
-    staffRole: (staffRoleByDiscordId[p.discord_id] ?? null) as StaffRole | null,
-    platformAccounts: platformAccountsByPlayerId.get(p.id) ?? [],
-  }));
+  type RawAccount = { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null; status: string; ban_reason: string | null; kick_reason: string | null; kicked_until: string | null; created_at: string };
+
+  // Tier 3 (players) rows only exist for accounts that have been approved at
+  // some point, so "has a players row" is what distinguishes the main roster
+  // from guest accounts below — not accounts.status alone (a banned account
+  // that was never approved has no players row and no MMR/tracker data).
+  const combinedPlayers: CombinedPlayer[] = ((allAccounts ?? []) as RawAccount[])
+    .filter(a => (a.status === "approved" || a.status === "banned") && playersByAccountId.has(a.id))
+    .map(a => {
+      const pr = playersByAccountId.get(a.id)!;
+      return {
+        id: a.id,
+        discord_id: a.discord_id,
+        username: a.username,
+        display_name: a.display_name ?? null,
+        avatar: a.avatar,
+        status: a.status as "approved" | "banned",
+        tracker_url: pr.tracker_url ?? "",
+        peak_3v3: pr.peak_3v3 ?? "0",
+        current_3v3: pr.current_3v3 ?? "0",
+        peak_2v2: pr.peak_2v2 ?? "0",
+        current_2v2: pr.current_2v2 ?? "0",
+        banReason: a.ban_reason ?? null,
+        kickReason: a.kick_reason ?? null,
+        kickedUntil: a.kicked_until ?? null,
+        isKicked: isCurrentlyKicked(a.kick_reason ?? null, a.kicked_until ?? null),
+        staffRole: (staffRoleByDiscordId[a.discord_id] ?? null) as StaffRole | null,
+        platformAccounts: platformAccountsByPlayerId.get(a.id) ?? [],
+      };
+    });
   const bannedCount = combinedPlayers.filter(p => p.status === "banned").length;
+
+  // Exact complement of combinedPlayers, so every account renders in exactly
+  // one panel — covers unregistered/pending, rejected (even with a leftover
+  // players row from a prior approval), and banned-without-ever-approved
+  // (no players row, e.g. an admin banning a guest straight from this panel).
+  const guestAccounts: GuestAccount[] = ((allAccounts ?? []) as RawAccount[])
+    .filter(a => !((a.status === "approved" || a.status === "banned") && playersByAccountId.has(a.id)))
+    .map(a => ({
+      id: a.id,
+      discord_id: a.discord_id,
+      username: a.username,
+      display_name: a.display_name ?? null,
+      avatar: a.avatar,
+      status: a.status as GuestAccount["status"],
+      banReason: a.ban_reason ?? null,
+      kickReason: a.kick_reason ?? null,
+      kickedUntil: a.kicked_until ?? null,
+      isKicked: isCurrentlyKicked(a.kick_reason ?? null, a.kicked_until ?? null),
+      staffRole: (staffRoleByDiscordId[a.discord_id] ?? null) as StaffRole | null,
+      createdAt: a.created_at,
+    }));
 
   // ── Insights: visits / registrations / draft joins over the last 52 weeks ──
   const now = new Date();
@@ -740,6 +840,16 @@ export default async function AdminPage() {
         {bannedCount > 0 && (
           <p className="mt-3 text-xs text-red-400/60">{bannedCount} banned player{bannedCount !== 1 ? "s" : ""} shown below active players.</p>
         )}
+      </CollapsibleSection>
+
+      {/* ── Unregistered / Pending Accounts ── */}
+      <CollapsibleSection
+        title="Unregistered / Pending Accounts"
+        value={guestAccounts.length}
+        defaultOpen={false}
+        description="Discord accounts that have logged in but never made the roster — unregistered, pending review, rejected, or banned before ever being approved. No MMR or tracker data yet; from here you can kick or ban them, or reverse a ban, subject to the staff hierarchy."
+      >
+        <GuestAccountPanel accounts={guestAccounts} actorRole={actorRole} />
       </CollapsibleSection>
       </AdminTabSection>
 
@@ -979,6 +1089,7 @@ export default async function AdminPage() {
             seasons={(seasons ?? []) as Season[]}
             hasActive={!!settings?.active_tournament_id}
             testingMode={testingMode}
+            signups={tournamentSignups}
           />
         </CollapsibleSection>
       )}
@@ -1007,6 +1118,18 @@ export default async function AdminPage() {
           </div>
         </div>
       </CollapsibleSection>}
+
+      {/* ── Draft Pool (Director+) ── */}
+      {userIsDirector && (
+        <CollapsibleSection
+          title="Draft Pool"
+          value={enteredCount}
+          defaultOpen={false}
+          description="Everyone currently signed up for the draft ('Enter Draft' on the dashboard). Remove a player from the pool before the draft starts if they need to be pulled from signups."
+        >
+          <DraftPoolPanel entries={(draftPoolRows ?? []) as DraftPoolEntry[]} />
+        </CollapsibleSection>
+      )}
 
       {/* ── League Controls (Director+) ── */}
       {userIsDirector && (
@@ -1070,6 +1193,16 @@ export default async function AdminPage() {
             )}
           </div>
         </div>
+      </CollapsibleSection>
+
+      {/* ── Flappy Bird Leaderboard ── */}
+      <CollapsibleSection
+        title="Game Leaderboard"
+        defaultOpen={false}
+        value={gameScores.length}
+        description="Every submitted Flappy Bird score. Remove a score if it looks bogus or exploited."
+      >
+        <GameLeaderboardPanel scores={gameScores} />
       </CollapsibleSection>
       </AdminTabSection>
 

@@ -234,6 +234,30 @@ export async function generateTestTeams() {
   return { ok: true, message: `Generated ${numTeams} teams (${assigned} players assigned${skipped > 0 ? `, ${skipped} unassigned` : ""}).${roleWarning}` };
 }
 
+export async function removePlayerFromDraft(playerId: string): Promise<{ ok?: boolean; error?: string }> {
+  await verifyAdmin();
+
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("draft_active, season_active").single();
+  if (settings?.draft_active || settings?.season_active) {
+    return { error: "Cannot remove players from the pool once the draft or season has started." };
+  }
+
+  const { data: player } = await supabaseAdmin
+    .from("players").select("id, draft_entered").eq("id", playerId).single();
+  if (!player) return { error: "Player not found." };
+  if (!player.draft_entered) return { error: "Player is not in the draft pool." };
+
+  await supabaseAdmin
+    .from("players")
+    .update({ draft_entered: false, draft_entered_at: null, updated_at: new Date().toISOString() })
+    .eq("id", playerId);
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
 export async function addBulkTournamentTestUsers(tournamentId: string, count = 32) {
   await verifyAdmin();
 

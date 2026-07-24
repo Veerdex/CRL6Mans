@@ -297,6 +297,44 @@ export async function closeSignups(id: string) {
   return { ok: true, message: "Sign-ups closed." };
 }
 
+export async function removeTournamentEntry(tournamentId: string, playerId: string) {
+  await verifyAdmin();
+  const { data: t } = await supabaseAdmin.from("tournaments").select("status").eq("id", tournamentId).single();
+  if (!t) return { error: "Tournament not found." };
+  if (t.status !== "scheduled") return { error: "Sign-ups can only be edited before a tournament is activated." };
+
+  const { error } = await supabaseAdmin
+    .from("tournament_entries")
+    .delete()
+    .eq("tournament_id", tournamentId)
+    .eq("player_id", playerId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard");
+
+  return { ok: true };
+}
+
+export async function removeTeamSignup(teamSignupId: string) {
+  await verifyAdmin();
+  const { data: signup } = await supabaseAdmin.from("team_signups").select("tournament_id").eq("id", teamSignupId).single();
+  if (!signup) return { error: "Team signup not found." };
+
+  const { data: t } = await supabaseAdmin.from("tournaments").select("status").eq("id", signup.tournament_id).single();
+  if (!t) return { error: "Tournament not found." };
+  if (t.status !== "scheduled") return { error: "Sign-ups can only be edited before a tournament is activated." };
+
+  await supabaseAdmin.from("team_signup_members").delete().eq("team_signup_id", teamSignupId);
+  const { error } = await supabaseAdmin.from("team_signups").delete().eq("id", teamSignupId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard");
+
+  return { ok: true };
+}
+
 export async function activateTournament(id: string) {
   await verifyAdmin();
 
