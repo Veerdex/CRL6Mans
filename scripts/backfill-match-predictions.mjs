@@ -146,10 +146,10 @@ function getStageSlotKey(stage) {
   if (stage === "deq_winners" || stage === "deq_losers") return "de_qualifier";
   if (stage === "de_winners" || stage === "de_losers" || stage === "de_grand_final") return "double_elimination";
   if (stage === "single_elimination") return "single_elimination";
+  if (stage.startsWith("hybrid")) return "hybrid";
   return null;
 }
 function resolveBestOf(stage, round, maxRoundByStage, config, fallback = 3) {
-  if (stage?.startsWith("hybrid")) return 7;
   if (!stage) return fallback;
   const slotKey = getStageSlotKey(stage);
   const slotConfig = slotKey ? config?.[slotKey] : undefined;

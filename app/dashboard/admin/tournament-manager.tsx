@@ -131,7 +131,7 @@ function slotFlatBO(config: RoundBestOfConfig, key: "group" | "swiss"): BestOf {
   const c = config[key];
   return c?.mode === "flat" ? c.value : 3;
 }
-function slotTiers(config: RoundBestOfConfig, key: "single_elimination" | "double_elimination" | "se_qualifier" | "de_qualifier"): Record<RoundTier, BestOf> {
+function slotTiers(config: RoundBestOfConfig, key: "single_elimination" | "double_elimination" | "se_qualifier" | "de_qualifier" | "hybrid"): Record<RoundTier, BestOf> {
   const c = config[key];
   return c?.mode === "tiered" ? c.tiers : DEFAULT_BEST_OF;
 }
@@ -147,8 +147,6 @@ function computeStageSchedule(
 
   const groupStd = gapMin(slotFlatBO(config, "group"));
   const swissStd = gapMin(slotFlatBO(config, "swiss"));
-  // Hybrid brackets are hardcoded to BO7 (see resolveBestOf) — not a configurable slot.
-  const hybridGap = gapMin(7);
 
   const groups = { key: "groups", label: "Groups", estimatedMinutes: (groupRounds ?? groupStageRounds(teams)) * groupStd };
   const swiss  = { key: "swiss", label: "Swiss", estimatedMinutes: SWISS_ROUNDS * swissStd };
@@ -173,19 +171,21 @@ function computeStageSchedule(
       return [groups, swiss, se8];
 
     case "group_swiss_hybrid":
-      // 5 wall-clock rounds: (UB QF ‖ LB R1), LB R2, LB QF, SF, GF — all BO7.
+      // 5 wall-clock rounds: (UB QF ‖ LB R1), LB R2, LB QF, SF, GF — mapped to
+      // standard/standard/quarterfinals/semifinals/finals tiers, same as an SE bracket.
       return [
         groups,
         swiss,
-        { key: "hybrid", label: "Hybrid(12)", estimatedMinutes: hybridGap * 5 },
+        { key: "hybrid", label: "Hybrid(12)", estimatedMinutes: seRoundsDuration(5, slotTiers(config, "hybrid")) },
       ];
 
     case "group_swiss_hybrid_8":
-      // 4 wall-clock rounds: (UB QF ‖ LB R1), LB QF, SF, GF — all BO7.
+      // 4 wall-clock rounds: (UB QF ‖ LB R1), LB QF, SF, GF — mapped to
+      // standard/quarterfinals/semifinals/finals tiers, same as an SE bracket.
       return [
         groups,
         swiss,
-        { key: "hybrid", label: "Hybrid(8)", estimatedMinutes: hybridGap * 4 },
+        { key: "hybrid", label: "Hybrid(8)", estimatedMinutes: seRoundsDuration(4, slotTiers(config, "hybrid")) },
       ];
 
     case "se_swiss_single_elimination": {

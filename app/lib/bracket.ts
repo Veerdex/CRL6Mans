@@ -905,18 +905,19 @@ export function getTier(round: number, totalRounds: number): RoundTier {
 // Which user-configurable best-of "slot" a physical DB stage string belongs to.
 // Multiple physical stage strings can share one slot — a double-elimination
 // bracket's winners/losers/grand-final rows are all one "Double Elimination"
-// settings block. Some presets also reuse the same literal stage string in a
-// different role (the terminal bracket of a qualifier→Swiss→SE format is
+// settings block, and the hybrid bracket's UB/LB/SF/GF rows are all one
+// "Hybrid Bracket" block. Some presets also reuse the same literal stage string
+// in a different role (the terminal bracket of a qualifier→Swiss→SE format is
 // stage="single_elimination", the same string the plain SE preset uses) — that's
 // fine since only one preset's stages ever exist in a tournament at a time.
-// Hybrid stages return null: their series length is fixed at BO7, not configurable.
 export type StageSlotKey =
   | "group"
   | "swiss"
   | "se_qualifier"
   | "de_qualifier"
   | "single_elimination"
-  | "double_elimination";
+  | "double_elimination"
+  | "hybrid";
 
 export function getStageSlotKey(stage: string): StageSlotKey | null {
   if (stage.startsWith(GROUP_STAGE_PREFIX)) return "group";
@@ -925,5 +926,6 @@ export function getStageSlotKey(stage: string): StageSlotKey | null {
   if (stage === DE_QUALIFIER_WINNERS || stage === DE_QUALIFIER_LOSERS) return "de_qualifier";
   if (stage === DE_WINNERS || stage === DE_LOSERS || stage === DE_GF) return "double_elimination";
   if (stage === "single_elimination") return "single_elimination";
+  if (stage.startsWith("hybrid")) return "hybrid";
   return null;
 }

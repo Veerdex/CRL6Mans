@@ -289,7 +289,7 @@ async function simulateHybridSingleMatch(match: {
   home_team_id: string; away_team_id: string;
 }) {
   const homeWins  = Math.random() > 0.5;
-  const winScore  = 4; // hybrid is BO7 — winner needs exactly 4
+  const winScore  = 4; // simulated as BO7 regardless of configured bestOf, same simplification as every other stage here
   const loseScore = Math.floor(Math.random() * 4);
 
   await supabaseAdmin.from("matches")
@@ -329,7 +329,7 @@ async function simulateHybrid8SingleMatch(match: {
   home_team_id: string; away_team_id: string;
 }) {
   const homeWins  = Math.random() > 0.5;
-  const winScore  = 4; // hybrid is BO7 — winner needs exactly 4
+  const winScore  = 4; // simulated as BO7 regardless of configured bestOf, same simplification as every other stage here
   const loseScore = Math.floor(Math.random() * 4);
 
   await supabaseAdmin.from("matches")

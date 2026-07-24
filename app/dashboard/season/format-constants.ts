@@ -185,10 +185,10 @@ export type StageSlotDef = {
 };
 
 // Ordered list of independently-configurable best-of slots for each preset.
-// Group/Swiss are always "flat" (one BO for every match in the stage); SE/DE
-// brackets (qualifier or terminal) are always "tiered" (standard/QF/SF/finals).
-// Hybrid brackets are omitted entirely — they're hardcoded to BO7 (see
-// getBestOfForMatch) and aren't user-configurable.
+// Group/Swiss are always "flat" (one BO for every match in the stage); SE/DE/
+// hybrid brackets (qualifier or terminal) are always "tiered" (standard/QF/SF/
+// finals) — the hybrid bracket's UB/LB/SF/GF rows share one "hybrid" slot the
+// same way a plain DE bracket's WB/LB/GF rows share "double_elimination".
 export const STAGE_SLOTS_BY_PRESET: Record<PresetId, StageSlotDef[]> = {
   single_elimination: [
     { key: "single_elimination", label: "Single Elimination", kind: "tiered" },
@@ -208,10 +208,12 @@ export const STAGE_SLOTS_BY_PRESET: Record<PresetId, StageSlotDef[]> = {
   group_swiss_hybrid: [
     { key: "group", label: "Group Stage", kind: "flat" },
     { key: "swiss", label: "Swiss Stage", kind: "flat" },
+    { key: "hybrid", label: "Hybrid Bracket", kind: "tiered" },
   ],
   group_swiss_hybrid_8: [
     { key: "group", label: "Group Stage", kind: "flat" },
     { key: "swiss", label: "Swiss Stage", kind: "flat" },
+    { key: "hybrid", label: "Hybrid Bracket", kind: "tiered" },
   ],
   se_swiss_single_elimination: [
     { key: "se_qualifier", label: "SE Qualifier", kind: "tiered" },
@@ -240,8 +242,8 @@ export function defaultRoundBestOfForPreset(presetId: PresetId): RoundBestOfConf
 // Resolves the best-of for one match from its physical stage/round plus the
 // tournament's per-slot config. Shared by the admin page, wagers page, match
 // predictions, and discord-bot's match-channel/scoring flows so there's one
-// canonical place this logic lives. Hybrid stages are always BO7 regardless
-// of config; unrecognized/unconfigured stages fall back to `fallback`.
+// canonical place this logic lives. Unrecognized/unconfigured stages fall
+// back to `fallback`.
 export function resolveBestOf(
   stage: string,
   round: number,
@@ -249,7 +251,6 @@ export function resolveBestOf(
   config: RoundBestOfConfig | undefined,
   fallback: BestOf = 3
 ): BestOf {
-  if (stage.startsWith("hybrid")) return 7;
   const slotKey = getStageSlotKey(stage);
   const slotConfig = slotKey ? config?.[slotKey] : undefined;
   if (!slotConfig) return fallback;
