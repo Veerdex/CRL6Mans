@@ -105,8 +105,8 @@ CEO-only, rarely-used commands — see the [README](../README.md#discord-bot-com
 | Command | Purpose |
 |---|---|
 | `/admin resyncmoderation` | Re-applies bans/timeouts/the Kicked role after moving the bot to a **new** Discord server — this state is guild-scoped and doesn't carry over on its own. |
-| `/admin disconnect` | Clears all stored Discord channel/role IDs from the database (no Discord-side changes) — the first step of a server migration, paired with re-running the setup checklist and `/syncroles`. |
-| `/admin wipe` | Clears all game/season data (teams, matches, drafts) while keeping the Discord connection and staff roles — for starting completely over. Does **not** touch Westside Wages or existing kicks/bans. |
+| `/admin disconnect` | Clears all stored Discord channel/role IDs from the database, including deleting team slots (no Discord-side changes) — the first step of a server migration, paired with re-running the setup checklist and `/syncroles`. |
+| `/admin wipe` | Clears all season/draft data (matches, drafts) and resets team slots' win/loss record, while keeping the team slots themselves, the Discord connection, and staff roles — for starting a new season. Does **not** touch Westside Wages or existing kicks/bans. |
 
 ---
 

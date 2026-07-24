@@ -1658,7 +1658,9 @@ async function adminChecklist(userId: string) {
 // DB-only: clears every guild-scoped Discord ID reference so a stale server's channel/role
 // IDs don't linger after switching which Discord server the bot is invited to. Makes no
 // Discord API calls itself and never touches staff_roles or player Discord IDs, since those
-// are global user IDs, not scoped to any one guild.
+// are global user IDs, not scoped to any one guild. Team slots are deleted here (not in
+// /admin wipe) because a slot's discord_role_id is only meaningful for the guild it was
+// created in — switching servers invalidates every slot, so they get recreated from scratch.
 async function adminDisconnect(userId: string, confirm: string) {
   const denied = await ceoGuard(userId);
   if (denied) return denied;
@@ -1671,16 +1673,18 @@ async function adminDisconnect(userId: string, confirm: string) {
       director_role_id: null, ceo_role_id: null, registered_role_id: null,
       updated_at: new Date().toISOString(),
     }).not("id", "is", null),
-    supabaseAdmin.from("teams").update({ discord_role_id: null }).not("id", "is", null),
+    supabaseAdmin.from("teams").delete().not("id", "is", null),
     supabaseAdmin.from("matches").update({ discord_channel_id: null }).not("id", "is", null),
     supabaseAdmin.from("match_discord_categories").delete().not("id", "is", null),
   ]);
 
-  return ephemeralReply("✅ Disconnected. All Discord channel/role/category references cleared from the database — no changes were made in the Discord server itself. Run `/admin checklist` to see what to reconfigure.");
+  return ephemeralReply("✅ Disconnected. All Discord channel/role/category references cleared and team slots removed — no changes were made in the Discord server itself. Run `/admin checklist` to see what to reconfigure.");
 }
 
 // Clears live game/season data so the website starts fresh, without touching staff roles,
 // player registration, or any of the Discord-connection config /admin disconnect owns.
+// Team slots (name, discord_role_id, logo) are preserved — only their season record resets —
+// matching the website's own resetSeason(); deleting slots is /admin disconnect's job, not this one's.
 // player_game_stats rows cascade-delete automatically with their parent match (DB constraint),
 // regardless of clearHistory — clearHistory only additionally clears the completed-seasons archive.
 async function adminWipe(userId: string, confirm: string, clearHistory: boolean) {
@@ -1707,7 +1711,7 @@ async function adminWipe(userId: string, confirm: string, clearHistory: boolean)
   await Promise.all([
     supabaseAdmin.from("sub_requests").delete().not("id", "is", null),
     supabaseAdmin.from("matches").delete().not("id", "is", null),
-    supabaseAdmin.from("teams").delete().not("id", "is", null),
+    supabaseAdmin.from("teams").update({ wins: 0, losses: 0, is_locked: false }).not("id", "is", null),
   ]);
   await supabaseAdmin.from("players").update({
     team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null,
@@ -1725,7 +1729,7 @@ async function adminWipe(userId: string, confirm: string, clearHistory: boolean)
 
   if (clearHistory) await supabaseAdmin.from("seasons").delete().not("id", "is", null);
 
-  return ephemeralReply(`✅ Wiped. All teams, matches, and season/draft state cleared — the website is a clean slate.${clearHistory ? " Completed-season history was also cleared." : " Completed-season history was preserved (pass clear_history:true to also clear it)."}`);
+  return ephemeralReply(`✅ Wiped. Matches and season/draft state cleared, team slots reset (kept, not deleted) — the website is a clean slate.${clearHistory ? " Completed-season history was also cleared." : " Completed-season history was preserved (pass clear_history:true to also clear it)."}`);
 }
 
 async function openRound(userId: string, roundOverride?: number) {
