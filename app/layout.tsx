@@ -80,14 +80,6 @@ export default async function RootLayout({
         </div>
         {children}
 
-        {/* Beta indicator */}
-        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900/90 border border-zinc-700/60 rounded-full text-xs font-semibold text-zinc-400 backdrop-blur-sm shadow-lg pointer-events-none select-none">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
-          </span>
-          Beta
-        </div>
         <Analytics />
         <SpeedInsights />
       </body>
