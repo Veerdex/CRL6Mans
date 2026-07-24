@@ -122,7 +122,7 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
 
   const pendingDraftTeamCount = (() => {
     const parsed = maxTeamsInput.trim() === "" ? null : parseInt(maxTeamsInput, 10);
-    return parsed && parsed > 0 ? parsed : draftFormatMax ?? draftCurrentMax;
+    return parsed && parsed > 0 ? Math.min(parsed, draftCurrentMax) : draftCurrentMax;
   })();
 
   const handleConfirm = () => {
@@ -297,13 +297,14 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
                       min={2}
                       value={maxTeamsInput}
                       onChange={(e) => setMaxTeamsInput(e.target.value)}
-                      placeholder={`Max (${draftFormatMax ?? draftCurrentMax})`}
+                      placeholder={`Max (${draftCurrentMax})`}
                       className="w-full bg-zinc-900 border border-zinc-600 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     />
                     <p className="text-[11px] text-zinc-500">
-                      {draftFormatMax != null
-                        ? `Leave blank to use the format max (${draftFormatMax} team${draftFormatMax === 1 ? "" : "s"}).`
-                        : `Leave blank to make the maximum (${draftCurrentMax} team${draftCurrentMax === 1 ? "" : "s"}) from the current pool.`}
+                      {`Leave blank to make the maximum (${draftCurrentMax} team${draftCurrentMax === 1 ? "" : "s"}) from players currently in the draft.`}
+                      {draftFormatMax != null && draftFormatMax < draftCurrentMax
+                        ? ` This format supports at most ${draftFormatMax}.`
+                        : ""}
                     </p>
                   </div>
                 )}

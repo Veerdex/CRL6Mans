@@ -840,18 +840,19 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
     .map(t => ({ ...t, num: t.slot_number }))
     .sort((a, b) => a.num - b.num);
 
-  // numTeams resolution:
+  // numTeams resolution — always based on the player pool, never the pre-created
+  // slot count: slots are validated separately below and surface an explicit
+  // "add more slots" error instead of silently shrinking the team count.
   //  • a positive number caps the team count (admin-specified max),
-  //  • "max" builds as many as the pool (3 per team) and slots allow,
+  //  • "max" builds as many teams as the pool supports (3 players per team),
   //  • null/undefined (cron/tournament) respects the configured num_teams, else max.
   const feasibleByPlayers = Math.floor(enteredAll.length / 3);
-  const slotCappedMax = Math.min(feasibleByPlayers, numberedTeams.length);
   const storedNum = (settings?.num_teams as number | null) ?? 0;
   const numTeams: number =
     typeof maxTeams === "number" && maxTeams > 0 ? Math.min(maxTeams, feasibleByPlayers)
-    : maxTeams === "max"                         ? slotCappedMax
+    : maxTeams === "max"                         ? feasibleByPlayers
     : storedNum > 0                              ? Math.min(storedNum, feasibleByPlayers)
-    :                                              slotCappedMax;
+    :                                              feasibleByPlayers;
   if (numTeams < 2)
     return { ok: false, message: "Not enough players to form teams (need at least 6 in the pool)." };
 
@@ -1002,18 +1003,19 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
     .map(t => ({ ...t, num: t.slot_number }))
     .sort((a, b) => a.num - b.num);
 
-  // numTeams resolution:
+  // numTeams resolution — always based on the player pool, never the pre-created
+  // slot count: slots are validated separately below and surface an explicit
+  // "add more slots" error instead of silently shrinking the team count.
   //  • a positive number caps the team count (admin-specified max),
-  //  • "max" builds as many as the pool (3 per team) and slots allow,
+  //  • "max" builds as many teams as the pool supports (3 players per team),
   //  • null/undefined (cron/tournament) respects the configured num_teams, else max.
   const feasibleByPlayers = Math.floor(enteredAll.length / 3);
-  const slotCappedMax = Math.min(feasibleByPlayers, numberedTeams.length);
   const storedNum = (settings?.num_teams as number | null) ?? 0;
   const numTeams: number =
     typeof maxTeams === "number" && maxTeams > 0 ? Math.min(maxTeams, feasibleByPlayers)
-    : maxTeams === "max"                         ? slotCappedMax
+    : maxTeams === "max"                         ? feasibleByPlayers
     : storedNum > 0                              ? Math.min(storedNum, feasibleByPlayers)
-    :                                              slotCappedMax;
+    :                                              feasibleByPlayers;
   if (numTeams < 2)
     return { ok: false, message: "Not enough players to form teams (need at least 6 in the pool)." };
 
