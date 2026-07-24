@@ -44,6 +44,7 @@ interface Props {
   roster: SubRosterPlayer[];
   availableSubs: AvailableSub[];
   existingRequests: SubRequestRow[];
+  subsEnabled: boolean;
 }
 
 function peakMmr(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }) {
@@ -57,7 +58,7 @@ const STATUS_META: Record<SubRequestRow["status"], { label: string; cls: string 
   escalated: { label: "Reported to staff", cls: "text-indigo-300 bg-indigo-400/10" },
 };
 
-export function SubRequestPanel({ teamId, roster, availableSubs, existingRequests }: Props) {
+export function SubRequestPanel({ teamId, roster, availableSubs, existingRequests, subsEnabled }: Props) {
   const router = useRouter();
   const [showForm, setShowForm]       = useState(false);
   const [playerOutId, setPlayerOutId] = useState("");
@@ -115,7 +116,7 @@ export function SubRequestPanel({ teamId, roster, availableSubs, existingRequest
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
       <div className="px-5 py-3 border-b border-zinc-800 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-zinc-300">Sub Requests</h2>
-        {!showForm && !hasActive && (
+        {!showForm && !hasActive && subsEnabled && (
           <button
             onClick={() => setShowForm(true)}
             className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium"
@@ -125,7 +126,13 @@ export function SubRequestPanel({ teamId, roster, availableSubs, existingRequest
         )}
       </div>
 
-      {showForm && !hasActive && (
+      {!hasActive && !subsEnabled && (
+        <p className="px-5 py-3 border-b border-zinc-800 text-xs text-zinc-500">
+          Substitute requests are currently disabled by staff.
+        </p>
+      )}
+
+      {showForm && !hasActive && subsEnabled && (
         <div className="px-5 py-4 border-b border-zinc-800 space-y-3">
           <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">New Request</p>
 

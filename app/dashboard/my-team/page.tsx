@@ -210,7 +210,7 @@ export default async function MyTeamPage() {
       .eq("team_id", teamId).eq("status", "approved"),
     supabaseAdmin.from("teams").select("id, name, logo_url, logo_offset_x, logo_offset_y"),
     supabaseAdmin.from("league_settings")
-      .select("season_active, season_format, num_teams, active_tournament_id").single(),
+      .select("season_active, season_format, num_teams, active_tournament_id, subs_enabled").single(),
     supabaseAdmin.from("sub_requests")
       .select("id, match_id, player_out_id, sub_player_id, sub_player_ids, reason, status, admin_note, created_at")
       .eq("team_id", teamId).order("created_at", { ascending: false }),
@@ -220,6 +220,7 @@ export default async function MyTeamPage() {
   if (!team) redirect("/dashboard");
 
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
+  const subsEnabled = (settings?.subs_enabled as boolean | null) ?? true;
   const seasonActive = settings?.season_active ?? false;
   const preset       = (settings?.season_format as { preset?: string })?.preset ?? "single_elimination";
   // isDE covers all formats that use a double-elimination bracket (full or qualifier)
@@ -868,6 +869,7 @@ export default async function MyTeamPage() {
                   roster={subRoster}
                   availableSubs={availableSubs}
                   existingRequests={existingSubRequests}
+                  subsEnabled={subsEnabled}
                 />
               )}
             </>

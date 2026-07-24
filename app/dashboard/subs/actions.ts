@@ -110,11 +110,14 @@ export async function submitSubRequest(
       .not("home_team_id", "is", null)
       .not("away_team_id", "is", null)
       .order("round").order("match_number").limit(1),
-    supabaseAdmin.from("league_settings").select("active_tournament_id").single(),
+    supabaseAdmin.from("league_settings").select("active_tournament_id, subs_enabled").single(),
   ]);
 
   const nextMatch = (nextMatchRows ?? [])[0] ?? null;
   const activeTournamentId = (leagueSettings?.active_tournament_id as string | null) ?? null;
+  if (leagueSettings?.subs_enabled === false) {
+    return { error: "Substitute requests are currently disabled by staff." };
+  }
   if (!nextMatch) return { error: "Your team has no upcoming matches." };
 
   const opposingTeamId = nextMatch.home_team_id === teamId

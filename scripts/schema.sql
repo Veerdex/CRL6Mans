@@ -346,6 +346,7 @@ alter table tournaments add column if not exists updated_at         timestamptz 
 alter table tournaments add column if not exists hidden_from_home   boolean     not null default false;
 
 alter table league_settings add column if not exists active_tournament_id uuid references tournaments(id) on delete set null;
+alter table league_settings add column if not exists subs_enabled          boolean     not null default true;
 
 -- ─────────────────────────────────────────────
 -- TOURNAMENT ENTRIES  (join_mode = 'players')

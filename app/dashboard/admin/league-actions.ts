@@ -980,6 +980,13 @@ export async function setNotificationsEnabled(enabled: boolean) {
   }
 }
 
+export async function setSubsEnabled(enabled: boolean) {
+  await verifyAdmin();
+  await supabaseAdmin.from("league_settings")
+    .update({ subs_enabled: enabled, updated_at: new Date().toISOString() }).not("id", "is", null);
+  return { ok: true, message: enabled ? "Substitute requests enabled." : "Substitute requests disabled." };
+}
+
 export async function setIsTestSeason(value: boolean) {
   await verifyAdmin();
   const { data: settings } = await supabaseAdmin

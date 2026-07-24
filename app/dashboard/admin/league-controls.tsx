@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate, setIsTestSeason } from "./league-actions";
+import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate, setIsTestSeason, setSubsEnabled } from "./league-actions";
 import { auditMatchChannels, applyChannelChanges, type ChannelAuditItem, type ChannelAuditResult } from "./channel-debug-actions";
 import { ExportAndResetSeasonButton } from "./export-pdf-button";
 
@@ -32,6 +32,7 @@ interface LeagueControlsProps {
   draftFormatMax: number | null;
   seasonFormatLabel: string;
   isTestSeason: boolean;
+  subsEnabled: boolean;
   isCEO: boolean;
 }
 
@@ -60,7 +61,7 @@ const COMMANDS: Record<ActionKey, { label: string; code: string; description: st
   },
 };
 
-export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, teamSlotCount, draftFormatMax, seasonFormatLabel, isTestSeason, isCEO }: LeagueControlsProps) {
+export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, teamSlotCount, draftFormatMax, seasonFormatLabel, isTestSeason, subsEnabled, isCEO }: LeagueControlsProps) {
   const [isPending, startTransition] = useTransition();
   const [active, setActive] = useState<ActionKey | null>(null);
   const [codeInput, setCodeInput] = useState("");
@@ -77,6 +78,7 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
   const [testingEnabled, setTestingEnabled] = useState(testingMode);
   const [notifsEnabled, setNotifsEnabled]   = useState(notificationsEnabled);
   const [localIsTestSeason, setLocalIsTestSeason] = useState(isTestSeason);
+  const [localSubsEnabled, setLocalSubsEnabled] = useState(subsEnabled);
   const [showTestingWarning, setShowTestingWarning] = useState(false);
   const [showTrackerForce, setShowTrackerForce] = useState(false);
   const [showDebugChannels, setShowDebugChannels] = useState(false);
@@ -174,6 +176,34 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
           }`}
         >
           {localDraftOpen ? "Close Signups" : "Open Signups"}
+        </button>
+      </div>
+
+      {/* Substitute requests toggle */}
+      <div className="flex items-center justify-between bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3">
+        <div>
+          <p className="text-sm font-medium text-white">Substitute Requests</p>
+          <p className="text-xs text-zinc-500 mt-0.5">
+            {localSubsEnabled ? "Enabled — teams can request subs for upcoming matches" : "Disabled — teams cannot submit new sub requests"}
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            const next = !localSubsEnabled;
+            setLocalSubsEnabled(next);
+            startTransition(async () => {
+              const result = await setSubsEnabled(next);
+              showFeedback(result.message, result.ok);
+            });
+          }}
+          disabled={isPending}
+          className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 transition-colors duration-200 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+            localSubsEnabled ? "bg-emerald-600 border-emerald-600" : "bg-zinc-700 border-zinc-700"
+          }`}
+          role="switch"
+          aria-checked={localSubsEnabled}
+        >
+          <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${localSubsEnabled ? "translate-x-4" : "translate-x-0"}`} />
         </button>
       </div>
 
