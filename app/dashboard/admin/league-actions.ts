@@ -667,23 +667,26 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
 
 export async function addTeamSlot(discordRoleId: string) {
   await verifyAdmin();
-  if (!discordRoleId.trim()) return { error: "A Discord role ID is required." };
+  const trimmedRoleId = discordRoleId.trim();
+  if (!trimmedRoleId) return { error: "A Discord role ID is required." };
+  const { data: duplicate } = await supabaseAdmin.from("teams").select("name").eq("discord_role_id", trimmedRoleId).maybeSingle();
+  if (duplicate) return { error: `That role ID is already assigned to ${duplicate.name}.` };
   const { data: existing } = await supabaseAdmin.from("teams").select("slot_number").not("slot_number", "is", null);
   const nums = (existing ?? []).map(t => t.slot_number as number);
   const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
   const { data: newTeam, error } = await supabaseAdmin
     .from("teams")
-    .insert({ name: `Team ${next}`, discord_role_id: discordRoleId, is_locked: false, slot_number: next })
+    .insert({ name: `Team ${next}`, discord_role_id: trimmedRoleId, is_locked: false, slot_number: next })
     .select("id, name, discord_role_id, slot_number")
     .single();
   if (error || !newTeam) return { error: error?.message ?? "Failed to create team." };
   const canonicalName = `Team ${next}`;
   try {
     const guildRoles = await getGuildRoles();
-    const currentName = guildRoles.find(r => r.id === discordRoleId)?.name;
+    const currentName = guildRoles.find(r => r.id === trimmedRoleId)?.name;
     const updates: { name?: string; color: number } = { color: TEAM_ROLE_COLOR };
     if (currentName !== canonicalName) updates.name = canonicalName;
-    await editRole(discordRoleId, updates);
+    await editRole(trimmedRoleId, updates);
   } catch {
     // Discord role update failed — team is saved; admin should rename the role manually
   }
@@ -694,19 +697,29 @@ export async function addTeamSlot(discordRoleId: string) {
 
 export async function updateTeamRoleId(teamId: string, discordRoleId: string) {
   await verifyAdmin();
+  const trimmedRoleId = discordRoleId.trim();
+  if (trimmedRoleId) {
+    const { data: duplicate } = await supabaseAdmin
+      .from("teams")
+      .select("name")
+      .eq("discord_role_id", trimmedRoleId)
+      .neq("id", teamId)
+      .maybeSingle();
+    if (duplicate) return { error: `That role ID is already assigned to ${duplicate.name}.` };
+  }
   const { data: team } = await supabaseAdmin.from("teams").select("name").eq("id", teamId).single();
   const { error } = await supabaseAdmin
     .from("teams")
-    .update({ discord_role_id: discordRoleId || null })
+    .update({ discord_role_id: trimmedRoleId || null })
     .eq("id", teamId);
   if (error) return { error: error.message };
-  if (discordRoleId && team) {
+  if (trimmedRoleId && team) {
     try {
       const guildRoles = await getGuildRoles();
-      const currentName = guildRoles.find(r => r.id === discordRoleId)?.name;
+      const currentName = guildRoles.find(r => r.id === trimmedRoleId)?.name;
       const updates: { name?: string; color: number } = { color: TEAM_ROLE_COLOR };
       if (currentName !== team.name) updates.name = team.name;
-      await editRole(discordRoleId, updates);
+      await editRole(trimmedRoleId, updates);
     } catch {
       // Discord role update failed — DB is saved; role name/color may be out of sync
     }
