@@ -898,7 +898,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
     supabaseAdmin.from("matches").delete().not("id", "is", null),
     // credits column kept in DB but unused in snake draft
     ...teamsToUse.map(t =>
-      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: `Team ${t.num}`, logo_url: null }).eq("id", t.id)
+      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: `Team ${t.num}`, logo_url: null, is_disqualified: false, disqualified_at: null }).eq("id", t.id)
     ),
     ...sorted.slice(0, numTeams).map((captain, i) =>
       supabaseAdmin.from("players")
@@ -1079,7 +1079,7 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
 
   await Promise.all([
     ...teamsToUse.map(t =>
-      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: `Team ${t.num}`, logo_url: null }).eq("id", t.id)
+      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: `Team ${t.num}`, logo_url: null, is_disqualified: false, disqualified_at: null }).eq("id", t.id)
     ),
     ...teamsToUse.map((t, i) =>
       teamPlayerIds[i].length
@@ -1238,7 +1238,7 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
   await supabaseAdmin.from("matches").delete().not("id", "is", null);
   await Promise.all([
     ...teamsToUse.map((t, i) =>
-      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: kept[i].name }).eq("id", t.id)
+      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: kept[i].name, is_disqualified: false, disqualified_at: null }).eq("id", t.id)
     ),
     ...teamsToUse.map((t, i) =>
       supabaseAdmin.from("players")
@@ -2726,6 +2726,7 @@ export async function execReportMatchResult(
   awayScore: number,
   goalDiff = 0,
   forfeit = false,
+  skipRatingUpdate = false,
 ): Promise<{ ok: boolean; message: string }> {
   const { data: match } = await supabaseAdmin
     .from("matches")
@@ -2758,13 +2759,16 @@ export async function execReportMatchResult(
       supabaseAdmin.from("teams").update({ losses: (loser.losses ?? 0) + 1 }).eq("id", loser.id),
     ]);
 
-    // Update season ratings. Lazy-init from roster RVs on first match.
-    applySeasonRatingUpdate(
-      homeTeam.id, awayTeam.id,
-      homeTeam.season_rating as number | null,
-      awayTeam.season_rating as number | null,
-      homeScore, awayScore,
-    ).catch(() => {});
+    // Update season ratings. Lazy-init from roster RVs on first match. Skipped
+    // for administrative forfeits (DQ cascade) — those scores never happened.
+    if (!skipRatingUpdate) {
+      applySeasonRatingUpdate(
+        homeTeam.id, awayTeam.id,
+        homeTeam.season_rating as number | null,
+        awayTeam.season_rating as number | null,
+        homeScore, awayScore,
+      ).catch(() => {});
+    }
 
     if (match.stage) {
       await advanceBracketWinner(
@@ -2864,6 +2868,91 @@ export async function execReportMatchResult(
     ok: true,
     message: `${homeTeam.name} ${homeScore} — ${awayScore} ${awayTeam.name}${winnerName ? ` · ${winnerName} wins` : " · Draw"}`,
   };
+}
+
+// Finds the most recent match teamId decisively won, ranked by bracket
+// progression (stage order, then round) rather than wall-clock time — matches
+// have no completed_at column, and brackets only ever move forward. Returns
+// the loser of that match (the reinstatement candidate for a DQ'd opponent),
+// or null if teamId has never won a match.
+async function findMostRecentWin(teamId: string): Promise<string | null> {
+  const { data: matches } = await supabaseAdmin
+    .from("matches")
+    .select("stage, round, home_team_id, away_team_id, home_score, away_score")
+    .eq("status", "completed")
+    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
+
+  let best: { stageIdx: number; round: number; loserId: string } | null = null;
+  for (const m of matches ?? []) {
+    if (m.home_score == null || m.away_score == null || m.home_score === m.away_score) continue;
+    const isHome = m.home_team_id === teamId;
+    const won = isHome ? m.home_score > m.away_score : m.away_score > m.home_score;
+    if (!won) continue;
+    const loserId = isHome ? m.away_team_id : m.home_team_id;
+    if (!loserId) continue;
+    const stageIdx = STAGE_ORDER.indexOf(canonicalStage(m.stage ?? ""));
+    if (!best || stageIdx > best.stageIdx || (stageIdx === best.stageIdx && m.round > best.round)) {
+      best = { stageIdx, round: m.round, loserId };
+    }
+  }
+  return best?.loserId ?? null;
+}
+
+// Disqualifies a team: marks it DQ'd, then forfeits every not-yet-completed
+// match it currently occupies a filled slot in. For elimination-stage matches
+// that haven't begun (no Discord channel opened yet), the DQ'd team's most
+// recently beaten opponent is swapped into its slot instead of recording a
+// forfeit — per the user's exact "swap in place" reinstatement rule. Group and
+// Swiss stages never reinstate; they're just forfeited and excluded from
+// qualifier seeding by bracket-server.ts instead. Loops because forfeiting one
+// match can route the DQ'd team into a new downstream slot (e.g. DE losers
+// bracket), which then needs the same treatment.
+export async function execDisqualifyTeam(teamId: string): Promise<{ ok: boolean; message: string }> {
+  const { data: team } = await supabaseAdmin.from("teams").select("id, is_disqualified").eq("id", teamId).single();
+  if (!team) return { ok: false, message: "Team not found." };
+  if (team.is_disqualified) return { ok: false, message: "Team is already disqualified." };
+
+  await supabaseAdmin.from("teams")
+    .update({ is_disqualified: true, disqualified_at: new Date().toISOString() })
+    .eq("id", teamId);
+
+  for (let guard = 0; guard < 200; guard++) {
+    const { data: matches } = await supabaseAdmin
+      .from("matches")
+      .select("id, stage, round, match_number, home_team_id, away_team_id, discord_channel_id")
+      .eq("status", "scheduled")
+      .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
+
+    const next = (matches ?? []).find(m => m.home_team_id && m.away_team_id);
+    if (!next) break;
+
+    const stage = next.stage ?? "";
+    const isHome = next.home_team_id === teamId;
+    const opponentId = isHome ? next.away_team_id! : next.home_team_id!;
+    const isGroupOrSwiss = stage.startsWith(GROUP_STAGE_PREFIX) || stage === "swiss";
+    const hasBegun = !!next.discord_channel_id;
+
+    let reinstateId: string | null = null;
+    if (!isGroupOrSwiss && !hasBegun) {
+      const candidate = await findMostRecentWin(teamId);
+      if (candidate && candidate !== opponentId) reinstateId = candidate;
+    }
+
+    if (reinstateId) {
+      const slot = isHome ? "home_team_id" : "away_team_id";
+      await setMatchSlot(stage, next.round, next.match_number, slot, reinstateId);
+      await maybeCreateChannelForMatch(stage, next.round, next.match_number);
+      continue;
+    }
+
+    const bestOf = await getBestOfForMatch(next.id);
+    const winsNeeded = Math.ceil(bestOf / 2);
+    const homeScore = isHome ? 0 : winsNeeded;
+    const awayScore = isHome ? winsNeeded : 0;
+    await execReportMatchResult(next.id, homeScore, awayScore, 0, true, true);
+  }
+
+  return { ok: true, message: "Team disqualified." };
 }
 
 // Refunds every pending wager/parlay on a forfeited match (the game wasn't played,

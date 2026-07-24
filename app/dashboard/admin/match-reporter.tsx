@@ -434,7 +434,7 @@ function MatchEntry({
     startDqTransition(async () => {
       const res = await dqTeamFromMatch(match.id, teamId);
       if (!res.ok) { setError(res.message); setDqTarget(null); return; }
-      onReported(match.id, `DQ — ${teamName} forfeited · ${res.message}`);
+      onReported(match.id, `Forfeit — ${teamName} forfeited · ${res.message}`);
     });
   }
 
@@ -462,13 +462,13 @@ function MatchEntry({
             </span>
           </div>
 
-          {/* Home team + DQ button */}
+          {/* Home team + Forfeit button */}
           <div className="flex-1 flex items-center justify-end gap-1.5 min-w-0">
             <button
               onClick={() => setDqTarget(dqTarget === "home" ? null : "home")}
               className="shrink-0 text-[10px] font-bold text-red-500 hover:text-red-400 border border-red-800/50 hover:border-red-600/60 rounded px-1.5 py-0.5 transition-colors"
             >
-              DQ
+              Forfeit
             </button>
             <span className="text-sm font-medium text-white truncate text-right">{match.homeTeamName}</span>
           </div>
@@ -507,14 +507,14 @@ function MatchEntry({
             </div>
           )}
 
-          {/* Away team + DQ button */}
+          {/* Away team + Forfeit button */}
           <div className="flex-1 flex items-center gap-1.5 min-w-0">
             <span className="text-sm font-medium text-white truncate">{match.awayTeamName}</span>
             <button
               onClick={() => setDqTarget(dqTarget === "away" ? null : "away")}
               className="shrink-0 text-[10px] font-bold text-red-500 hover:text-red-400 border border-red-800/50 hover:border-red-600/60 rounded px-1.5 py-0.5 transition-colors"
             >
-              DQ
+              Forfeit
             </button>
           </div>
 
@@ -556,7 +556,7 @@ function MatchEntry({
           </div>
         </div>
 
-        {/* DQ inline confirmation */}
+        {/* Forfeit inline confirmation */}
         {dqTarget && (
           <div className="flex items-center gap-3 pl-20 py-1">
             <span className="text-xs text-red-400">
@@ -567,7 +567,7 @@ function MatchEntry({
               disabled={isDqing}
               className="px-2.5 py-1 bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-medium rounded transition-colors"
             >
-              {isDqing ? "Processing…" : "Confirm DQ"}
+              {isDqing ? "Processing…" : "Confirm Forfeit"}
             </button>
             <button
               onClick={() => setDqTarget(null)}

@@ -35,18 +35,14 @@ export async function dqTeamFromMatch(
   if (match.home_team_id !== dqTeamId && match.away_team_id !== dqTeamId)
     return { ok: false, message: "Team is not in this match." };
 
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings")
-    .select("season_format")
-    .single();
-  const bestOf = (settings?.season_format as { best_of?: number } | null)?.best_of ?? 3;
+  const bestOf = await getBestOfForMatch(matchId);
   const winsNeeded = Math.ceil(bestOf / 2);
 
   const dqIsHome = match.home_team_id === dqTeamId;
   const homeScore = dqIsHome ? 0 : winsNeeded;
   const awayScore = dqIsHome ? winsNeeded : 0;
 
-  const result = await execReportMatchResult(matchId, homeScore, awayScore);
+  const result = await execReportMatchResult(matchId, homeScore, awayScore, 0, /*forfeit*/ true, /*skipRatingUpdate*/ true);
   if (result.ok) {
     revalidatePath("/dashboard/admin");
     revalidatePath("/dashboard/season");

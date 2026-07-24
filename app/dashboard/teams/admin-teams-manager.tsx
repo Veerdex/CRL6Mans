@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { deleteTeam, removePlayerFromTeam, movePlayerToTeam, addPlayerToTeam } from "./actions";
+import { swapPlayersBetweenTeams, swapRosterPlayerWithBenchPlayer, disqualifyTeam } from "./actions";
 import { MyTeamEditor } from "./my-team-editor";
 import { PlayerName } from "@/app/dashboard/player-name";
 
@@ -33,6 +33,7 @@ function TeamEditToggleInline({ team }: { team: { id: string; name: string; logo
 type Team = {
   id: string; name: string; logo_url: string | null;
   logo_offset_x: number | null; logo_offset_y: number | null; is_locked: boolean | null;
+  is_disqualified?: boolean | null; disqualified_at?: string | null;
 };
 type Player = {
   id: string; username: string; display_name: string | null; discord_id: string | null; avatar: string | null;
@@ -50,6 +51,7 @@ interface Props {
   avgMmr: Record<string, number>;
   availablePlayers?: AvailablePlayer[];
   initialQuery?: string;
+  joinMode?: "players" | "teams";
 }
 
 const gradients = [
@@ -69,16 +71,30 @@ function DefaultLogo({ name }: { name: string }) {
   );
 }
 
-export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = [], initialQuery = "" }: Props) {
+function rv(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }) {
+  return Math.round((Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2);
+}
+
+// Either a rostered player (tied to a team) or a bench player (no team yet).
+type SwapSelection = { kind: "roster"; playerId: string; teamId: string; name: string } | { kind: "bench"; playerId: string; name: string };
+
+function isValidTarget(source: SwapSelection, candidate: SwapSelection): boolean {
+  if (source.playerId === candidate.playerId) return false;
+  if (source.kind === "bench" && candidate.kind === "bench") return false;
+  if (source.kind === "roster" && candidate.kind === "roster" && source.teamId === candidate.teamId) return false;
+  return true;
+}
+
+export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = [], initialQuery = "", joinMode = "players" }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [confirmDeleteTeamId, setConfirmDeleteTeamId] = useState<string | null>(null);
-  const [confirmDeletePlayerId, setConfirmDeletePlayerId] = useState<string | null>(null);
-  const [dragPlayerId, setDragPlayerId] = useState<string | null>(null);
-  const [dragOverTeamId, setDragOverTeamId] = useState<string | null>(null);
+  const [confirmDqTeamId, setConfirmDqTeamId] = useState<string | null>(null);
+  const [swapSource, setSwapSource] = useState<SwapSelection | null>(null);
+  const [swapTarget, setSwapTarget] = useState<SwapSelection | null>(null);
+  const [swapError, setSwapError] = useState<string | null>(null);
   const [query, setQuery] = useState(initialQuery);
-  const [addingToTeamId, setAddingToTeamId] = useState<string | null>(null);
-  const [addPlayerQuery, setAddPlayerQuery] = useState("");
+
+  const swapEnabled = joinMode !== "teams";
 
   const visibleTeams = query.trim()
     ? (() => {
@@ -95,50 +111,63 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
       })()
     : teams;
 
-  function handleDeleteTeam(teamId: string) {
+  function handleDisqualify(teamId: string) {
     startTransition(async () => {
-      await deleteTeam(teamId);
-      setConfirmDeleteTeamId(null);
+      await disqualifyTeam(teamId);
+      setConfirmDqTeamId(null);
       router.refresh();
     });
   }
 
-  function handleDeletePlayer(playerId: string) {
+  function handleSelect(candidate: SwapSelection, teamDqd: boolean) {
+    if (!swapEnabled || teamDqd) return;
+    setSwapError(null);
+    if (!swapSource) {
+      setSwapSource(candidate);
+      return;
+    }
+    if (swapSource.playerId === candidate.playerId) {
+      setSwapSource(null);
+      return;
+    }
+    if (!isValidTarget(swapSource, candidate)) {
+      // Not a legal pairing with the current source — treat the new click as a
+      // fresh selection instead of silently doing nothing.
+      setSwapSource(candidate);
+      return;
+    }
+    setSwapTarget(candidate);
+  }
+
+  function cancelSwap() {
+    setSwapSource(null);
+    setSwapTarget(null);
+    setSwapError(null);
+  }
+
+  function confirmSwap() {
+    if (!swapSource || !swapTarget) return;
+    const source = swapSource;
+    const target = swapTarget;
     startTransition(async () => {
-      await removePlayerFromTeam(playerId);
-      setConfirmDeletePlayerId(null);
+      let result: { error?: string; success?: boolean };
+      if (source.kind === "roster" && target.kind === "roster") {
+        result = await swapPlayersBetweenTeams(source.playerId, target.playerId);
+      } else if (source.kind === "roster" && target.kind === "bench") {
+        result = await swapRosterPlayerWithBenchPlayer(source.playerId, target.playerId, source.teamId);
+      } else {
+        // bench source, roster target
+        result = await swapRosterPlayerWithBenchPlayer((target as Extract<SwapSelection, { kind: "roster" }>).playerId, source.playerId, (target as Extract<SwapSelection, { kind: "roster" }>).teamId);
+      }
+      if (result.error) {
+        setSwapError(result.error);
+        setSwapTarget(null);
+        return;
+      }
+      cancelSwap();
       router.refresh();
     });
   }
-
-  function handleDrop(targetTeamId: string) {
-    if (!dragPlayerId) return;
-    setDragOverTeamId(null);
-    startTransition(async () => {
-      await movePlayerToTeam(dragPlayerId, targetTeamId);
-      setDragPlayerId(null);
-      router.refresh();
-    });
-  }
-
-  function handleAddPlayer(playerId: string, teamId: string) {
-    startTransition(async () => {
-      await addPlayerToTeam(playerId, teamId);
-      setAddingToTeamId(null);
-      setAddPlayerQuery("");
-      router.refresh();
-    });
-  }
-
-  const queryFilteredPlayers = addPlayerQuery.trim()
-    ? availablePlayers.filter((p) => {
-        const q = addPlayerQuery.toLowerCase();
-        return (
-          (p.display_name ?? p.username).toLowerCase().includes(q) ||
-          p.username.toLowerCase().includes(q)
-        );
-      })
-    : availablePlayers;
 
   return (
     <div className="space-y-4">
@@ -152,29 +181,47 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
       {visibleTeams.length === 0 && query.trim() && (
         <p className="text-zinc-500 text-sm">No teams match &quot;{query}&quot;.</p>
       )}
+
+      {swapSource && !swapTarget && (
+        <div className="flex items-center gap-3 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-4 py-2.5">
+          <span className="text-sm text-indigo-300">
+            Select a player to swap with <span className="font-semibold">{swapSource.name}</span>…
+          </span>
+          <button onClick={cancelSwap} className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
+        </div>
+      )}
+
+      {swapTarget && swapSource && (
+        <div className="flex items-center gap-3 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-4 py-2.5">
+          <span className="text-sm text-indigo-200">
+            Swap <span className="font-semibold">{swapSource.name}</span> ↔ <span className="font-semibold">{swapTarget.name}</span>?
+          </span>
+          <button
+            onClick={confirmSwap}
+            disabled={isPending}
+            className="px-2.5 py-1 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg"
+          >
+            {isPending ? "Swapping…" : "Yes"}
+          </button>
+          <button onClick={cancelSwap} className="px-2.5 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs rounded-lg">
+            Cancel
+          </button>
+        </div>
+      )}
+      {swapError && <p className="text-xs text-red-400">{swapError}</p>}
+
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
       {visibleTeams.map((team) => {
         const roster = byTeam[team.id] ?? [];
         const offsetX = team.logo_offset_x ?? 50;
         const offsetY = team.logo_offset_y ?? 50;
-        const isDropTarget = dragOverTeamId === team.id;
-        const isConfirmingDelete = confirmDeleteTeamId === team.id;
+        const isConfirmingDq = confirmDqTeamId === team.id;
+        const isDqd = !!team.is_disqualified;
 
         return (
           <div
             key={team.id}
-            onDragOver={(e) => { e.preventDefault(); setDragOverTeamId(team.id); }}
-            onDragLeave={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                setDragOverTeamId(null);
-              }
-            }}
-            onDrop={() => handleDrop(team.id)}
-            className={`rounded-xl border transition-colors ${
-              isDropTarget
-                ? "border-indigo-500 bg-indigo-950/30"
-                : "border-zinc-800 bg-zinc-900"
-            }`}
+            className={`rounded-xl border border-zinc-800 bg-zinc-900 transition-opacity ${isDqd ? "opacity-60" : ""}`}
           >
             {/* Header */}
             <div className="p-5 flex items-center gap-4 border-b border-zinc-800 relative">
@@ -196,19 +243,28 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
                 </p>
               </div>
 
-              {/* Trash / confirm delete */}
-              {isConfirmingDelete ? (
+              {/* Disqualify / DQ badge */}
+              {isDqd ? (
+                <span className="shrink-0 text-[10px] font-bold text-red-400 border border-red-800/50 bg-red-950/40 rounded px-2 py-1 uppercase tracking-wide">
+                  Disqualified
+                  {team.disqualified_at && (
+                    <span className="block font-normal normal-case text-red-500/70 text-[9px] mt-0.5">
+                      {new Date(team.disqualified_at).toLocaleDateString()}
+                    </span>
+                  )}
+                </span>
+              ) : isConfirmingDq ? (
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-xs text-zinc-400">Delete team?</span>
+                  <span className="text-xs text-zinc-400">DQ team?</span>
                   <button
-                    onClick={() => handleDeleteTeam(team.id)}
+                    onClick={() => handleDisqualify(team.id)}
                     disabled={isPending}
                     className="px-2 py-1 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg"
                   >
                     Yes
                   </button>
                   <button
-                    onClick={() => setConfirmDeleteTeamId(null)}
+                    onClick={() => setConfirmDqTeamId(null)}
                     className="px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs rounded-lg"
                   >
                     Cancel
@@ -216,13 +272,11 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
                 </div>
               ) : (
                 <button
-                  onClick={() => setConfirmDeleteTeamId(team.id)}
-                  className="p-1.5 text-zinc-600 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-800 shrink-0"
-                  title="Delete team"
+                  onClick={() => setConfirmDqTeamId(team.id)}
+                  className="shrink-0 text-[10px] font-bold text-red-500 hover:text-red-400 border border-red-800/50 hover:border-red-600/60 rounded px-2 py-1 transition-colors uppercase tracking-wide"
+                  title="Disqualify team"
                 >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-                  </svg>
+                  Disqualify
                 </button>
               )}
             </div>
@@ -233,29 +287,19 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
                 <p className="px-5 py-3 text-sm text-zinc-600 italic">No players yet.</p>
               ) : (
                 roster.map((player) => {
-                  const peak = Math.round((Number(player.peak_2v2) + Number(player.current_2v2)) * 0.3 + (Number(player.peak_3v3) + Number(player.current_3v3)) * 0.2);
-                  const isConfirmingPlayerDelete = confirmDeletePlayerId === player.id;
+                  const peak = rv(player);
+                  const selection: SwapSelection = { kind: "roster", playerId: player.id, teamId: team.id, name: player.display_name ?? player.username };
+                  const isSelected = swapSource?.playerId === player.id;
+                  const clickable = swapEnabled && !isDqd;
 
                   return (
                     <div
                       key={player.id}
-                      draggable
-                      onDragStart={(e) => {
-                        setDragPlayerId(player.id);
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      onDragEnd={() => { setDragPlayerId(null); setDragOverTeamId(null); }}
-                      className={`flex items-center gap-3 px-5 py-3 group transition-colors cursor-grab active:cursor-grabbing ${
-                        dragPlayerId === player.id ? "opacity-40" : "hover:bg-zinc-800"
-                      }`}
+                      onClick={() => handleSelect(selection, isDqd)}
+                      className={`flex items-center gap-3 px-5 py-3 transition-colors ${
+                        clickable ? "cursor-pointer hover:bg-zinc-800" : ""
+                      } ${isSelected ? "bg-indigo-950/50 ring-1 ring-inset ring-indigo-600" : ""}`}
                     >
-                      {/* Drag handle */}
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-zinc-600 group-hover:text-zinc-400 shrink-0">
-                        <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
-                        <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
-                        <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
-                      </svg>
-
                       {player.avatar ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -272,8 +316,6 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
                           href={player.tracker_url || undefined}
                           target="_blank"
                           rel="noopener noreferrer"
-                          draggable={false}
-                          onMouseDown={(e) => e.stopPropagation()}
                           onClick={(e) => e.stopPropagation()}
                           className="hover:text-indigo-400 transition-colors"
                         >
@@ -282,100 +324,11 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
                         {player.is_captain && <span className="ml-1.5 text-xs font-semibold text-yellow-400">C</span>}
                       </span>
                       <span className="text-xs text-zinc-500 shrink-0">{peak.toLocaleString()} <span className="text-zinc-700">RV</span></span>
-
-                      {/* Delete player */}
-                      {isConfirmingPlayerDelete ? (
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            onClick={() => handleDeletePlayer(player.id)}
-                            disabled={isPending}
-                            className="px-2 py-0.5 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-xs font-semibold rounded"
-                          >
-                            Yes
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeletePlayerId(null)}
-                            className="px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs rounded"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setConfirmDeletePlayerId(player.id)}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-zinc-600 hover:text-red-400 transition-all rounded"
-                          title="Remove from team"
-                        >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                          </svg>
-                        </button>
-                      )}
                     </div>
                   );
                 })
               )}
             </div>
-
-            {/* Add Player */}
-            {availablePlayers.length > 0 && roster.length < 3 && (() => {
-              const addableForTeam = queryFilteredPlayers.filter((p) => p.team_id !== team.id);
-              const unfiltered = availablePlayers.filter((p) => p.team_id !== team.id);
-              return (
-                <div className="border-t border-zinc-800">
-                  {addingToTeamId !== team.id ? (
-                    <button
-                      onClick={() => { setAddingToTeamId(team.id); setAddPlayerQuery(""); }}
-                      className="w-full px-5 py-2.5 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors text-left"
-                    >
-                      + Add Player
-                    </button>
-                  ) : (
-                    <div className="px-4 py-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Add Player</span>
-                        <button
-                          onClick={() => setAddingToTeamId(null)}
-                          className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="Search…"
-                        value={addPlayerQuery}
-                        onChange={(e) => setAddPlayerQuery(e.target.value)}
-                        autoFocus
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      />
-                      <div className="max-h-44 overflow-y-auto rounded-lg border border-zinc-800 divide-y divide-zinc-800">
-                        {unfiltered.length === 0 ? (
-                          <p className="px-3 py-2 text-xs text-zinc-600">All participants are already on this team.</p>
-                        ) : addableForTeam.length === 0 ? (
-                          <p className="px-3 py-2 text-xs text-zinc-600">No matching players.</p>
-                        ) : (
-                          addableForTeam.map((p) => {
-                            const mmr = Math.round((Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2);
-                            return (
-                              <button
-                                key={p.id}
-                                onClick={() => handleAddPlayer(p.id, team.id)}
-                                disabled={isPending}
-                                className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-zinc-800 text-zinc-300 hover:text-white transition-colors disabled:opacity-50 text-left"
-                              >
-                                <span>{p.display_name ?? p.username}</span>
-                                <span className="text-zinc-500 ml-2 shrink-0">{mmr.toLocaleString()}</span>
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
 
             {/* Edit team info toggle — per-card state, isolated from other cards */}
             <TeamEditToggleInline team={team} />
@@ -383,6 +336,35 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
         );
       })}
     </div>
+
+      {/* Bench — players who entered the draft/tournament but aren't rostered yet */}
+      {swapEnabled && availablePlayers.length > 0 && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900">
+          <div className="px-5 py-3 border-b border-zinc-800">
+            <h3 className="text-sm font-semibold text-zinc-300">Available Players</h3>
+            <p className="text-xs text-zinc-500">Select a rostered player above, then one of these to swap them in.</p>
+          </div>
+          <div className="divide-y divide-zinc-800 max-h-72 overflow-y-auto">
+            {availablePlayers.map((p) => {
+              const peak = rv(p);
+              const selection: SwapSelection = { kind: "bench", playerId: p.id, name: p.display_name ?? p.username };
+              const isSelected = swapSource?.playerId === p.id;
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => handleSelect(selection, false)}
+                  className={`flex items-center justify-between px-5 py-2.5 cursor-pointer hover:bg-zinc-800 transition-colors ${
+                    isSelected ? "bg-indigo-950/50 ring-1 ring-inset ring-indigo-600" : ""
+                  }`}
+                >
+                  <span className="text-sm text-zinc-300">{p.display_name ?? p.username}</span>
+                  <span className="text-xs text-zinc-500">{peak.toLocaleString()} RV</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

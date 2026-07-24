@@ -19,7 +19,7 @@ export default async function TeamsPage({
   const [{ data: teamsRaw }, { data: allPlayers }, { data: settings }] = await Promise.all([
     supabaseAdmin
       .from("teams")
-      .select("id, name, logo_url, logo_offset_x, logo_offset_y, is_locked"),
+      .select("id, name, logo_url, logo_offset_x, logo_offset_y, is_locked, is_disqualified, disqualified_at"),
     supabaseAdmin
       .from("players")
       .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, tracker_url, is_captain, team_id")
@@ -29,6 +29,13 @@ export default async function TeamsPage({
   ]);
 
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
+
+  let joinMode: "players" | "teams" = "players";
+  if (activeTournamentId) {
+    const { data: tourney } = await supabaseAdmin
+      .from("tournaments").select("join_mode").eq("id", activeTournamentId).single();
+    joinMode = (tourney?.join_mode as "players" | "teams" | undefined) ?? "players";
+  }
 
   // Fetch tournament entries once — used for both allowedTeamIds and availablePlayers.
   let entryPlayerIds: Set<string> | null = null;
@@ -133,6 +140,7 @@ export default async function TeamsPage({
             avgMmr={Object.fromEntries(teams.map(t => [t.id, Math.round(teamAvgMmr(t.id))]))}
             availablePlayers={availablePlayers}
             initialQuery={initialSearch ?? ""}
+            joinMode={joinMode}
           />
         ) : (
           <TeamsGrid

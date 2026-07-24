@@ -120,6 +120,15 @@ async function saveSwissRoundOne(
   return saveRoundOne(SWISS_STAGE, r1Inserts, laterRounds);
 }
 
+// Teams DQ'd mid-season still count for opponents' already-recorded results, but
+// must never themselves be selected to advance/qualify — callers filter this set
+// out of the standings/records array right before seeding, never out of the raw
+// match list.
+async function getDisqualifiedTeamIds(): Promise<Set<string>> {
+  const { data } = await supabaseAdmin.from("teams").select("id").eq("is_disqualified", true);
+  return new Set((data ?? []).map(t => t.id as string));
+}
+
 // Build a set of canonical "A:B" (lexicographic) keys from completed match history.
 function buildPlayedSet(
   matches: { home_team_id: string | null; away_team_id: string | null }[],
@@ -354,8 +363,10 @@ export async function buildAndSaveSEFromGroups(): Promise<{ error?: string; ok?:
   if (pending.length > 0) return { error: `${pending.length} group match${pending.length === 1 ? "" : "es"} still need to be played.` };
 
   // Compute standings per group (ordered by group number)
+  const dqIds = await getDisqualifiedTeamIds();
   const groupStandings = stages.map((stage) =>
     computeGroupStandings(allGroupMatches.filter((m) => m.stage === stage))
+      .filter(s => !dqIds.has(s.teamId))
   );
 
   // Seed qualifiers for SE
@@ -425,11 +436,13 @@ export async function buildAndSaveSwissFromGroups(): Promise<{ error?: string; o
   const pending = allGroupMatches.filter(m => m.status !== "completed");
   if (pending.length > 0) return { error: `${pending.length} group match${pending.length === 1 ? "" : "es"} still pending.` };
 
+  const dqIds = await getDisqualifiedTeamIds();
   const groupStandings = stages.map(stage =>
     computeGroupStandings(allGroupMatches.filter(m => m.stage === stage))
+      .filter(s => !dqIds.has(s.teamId))
   );
   const qualified = seedGroupQualifiers(groupStandings, qualifiersPerGroup);
-  if (qualified.length !== 16) return { error: `Expected 16 qualifiers, got ${qualified.length}.` };
+  if (qualified.length < 16) return { error: "A disqualification reduced a group below its required qualifier count." };
 
   // seedGroupQualifiers cycles through groups: [G0R1, G1R1, ..., G0R2, G1R2, ...]
   // so position i belongs to group i % numGroups. Tag each seed then pair cross-group.
@@ -476,7 +489,8 @@ export async function buildAndSaveNextSwissRound(): Promise<{ error?: string; ok
   const teamIds = [...new Set(swissMatches.flatMap(m =>
     [m.home_team_id, m.away_team_id].filter(Boolean) as string[]
   ))];
-  const records = computeSwissRecords(swissMatches, teamIds);
+  const dqIds = await getDisqualifiedTeamIds();
+  const records = computeSwissRecords(swissMatches, teamIds).filter(r => !dqIds.has(r.teamId));
 
   const active = records.filter(r => r.wins < advanceWins && r.losses < eliminateLosses);
   if (active.length === 0) return { error: "Swiss stage is complete — no active teams." };
@@ -520,7 +534,8 @@ export async function buildAndSaveSEFromSwiss(): Promise<{ error?: string; ok?: 
   const teamIds = [...new Set(swissMatches.flatMap(m =>
     [m.home_team_id, m.away_team_id].filter(Boolean) as string[]
   ))];
-  const records = computeSwissRecords(swissMatches, teamIds);
+  const dqIds = await getDisqualifiedTeamIds();
+  const records = computeSwissRecords(swissMatches, teamIds).filter(r => !dqIds.has(r.teamId));
   const seeded = seedSwissQualifiers(records);
   if (seeded.length < 2) return { error: "Not enough Swiss qualifiers." };
 
@@ -690,14 +705,16 @@ export async function buildAndSaveSwissFromGroupsHybrid(): Promise<{ error?: str
   const pending = allGroupMatches.filter(m => m.status !== "completed");
   if (pending.length > 0) return { error: `${pending.length} group match${pending.length === 1 ? "" : "es"} still pending.` };
 
+  const dqIds = await getDisqualifiedTeamIds();
   const groupStandings = stages.map(stage =>
     computeGroupStandings(allGroupMatches.filter(m => m.stage === stage))
+      .filter(s => !dqIds.has(s.teamId))
   );
 
   // Take ranks 1-5 (top 5 per group), then skip the first numGroups entries (rank-1 teams = UB seeds)
   const qualified5 = seedGroupQualifiers(groupStandings, 5);
   const swissSeeds = qualified5.slice(numGroups); // ranks 2-5 only (16 teams for 4 groups)
-  if (swissSeeds.length !== 16) return { error: `Expected 16 Swiss seeds, got ${swissSeeds.length}.` };
+  if (swissSeeds.length < 16) return { error: "A disqualification reduced a group below its required qualifier count." };
 
   // After slicing out rank-1s, position i in swissSeeds still cycles groups with period numGroups.
   const seededWithGroup = swissSeeds.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
@@ -733,7 +750,8 @@ export async function buildAndSaveHybridFromSwiss(): Promise<{ error?: string; o
   const teamIds = [...new Set(swissMatches.flatMap(m =>
     [m.home_team_id, m.away_team_id].filter(Boolean) as string[]
   ))];
-  const records = computeSwissRecords(swissMatches, teamIds);
+  const dqIds = await getDisqualifiedTeamIds();
+  const records = computeSwissRecords(swissMatches, teamIds).filter(r => !dqIds.has(r.teamId));
   const lbSeeds = seedSwissQualifiers(records);
   if (lbSeeds.length < 8) return { error: `Expected 8 Swiss qualifiers, got ${lbSeeds.length}.` };
 
@@ -748,9 +766,10 @@ export async function buildAndSaveHybridFromSwiss(): Promise<{ error?: string; o
   if (!allGroupMatches?.length) return { error: "No group matches found." };
   const groupStandings = stages.map(stage =>
     computeGroupStandings(allGroupMatches.filter(m => m.stage === stage))
+      .filter(s => !dqIds.has(s.teamId))
   );
   const ubSeeds = seedGroupQualifiers(groupStandings, 1); // only rank-1 from each group
-  if (ubSeeds.length !== numGroups) return { error: `Expected ${numGroups} UB seeds, got ${ubSeeds.length}.` };
+  if (ubSeeds.length < numGroups) return { error: "A disqualification reduced a group below its required qualifier count." };
   if (ubSeeds.length !== 4) return { error: `Hybrid requires exactly 4 UB seeds (got ${ubSeeds.length}). Format requires 4 groups.` };
 
   // Pass Swiss match history so LB R1 avoids rematches from Swiss stage.
@@ -795,14 +814,16 @@ export async function buildAndSaveSwissFromGroupsHybrid8(): Promise<{ error?: st
   const pending = allGroupMatches.filter(m => m.status !== "completed");
   if (pending.length > 0) return { error: `${pending.length} group match${pending.length === 1 ? "" : "es"} still pending.` };
 
+  const dqIds = await getDisqualifiedTeamIds();
   const groupStandings = stages.map(stage =>
     computeGroupStandings(allGroupMatches.filter(m => m.stage === stage))
+      .filter(s => !dqIds.has(s.teamId))
   );
 
   // Take top 3 per group, skip 1sts (UB seeds) → only ranks 2-3 go to Swiss
   const qualified3 = seedGroupQualifiers(groupStandings, 3);
   const swissSeeds = qualified3.slice(numGroups); // skip first numGroups (rank-1 teams)
-  if (swissSeeds.length !== 8) return { error: `Expected 8 Swiss seeds, got ${swissSeeds.length}.` };
+  if (swissSeeds.length < 8) return { error: "A disqualification reduced a group below its required qualifier count." };
 
   const seededWithGroup = swissSeeds.map((t, i) => ({ id: t.id, groupIdx: i % numGroups }));
   const pairs = pairCrossGroupR1(seededWithGroup);
@@ -837,7 +858,8 @@ export async function buildAndSaveHybrid8FromSwiss(): Promise<{ error?: string; 
   const teamIds = [...new Set(swissMatches.flatMap(m =>
     [m.home_team_id, m.away_team_id].filter(Boolean) as string[]
   ))];
-  const records = computeSwissRecords(swissMatches, teamIds);
+  const dqIds = await getDisqualifiedTeamIds();
+  const records = computeSwissRecords(swissMatches, teamIds).filter(r => !dqIds.has(r.teamId));
   const lbSeeds = seedSwissQualifiers(records, SWISS8_ADVANCE_WINS);
   if (lbSeeds.length < 4) return { error: `Expected 4 Swiss qualifiers, got ${lbSeeds.length}.` };
 
@@ -852,9 +874,10 @@ export async function buildAndSaveHybrid8FromSwiss(): Promise<{ error?: string; 
   if (!allGroupMatches?.length) return { error: "No group matches found." };
   const groupStandings = stages.map(stage =>
     computeGroupStandings(allGroupMatches.filter(m => m.stage === stage))
+      .filter(s => !dqIds.has(s.teamId))
   );
   const ubSeeds = seedGroupQualifiers(groupStandings, 1);
-  if (ubSeeds.length !== 4) return { error: `Expected 4 UB seeds (group 1sts), got ${ubSeeds.length}.` };
+  if (ubSeeds.length < 4) return { error: "A disqualification reduced a group below its required qualifier count." };
 
   const inserts = generateHybrid8MatchInserts(ubSeeds, lbSeeds.slice(0, 4));
 

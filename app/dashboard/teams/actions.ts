@@ -8,6 +8,7 @@ import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { editRole, addRole, addRoleById, removeRoleById, removeRole } from "@/app/lib/discord-api";
 import { validateImageUpload } from "@/app/lib/uploads";
+import { applyPlayerRVChangeToTeamRating, execDisqualifyTeam } from "@/app/lib/discord-bot";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -90,45 +91,6 @@ export async function updateTeamInfo(formData: FormData) {
   return { success: true };
 }
 
-export async function deleteTeam(teamId: string) {
-  const session = await getSession();
-  if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
-
-  // Only the last numbered team slot can be deleted — use the Team Slots panel in admin.
-  const { data: teams } = await supabaseAdmin
-    .from("teams").select("id, slot_number, discord_role_id").not("slot_number", "is", null);
-  const numbered = (teams ?? [])
-    .filter((t): t is typeof t & { slot_number: number } => typeof t.slot_number === "number")
-    .sort((a, b) => b.slot_number - a.slot_number);
-
-  const lastId = numbered[0]?.id;
-  if (teamId !== lastId) return { error: "Only the last team slot can be deleted. Use the Team Slots panel." };
-
-  const team = numbered[0];
-
-  const { data: members } = await supabaseAdmin
-    .from("players")
-    .select("discord_id, is_captain")
-    .eq("team_id", teamId);
-
-  await supabaseAdmin.from("players")
-    .update({ team_id: null, is_captain: false })
-    .eq("team_id", teamId);
-
-  const { error } = await supabaseAdmin.from("teams").delete().eq("id", teamId);
-  if (error) return { error: error.message };
-
-  for (const m of members ?? []) {
-    if (!m.discord_id) continue;
-    if (team?.discord_role_id) removeRoleById(m.discord_id, team.discord_role_id).catch(() => {});
-    if (m.is_captain) removeRole(m.discord_id, "Captain").catch(() => {});
-  }
-
-  revalidatePath("/dashboard/teams");
-  revalidatePath("/dashboard/my-team");
-  return { success: true };
-}
-
 async function assignCaptainIfMissing(teamId: string): Promise<void> {
   const { data: members } = await supabaseAdmin
     .from("players")
@@ -148,75 +110,126 @@ async function assignCaptainIfMissing(teamId: string): Promise<void> {
   if (best.discord_id) addRole(best.discord_id, "Captain").catch(() => {});
 }
 
-export async function removePlayerFromTeam(playerId: string) {
+type PlayerRow = {
+  id: string;
+  discord_id: string | null;
+  team_id: string | null;
+  is_captain: boolean | null;
+  peak_2v2: string;
+  current_2v2: string;
+  peak_3v3: string;
+  current_3v3: string;
+};
+
+const PLAYER_RV_SELECT = "id, discord_id, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3";
+
+export async function swapPlayersBetweenTeams(playerAId: string, playerBId: string) {
   const session = await getSession();
   if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
+  if (playerAId === playerBId) return { error: "Cannot swap a player with themself." };
 
-  const { data: player } = await supabaseAdmin
-    .from("players")
-    .select("discord_id, team_id, is_captain")
-    .eq("id", playerId)
-    .single();
+  const [{ data: playerA }, { data: playerB }] = await Promise.all([
+    supabaseAdmin.from("players").select(PLAYER_RV_SELECT).eq("id", playerAId).single(),
+    supabaseAdmin.from("players").select(PLAYER_RV_SELECT).eq("id", playerBId).single(),
+  ]);
+  if (!playerA?.team_id || !playerB?.team_id) return { error: "Both players must be on a team to swap." };
+  if (playerA.team_id === playerB.team_id) return { error: "Players are already on the same team." };
 
-  const { error } = await supabaseAdmin.from("players")
-    .update({ team_id: null, is_captain: false })
-    .eq("id", playerId);
-  if (error) return { error: error.message };
+  const a = playerA as PlayerRow;
+  const b = playerB as PlayerRow;
+  const teamAId = a.team_id as string;
+  const teamBId = b.team_id as string;
+  const rvFields = (p: PlayerRow) => ({
+    peak_2v2: p.peak_2v2, current_2v2: p.current_2v2, peak_3v3: p.peak_3v3, current_3v3: p.current_3v3,
+  });
 
-  if (player?.discord_id && player.team_id) {
-    const { data: team } = await supabaseAdmin
-      .from("teams").select("discord_role_id").eq("id", player.team_id).single();
-    if (team?.discord_role_id)
-      await removeRoleById(player.discord_id, team.discord_role_id);
-    if (player.is_captain)
-      await removeRole(player.discord_id, "Captain");
+  await Promise.all([
+    applyPlayerRVChangeToTeamRating(a.id, teamAId, rvFields(a), rvFields(b)).catch(() => {}),
+    applyPlayerRVChangeToTeamRating(b.id, teamBId, rvFields(b), rvFields(a)).catch(() => {}),
+  ]);
+
+  const [{ error: errA }, { error: errB }] = await Promise.all([
+    supabaseAdmin.from("players").update({ team_id: teamBId, is_captain: false }).eq("id", a.id),
+    supabaseAdmin.from("players").update({ team_id: teamAId, is_captain: false }).eq("id", b.id),
+  ]);
+  if (errA || errB) return { error: "Failed to swap players. Please try again." };
+
+  const [{ data: teamA }, { data: teamB }] = await Promise.all([
+    supabaseAdmin.from("teams").select("discord_role_id").eq("id", teamAId).single(),
+    supabaseAdmin.from("teams").select("discord_role_id").eq("id", teamBId).single(),
+  ]);
+
+  if (a.discord_id) {
+    if (teamAId && teamA?.discord_role_id) removeRoleById(a.discord_id, teamA.discord_role_id).catch(() => {});
+    if (a.is_captain) removeRole(a.discord_id, "Captain").catch(() => {});
+    if (teamB?.discord_role_id) addRoleById(a.discord_id, teamB.discord_role_id).catch(() => {});
   }
+  if (b.discord_id) {
+    if (teamBId && teamB?.discord_role_id) removeRoleById(b.discord_id, teamB.discord_role_id).catch(() => {});
+    if (b.is_captain) removeRole(b.discord_id, "Captain").catch(() => {});
+    if (teamA?.discord_role_id) addRoleById(b.discord_id, teamA.discord_role_id).catch(() => {});
+  }
+
+  await Promise.all([assignCaptainIfMissing(teamAId), assignCaptainIfMissing(teamBId)]);
 
   revalidatePath("/dashboard/teams");
   revalidatePath("/dashboard/my-team");
   return { success: true };
 }
 
-export async function movePlayerToTeam(playerId: string, newTeamId: string) {
+export async function swapRosterPlayerWithBenchPlayer(rosterPlayerId: string, benchPlayerId: string, teamId: string) {
   const session = await getSession();
   if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
+  if (rosterPlayerId === benchPlayerId) return { error: "Cannot swap a player with themself." };
 
-  const { data: player } = await supabaseAdmin
-    .from("players")
-    .select("discord_id, team_id, is_captain")
-    .eq("id", playerId)
-    .single();
+  const [{ data: rosterPlayer }, { data: benchPlayer }] = await Promise.all([
+    supabaseAdmin.from("players").select(PLAYER_RV_SELECT).eq("id", rosterPlayerId).single(),
+    supabaseAdmin.from("players").select(PLAYER_RV_SELECT).eq("id", benchPlayerId).single(),
+  ]);
+  if (rosterPlayer?.team_id !== teamId) return { error: "Player is not on this team." };
+  if (benchPlayer?.team_id !== null) return { error: "That player is already on a team." };
 
-  const { error } = await supabaseAdmin.from("players")
-    .update({ team_id: newTeamId, is_captain: false })
-    .eq("id", playerId);
-  if (error) return { error: error.message };
+  const roster = rosterPlayer as PlayerRow;
+  const bench = benchPlayer as PlayerRow;
+  const rvFields = (p: PlayerRow) => ({
+    peak_2v2: p.peak_2v2, current_2v2: p.current_2v2, peak_3v3: p.peak_3v3, current_3v3: p.current_3v3,
+  });
 
-  if (player?.discord_id) {
-    const [{ data: oldTeam }, { data: newTeam }] = await Promise.all([
-      player.team_id
-        ? supabaseAdmin.from("teams").select("discord_role_id").eq("id", player.team_id).single()
-        : Promise.resolve({ data: null }),
-      supabaseAdmin.from("teams").select("discord_role_id").eq("id", newTeamId).single(),
-    ]);
-    if (oldTeam?.discord_role_id)
-      await removeRoleById(player.discord_id, oldTeam.discord_role_id);
-    if (player.is_captain)
-      await removeRole(player.discord_id, "Captain");
-    if (newTeam?.discord_role_id)
-      await addRoleById(player.discord_id, newTeam.discord_role_id);
+  await applyPlayerRVChangeToTeamRating(roster.id, teamId, rvFields(roster), rvFields(bench)).catch(() => {});
+
+  const [{ error: errOut }, { error: errIn }] = await Promise.all([
+    supabaseAdmin.from("players").update({ team_id: null, is_captain: false }).eq("id", roster.id),
+    supabaseAdmin.from("players").update({ team_id: teamId, is_captain: false }).eq("id", bench.id),
+  ]);
+  if (errOut || errIn) return { error: "Failed to swap players. Please try again." };
+
+  const { data: team } = await supabaseAdmin.from("teams").select("discord_role_id").eq("id", teamId).single();
+
+  if (roster.discord_id) {
+    if (team?.discord_role_id) removeRoleById(roster.discord_id, team.discord_role_id).catch(() => {});
+    if (roster.is_captain) removeRole(roster.discord_id, "Captain").catch(() => {});
   }
+  if (bench.discord_id && team?.discord_role_id) addRoleById(bench.discord_id, team.discord_role_id).catch(() => {});
 
-  await assignCaptainIfMissing(newTeamId);
+  await assignCaptainIfMissing(teamId);
 
   revalidatePath("/dashboard/teams");
   revalidatePath("/dashboard/my-team");
   return { success: true };
 }
 
-export async function addPlayerToTeam(playerId: string, teamId: string) {
-  // Delegates to movePlayerToTeam which handles Discord roles and captain assignment.
-  return movePlayerToTeam(playerId, teamId);
+export async function disqualifyTeam(teamId: string) {
+  const session = await getSession();
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
+
+  const result = await execDisqualifyTeam(teamId);
+  if (!result.ok) return { error: result.message };
+
+  revalidatePath("/dashboard/teams");
+  revalidatePath("/dashboard/season");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/my-team");
+  return { success: true };
 }
 
 export async function toggleTeamLock(teamId: string) {
