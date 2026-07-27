@@ -11,7 +11,7 @@ import { MatchOverviewGrid, type OverviewMatch } from "./overview-grid";
 
 function toAmericanOdds(prob: number): string {
   const p = Math.max(0.01, Math.min(0.99, prob));
-  const vp = p / (1 - HOUSE_VIG);
+  const vp = Math.min(0.99, p / (1 - HOUSE_VIG));
   if (vp >= 0.5) {
     const raw = Math.round((vp / (1 - vp)) * 100);
     return `-${Math.floor(raw / 10) * 10}`;
