@@ -150,6 +150,19 @@ export async function banPlayer(
     .eq("id", accountId);
   if (error) return { error: error.message };
 
+  // Mirror onto the Tier 3 row (no-op if this account has no players row) —
+  // several call sites that predate the tier model still filter directly on
+  // players.status ("approved") rather than joining accounts: pushToAllApproved/
+  // pushToTeam/pushToEnteredDraft in app/lib/push.ts, computeTopStats in
+  // app/lib/game-stats.ts, and the champion-roster check in
+  // app/dashboard/podium/page.tsx. Without this they'd keep treating a banned
+  // player as an approved one. Requires players_status_check to allow 'banned'
+  // (see scripts/players-banned-status-migration.sql).
+  await supabaseAdmin
+    .from("players")
+    .update({ status: "banned", updated_at: new Date().toISOString() })
+    .eq("account_id", accountId);
+
   if (account?.discord_id && !account.discord_id.startsWith("test_")) {
     const discordId = account.discord_id;
     const teamId = player?.team_id ?? null;
