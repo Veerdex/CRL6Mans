@@ -382,7 +382,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // desktop header/footer bars differ.
   if (navLayout === "topbar") {
     return (
-      <div className="flex flex-col h-screen text-white relative z-[1]">
+      <div className="flex flex-col h-dvh text-white relative z-[1]">
         <ServiceWorkerRegistrar />
 
         {/* Top bar — desktop only */}
@@ -438,7 +438,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   return (
-    <div className="flex h-screen text-white relative z-[1]">
+    <div className="flex h-dvh text-white relative z-[1]">
       <ServiceWorkerRegistrar />
       <aside className="hidden md:flex w-56 flex-col bg-zinc-900 border-r border-zinc-800">
         <div className="px-4 py-5 border-b border-zinc-800">

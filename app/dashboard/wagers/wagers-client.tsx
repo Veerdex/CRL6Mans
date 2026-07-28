@@ -546,7 +546,7 @@ export function WagersClient({
       </div>
 
       {showOverview ? (
-        <div className="flex-1 min-h-0 overflow-y-auto bg-zinc-900">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain bg-zinc-900">
           <MatchOverviewGrid
             matches={gridMatches}
             teams={teams}
@@ -601,7 +601,7 @@ export function WagersClient({
           <div className="px-4 py-2.5 border-b border-zinc-800">
             <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Matches</p>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto overscroll-contain">
             {matches.map((m) => {
               const isSelected = m.id === selectedMatchId;
               const home = teams[m.home_team_id];
@@ -674,7 +674,7 @@ export function WagersClient({
         </div>
 
         {/* ── Center: Market view or Leaderboard ── */}
-        <div className={`flex-1 min-w-0 overflow-y-auto bg-zinc-900 ${mobileTab === "market" ? "block" : "hidden"} lg:block`}>
+        <div className={`flex-1 min-w-0 overflow-y-auto overscroll-contain bg-zinc-900 ${mobileTab === "market" ? "block" : "hidden"} lg:block`}>
           {showLeaderboard ? (
             <LeaderboardView
               entries={leaderboard}
@@ -1001,7 +1001,7 @@ function BetSlip({
       </div>
 
       {/* Legs */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto overscroll-contain min-h-0">
         {allSelections.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full px-6 text-center gap-2">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zinc-700">
