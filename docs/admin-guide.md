@@ -96,7 +96,7 @@ Day-to-day league running rarely needs Discord commands — the dashboard drives
 
 | Command | When to use it |
 |---|---|
-| `/syncroles` | Discord roles look wrong (stale team role, missing Registered role) — reconciles all Discord roles to the database. |
+| `/syncroles` (Director+) | Discord roles look wrong (stale team role, missing Registered role) — reconciles all Discord roles to the database. |
 | `/diagroles` | A specific player's roles aren't syncing — shows why. |
 | `/admin checklist` | Setting up a new server or unsure what's still misconfigured. |
 

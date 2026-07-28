@@ -2160,7 +2160,12 @@ export async function processExpiredScoreConfirmations(): Promise<void> {
 // removes stale/incorrect ones (e.g. a player who switched teams, left a team, or
 // rejoined the server). Every approved player is processed, not just rostered ones,
 // so free agents get leftover team/Drafted/Captain roles cleared.
-export async function execSyncRoles(): Promise<{ assigned: number; roleNames: string[]; warnings: string[] }> {
+export async function execSyncRoles(): Promise<{
+  assigned: number;
+  roleNames: string[];
+  roleIds: { label: string; id: string }[];
+  warnings: string[];
+}> {
   const warnings: string[] = [];
 
   const [{ data: teams }, { data: approved }, { data: allPlayers }, { data: settings }] = await Promise.all([
@@ -2243,19 +2248,28 @@ export async function execSyncRoles(): Promise<{ assigned: number; roleNames: st
     ...(registeredRoleId ? ["Registered"] : []),
     "Drafted", "Captain", ...(teams ?? []).map(t => t.name),
   ];
-  return { assigned, roleNames, warnings };
+  const roleIds = [
+    ...(registeredRoleId ? [{ label: "Registered", id: registeredRoleId }] : []),
+    ...(roleMap["Drafted"] ? [{ label: "Drafted", id: roleMap["Drafted"] }] : []),
+    ...(roleMap["Captain"] ? [{ label: "Captain", id: roleMap["Captain"] }] : []),
+    ...Object.entries(teamById)
+      .filter(([, t]) => t.roleId)
+      .map(([, t]) => ({ label: t.name, id: t.roleId as string })),
+  ];
+  return { assigned, roleNames, roleIds, warnings };
 }
 
 async function syncRoles(userId: string) {
-  const denied = await adminGuard(userId);
+  const denied = await directorGuard(userId);
   if (denied) return denied;
 
   const { data: teams } = await supabaseAdmin.from("teams").select("id").limit(1);
   if (!teams?.length) return ephemeralReply("❌ No teams found in the database.");
 
-  const { assigned, roleNames, warnings } = await execSyncRoles();
+  const { assigned, roleNames, roleIds, warnings } = await execSyncRoles();
   const lines = [
-    `• Roles ensured: ${roleNames.join(", ")}`,
+    `• Roles reconciled: ${roleNames.join(", ")}`,
+    `• Role IDs used: ${roleIds.length ? roleIds.map(r => `${r.label} <@&${r.id}>`).join(", ") : "none (falling back to name lookup)"}`,
     `• Players updated: **${assigned}**`,
     ...warnings.map(w => `⚠️ ${w}`),
   ];

@@ -80,13 +80,13 @@ Sets the channel linked in match messages as the rulebook. Run this command insi
 
 ### Role Management — [Staff]
 
-#### `/syncroles`
+#### `/syncroles` — [Director]
 Creates missing Discord roles and syncs them to all players based on current DB state. Ensures:
 - `Registered` — given to all approved players, stripped from unapproved
 - `Drafted` and `Captain` — assigned to active team members
 - Team roles — assigned based on team membership
 
-Run this after making staff role or registration changes to reconcile Discord with the database.
+Run this after making staff role or registration changes to reconcile Discord with the database. The reply lists exactly which role IDs it reconciled (Registered, Drafted, Captain, each team) and how many players were updated.
 
 #### `/diagroles`
 Diagnoses why your Discord roles may not be assigned correctly.
