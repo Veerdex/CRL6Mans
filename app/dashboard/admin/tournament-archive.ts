@@ -119,12 +119,30 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
       }),
     );
 
+  // Derived from completed matches rather than the teams.wins/losses columns —
+  // mirrors season/page.tsx and completeSeason's own finalStandings, since those
+  // columns aren't the source of truth the live standings page relies on.
+  const records: Record<string, { wins: number; losses: number }> = {};
+  for (const m of allMatches ?? []) {
+    if (m.status !== "completed" || m.home_score === null || m.away_score === null) continue;
+    if (!m.home_team_id || !m.away_team_id) continue;
+    records[m.home_team_id] ??= { wins: 0, losses: 0 };
+    records[m.away_team_id] ??= { wins: 0, losses: 0 };
+    if (m.home_score > m.away_score) {
+      records[m.home_team_id].wins++;
+      records[m.away_team_id].losses++;
+    } else if (m.away_score > m.home_score) {
+      records[m.away_team_id].wins++;
+      records[m.home_team_id].losses++;
+    }
+  }
+
   const teams: TournamentArchive["teams"] = participatingTeams.map((t) => ({
     id: t.id,
     name: t.name,
     logoUrl: (t.logo_url as string | null) ?? null,
-    wins: t.wins ?? 0,
-    losses: t.losses ?? 0,
+    wins: records[t.id]?.wins ?? 0,
+    losses: records[t.id]?.losses ?? 0,
     roster: (allPlayers ?? [])
       .filter((p) => p.team_id === t.id)
       .map((p) => ({
