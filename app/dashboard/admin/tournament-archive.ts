@@ -6,8 +6,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { calculatePlayerRating } from "@/app/lib/rating";
-
-export const ARCHIVE_SCHEMA_VERSION = 1 as const;
+import { ARCHIVE_SCHEMA_VERSION } from "./archive-schema";
 
 export type TournamentArchive = {
   schemaVersion: 1;

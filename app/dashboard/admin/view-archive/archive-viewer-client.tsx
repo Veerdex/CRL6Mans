@@ -19,7 +19,7 @@ import { StatsTable } from "@/app/dashboard/stats/stats-table";
 import { aggregatePlayerGameStats, type StatAggregationInput } from "@/app/lib/player-stat-aggregation";
 import { LocalTime } from "@/app/dashboard/local-time";
 import type { TournamentArchive } from "../tournament-archive";
-import { ARCHIVE_SCHEMA_VERSION } from "../tournament-archive";
+import { ARCHIVE_SCHEMA_VERSION } from "../archive-schema";
 import { toDbMatch, toTeamMap, toHybridTeamMap, toGroupMatches, buildArchiveTeamTitles } from "./archive-mappers";
 import { ArchiveRosterGrid } from "./archive-roster-grid";
 
