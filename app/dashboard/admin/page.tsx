@@ -35,6 +35,8 @@ import { canonicalStage, stageName, STAGE_ORDER, expectedStageRounds, type Round
 import { WagersBalanceTable, type BalanceRow } from "./wagers-balance-table";
 import { WagersBulkForm } from "./wagers-bulk-form";
 import { WagersResetForm } from "./wagers-reset-form";
+import { WagersModeToggle } from "./wagers-mode-toggle";
+import type { BettingMode } from "@/app/dashboard/wagers/actions";
 import { AnnouncementManager } from "./announcement-manager";
 import { GameLeaderboardPanel } from "./game-leaderboard-panel";
 import { getAllGameScores } from "../game/actions";
@@ -67,7 +69,7 @@ export default async function AdminPage() {
 
   const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }] = await Promise.all([
     getAllPendingPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending").maybeSingle(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode").maybeSingle(),
     supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
@@ -299,6 +301,8 @@ export default async function AdminPage() {
     displayName: a.display_name,
     balance: a.crl_coins ?? 0,
   }));
+
+  const globalBettingMode: BettingMode = settings?.betting_mode === "pool" ? "pool" : "fixed";
 
   const gameScores = await getAllGameScores();
 
@@ -1186,6 +1190,7 @@ export default async function AdminPage() {
       >
         <div className="space-y-6">
           <WagersBalanceTable rows={wagerBalanceRows} />
+          {userIsDirector && <WagersModeToggle currentMode={globalBettingMode} />}
           {userIsDirector && <WagersBulkForm approvedCount={wagerBalanceRows.length} />}
           {userIsDirector && <WagersResetForm approvedCount={wagerBalanceRows.length} />}
           <div>

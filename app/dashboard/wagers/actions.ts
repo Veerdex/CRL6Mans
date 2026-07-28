@@ -13,22 +13,6 @@ import {
   payoutMultiplier,
 } from "./prediction";
 
-// Testing-only: zero out every eligible account's Westside Wages (everyone but
-// rejected — unregistered/pending/approved can all wager). Guarded by both
-// director status and the testing_mode cookie so it can't run in a live event.
-export async function resetAllWestsideWages(): Promise<{ ok?: boolean; error?: string }> {
-  const cookieStore = await cookies();
-  const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId) return { error: "Not authenticated" };
-  if (!(await isDirectorVerified(session.userId))) return { error: "Not authorized" };
-  if (cookieStore.get("testing_mode")?.value !== "1") return { error: "Testing mode is not enabled." };
-
-  await supabaseAdmin.from("accounts").update({ crl_coins: 0 }).in("status", ["unregistered", "pending", "approved"]);
-
-  revalidatePath("/dashboard/wagers");
-  return { ok: true };
-}
-
 export type BettingMode = "fixed" | "pool";
 
 // League-wide default for newly-opened matches. Already-locked matches
@@ -42,6 +26,7 @@ export async function setBettingMode(mode: BettingMode): Promise<{ ok?: boolean;
   await supabaseAdmin.from("league_settings").update({ betting_mode: mode }).not("id", "is", null);
 
   revalidatePath("/dashboard/wagers");
+  revalidatePath("/dashboard/admin");
   return { ok: true };
 }
 

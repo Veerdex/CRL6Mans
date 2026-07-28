@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { placeBets, placeParlayBet, resetAllWestsideWages, setBettingMode, type BetInput, type ParlayLegInput, type BettingMode } from "./actions";
+import { placeBets, placeParlayBet, type BetInput, type ParlayLegInput, type BettingMode } from "./actions";
 import { getOULines, getTotalSlots, HOUSE_VIG, type MatchPrediction } from "./prediction";
 import { LeaderboardView, type LeaderboardEntry } from "./leaderboard-view";
 import { MatchOverviewGrid, type OverviewMatch } from "./overview-grid";
@@ -225,8 +224,6 @@ export function WagersClient({
   gridMatches,
   gridWagerTotals,
   betTypeTotals,
-  globalBettingMode,
-  isDirector,
   myWagers: initialWagers,
   myParlays,
   tickerWagers: _tickerWagers,
@@ -234,7 +231,6 @@ export function WagersClient({
   coinBalance,
   currentUsername,
   leaderboard,
-  testingMode,
 }: {
   eventName: string;
   currentStage: string;
@@ -245,8 +241,6 @@ export function WagersClient({
   gridMatches: OverviewMatch[];
   gridWagerTotals: Record<string, { home: number; away: number }>;
   betTypeTotals: Record<string, Record<string, number>>;
-  globalBettingMode: BettingMode;
-  isDirector: boolean;
   myWagers: MyWager[];
   myParlays: MyParlay[];
   tickerWagers: TickerWager[];
@@ -254,9 +248,7 @@ export function WagersClient({
   coinBalance: number;
   currentUsername: string;
   leaderboard: LeaderboardEntry[];
-  testingMode: boolean;
 }) {
-  const router = useRouter();
   const [selectedMatchId, setSelectedMatchId] = useState(defaultMatchId || matches[0]?.id || "");
   const [straightSelections, setStraightSelections] = useState<Record<string, { betType: string; amount: string }>>({});
   const [parlaySelections, setParlaySelections] = useState<Record<string, { betType: string; amount: string }>>({});
@@ -279,39 +271,6 @@ export function WagersClient({
   const [leaderboardSearch, setLeaderboardSearch] = useState("");
   // Mobile: only one pane is shown at a time (3 columns is desktop-only).
   const [mobileTab, setMobileTab] = useState<"matches" | "market" | "slip">("matches");
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [resetting, setResetting] = useState(false);
-  const [localBettingMode, setLocalBettingMode] = useState<BettingMode>(globalBettingMode);
-  const [togglingMode, setTogglingMode] = useState(false);
-
-  async function handleToggleBettingMode() {
-    const next: BettingMode = localBettingMode === "pool" ? "fixed" : "pool";
-    setTogglingMode(true);
-    try {
-      const res = await setBettingMode(next);
-      if (!res.error) {
-        setLocalBettingMode(next);
-        router.refresh();
-      }
-    } finally {
-      setTogglingMode(false);
-    }
-  }
-
-  async function handleResetWages() {
-    setResetting(true);
-    try {
-      const res = await resetAllWestsideWages();
-      if (!res.error) {
-        setLocalBalance(0);
-        setShowResetConfirm(false);
-        router.refresh();
-      }
-    } finally {
-      setResetting(false);
-    }
-  }
-
   const selectedMatch = matches.find((m) => m.id === selectedMatchId) ?? matches[0];
 
   useEffect(() => { setError(null); setSuccessMsg(null); }, [selectedMatchId]);
@@ -578,30 +537,6 @@ export function WagersClient({
               <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
             </svg>
           </button>
-          {isDirector && (
-            <button
-              onClick={handleToggleBettingMode}
-              disabled={togglingMode}
-              title="Toggle the league-wide betting mode for newly-opened matches. Matches with bets already placed keep whichever mode they opened in."
-              className={[
-                "h-8 px-2.5 rounded-lg border text-xs font-semibold transition-colors disabled:opacity-50",
-                localBettingMode === "pool"
-                  ? "bg-amber-600/20 border-amber-500 text-amber-300"
-                  : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500",
-              ].join(" ")}
-            >
-              {togglingMode ? "…" : localBettingMode === "pool" ? "Pool Mode" : "Fixed Odds"}
-            </button>
-          )}
-          {testingMode && (
-            <button
-              onClick={() => setShowResetConfirm(true)}
-              title="Testing: reset everyone's Westside Wages to 0"
-              className="h-8 px-2.5 rounded-lg border border-red-700/60 bg-red-900/30 text-red-300 hover:bg-red-900/50 text-xs font-semibold transition-colors"
-            >
-              Reset Wages
-            </button>
-          )}
           <div className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5">
             <span className="text-sm">🪙</span>
             <span className="text-sm font-semibold text-amber-400">{localBalance.toLocaleString()}</span>
@@ -609,36 +544,6 @@ export function WagersClient({
           </div>
         </div>
       </div>
-
-      {/* Testing-only confirm modal */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={resetting ? undefined : () => setShowResetConfirm(false)}>
-          <div className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="space-y-1.5">
-              <p className="text-lg font-bold text-red-400">Reset all Westside Wages?</p>
-              <p className="text-sm text-zinc-400">
-                This sets <span className="font-semibold text-white">every approved and pending player&apos;s</span> balance to 🪙 0. This can&apos;t be undone.
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={handleResetWages}
-                disabled={resetting}
-                className="flex-1 px-4 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
-              >
-                {resetting ? "Resetting…" : "Yes, reset to 0"}
-              </button>
-              <button
-                onClick={() => setShowResetConfirm(false)}
-                disabled={resetting}
-                className="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showOverview ? (
         <div className="flex-1 min-h-0 overflow-y-auto bg-zinc-900">

@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
-import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 import { calculatePlayerRating } from "@/app/lib/rating";
@@ -52,9 +51,6 @@ export default async function WagersPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
-
-  const isDirector = await isDirectorVerified(session.userId);
-  const testingMode = cookieStore.get("testing_mode")?.value === "1" && isDirector;
 
   // crl_coins/status/username all live on accounts (Tier 1) now, so unregistered
   // and pending guests show up here too — only rejected accounts are excluded,
@@ -409,8 +405,6 @@ export default async function WagersPage() {
         gridMatches={gridMatches}
         gridWagerTotals={gridWagerTotals}
         betTypeTotals={betTypeTotals}
-        globalBettingMode={globalBettingMode}
-        isDirector={isDirector}
         myWagers={(myWagersData ?? []).map((w) => ({
           match_id: w.match_id,
           bet_type: w.bet_type,
@@ -431,7 +425,6 @@ export default async function WagersPage() {
         tickerPlayers={tickerPlayers}
         coinBalance={coinBalance}
         currentUsername={currentUsername}
-        testingMode={testingMode}
         leaderboard={leaderboard}
       />
     </div>
