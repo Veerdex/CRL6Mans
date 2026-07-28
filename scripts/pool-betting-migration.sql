@@ -1,8 +1,10 @@
 -- Pari-mutuel ("pool") betting mode alongside the existing fixed-odds mode.
 -- Directors toggle the league-wide default here; each match locks in whichever
--- mode was live at the moment its first bet lands (see placeBets in
--- app/dashboard/wagers/actions.ts), so in-flight matches never change mode
--- retroactively when the toggle is flipped later.
+-- mode was live the moment it got both teams assigned (see
+-- freezeUnfrozenMatchPredictions in app/lib/match-predictions.ts, with a
+-- first-bet backstop in placeBets in app/dashboard/wagers/actions.ts for the
+-- narrow window before that cron runs), so in-flight matches never change
+-- mode retroactively when the toggle is flipped later.
 alter table league_settings add column if not exists betting_mode text not null default 'fixed';
 alter table matches add column if not exists betting_mode text;
 

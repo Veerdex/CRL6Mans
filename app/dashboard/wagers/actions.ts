@@ -139,10 +139,12 @@ async function getGlobalBettingMode(): Promise<BettingMode> {
   return data?.betting_mode === "pool" ? "pool" : "fixed";
 }
 
-// Locks a match's betting mode to whatever the global default is right now,
-// the first time anyone bets on it — a conditional write so concurrent
-// first-bets can't race, and later toggle flips don't affect matches that
-// already have action on them.
+// Backstop lock: matches are normally locked to a betting mode already by
+// freezeUnfrozenMatchPredictions (app/lib/match-predictions.ts), the moment
+// they get both teams assigned. This only does anything in the narrow window
+// before that cron has run — a conditional write so concurrent first-bets
+// can't race, and later toggle flips don't affect matches that already have
+// action on them.
 async function lockMatchBettingMode(matchId: string, currentMode: string | null, globalMode: BettingMode): Promise<BettingMode> {
   if (currentMode === "pool" || currentMode === "fixed") return currentMode;
   await supabaseAdmin.from("matches").update({ betting_mode: globalMode }).eq("id", matchId).is("betting_mode", null);

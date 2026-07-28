@@ -21,32 +21,46 @@ function playerRatingOf(p: {
   });
 }
 
-// Freezes the win% shown in the wagers "all matches" grid the moment both teams
-// are known for a match — run from the per-minute tournament-scheduler cron so
-// it happens shortly after match creation, well before the match is ever played.
-// This is deliberately NOT run from the wagers page render path: freezing on
-// first view would capture whatever the team rating happens to be at that
-// moment, which drifts to a post-game value for matches nobody viewed the grid
-// for until after they were reported.
+// Freezes the win% shown in the wagers "all matches" grid, and locks in the
+// match's betting mode, the moment both teams are known for a match — run
+// from the per-minute tournament-scheduler cron so it happens shortly after
+// match creation, well before the match is ever played. This is deliberately
+// NOT run from the wagers page render path: freezing predictions on first
+// view would capture whatever the team rating happens to be at that moment,
+// which drifts to a post-game value for matches nobody viewed the grid for
+// until after they were reported. Locking betting_mode here (rather than
+// only on first bet, in placeBets' lockMatchBettingMode) is what keeps a
+// director's later mode toggle from flipping matches that are already
+// visible/bettable but haven't had a bet placed yet.
 export async function freezeUnfrozenMatchPredictions(): Promise<void> {
   const [{ data: ls }, { data: allMatches }] = await Promise.all([
-    supabaseAdmin.from("league_settings").select("season_format").single(),
+    supabaseAdmin.from("league_settings").select("season_format, betting_mode").single(),
     supabaseAdmin
       .from("matches")
-      .select("id, stage, round, status, home_team_id, away_team_id, predicted_home_win_prob, predicted_away_win_prob")
+      .select("id, stage, round, status, home_team_id, away_team_id, predicted_home_win_prob, predicted_away_win_prob, betting_mode")
       .not("home_team_id", "is", null)
       .not("away_team_id", "is", null),
   ]);
+
+  const globalBettingMode: "fixed" | "pool" = ls?.betting_mode === "pool" ? "pool" : "fixed";
 
   // A completed match's rating already reflects that match's own result, so
   // freezing it here would capture a post-game value, not the pre-game one the
   // grid is supposed to show. Only matches still in progress have a legitimate
   // "before" rating to freeze; already-completed matches are backfilled
-  // separately (see scripts/backfill-match-predictions.mjs).
-  const unfrozen = (allMatches ?? []).filter(
+  // separately (see scripts/backfill-match-predictions.mjs). Completed matches
+  // still get their betting_mode locked, if somehow missing, since that has no
+  // such drift concern.
+  const needsWork = (allMatches ?? []).filter(
+    (m) =>
+      m.betting_mode == null ||
+      (m.status !== "completed" && (m.predicted_home_win_prob == null || m.predicted_away_win_prob == null)),
+  );
+  if (!needsWork.length) return;
+
+  const unfrozen = needsWork.filter(
     (m) => m.status !== "completed" && (m.predicted_home_win_prob == null || m.predicted_away_win_prob == null),
   );
-  if (!unfrozen.length) return;
 
   const maxRoundByStage: Record<string, number> = {};
   for (const m of allMatches ?? []) {
@@ -87,23 +101,26 @@ export async function freezeUnfrozenMatchPredictions(): Promise<void> {
   }
 
   await Promise.all(
-    unfrozen.map((m) => {
-      const homeTeamId = m.home_team_id as string;
-      const awayTeamId = m.away_team_id as string;
-      const bestOf = bestOfForMatch(m);
-      const hRating = seasonRatings[homeTeamId];
-      const aRating = seasonRatings[awayTeamId];
-      const pred =
-        hRating != null && aRating != null
-          ? computeMatchPredictionFromRating(hRating, aRating, bestOf)
-          : computeMatchPrediction(ratingsByTeam[homeTeamId] ?? [], ratingsByTeam[awayTeamId] ?? [], bestOf);
-      return supabaseAdmin
-        .from("matches")
-        .update({
-          predicted_home_win_prob: pred.homeWinProb,
-          predicted_away_win_prob: pred.awayWinProb,
-        })
-        .eq("id", m.id);
+    needsWork.map((m) => {
+      const update: { betting_mode?: "fixed" | "pool"; predicted_home_win_prob?: number; predicted_away_win_prob?: number } = {};
+      if (m.betting_mode == null) update.betting_mode = globalBettingMode;
+
+      const needsPrediction = m.status !== "completed" && (m.predicted_home_win_prob == null || m.predicted_away_win_prob == null);
+      if (needsPrediction) {
+        const homeTeamId = m.home_team_id as string;
+        const awayTeamId = m.away_team_id as string;
+        const bestOf = bestOfForMatch(m);
+        const hRating = seasonRatings[homeTeamId];
+        const aRating = seasonRatings[awayTeamId];
+        const pred =
+          hRating != null && aRating != null
+            ? computeMatchPredictionFromRating(hRating, aRating, bestOf)
+            : computeMatchPrediction(ratingsByTeam[homeTeamId] ?? [], ratingsByTeam[awayTeamId] ?? [], bestOf);
+        update.predicted_home_win_prob = pred.homeWinProb;
+        update.predicted_away_win_prob = pred.awayWinProb;
+      }
+
+      return supabaseAdmin.from("matches").update(update).eq("id", m.id);
     }),
   );
 }
