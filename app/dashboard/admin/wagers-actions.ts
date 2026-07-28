@@ -117,3 +117,47 @@ export async function bulkAdjustAllBalances(
   revalidatePath("/dashboard/admin");
   return { ok: true, affected: updates.length };
 }
+
+const STARTING_BALANCE = 1000;
+
+// Sets every approved player's balance to the standard starting amount,
+// wiping out whatever they'd accumulated (grants, wins, losses, prior manual
+// adjustments) — for starting a season on an even footing rather than
+// carrying balances forward. Distinct from bulkAdjustAllBalances, which
+// applies a signed delta on top of each player's current balance instead of
+// overwriting it. Director+ only, same bar as bulkAdjustAllBalances.
+export async function resetAllBalancesToStart(
+  reason: string,
+): Promise<{ error?: string; ok?: boolean; affected?: number }> {
+  const adminId = await requireDirector();
+  if (!reason.trim()) return { error: "A reason is required." };
+
+  const { data: accounts } = await supabaseAdmin
+    .from("accounts")
+    .select("id, crl_coins")
+    .eq("status", "approved");
+  if (!accounts?.length) return { error: "No approved players found." };
+
+  const batchId = crypto.randomUUID();
+  const updates = accounts.map(a => ({ id: a.id, applied: STARTING_BALANCE - (a.crl_coins ?? 0) }));
+
+  await Promise.all(
+    updates.map(u => supabaseAdmin.from("accounts").update({ crl_coins: STARTING_BALANCE }).eq("id", u.id)),
+  );
+
+  await supabaseAdmin.from("wager_balance_adjustments").insert(
+    updates.map(u => ({
+      batch_id: batchId,
+      scope: "bulk" as const,
+      player_id: u.id,
+      requested_amount: STARTING_BALANCE,
+      amount: u.applied,
+      balance_after: STARTING_BALANCE,
+      reason: reason.trim(),
+      actor: adminId,
+    })),
+  );
+
+  revalidatePath("/dashboard/admin");
+  return { ok: true, affected: updates.length };
+}

@@ -34,6 +34,7 @@ import { ScheduleOverrideCard, type ScheduleOverrideCardData } from "./schedule-
 import { canonicalStage, stageName, STAGE_ORDER, expectedStageRounds, type RoundScheduleRow } from "./schedule-utils";
 import { WagersBalanceTable, type BalanceRow } from "./wagers-balance-table";
 import { WagersBulkForm } from "./wagers-bulk-form";
+import { WagersResetForm } from "./wagers-reset-form";
 import { AnnouncementManager } from "./announcement-manager";
 import { GameLeaderboardPanel } from "./game-leaderboard-panel";
 import { getAllGameScores } from "../game/actions";
@@ -1186,6 +1187,7 @@ export default async function AdminPage() {
         <div className="space-y-6">
           <WagersBalanceTable rows={wagerBalanceRows} />
           {userIsDirector && <WagersBulkForm approvedCount={wagerBalanceRows.length} />}
+          {userIsDirector && <WagersResetForm approvedCount={wagerBalanceRows.length} />}
           <div>
             <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Recent Adjustments</p>
             {balanceAdjustmentLog.length === 0 ? (
