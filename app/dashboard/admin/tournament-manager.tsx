@@ -19,6 +19,7 @@ import {
 } from "./tournament-actions";
 import { addBulkTournamentTestUsers } from "./league-actions";
 import { ExportCompletedPdfButton, ExportAndCompletePdfButton } from "./export-pdf-button";
+import { DownloadArchiveButton } from "./download-archive-button";
 import {
   type RoundTier,
   type BestOf,
@@ -984,6 +985,9 @@ export function TournamentManager({
                 {t.status === "completed" && (summary?.finalStandings?.length ?? 0) > 0 && (
                   <ExportCompletedPdfButton tournamentId={t.id} />
                 )}
+                {t.status === "completed" && !!t.full_archive && (
+                  <DownloadArchiveButton kind="tournament" id={t.id} name={t.name} />
+                )}
                 {t.status === "scheduled" && (
                   <button onClick={() => setConfirm({ id: t.id, action: "cancel" })} disabled={isPending}
                     className="px-3 py-1.5 bg-zinc-800 hover:bg-red-900/50 text-red-400 text-xs font-medium rounded-lg transition-colors">
@@ -1042,6 +1046,9 @@ export function TournamentManager({
                   </p>
                 )}
               </div>
+              {!!s.full_archive && (
+                <DownloadArchiveButton kind="season" id={s.id} name={s.name} />
+              )}
             </div>
           );
         };

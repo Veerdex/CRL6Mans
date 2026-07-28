@@ -10,6 +10,7 @@ import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 import { APP_NAME } from "@/app/lib/constants";
 import { computeTopStats } from "@/app/lib/game-stats";
+import { computeFullArchive } from "./tournament-archive";
 
 const TEAM_ROLE_COLOR = 0x3498db; // blue
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -656,6 +657,18 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     return { ok: true, message: "Test season discarded. No records saved." };
   }
 
+  const endedAt = new Date().toISOString();
+  const fullArchive = await computeFullArchive({
+    kind: "season",
+    name,
+    formatPreset: null,
+    seasonFormat: settings.season_format ?? null,
+    joinMode: null,
+    teamAssignment: null,
+    startedAt: null,
+    endedAt,
+  });
+
   const { error: archiveError } = await supabaseAdmin.from("seasons").insert({
     name,
     year,
@@ -671,7 +684,8 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
       runnerUpPlayers: byTeam(runnerUpTeam?.id),
       topStats,
     },
-    ended_at: new Date().toISOString(),
+    full_archive: fullArchive,
+    ended_at: endedAt,
   });
   if (archiveError) return { error: `Failed to archive season: ${archiveError.message}` };
 

@@ -8,6 +8,7 @@ import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
 import { computeTopStats, type TopStats } from "@/app/lib/game-stats";
+import { computeFullArchive } from "./tournament-archive";
 import { resetSeason } from "./league-actions";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 
@@ -40,6 +41,7 @@ export type Tournament = TournamentInput & {
   status: "scheduled" | "active" | "completed" | "cancelled";
   signups_open: boolean;
   summary: TournamentSummary | null;
+  full_archive: unknown | null;
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
@@ -55,6 +57,7 @@ export type Season = {
   season_format: unknown | null;
   team_count: number;
   summary: TournamentSummary | null;
+  full_archive: unknown | null;
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
@@ -464,7 +467,9 @@ export async function completeTournament() {
   if (!activeId) return { error: "No active tournament to complete." };
 
   const { data: tournament } = await supabaseAdmin
-    .from("tournaments").select("is_test").eq("id", activeId).single();
+    .from("tournaments")
+    .select("is_test, name, season_format, join_mode, team_assignment, started_at")
+    .eq("id", activeId).single();
   const isTest = tournament?.is_test ?? false;
 
   if (isTest) {
@@ -479,14 +484,28 @@ export async function completeTournament() {
       })
       .eq("id", activeId);
   } else {
-    // Snapshot the summary BEFORE resetSeason wipes the matches/teams.
-    const summary = await computeSummary();
+    // Snapshot the summary AND the full archive BEFORE resetSeason wipes the matches/teams.
+    const endedAt = new Date().toISOString();
+    const [summary, fullArchive] = await Promise.all([
+      computeSummary(),
+      computeFullArchive({
+        kind: "tournament",
+        name: tournament!.name,
+        formatPreset: null,
+        seasonFormat: tournament!.season_format ?? null,
+        joinMode: (tournament!.join_mode as "teams" | "players" | null) ?? null,
+        teamAssignment: (tournament!.team_assignment as "snake_draft" | "auto_balance" | null) ?? null,
+        startedAt: tournament!.started_at ?? null,
+        endedAt,
+      }),
+    ]);
     await supabaseAdmin
       .from("tournaments")
       .update({
         status: "completed",
         summary,
-        ended_at: new Date().toISOString(),
+        full_archive: fullArchive,
+        ended_at: endedAt,
         updated_at: new Date().toISOString(),
       })
       .eq("id", activeId);

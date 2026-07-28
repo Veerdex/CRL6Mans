@@ -329,6 +329,7 @@ export async function purgeTournamentStandings(
         runnerUp: existing?.runnerUp ?? null,
         finalStandings: [],
       },
+      full_archive: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);

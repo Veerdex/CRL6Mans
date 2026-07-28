@@ -10,28 +10,7 @@ import {
 } from "./tournament-pdf-actions";
 import { completeTournament } from "./tournament-actions";
 import { completeSeason } from "./league-actions";
-
-// @react-pdf/renderer can only decode PNG/JPEG, and a single unfetchable or
-// unsupported (WebP/SVG/GIF) remote image makes the whole toBlob() reject.
-// Pre-resolve every logo to a safe data URL and drop anything that fails so a
-// bad team logo can never sink the entire report.
-async function toSafeDataUrl(url: string | null): Promise<string | null> {
-  if (!url) return null;
-  try {
-    const res = await fetch(url, { mode: "cors" });
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    if (blob.type !== "image/png" && blob.type !== "image/jpeg" && blob.type !== "image/jpg") return null;
-    return await new Promise<string | null>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(typeof reader.result === "string" ? reader.result : null);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
-  }
-}
+import { toSafeDataUrl } from "./image-data-url";
 
 async function sanitizeImages(data: TournamentPdfData): Promise<TournamentPdfData> {
   const urls = new Set<string>();

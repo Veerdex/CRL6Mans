@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { StatsTable, type PlayerStatRow } from "./stats-table";
+import { aggregatePlayerGameStats, type StatAggregationInput } from "@/app/lib/player-stat-aggregation";
+import { StatsTable } from "./stats-table";
 
 export default async function StatsPage() {
   const cookieStore = await cookies();
@@ -21,39 +22,19 @@ export default async function StatsPage() {
   const teamNames = Object.fromEntries((teamsRaw ?? []).map((t) => [t.id, t.name]));
   const playerMap = Object.fromEntries((playersRaw ?? []).map((p) => [p.id, p]));
 
-  type Agg = { totalGoals: number; totalAssists: number; totalSaves: number; totalShots: number; totalScore: number; games: number };
-  const aggMap = new Map<string, Agg>();
-
-  for (const r of (statsRaw ?? []) as { player_id: string; goals: number; assists: number; saves: number; shots: number; score: number }[]) {
-    if (!r.player_id) continue;
-    const prev = aggMap.get(r.player_id) ?? { totalGoals: 0, totalAssists: 0, totalSaves: 0, totalShots: 0, totalScore: 0, games: 0 };
-    aggMap.set(r.player_id, {
-      totalGoals:   prev.totalGoals   + r.goals,
-      totalAssists: prev.totalAssists + r.assists,
-      totalSaves:   prev.totalSaves   + r.saves,
-      totalShots:   prev.totalShots   + r.shots,
-      totalScore:   prev.totalScore   + r.score,
-      games:        prev.games        + 1,
+  const inputs: StatAggregationInput[] = (statsRaw ?? [])
+    .filter((r) => r.player_id && playerMap[r.player_id])
+    .map((r) => {
+      const player = playerMap[r.player_id];
+      return {
+        key: r.player_id,
+        username: player.username,
+        displayName: (player as typeof player & { display_name?: string | null }).display_name ?? null,
+        teamName: player.team_id ? (teamNames[player.team_id] ?? null) : null,
+        goals: r.goals, assists: r.assists, saves: r.saves, shots: r.shots, score: r.score,
+      };
     });
-  }
-
-  const rows: PlayerStatRow[] = [];
-  for (const [playerId, agg] of aggMap) {
-    const player = playerMap[playerId];
-    if (!player) continue;
-    rows.push({
-      playerId,
-      username:     player.username,
-      displayName:  (player as typeof player & { display_name?: string | null }).display_name ?? null,
-      teamName:     player.team_id ? (teamNames[player.team_id] ?? null) : null,
-      games:        agg.games,
-      totalGoals:   agg.totalGoals,
-      totalAssists: agg.totalAssists,
-      totalSaves:   agg.totalSaves,
-      totalShots:   agg.totalShots,
-      totalScore:   agg.totalScore,
-    });
-  }
+  const rows = aggregatePlayerGameStats(inputs);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
