@@ -96,7 +96,7 @@ export function calculatePlayerRating(row: PlayerRatingInputs): number {
 
   const adjustedValues = [
     convert1v1(average1v1) * DIRECT_MULTIPLIERS["1v1"],
-    average2v2 * DIRECT_MULTIPLIERS["2v2"],
+    clamp(average2v2, 100, 2800) * DIRECT_MULTIPLIERS["2v2"],
     convert3v3(average3v3) * DIRECT_MULTIPLIERS["3v3"],
   ];
   const weights = [PLAYLIST_WEIGHTS["1v1"], PLAYLIST_WEIGHTS["2v2"], PLAYLIST_WEIGHTS["3v3"]];
