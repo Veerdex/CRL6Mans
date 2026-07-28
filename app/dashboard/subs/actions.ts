@@ -124,6 +124,15 @@ export async function submitSubRequest(
   if (leagueSettings?.subs_enabled === false) {
     return { error: "Substitute requests are currently disabled by staff." };
   }
+
+  if (activeTournamentId) {
+    const { data: tourney } = await supabaseAdmin
+      .from("tournaments").select("join_mode").eq("id", activeTournamentId).single();
+    if (tourney?.join_mode === "teams") {
+      return { error: "Substitute requests are not available for team sign-up tournaments." };
+    }
+  }
+
   if (!nextMatch) return { error: "Your team has no upcoming matches." };
 
   const opposingTeamId = nextMatch.home_team_id === teamId
