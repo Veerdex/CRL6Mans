@@ -43,30 +43,26 @@ function toPct(prob: number): string {
 }
 
 // Pool-mode probability is the live ratio of stake on each side of a slot —
-// falls back to the rating-based predictor only while the slot has no money in it.
+// falls back to a flat 50/50 while the slot has no money in it.
 function poolProb(
   matchId: string,
   sk: string,
   side: string,
   betTypeTotals: Record<string, Record<string, number>>,
-  pred: MatchPrediction,
 ): number {
   const totals = betTypeTotals[matchId] ?? {};
   if (sk === "moneyline") {
     const home = totals.home ?? 0;
     const away = totals.away ?? 0;
     const sum = home + away;
-    if (sum === 0) return side === "home" ? pred.homeWinProb : pred.awayWinProb;
+    if (sum === 0) return 0.5;
     return (side === "home" ? home : away) / sum;
   }
   const line = sk.replace("ou_", "");
   const over = totals[`over_${line}`] ?? 0;
   const under = totals[`under_${line}`] ?? 0;
   const sum = over + under;
-  if (sum === 0) {
-    const ou = pred.ouLines.find((l) => String(l.line) === line);
-    return side === "over" ? (ou?.overProb ?? 0.5) : (ou?.underProb ?? 0.5);
-  }
+  if (sum === 0) return 0.5;
   return (side === "over" ? over : under) / sum;
 }
 
@@ -224,6 +220,8 @@ export function WagersClient({
   gridMatches,
   gridWagerTotals,
   betTypeTotals,
+  teamStandings,
+  matchRosters,
   myWagers: initialWagers,
   myParlays,
   tickerWagers: _tickerWagers,
@@ -241,6 +239,8 @@ export function WagersClient({
   gridMatches: OverviewMatch[];
   gridWagerTotals: Record<string, { home: number; away: number }>;
   betTypeTotals: Record<string, Record<string, number>>;
+  teamStandings: Record<string, number>;
+  matchRosters: Record<string, Record<string, { name: string; rating: number; isSub: boolean }[]>>;
   myWagers: MyWager[];
   myParlays: MyParlay[];
   tickerWagers: TickerWager[];
@@ -616,8 +616,8 @@ export function WagersClient({
                 Object.keys(parlaySelections).some((k) => k.startsWith(`${m.id}:`));
               const hasBet = hasPlacedBet || hasSelection;
               const isPool = m.bettingMode === "pool";
-              const homeProb = isPool ? poolProb(m.id, "moneyline", "home", betTypeTotals, pred) : pred.homeWinProb;
-              const awayProb = isPool ? poolProb(m.id, "moneyline", "away", betTypeTotals, pred) : pred.awayWinProb;
+              const homeProb = isPool ? poolProb(m.id, "moneyline", "home", betTypeTotals) : pred.homeWinProb;
+              const awayProb = isPool ? poolProb(m.id, "moneyline", "away", betTypeTotals) : pred.awayWinProb;
               const homeOdds = isPool ? toPct(homeProb) : toAmericanOdds(homeProb);
               const awayOdds = isPool ? toPct(awayProb) : toAmericanOdds(awayProb);
               const activeSelections = betMode === "straight" ? straightSelections : parlaySelections;
@@ -696,6 +696,8 @@ export function WagersClient({
               teams={teams}
               pred={matchPredictions[selectedMatch.id] ?? FALLBACK_PRED}
               betTypeTotals={betTypeTotals}
+              teamStandings={teamStandings}
+              roster={matchRosters[selectedMatch.id]}
               localWagers={localWagers}
               selections={betMode === "straight" ? straightSelections : parlaySelections}
               onSideClick={handleSideClick}
@@ -744,12 +746,14 @@ export function WagersClient({
 // ── Market view ───────────────────────────────────────────────────────────────
 
 function MatchMarketView({
-  match, teams, pred, betTypeTotals, localWagers, selections, onSideClick,
+  match, teams, pred, betTypeTotals, teamStandings, roster, localWagers, selections, onSideClick,
 }: {
   match: MatchBO;
   teams: Record<string, Team>;
   pred: MatchPrediction;
   betTypeTotals: Record<string, Record<string, number>>;
+  teamStandings: Record<string, number>;
+  roster?: Record<string, { name: string; rating: number; isSub: boolean }[]>;
   localWagers: MyWager[];
   selections: Record<string, { betType: string; amount: string }>;
   onSideClick: (matchId: string, sk: string, side: string) => void;
@@ -759,8 +763,8 @@ function MatchMarketView({
   const badge = matchBadge(match.stage, match.round, match.match_number);
   const myMatchWagers = localWagers.filter((w) => w.match_id === match.id);
   const isPool = match.bettingMode === "pool";
-  const homeProb = isPool ? poolProb(match.id, "moneyline", "home", betTypeTotals, pred) : pred.homeWinProb;
-  const awayProb = isPool ? poolProb(match.id, "moneyline", "away", betTypeTotals, pred) : pred.awayWinProb;
+  const homeProb = isPool ? poolProb(match.id, "moneyline", "home", betTypeTotals) : pred.homeWinProb;
+  const awayProb = isPool ? poolProb(match.id, "moneyline", "away", betTypeTotals) : pred.awayWinProb;
   const homeWinPct = Math.round(homeProb * 100);
 
   const slots = [
@@ -779,12 +783,12 @@ function MatchMarketView({
         {
           side: "under",
           betType: `under_${ou.line}`,
-          prob: isPool ? poolProb(match.id, `ou_${ou.line}`, "under", betTypeTotals, pred) : ou.underProb,
+          prob: isPool ? poolProb(match.id, `ou_${ou.line}`, "under", betTypeTotals) : ou.underProb,
         },
         {
           side: "over",
           betType: `over_${ou.line}`,
-          prob: isPool ? poolProb(match.id, `ou_${ou.line}`, "over", betTypeTotals, pred) : ou.overProb,
+          prob: isPool ? poolProb(match.id, `ou_${ou.line}`, "over", betTypeTotals) : ou.overProb,
         },
       ],
     })),
@@ -798,19 +802,48 @@ function MatchMarketView({
           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{badge}</span>
           <span className="text-[10px] font-semibold text-indigo-400 uppercase tracking-widest">BO{match.bestOf}</span>
         </div>
+        <p className="text-center mb-3">
+          <span className="inline-block text-[9px] font-bold uppercase tracking-widest text-purple-300 bg-purple-950/50 border border-purple-700/40 rounded-full px-3 py-1">
+            🤖 Algorithm Prediction · {home?.name ?? "Home"} {toPct(pred.homeWinProb)} – {toPct(pred.awayWinProb)} {away?.name ?? "Away"}
+          </span>
+        </p>
         <div className="flex items-center gap-6 mb-5">
           <div className="flex-1 flex flex-col items-center text-center min-w-0">
             {home?.logo_url && (
               <img src={home.logo_url} alt="" className="w-12 h-12 rounded-lg object-cover mb-2" />
             )}
+            {teamStandings[match.home_team_id] != null && (
+              <span className="text-[10px] font-bold text-zinc-500 tabular-nums mb-1">#{teamStandings[match.home_team_id]}</span>
+            )}
             <p className="font-bold text-white text-lg leading-tight truncate w-full">{home?.name ?? "Home"}</p>
+            {roster?.[match.home_team_id] && (
+              <ul className="mt-1 space-y-0.5">
+                {roster[match.home_team_id].map((p, i) => (
+                  <li key={i} className="text-[11px] text-zinc-500 tabular-nums truncate">
+                    {p.name}{p.isSub ? " (sub)" : ""} · {Math.round(p.rating)}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
           <span className="text-zinc-600 text-sm shrink-0 font-medium">vs</span>
           <div className="flex-1 flex flex-col items-center text-center min-w-0">
             {away?.logo_url && (
               <img src={away.logo_url} alt="" className="w-12 h-12 rounded-lg object-cover mb-2" />
             )}
+            {teamStandings[match.away_team_id] != null && (
+              <span className="text-[10px] font-bold text-zinc-500 tabular-nums mb-1">#{teamStandings[match.away_team_id]}</span>
+            )}
             <p className="font-bold text-white text-lg leading-tight truncate w-full">{away?.name ?? "Away"}</p>
+            {roster?.[match.away_team_id] && (
+              <ul className="mt-1 space-y-0.5">
+                {roster[match.away_team_id].map((p, i) => (
+                  <li key={i} className="text-[11px] text-zinc-500 tabular-nums truncate">
+                    {p.name}{p.isSub ? " (sub)" : ""} · {Math.round(p.rating)}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -875,9 +908,16 @@ function MatchMarketView({
                             : "border-zinc-700 bg-zinc-800/50 hover:border-zinc-500 hover:bg-zinc-800",
                         ].join(" ")}
                       >
-                        <span className={`text-2xl font-bold tabular-nums ${isSelected ? "text-indigo-300" : "text-amber-400"}`}>
-                          {isPool ? toPct(s.prob) : toAmericanOdds(s.prob)}
-                        </span>
+                        <div className="flex flex-col items-center">
+                          <span className={`text-2xl font-bold tabular-nums ${isSelected ? "text-indigo-300" : "text-amber-400"}`}>
+                            {isPool ? toPct(s.prob) : toAmericanOdds(s.prob)}
+                          </span>
+                          {isPool && (
+                            <span className="text-[10px] text-zinc-500 tabular-nums mt-0.5">
+                              🪙 {(betTypeTotals[match.id]?.[s.betType] ?? 0).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
                       </button>
                     );
                   })}
@@ -987,7 +1027,7 @@ function BetSlip({
               const badge = match ? matchBadge(match.stage, match.round, match.match_number) : "";
               const desc = betDescription(sel.betType, home?.name ?? "Home", away?.name ?? "Away");
               const side = sideFromBetType(sel.betType);
-              const prob = isPool ? poolProb(matchId, sk, side, betTypeTotals, pred) : getProbForBet(sk, sel.betType, pred);
+              const prob = isPool ? poolProb(matchId, sk, side, betTypeTotals) : getProbForBet(sk, sel.betType, pred);
               const odds = isPool ? toPct(prob) : toAmericanOdds(prob);
               const mult = getSlotMultiplier(sk, side, pred);
               const payout = isPool ? null : Math.round(amount * mult);

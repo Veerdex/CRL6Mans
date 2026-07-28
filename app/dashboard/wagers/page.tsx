@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
-import { calculatePlayerRating } from "@/app/lib/rating";
+import { calculatePlayerRating, initialTeamRating } from "@/app/lib/rating";
 import { computeMatchPrediction, computeMatchPredictionFromRating, type MatchPrediction } from "./prediction";
 import { WagersClient } from "./wagers-client";
 import { WagesLeaderboardOnly } from "./leaderboard-view";
@@ -117,7 +117,7 @@ export default async function WagersPage() {
   const { data: allMatches } = await supabaseAdmin
     .from("matches")
     .select(
-      "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, predicted_home_win_prob, predicted_away_win_prob, betting_mode",
+      "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, predicted_home_win_prob, predicted_away_win_prob, betting_mode, home_score, away_score",
     )
     .order("stage")
     .order("round")
@@ -218,11 +218,21 @@ export default async function WagersPage() {
   const currentStageKey = Object.entries(stageCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
   const currentStage = currentStageKey ? formatStageName(currentStageKey) : "";
 
+  // Every team referenced anywhere in the season/tournament's matches — needed so
+  // standings rank teams correctly even when most of them aren't in a bettable
+  // match right now (mirrors season/page.tsx's participatingIds derivation).
+  const participatingIds = new Set<string>();
+  for (const m of allMatches ?? []) {
+    if (m.home_team_id) participatingIds.add(m.home_team_id as string);
+    if (m.away_team_id) participatingIds.add(m.away_team_id as string);
+  }
+
   // Team data
   const teamIds = [
     ...new Set([
       ...matches.flatMap((m) => [m.home_team_id, m.away_team_id]),
       ...gridMatchesRaw.flatMap((m) => [m.home_team_id as string, m.away_team_id as string]),
+      ...participatingIds,
     ]),
   ];
 
@@ -231,7 +241,7 @@ export default async function WagersPage() {
         supabaseAdmin.from("teams").select("id, name, logo_url, season_rating").in("id", teamIds),
         supabaseAdmin
           .from("players")
-          .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .select("id, username, display_name, team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
           .in("team_id", teamIds)
           .eq("status", "approved"),
       ])
@@ -249,6 +259,99 @@ export default async function WagersPage() {
   for (const p of rosterPlayers ?? []) {
     if (!p.team_id) continue;
     (ratingsByTeam[p.team_id] ??= []).push(playerRatingOf(p));
+  }
+
+  function teamRatingFor(teamId: string): number {
+    return seasonRatings[teamId] ?? initialTeamRating(ratingsByTeam[teamId] ?? []);
+  }
+
+  // Standings — same wins/losses-from-completed-matches derivation as
+  // season/page.tsx, plus a team-rating tiebreak (before the alphabetical one) so
+  // 0-0 ties at the start of a season/tournament still produce a meaningful order.
+  const standingsRecords: Record<string, { wins: number; losses: number }> = {};
+  for (const m of allMatches ?? []) {
+    if (m.status !== "completed" || m.home_score == null || m.away_score == null) continue;
+    if (!m.home_team_id || !m.away_team_id) continue;
+    (standingsRecords[m.home_team_id] ??= { wins: 0, losses: 0 });
+    (standingsRecords[m.away_team_id] ??= { wins: 0, losses: 0 });
+    if (m.home_score > m.away_score) {
+      standingsRecords[m.home_team_id].wins++;
+      standingsRecords[m.away_team_id].losses++;
+    } else {
+      standingsRecords[m.away_team_id].wins++;
+      standingsRecords[m.home_team_id].losses++;
+    }
+  }
+
+  const teamStandings: Record<string, number> = {};
+  [...participatingIds]
+    .map((id) => ({
+      id,
+      name: teams[id]?.name ?? "",
+      wins: standingsRecords[id]?.wins ?? 0,
+      losses: standingsRecords[id]?.losses ?? 0,
+      rating: teamRatingFor(id),
+    }))
+    .sort((a, b) => b.wins - a.wins || a.losses - b.losses || b.rating - a.rating || a.name.localeCompare(b.name))
+    .forEach((t, i) => { teamStandings[t.id] = i + 1; });
+
+  // Per-match starting lineup, accounting for approved subs — scoped to the
+  // specific match_id + team_id so a sub approved for one match never bleeds
+  // into that team's other matches. Mirrors mergeWithSubs in my-team/page.tsx,
+  // generalized across every bettable match instead of just "my next match",
+  // and tagged with isSub since the wagers UI needs to render "(sub)".
+  const { data: approvedSubsRaw } = bettableMatchIds.length
+    ? await supabaseAdmin
+        .from("sub_requests")
+        .select("match_id, team_id, player_out_id, sub_player_id, sub_player_ids")
+        .eq("status", "approved")
+        .in("match_id", bettableMatchIds)
+    : { data: [] as { match_id: string | null; team_id: string; player_out_id: string; sub_player_id: string | null; sub_player_ids: string[] | null }[] };
+
+  // Multi-sub requests store their incoming players in the plural array column
+  // and leave the singular one null — mirrors the fallback in my-team/page.tsx.
+  function subInIdsFor(r: { sub_player_id: string | null; sub_player_ids: string[] | null }): string[] {
+    if (r.sub_player_ids && r.sub_player_ids.length > 0) return r.sub_player_ids;
+    if (r.sub_player_id) return [r.sub_player_id];
+    return [];
+  }
+
+  const subInIds = [
+    ...new Set((approvedSubsRaw ?? []).flatMap(subInIdsFor)),
+  ];
+  const { data: subInPlayersRaw } = subInIds.length
+    ? await supabaseAdmin
+        .from("players")
+        .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+        .in("id", subInIds)
+    : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null; peak_1v1: string | null; current_1v1: string | null }[] };
+
+  const playersById: Record<string, { name: string; rating: number }> = {};
+  for (const p of rosterPlayers ?? []) {
+    playersById[p.id] = { name: p.display_name ?? p.username, rating: playerRatingOf(p) };
+  }
+  for (const p of subInPlayersRaw ?? []) {
+    playersById[p.id] = { name: p.display_name ?? p.username, rating: playerRatingOf(p) };
+  }
+
+  const matchRosters: Record<string, Record<string, { name: string; rating: number; isSub: boolean }[]>> = {};
+  for (const m of matches) {
+    const perTeam: Record<string, { name: string; rating: number; isSub: boolean }[]> = {};
+    for (const teamId of [m.home_team_id, m.away_team_id]) {
+      const approvedSubs = (approvedSubsRaw ?? []).filter((r) => r.match_id === m.id && r.team_id === teamId);
+      const outIds = new Set(approvedSubs.map((r) => r.player_out_id));
+      const roster = (rosterPlayers ?? [])
+        .filter((p) => p.team_id === teamId && !outIds.has(p.id))
+        .map((p) => ({ ...playersById[p.id], isSub: false }));
+      const subsIn = approvedSubs
+        .flatMap(subInIdsFor)
+        .filter((id) => playersById[id])
+        .map((id) => ({ ...playersById[id], isSub: true }));
+      // A team may carry more than 3 approved players (bench depth); only the top
+      // 3 by rating are the ones actually participating in this match.
+      perTeam[teamId] = [...roster, ...subsIn].sort((a, b) => b.rating - a.rating).slice(0, 3);
+    }
+    matchRosters[m.id] = perTeam;
   }
 
   // Compute predictions — prefer stored season_rating (reflects match history),
@@ -405,6 +508,8 @@ export default async function WagersPage() {
         gridMatches={gridMatches}
         gridWagerTotals={gridWagerTotals}
         betTypeTotals={betTypeTotals}
+        teamStandings={teamStandings}
+        matchRosters={matchRosters}
         myWagers={(myWagersData ?? []).map((w) => ({
           match_id: w.match_id,
           bet_type: w.bet_type,
