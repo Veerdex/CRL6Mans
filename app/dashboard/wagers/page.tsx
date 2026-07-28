@@ -53,7 +53,8 @@ export default async function WagersPage() {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const testingMode = cookieStore.get("testing_mode")?.value === "1" && (await isDirectorVerified(session.userId));
+  const isDirector = await isDirectorVerified(session.userId);
+  const testingMode = cookieStore.get("testing_mode")?.value === "1" && isDirector;
 
   // crl_coins/status/username all live on accounts (Tier 1) now, so unregistered
   // and pending guests show up here too — only rejected accounts are excluded,
@@ -61,7 +62,7 @@ export default async function WagersPage() {
   const [{ data: ls }, { data: accountRow }, { data: leaderboardData }] = await Promise.all([
     supabaseAdmin
       .from("league_settings")
-      .select("active_tournament_id, season_active, season_format")
+      .select("active_tournament_id, season_active, season_format, betting_mode")
       .single(),
     supabaseAdmin
       .from("accounts")
@@ -83,6 +84,7 @@ export default async function WagersPage() {
   const activeTournamentId = (ls?.active_tournament_id as string | null) ?? null;
   const seasonActive = ls?.season_active ?? false;
   const hasActiveContent = seasonActive || !!activeTournamentId;
+  const globalBettingMode: "fixed" | "pool" = ls?.betting_mode === "pool" ? "pool" : "fixed";
 
   const leaderboard = (leaderboardData ?? []).map((p) => ({
     username: p.username,
@@ -119,7 +121,7 @@ export default async function WagersPage() {
   const { data: allMatches } = await supabaseAdmin
     .from("matches")
     .select(
-      "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, predicted_home_win_prob, predicted_away_win_prob",
+      "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, predicted_home_win_prob, predicted_away_win_prob, betting_mode",
     )
     .order("stage")
     .order("round")
@@ -160,6 +162,7 @@ export default async function WagersPage() {
     status: string;
     scheduled_at: string | null;
     bestOf: number;
+    bettingMode: "fixed" | "pool";
   };
 
   function bestOfForMatch(m: { stage: string | null; round: number }): number {
@@ -177,7 +180,26 @@ export default async function WagersPage() {
     status: m.status,
     scheduled_at: m.scheduled_at,
     bestOf: bestOfForMatch(m),
+    bettingMode: (m.betting_mode as "fixed" | "pool" | null) ?? globalBettingMode,
   }));
+
+  // Pool-mode odds are the live ratio of stake on each side, per independent slot
+  // (moneyline, or each O/U line) — unlike fixed-mode's precomputed multiplier,
+  // this has to be read fresh from pending wagers on every page load.
+  const bettableMatchIds = matches.map((m) => m.id);
+  const { data: poolWagersRaw } = bettableMatchIds.length
+    ? await supabaseAdmin
+        .from("wagers")
+        .select("match_id, bet_type, amount")
+        .eq("status", "pending")
+        .in("match_id", bettableMatchIds)
+    : { data: [] as { match_id: string; bet_type: string; amount: number }[] };
+
+  const betTypeTotals: Record<string, Record<string, number>> = {};
+  for (const w of poolWagersRaw ?? []) {
+    const t = (betTypeTotals[w.match_id] ??= {});
+    t[w.bet_type] = (t[w.bet_type] ?? 0) + w.amount;
+  }
 
   // Grid: only matches actually bettable right now (mirrors the `bettable` filter
   // above) plus already-completed ones. A group stage schedules every round's
@@ -317,7 +339,7 @@ export default async function WagersPage() {
   // My wagers
   const { data: myWagersData } = await supabaseAdmin
     .from("wagers")
-    .select("match_id, bet_type, amount, odds_multiplier, status")
+    .select("match_id, bet_type, amount, odds_multiplier, status, payout_amount")
     .eq("player_id", session.userId);
 
   // My parlays (+ legs) for the "My Bets" panel
@@ -386,12 +408,16 @@ export default async function WagersPage() {
         defaultMatchId={defaultMatchId}
         gridMatches={gridMatches}
         gridWagerTotals={gridWagerTotals}
+        betTypeTotals={betTypeTotals}
+        globalBettingMode={globalBettingMode}
+        isDirector={isDirector}
         myWagers={(myWagersData ?? []).map((w) => ({
           match_id: w.match_id,
           bet_type: w.bet_type,
           amount: w.amount,
-          odds_multiplier: Number(w.odds_multiplier),
+          odds_multiplier: w.odds_multiplier == null ? null : Number(w.odds_multiplier),
           status: w.status,
+          payout_amount: w.payout_amount,
         }))}
         myParlays={myParlays}
         tickerWagers={(tickerRaw ?? []).map((w) => ({

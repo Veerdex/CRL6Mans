@@ -29,6 +29,22 @@ export async function resetAllWestsideWages(): Promise<{ ok?: boolean; error?: s
   return { ok: true };
 }
 
+export type BettingMode = "fixed" | "pool";
+
+// League-wide default for newly-opened matches. Already-locked matches
+// (matches.betting_mode set) are unaffected — see the lock in placeBets.
+export async function setBettingMode(mode: BettingMode): Promise<{ ok?: boolean; error?: string }> {
+  const cookieStore = await cookies();
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId) return { error: "Not authenticated" };
+  if (!(await isDirectorVerified(session.userId))) return { error: "Not authorized" };
+
+  await supabaseAdmin.from("league_settings").update({ betting_mode: mode }).not("id", "is", null);
+
+  revalidatePath("/dashboard/wagers");
+  return { ok: true };
+}
+
 export type BetInput = {
   matchId: string;
   betType: string;
@@ -133,6 +149,21 @@ function slotKey(betType: string): string {
   return m ? `ou_${m[1]}` : betType;
 }
 
+async function getGlobalBettingMode(): Promise<BettingMode> {
+  const { data } = await supabaseAdmin.from("league_settings").select("betting_mode").not("id", "is", null).single();
+  return data?.betting_mode === "pool" ? "pool" : "fixed";
+}
+
+// Locks a match's betting mode to whatever the global default is right now,
+// the first time anyone bets on it — a conditional write so concurrent
+// first-bets can't race, and later toggle flips don't affect matches that
+// already have action on them.
+async function lockMatchBettingMode(matchId: string, currentMode: string | null, globalMode: BettingMode): Promise<BettingMode> {
+  if (currentMode === "pool" || currentMode === "fixed") return currentMode;
+  await supabaseAdmin.from("matches").update({ betting_mode: globalMode }).eq("id", matchId).is("betting_mode", null);
+  return globalMode;
+}
+
 type MatchBettingState = {
   status: string | null;
   scheduled_at: string | null;
@@ -224,7 +255,7 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
   const matchIds = [...new Set(bets.map((b) => b.matchId))];
   const { data: matches } = await supabaseAdmin
     .from("matches")
-    .select("id, status, scheduled_at, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in")
+    .select("id, status, scheduled_at, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in, betting_mode")
     .in("id", matchIds);
 
   for (const matchId of matchIds) {
@@ -238,11 +269,21 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
     }
   }
 
-  // Compute server-side odds for each match so the client cannot supply its own multiplier.
+  // Lock each match's betting mode to the current global default the first time
+  // anyone bets on it. Already-locked matches keep whatever mode they opened in.
+  const globalMode = await getGlobalBettingMode();
+  const modeMap = new Map<string, BettingMode>();
+  for (const matchId of matchIds) {
+    const match = (matches ?? []).find((m) => m.id === matchId)!;
+    modeMap.set(matchId, await lockMatchBettingMode(matchId, match.betting_mode, globalMode));
+  }
+
+  // Compute server-side odds for each fixed-mode match so the client cannot supply
+  // its own multiplier. Pool-mode matches skip this — there's no fixed multiplier.
   // best_of isn't a stored column — it's derived from stage/round/format, same as everywhere else.
   const oddsMap = new Map<string, MatchOdds>();
   for (const match of matches ?? []) {
-    if (match.home_team_id && match.away_team_id) {
+    if (modeMap.get(match.id) === "fixed" && match.home_team_id && match.away_team_id) {
       const bestOf = await getBestOfForMatch(match.id);
       const odds = await computeServerOdds(match.home_team_id, match.away_team_id, bestOf);
       if (odds) oddsMap.set(match.id, odds);
@@ -264,13 +305,14 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
   }
 
   const resolvedBets = bets.map((b) => {
+    const isPool = modeMap.get(b.matchId) === "pool";
     const odds = oddsMap.get(b.matchId);
-    const serverMultiplier = odds ? getMultiplierForBetType(odds, b.betType) : null;
-    return { ...b, serverMultiplier };
+    const serverMultiplier = isPool ? null : odds ? getMultiplierForBetType(odds, b.betType) : null;
+    return { ...b, isPool, serverMultiplier };
   });
 
   for (const b of resolvedBets) {
-    if (!b.serverMultiplier) return { error: "Could not compute odds for one or more bets" };
+    if (!b.isPool && !b.serverMultiplier) return { error: "Could not compute odds for one or more bets" };
   }
 
   await Promise.all([
@@ -352,8 +394,12 @@ export async function placeParlayBet(
   const matchIds = [...new Set(legs.map((l) => l.matchId))];
   const { data: matches } = await supabaseAdmin
     .from("matches")
-    .select("id, status, scheduled_at, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in")
+    .select("id, status, scheduled_at, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in, betting_mode")
     .in("id", matchIds);
+
+  // Pool-mode matches have no fixed multiplier, so they can't be priced into a
+  // parlay's combined multiplier — excluded from parlays entirely.
+  const globalMode = await getGlobalBettingMode();
 
   for (const matchId of matchIds) {
     const match = (matches ?? []).find((m) => m.id === matchId);
@@ -363,6 +409,9 @@ export async function placeParlayBet(
     // Players cannot bet on a match their own team is in — they control its result reporting.
     if (teamId && (match.home_team_id === teamId || match.away_team_id === teamId)) {
       return { error: "You cannot include a match your own team is playing in." };
+    }
+    if ((match.betting_mode ?? globalMode) === "pool") {
+      return { error: "Pool-mode matches can't be included in a parlay." };
     }
   }
 

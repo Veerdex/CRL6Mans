@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { placeBets, placeParlayBet, resetAllWestsideWages, type BetInput, type ParlayLegInput } from "./actions";
+import { placeBets, placeParlayBet, resetAllWestsideWages, setBettingMode, type BetInput, type ParlayLegInput, type BettingMode } from "./actions";
 import { getOULines, getTotalSlots, HOUSE_VIG, type MatchPrediction } from "./prediction";
 import { LeaderboardView, type LeaderboardEntry } from "./leaderboard-view";
 import { MatchOverviewGrid, type OverviewMatch } from "./overview-grid";
@@ -39,6 +39,38 @@ function americanOddsToMultiplier(oddsStr: string): number {
   return (val + 100) / val;
 }
 
+function toPct(prob: number): string {
+  return `${Math.round(Math.max(0, Math.min(1, prob)) * 100)}%`;
+}
+
+// Pool-mode probability is the live ratio of stake on each side of a slot —
+// falls back to the rating-based predictor only while the slot has no money in it.
+function poolProb(
+  matchId: string,
+  sk: string,
+  side: string,
+  betTypeTotals: Record<string, Record<string, number>>,
+  pred: MatchPrediction,
+): number {
+  const totals = betTypeTotals[matchId] ?? {};
+  if (sk === "moneyline") {
+    const home = totals.home ?? 0;
+    const away = totals.away ?? 0;
+    const sum = home + away;
+    if (sum === 0) return side === "home" ? pred.homeWinProb : pred.awayWinProb;
+    return (side === "home" ? home : away) / sum;
+  }
+  const line = sk.replace("ou_", "");
+  const over = totals[`over_${line}`] ?? 0;
+  const under = totals[`under_${line}`] ?? 0;
+  const sum = over + under;
+  if (sum === 0) {
+    const ou = pred.ouLines.find((l) => String(l.line) === line);
+    return side === "over" ? (ou?.overProb ?? 0.5) : (ou?.underProb ?? 0.5);
+  }
+  return (side === "over" ? over : under) / sum;
+}
+
 function getProbForBet(sk: string, betType: string, pred: MatchPrediction): number {
   if (sk === "moneyline") return betType === "home" ? pred.homeWinProb : pred.awayWinProb;
   const line = parseFloat(sk.replace("ou_", ""));
@@ -61,14 +93,16 @@ type MatchBO = {
   status: string;
   scheduled_at: string | null;
   bestOf: number;
+  bettingMode: BettingMode;
 };
 
 type MyWager = {
   match_id: string;
   bet_type: string;
   amount: number;
-  odds_multiplier: number;
+  odds_multiplier: number | null; // null means this was a pool-mode bet — payout is set at close
   status: string;
+  payout_amount: number | null; // set once a pool-mode bet resolves (won/lost/void); unused for fixed-mode bets
 };
 
 type ParlayLeg = {
@@ -190,6 +224,9 @@ export function WagersClient({
   defaultMatchId,
   gridMatches,
   gridWagerTotals,
+  betTypeTotals,
+  globalBettingMode,
+  isDirector,
   myWagers: initialWagers,
   myParlays,
   tickerWagers: _tickerWagers,
@@ -207,6 +244,9 @@ export function WagersClient({
   defaultMatchId: string;
   gridMatches: OverviewMatch[];
   gridWagerTotals: Record<string, { home: number; away: number }>;
+  betTypeTotals: Record<string, Record<string, number>>;
+  globalBettingMode: BettingMode;
+  isDirector: boolean;
   myWagers: MyWager[];
   myParlays: MyParlay[];
   tickerWagers: TickerWager[];
@@ -241,6 +281,22 @@ export function WagersClient({
   const [mobileTab, setMobileTab] = useState<"matches" | "market" | "slip">("matches");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [localBettingMode, setLocalBettingMode] = useState<BettingMode>(globalBettingMode);
+  const [togglingMode, setTogglingMode] = useState(false);
+
+  async function handleToggleBettingMode() {
+    const next: BettingMode = localBettingMode === "pool" ? "fixed" : "pool";
+    setTogglingMode(true);
+    try {
+      const res = await setBettingMode(next);
+      if (!res.error) {
+        setLocalBettingMode(next);
+        router.refresh();
+      }
+    } finally {
+      setTogglingMode(false);
+    }
+  }
 
   async function handleResetWages() {
     setResetting(true);
@@ -282,14 +338,22 @@ export function WagersClient({
 
   const parlayPayout = Math.round((parseInt(parlayAmount) || 0) * combinedMultiplier);
 
+  // Pool-mode legs have no fixed multiplier — their payout isn't known until the
+  // match closes, so they're excluded from this sum (see hasPoolSelections below).
   const totalPayout = useMemo(() => allSelections.reduce((sum, [key, sel]) => {
     const parts = key.split(":");
     const matchId = parts[0];
     const sk = parts.slice(1).join(":");
+    if (matches.find((m) => m.id === matchId)?.bettingMode === "pool") return sum;
     const pred = matchPredictions[matchId] ?? FALLBACK_PRED;
     const mult = getSlotMultiplier(sk, sideFromBetType(sel.betType), pred);
     return sum + Math.round((parseInt(sel.amount) || 0) * mult);
-  }, 0), [allSelections, matchPredictions]);
+  }, 0), [allSelections, matchPredictions, matches]);
+
+  const hasPoolSelections = useMemo(
+    () => allSelections.some(([key]) => matches.find((m) => m.id === key.split(":")[0])?.bettingMode === "pool"),
+    [allSelections, matches],
+  );
 
   function handleSideClick(matchId: string, sk: string, side: string) {
     const betType = sk === "moneyline" ? side : `${side}_${sk.replace("ou_", "")}`;
@@ -298,6 +362,15 @@ export function WagersClient({
     const current = isParlay ? parlaySelections : straightSelections;
     const setFn = isParlay ? setParlaySelections : setStraightSelections;
     const isToggleOff = current[key]?.betType === betType;
+
+    // Pool-mode matches have no fixed multiplier, so they can't price into a parlay.
+    if (isParlay && !isToggleOff) {
+      const m = matches.find((mm) => mm.id === matchId);
+      if (m?.bettingMode === "pool") {
+        setError("Pool-mode matches can't be added to a parlay.");
+        return;
+      }
+    }
 
     // Cap parlay legs
     if (!isToggleOff && isParlay && !current[key] && Object.keys(current).length >= MAX_PARLAY_LEGS) {
@@ -359,13 +432,17 @@ export function WagersClient({
         setLocalBalance((b) => b - spent);
         setLocalWagers((prev) => [
           ...prev,
-          ...allBets.map((b) => ({
-            match_id: b.matchId,
-            bet_type: b.betType,
-            amount: b.amount,
-            odds_multiplier: b.oddsMultiplier,
-            status: "pending",
-          })),
+          ...allBets.map((b) => {
+            const isPool = matches.find((m) => m.id === b.matchId)?.bettingMode === "pool";
+            return {
+              match_id: b.matchId,
+              bet_type: b.betType,
+              amount: b.amount,
+              odds_multiplier: isPool ? null : b.oddsMultiplier,
+              status: "pending",
+              payout_amount: null,
+            };
+          }),
         ]);
         setStraightSelections({});
         setSuccessMsg(`${allBets.length} bet${allBets.length > 1 ? "s" : ""} placed!`);
@@ -501,6 +578,21 @@ export function WagersClient({
               <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
             </svg>
           </button>
+          {isDirector && (
+            <button
+              onClick={handleToggleBettingMode}
+              disabled={togglingMode}
+              title="Toggle the league-wide betting mode for newly-opened matches. Matches with bets already placed keep whichever mode they opened in."
+              className={[
+                "h-8 px-2.5 rounded-lg border text-xs font-semibold transition-colors disabled:opacity-50",
+                localBettingMode === "pool"
+                  ? "bg-amber-600/20 border-amber-500 text-amber-300"
+                  : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500",
+              ].join(" ")}
+            >
+              {togglingMode ? "…" : localBettingMode === "pool" ? "Pool Mode" : "Fixed Odds"}
+            </button>
+          )}
           {testingMode && (
             <button
               onClick={() => setShowResetConfirm(true)}
@@ -618,8 +710,11 @@ export function WagersClient({
                 Object.keys(straightSelections).some((k) => k.startsWith(`${m.id}:`)) ||
                 Object.keys(parlaySelections).some((k) => k.startsWith(`${m.id}:`));
               const hasBet = hasPlacedBet || hasSelection;
-              const homeOdds = toAmericanOdds(pred.homeWinProb);
-              const awayOdds = toAmericanOdds(pred.awayWinProb);
+              const isPool = m.bettingMode === "pool";
+              const homeProb = isPool ? poolProb(m.id, "moneyline", "home", betTypeTotals, pred) : pred.homeWinProb;
+              const awayProb = isPool ? poolProb(m.id, "moneyline", "away", betTypeTotals, pred) : pred.awayWinProb;
+              const homeOdds = isPool ? toPct(homeProb) : toAmericanOdds(homeProb);
+              const awayOdds = isPool ? toPct(awayProb) : toAmericanOdds(awayProb);
               const activeSelections = betMode === "straight" ? straightSelections : parlaySelections;
               const homeSelected = activeSelections[`${m.id}:moneyline`]?.betType === "home";
               const awaySelected = activeSelections[`${m.id}:moneyline`]?.betType === "away";
@@ -695,6 +790,7 @@ export function WagersClient({
               match={selectedMatch}
               teams={teams}
               pred={matchPredictions[selectedMatch.id] ?? FALLBACK_PRED}
+              betTypeTotals={betTypeTotals}
               localWagers={localWagers}
               selections={betMode === "straight" ? straightSelections : parlaySelections}
               onSideClick={handleSideClick}
@@ -713,9 +809,11 @@ export function WagersClient({
           matches={matches}
           teams={teams}
           matchPredictions={matchPredictions}
+          betTypeTotals={betTypeTotals}
           localBalance={localBalance}
           totalCost={totalCost}
           totalPayout={totalPayout}
+          hasPoolSelections={hasPoolSelections}
           betMode={betMode}
           onBetModeChange={setBetMode}
           parlayAmount={parlayAmount}
@@ -741,11 +839,12 @@ export function WagersClient({
 // ── Market view ───────────────────────────────────────────────────────────────
 
 function MatchMarketView({
-  match, teams, pred, localWagers, selections, onSideClick,
+  match, teams, pred, betTypeTotals, localWagers, selections, onSideClick,
 }: {
   match: MatchBO;
   teams: Record<string, Team>;
   pred: MatchPrediction;
+  betTypeTotals: Record<string, Record<string, number>>;
   localWagers: MyWager[];
   selections: Record<string, { betType: string; amount: string }>;
   onSideClick: (matchId: string, sk: string, side: string) => void;
@@ -754,23 +853,34 @@ function MatchMarketView({
   const away = teams[match.away_team_id];
   const badge = matchBadge(match.stage, match.round, match.match_number);
   const myMatchWagers = localWagers.filter((w) => w.match_id === match.id);
-  const homeWinPct = Math.round(pred.homeWinProb * 100);
+  const isPool = match.bettingMode === "pool";
+  const homeProb = isPool ? poolProb(match.id, "moneyline", "home", betTypeTotals, pred) : pred.homeWinProb;
+  const awayProb = isPool ? poolProb(match.id, "moneyline", "away", betTypeTotals, pred) : pred.awayWinProb;
+  const homeWinPct = Math.round(homeProb * 100);
 
   const slots = [
     {
       key: "moneyline",
       label: "MONEYLINE",
       sides: [
-        { side: "home", betType: "home", prob: pred.homeWinProb },
-        { side: "away", betType: "away", prob: pred.awayWinProb },
+        { side: "home", betType: "home", prob: homeProb },
+        { side: "away", betType: "away", prob: awayProb },
       ],
     },
     ...pred.ouLines.map((ou) => ({
       key: `ou_${ou.line}`,
       label: `${ou.line} GAMES`,
       sides: [
-        { side: "under", betType: `under_${ou.line}`, prob: ou.underProb },
-        { side: "over", betType: `over_${ou.line}`, prob: ou.overProb },
+        {
+          side: "under",
+          betType: `under_${ou.line}`,
+          prob: isPool ? poolProb(match.id, `ou_${ou.line}`, "under", betTypeTotals, pred) : ou.underProb,
+        },
+        {
+          side: "over",
+          betType: `over_${ou.line}`,
+          prob: isPool ? poolProb(match.id, `ou_${ou.line}`, "over", betTypeTotals, pred) : ou.overProb,
+        },
       ],
     })),
   ];
@@ -799,12 +909,15 @@ function MatchMarketView({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-zinc-500 tabular-nums w-10 shrink-0">{toAmericanOdds(pred.homeWinProb)}</span>
+          <span className="text-[10px] text-zinc-500 tabular-nums w-10 shrink-0">{isPool ? toPct(homeProb) : toAmericanOdds(homeProb)}</span>
           <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
             <div className="h-full bg-indigo-500 transition-all" style={{ width: `${homeWinPct}%` }} />
           </div>
-          <span className="text-[10px] text-zinc-500 tabular-nums w-10 shrink-0 text-right">{toAmericanOdds(pred.awayWinProb)}</span>
+          <span className="text-[10px] text-zinc-500 tabular-nums w-10 shrink-0 text-right">{isPool ? toPct(awayProb) : toAmericanOdds(awayProb)}</span>
         </div>
+        {isPool && (
+          <p className="text-center text-[10px] text-amber-500/80 mt-2 uppercase tracking-widest font-semibold">Pool Betting — odds move with the money</p>
+        )}
       </div>
 
       {/* Bet markets */}
@@ -837,7 +950,9 @@ function MatchMarketView({
                     {betDescription(placed.bet_type, home?.name ?? "Home", away?.name ?? "Away")}
                   </span>
                   <span className="text-xs text-zinc-500 shrink-0 tabular-nums">
-                    🪙 {placed.amount.toLocaleString()} → {Math.round(placed.amount * placed.odds_multiplier).toLocaleString()}
+                    {placed.odds_multiplier == null
+                      ? `🪙 ${placed.amount.toLocaleString()} → payout set at close`
+                      : `🪙 ${placed.amount.toLocaleString()} → ${Math.round(placed.amount * placed.odds_multiplier).toLocaleString()}`}
                   </span>
                 </div>
               ) : (
@@ -856,7 +971,7 @@ function MatchMarketView({
                         ].join(" ")}
                       >
                         <span className={`text-2xl font-bold tabular-nums ${isSelected ? "text-indigo-300" : "text-amber-400"}`}>
-                          {toAmericanOdds(s.prob)}
+                          {isPool ? toPct(s.prob) : toAmericanOdds(s.prob)}
                         </span>
                       </button>
                     );
@@ -881,6 +996,7 @@ function BetSlip({
   parlayAmount, onParlayAmountChange, combinedMultiplier, parlayPayout,
   submitting, error, successMsg,
   onAmountChange, onRemove, onSubmit, onParlaySubmit,
+  betTypeTotals, hasPoolSelections,
 }: {
   mobileActive: boolean;
   allSelections: [string, { betType: string; amount: string }][];
@@ -903,6 +1019,8 @@ function BetSlip({
   onRemove: (fullKey: string) => void;
   onSubmit: () => void;
   onParlaySubmit: () => void;
+  betTypeTotals: Record<string, Record<string, number>>;
+  hasPoolSelections: boolean;
 }) {
   const parlayOdds = allSelections.length >= 2 ? multiplierToAmericanOdds(combinedMultiplier) : null;
 
@@ -959,13 +1077,15 @@ function BetSlip({
               const home = match ? teams[match.home_team_id] : null;
               const away = match ? teams[match.away_team_id] : null;
               const pred = matchPredictions[matchId] ?? FALLBACK_PRED;
-              const mult = getSlotMultiplier(sk, sideFromBetType(sel.betType), pred);
+              const isPool = match?.bettingMode === "pool";
               const amount = parseInt(sel.amount) || 0;
-              const payout = Math.round(amount * mult);
               const badge = match ? matchBadge(match.stage, match.round, match.match_number) : "";
               const desc = betDescription(sel.betType, home?.name ?? "Home", away?.name ?? "Away");
-              const prob = getProbForBet(sk, sel.betType, pred);
-              const odds = toAmericanOdds(prob);
+              const side = sideFromBetType(sel.betType);
+              const prob = isPool ? poolProb(matchId, sk, side, betTypeTotals, pred) : getProbForBet(sk, sel.betType, pred);
+              const odds = isPool ? toPct(prob) : toAmericanOdds(prob);
+              const mult = getSlotMultiplier(sk, side, pred);
+              const payout = isPool ? null : Math.round(amount * mult);
 
               return (
                 <div key={key} className="px-4 py-3 space-y-2">
@@ -1000,7 +1120,9 @@ function BetSlip({
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-[9px] text-zinc-600 uppercase tracking-wide">Win</p>
-                        <p className="text-sm font-bold text-amber-400 tabular-nums">🪙 {payout.toLocaleString()}</p>
+                        <p className="text-sm font-bold text-amber-400 tabular-nums">
+                          {payout == null ? "at close" : `🪙 ${payout.toLocaleString()}`}
+                        </p>
                       </div>
                     </div>
                   )}
@@ -1043,6 +1165,9 @@ function BetSlip({
                 <p className="text-lg font-bold text-amber-400">🪙 {totalPayout.toLocaleString()}</p>
               </div>
             </div>
+            {hasPoolSelections && (
+              <p className="text-[10px] text-zinc-600">Pool-mode legs aren&apos;t included above — their payout is set when the match closes.</p>
+            )}
             {error && <div className="px-3 py-2 bg-red-900/40 border border-red-700/50 rounded-lg text-xs text-red-300">{error}</div>}
             {successMsg && <div className="px-3 py-2 bg-emerald-900/40 border border-emerald-700/50 rounded-lg text-xs text-emerald-300">✓ {successMsg}</div>}
             <button
@@ -1148,8 +1273,11 @@ function MyBetsView({
     wagers.filter((w) => w.status === "pending").reduce((s, w) => s + w.amount, 0) +
     parlays.filter((p) => p.status === "pending").reduce((s, p) => s + p.amount, 0);
   const maxPayout =
-    wagers.filter((w) => w.status === "pending").reduce((s, w) => s + Math.round(w.amount * w.odds_multiplier), 0) +
+    wagers
+      .filter((w) => w.status === "pending" && w.odds_multiplier != null)
+      .reduce((s, w) => s + Math.round(w.amount * w.odds_multiplier!), 0) +
     parlays.filter((p) => p.status === "pending").reduce((s, p) => s + Math.round(p.amount * p.combinedMultiplier), 0);
+  const hasPendingPoolWagers = wagers.some((w) => w.status === "pending" && w.odds_multiplier == null);
 
   return (
     <div className="w-full px-6 py-6 max-w-2xl mx-auto space-y-6">
@@ -1161,6 +1289,7 @@ function MyBetsView({
           </p>
           <p className="text-xs text-zinc-500">
             Max payout · <span className="text-emerald-400 font-semibold">🪙 {maxPayout.toLocaleString()}</span>
+            {hasPendingPoolWagers && <span className="text-zinc-600"> (+ pool bets, set at close)</span>}
           </p>
         </div>
       </div>
@@ -1171,8 +1300,13 @@ function MyBetsView({
           <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Straight Bets</p>
           {wagers.map((w, i) => {
             const { badge, desc } = legLabel(w.match_id, w.bet_type);
-            const payout = Math.round(w.amount * w.odds_multiplier);
-            const odds = multiplierToAmericanOdds(w.odds_multiplier);
+            const isPool = w.odds_multiplier == null;
+            const odds = isPool ? "Pool" : multiplierToAmericanOdds(w.odds_multiplier!);
+            const payoutLabel = isPool
+              ? w.status === "pending"
+                ? "payout set at close"
+                : `🪙 ${w.amount.toLocaleString()} → ${(w.payout_amount ?? 0).toLocaleString()}`
+              : `🪙 ${w.amount.toLocaleString()} → ${Math.round(w.amount * w.odds_multiplier!).toLocaleString()}`;
             return (
               <button
                 key={`${w.match_id}:${w.bet_type}:${i}`}
@@ -1188,9 +1322,7 @@ function MyBetsView({
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-sm font-bold text-amber-400 tabular-nums">{odds}</p>
-                  <p className="text-[11px] text-zinc-500 tabular-nums">
-                    🪙 {w.amount.toLocaleString()} → {payout.toLocaleString()}
-                  </p>
+                  <p className="text-[11px] text-zinc-500 tabular-nums">{payoutLabel}</p>
                 </div>
               </button>
             );

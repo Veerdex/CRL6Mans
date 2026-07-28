@@ -2985,7 +2985,9 @@ async function voidMatchWagers(matchId: string): Promise<void> {
   const { data: wagers } = await supabaseAdmin
     .from("wagers").select("id, player_id, amount").eq("match_id", matchId).eq("status", "pending");
   if ((wagers ?? []).length) {
-    await supabaseAdmin.from("wagers").update({ status: "void" }).in("id", wagers!.map((w) => w.id));
+    await Promise.all(wagers!.map((w) =>
+      supabaseAdmin.from("wagers").update({ status: "void", payout_amount: w.amount }).eq("id", w.id),
+    ));
     await Promise.all(wagers!.map((w) =>
       supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: w.player_id, coin_amount: w.amount }),
     ));
@@ -3013,7 +3015,9 @@ export async function voidAllPendingWagers(): Promise<void> {
   const { data: wagers } = await supabaseAdmin
     .from("wagers").select("id, player_id, amount").eq("status", "pending");
   if ((wagers ?? []).length) {
-    await supabaseAdmin.from("wagers").update({ status: "void" }).in("id", wagers!.map((w) => w.id));
+    await Promise.all(wagers!.map((w) =>
+      supabaseAdmin.from("wagers").update({ status: "void", payout_amount: w.amount }).eq("id", w.id),
+    ));
     await Promise.all(wagers!.map((w) =>
       supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: w.player_id, coin_amount: w.amount }),
     ));
@@ -3033,6 +3037,23 @@ export async function voidAllPendingWagers(): Promise<void> {
   }
 }
 
+function slotKey(betType: string): string {
+  if (betType === "home" || betType === "away") return "moneyline";
+  const m = betType.match(/^(?:over|under)_([\d.]+)$/);
+  return m ? `ou_${m[1]}` : betType;
+}
+
+function evaluateBetWon(betType: string, homeWon: boolean, totalGames: number): boolean {
+  if (betType === "home") return homeWon;
+  if (betType === "away") return !homeWon;
+  const m = betType.match(/^(over|under)_([\d.]+)$/);
+  if (m) {
+    const line = parseFloat(m[2]);
+    return m[1] === "over" ? totalGames > line : totalGames < line;
+  }
+  return false;
+}
+
 async function resolveMatchWagers(matchId: string, homeScore: number, awayScore: number): Promise<void> {
   const { data: wagers } = await supabaseAdmin
     .from("wagers")
@@ -3041,37 +3062,88 @@ async function resolveMatchWagers(matchId: string, homeScore: number, awayScore:
     .eq("status", "pending");
 
   if (!(wagers ?? []).length) return;
+  const rows = wagers!;
+
+  const { data: match } = await supabaseAdmin.from("matches").select("betting_mode").eq("id", matchId).single();
+  const isPool = match?.betting_mode === "pool";
 
   const totalGames = homeScore + awayScore;
   const homeWon = homeScore > awayScore;
 
   const wonIds: string[] = [];
   const lostIds: string[] = [];
+  const voidIds: string[] = [];
   const gainByPlayer: Record<string, number> = {};
+  const poolPayoutById: Record<string, number> = {};
 
-  for (const w of wagers!) {
-    let won = false;
-    if (w.bet_type === "home") won = homeWon;
-    else if (w.bet_type === "away") won = !homeWon;
-    else {
-      const m = (w.bet_type as string).match(/^(over|under)_([\d.]+)$/);
-      if (m) {
-        const line = parseFloat(m[2]);
-        won = m[1] === "over" ? totalGames > line : totalGames < line;
+  if (isPool) {
+    // Pari-mutuel payout: each slot (moneyline, or a specific O/U line) is its own
+    // pool. Winners split the full pool proportional to stake. If nobody bet the
+    // winning side, every stake in that slot is refunded instead of forfeited —
+    // there's no house to absorb a one-sided miss, so input coins must equal output.
+    const bySlot = new Map<string, typeof rows>();
+    for (const w of rows) {
+      const key = slotKey(w.bet_type as string);
+      if (!bySlot.has(key)) bySlot.set(key, []);
+      bySlot.get(key)!.push(w);
+    }
+
+    for (const slotWagers of bySlot.values()) {
+      const totalPool = slotWagers.reduce((s, w) => s + w.amount, 0);
+      const winners = slotWagers.filter((w) => evaluateBetWon(w.bet_type as string, homeWon, totalGames));
+      const winningStake = winners.reduce((s, w) => s + w.amount, 0);
+
+      if (winningStake === 0) {
+        for (const w of slotWagers) {
+          voidIds.push(w.id);
+          gainByPlayer[w.player_id] = (gainByPlayer[w.player_id] ?? 0) + w.amount;
+          poolPayoutById[w.id] = w.amount;
+        }
+        continue;
+      }
+
+      for (const w of slotWagers) {
+        if (evaluateBetWon(w.bet_type as string, homeWon, totalGames)) {
+          wonIds.push(w.id);
+          const payout = Math.round((w.amount * totalPool) / winningStake);
+          gainByPlayer[w.player_id] = (gainByPlayer[w.player_id] ?? 0) + payout;
+          poolPayoutById[w.id] = payout;
+        } else {
+          lostIds.push(w.id);
+          poolPayoutById[w.id] = 0;
+        }
       }
     }
-    if (won) {
-      wonIds.push(w.id);
-      const gain = Math.round(w.amount * Number(w.odds_multiplier));
-      gainByPlayer[w.player_id] = (gainByPlayer[w.player_id] ?? 0) + gain;
-    } else {
-      lostIds.push(w.id);
+  } else {
+    for (const w of rows) {
+      if (evaluateBetWon(w.bet_type as string, homeWon, totalGames)) {
+        wonIds.push(w.id);
+        const gain = Math.round(w.amount * Number(w.odds_multiplier));
+        gainByPlayer[w.player_id] = (gainByPlayer[w.player_id] ?? 0) + gain;
+      } else {
+        lostIds.push(w.id);
+      }
     }
   }
 
   const updates: PromiseLike<unknown>[] = [];
-  if (wonIds.length) updates.push(supabaseAdmin.from("wagers").update({ status: "won" }).in("id", wonIds));
-  if (lostIds.length) updates.push(supabaseAdmin.from("wagers").update({ status: "lost" }).in("id", lostIds));
+  if (isPool) {
+    // Payout varies per wager (proportional to stake), so pool-mode rows are
+    // updated individually rather than bulk .in()-updated with one shared status.
+    for (const id of wonIds) {
+      updates.push(supabaseAdmin.from("wagers").update({ status: "won", payout_amount: poolPayoutById[id] }).eq("id", id));
+    }
+    for (const id of lostIds) {
+      updates.push(supabaseAdmin.from("wagers").update({ status: "lost", payout_amount: 0 }).eq("id", id));
+    }
+    for (const id of voidIds) {
+      updates.push(supabaseAdmin.from("wagers").update({ status: "void", payout_amount: poolPayoutById[id] }).eq("id", id));
+    }
+  } else {
+    if (wonIds.length) updates.push(supabaseAdmin.from("wagers").update({ status: "won" }).in("id", wonIds));
+    if (lostIds.length) updates.push(supabaseAdmin.from("wagers").update({ status: "lost" }).in("id", lostIds));
+    if (voidIds.length) updates.push(supabaseAdmin.from("wagers").update({ status: "void" }).in("id", voidIds));
+  }
   for (const [playerId, gain] of Object.entries(gainByPlayer)) {
     updates.push(supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: playerId, coin_amount: gain }));
   }
