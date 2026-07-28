@@ -27,6 +27,8 @@ export type CombinedPlayer = {
   current_3v3: string;
   peak_2v2: string;
   current_2v2: string;
+  peak_1v1: string | null;
+  current_1v1: string | null;
   banReason: string | null;
   kickReason: string | null;
   kickedUntil: string | null;
@@ -187,6 +189,8 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
   const [curr3v3, setCurr3v3]       = useState(player.current_3v3);
   const [peak2v2, setPeak2v2]       = useState(player.peak_2v2);
   const [curr2v2, setCurr2v2]       = useState(player.current_2v2);
+  const [peak1v1, setPeak1v1]       = useState(player.peak_1v1 ?? "");
+  const [curr1v1, setCurr1v1]       = useState(player.current_1v1 ?? "");
 
   const isBanned = player.status === "banned";
   const peakMmr  = (Number(peak2v2) + Number(curr2v2)) * 0.3 + (Number(peak3v3) + Number(curr3v3)) * 0.2;
@@ -200,6 +204,7 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
         username, tracker_url: trackerUrl,
         peak_3v3: peak3v3, current_3v3: curr3v3,
         peak_2v2: peak2v2, current_2v2: curr2v2,
+        peak_1v1: peak1v1, current_1v1: curr1v1,
       });
       if (res?.error) { setError(res.error); return; }
       setSaved(true);
@@ -215,6 +220,8 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
     setCurr3v3(player.current_3v3);
     setPeak2v2(player.peak_2v2);
     setCurr2v2(player.current_2v2);
+    setPeak1v1(player.peak_1v1 ?? "");
+    setCurr1v1(player.current_1v1 ?? "");
     setEditOpen(false);
     setError(null);
   }
@@ -361,6 +368,8 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
             <Field label="Current 3v3" value={curr3v3}    onChange={setCurr3v3} type="number" />
             <Field label="Peak 2v2"    value={peak2v2}    onChange={setPeak2v2} type="number" />
             <Field label="Current 2v2" value={curr2v2}    onChange={setCurr2v2} type="number" />
+            <Field label="Peak 1v1"    value={peak1v1}    onChange={setPeak1v1} type="number" />
+            <Field label="Current 1v1" value={curr1v1}    onChange={setCurr1v1} type="number" />
           </div>
 
           {player.platformAccounts.length > 0 && (

@@ -13,7 +13,7 @@ import {
   getRoundName, GROUP_STAGE_PREFIX, parseGroupNum,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
-import { teamRatingFromRVs, applyRatingUpdate, teamRatingDeltaFromRVChange } from "./rating";
+import { calculatePlayerRating, initialTeamRating, applyRatingUpdate, teamRatingDeltaFromRatingChange, type PlayerRatingInputs } from "./rating";
 import { hasBlockingIdentityDiscrepancy } from "./replay-identity-certification";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
@@ -692,71 +692,84 @@ function getTeamNumberForPick(pickIndex: number, numTeams: number): number {
   return roundIndex % 2 === 0 ? numTeams - pickInRound : pickInRound + 1;
 }
 
-function rankValue(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }) {
-  return (
-    (Number(p.peak_2v2) + Number(p.current_2v2)) * 1.2 +
-    (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.8
-  ) / 4;
+// ── Season rating calculator ──────────────────────────────────────────────────
+// Model: crl-final-rating-v1. Pure math lives in app/lib/rating.ts (shared
+// with the wager predictor); this layer only reads/writes season_rating.
+
+type RatingFields = {
+  peak_2v2: string; current_2v2: string;
+  peak_3v3: string; current_3v3: string;
+  peak_1v1: string | null; current_1v1: string | null;
+};
+
+// enterDraft gates on peak_1v1/current_1v1 being present, so any player who
+// can be on a season roster has already submitted 1v1 data — the ?? 0
+// fallback here only protects legacy rosters from a pre-gating season.
+function ratingInputsOf(p: RatingFields): PlayerRatingInputs {
+  return {
+    at_1v1:     Number(p.peak_1v1 ?? 0),
+    season_1v1: Number(p.current_1v1 ?? 0),
+    at_2v2:     Number(p.peak_2v2),
+    season_2v2: Number(p.current_2v2),
+    at_3v3:     Number(p.peak_3v3),
+    season_3v3: Number(p.current_3v3),
+  };
 }
 
-// ── Season rating calculator ──────────────────────────────────────────────────
-// Model: crl-game-share-elo-v1. Pure math lives in app/lib/rating.ts (shared
-// with the wager predictor); this layer only reads/writes season_rating.
-// Full spec: wagers-prediction-explainer.txt
+function playerRating(p: RatingFields): number {
+  return calculatePlayerRating(ratingInputsOf(p));
+}
 
-// Lazy-initialises a team's season_rating from its current roster RVs. The
-// roster-aggregation power mean is fixed regardless of stage — see rating.ts.
+// Lazy-initialises a team's season_rating from its current roster ratings.
+// The roster-aggregation power mean is fixed regardless of stage — see rating.ts.
 async function initTeamSeasonRating(teamId: string): Promise<number> {
   const { data: players } = await supabaseAdmin
     .from("players")
-    .select("peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
     .eq("team_id", teamId)
     .eq("status", "approved");
-  const rvs = (players ?? []).map((p) => rankValue(p as Parameters<typeof rankValue>[0]));
-  return teamRatingFromRVs(rvs);
+  const ratings = (players ?? []).map((p) => playerRating(p as RatingFields));
+  return initialTeamRating(ratings);
 }
 
-type RankFields = { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string };
-
-// Applies the marginal effect of one player's RV change (e.g. an approved
+// Applies the marginal effect of one player's rating change (e.g. an approved
 // profile-edit request) to their team's season_rating. No-ops if the team
 // hasn't played yet (season_rating still null) — the next match's lazy init
-// will pick up the new RV directly. See teamRatingDeltaFromRVChange in
+// will pick up the new rating directly. See teamRatingDeltaFromRatingChange in
 // rating.ts for why this is exact and safe to call per-edit regardless of
 // how many other edits happen before or after it.
 export async function applyPlayerRVChangeToTeamRating(
   playerId: string,
   teamId: string,
-  oldFields: RankFields,
-  newFields: RankFields,
+  oldFields: RatingFields,
+  newFields: RatingFields,
 ): Promise<void> {
   const { data: team } = await supabaseAdmin.from("teams").select("season_rating").eq("id", teamId).single();
   if (!team || team.season_rating == null) return;
 
   const { data: roster } = await supabaseAdmin
     .from("players")
-    .select("id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
     .eq("team_id", teamId)
     .eq("status", "approved");
 
-  const rvFor = (p: { id: string } & RankFields, fields: RankFields) =>
-    p.id === playerId ? rankValue(fields) : rankValue(p);
+  const ratingFor = (p: { id: string } & RatingFields, fields: RatingFields) =>
+    playerRating(p.id === playerId ? fields : p);
 
-  const oldRVs = (roster ?? []).map((p) => rvFor(p, oldFields));
-  const newRVs = (roster ?? []).map((p) => rvFor(p, newFields));
+  const oldRatings = (roster ?? []).map((p) => ratingFor(p, oldFields));
+  const newRatings = (roster ?? []).map((p) => ratingFor(p, newFields));
 
-  const delta = teamRatingDeltaFromRVChange(oldRVs, newRVs);
+  const delta = teamRatingDeltaFromRatingChange(oldRatings, newRatings);
   await supabaseAdmin
     .from("teams")
     .update({ season_rating: Number(team.season_rating) + delta })
     .eq("id", teamId);
 }
 
-// Applies the game-share Elo update to both teams after a series result.
+// Applies the zero-sum rating update to both teams after a series result.
 // homeScore/awayScore are games won in the series; the update is exactly
 // zero-sum, so goal differential no longer feeds the rating. Applied
-// identically regardless of stage — independent of the hidden
-// PREDICTION_CONFIDENCE used on the display/wager-odds path.
+// identically regardless of stage.
 async function applySeasonRatingUpdate(
   homeTeamId: string,
   awayTeamId: string,
@@ -808,7 +821,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
 
   const { data: enteredAll } = await supabaseAdmin
     .from("players")
-    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at")
+    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at")
     .eq("status", "approved")
     .eq("draft_entered", true)
     .order("draft_entered_at", { ascending: true, nullsFirst: false });
@@ -856,7 +869,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   if (missingRoleIds.length > 0)
     return { ok: false, message: `Missing Discord role IDs for: ${missingRoleIds.join(", ")}. Set them in the Team Slots section of the admin panel.` };
 
-  const sorted = [...entered].sort((a, b) => rankValue(b) - rankValue(a));
+  const sorted = [...entered].sort((a, b) => playerRating(b) - playerRating(a));
   const drafted = numTeams * 3;
   const undrafted = sorted.length - drafted;
 
@@ -872,7 +885,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   const captainLines: string[] = [];
   const captains: Array<{ discordId: string | null; teamRoleId?: string }> = [];
   for (let i = 0; i < numTeams; i++) {
-    captainLines.push(`Team ${captainTeams[i].num}: **${sorted[i].username}** (RV: ${rankValue(sorted[i]).toFixed(0)})`);
+    captainLines.push(`Team ${captainTeams[i].num}: **${sorted[i].username}** (RV: ${playerRating(sorted[i]).toFixed(0)})`);
     captains.push({ discordId: sorted[i].discord_id ?? null, teamRoleId: captainTeams[i].discord_role_id ?? undefined });
   }
 
@@ -971,7 +984,7 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
 
   const { data: enteredAll } = await supabaseAdmin
     .from("players")
-    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at")
+    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at")
     .eq("status", "approved")
     .eq("draft_entered", true)
     .order("draft_entered_at", { ascending: true, nullsFirst: false });
@@ -1014,17 +1027,22 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
   if (missingRoleIds.length > 0)
     return { ok: false, message: `Missing Discord role IDs for: ${missingRoleIds.join(", ")}.` };
 
-  const rvById = new Map<string, number>(entered.map(p => [p.id, rankValue(p)]));
+  const rvById = new Map<string, number>(entered.map(p => [p.id, playerRating(p)]));
 
   // Random shuffle into groups, then 10000 greedy single-swap iterations.
-  // Each iteration proposes one swap between two random groups and keeps it
-  // only if it reduces the sum of squared team totals (equivalent to minimising
-  // variance of group means since the grand total is constant).
+  // Each iteration proposes swapping one player between two random teams and
+  // keeps it only if it lowers the variance of team ratings — using
+  // initialTeamRating (the same power-mean + carry-gap formula the predictor
+  // scores matches with) rather than a raw average, so teams come out equal
+  // in the eyes of the win-probability model, not just in average player rating.
   const shuffled = [...entered].sort(() => Math.random() - 0.5);
   const teamPlayerIds: string[][] = Array.from({ length: numTeams }, (_, i) =>
     shuffled.slice(i * 3, (i + 1) * 3).map(p => p.id)
   );
-  const teamTotals = teamPlayerIds.map(ids => ids.reduce((s, id) => s + rvById.get(id)!, 0));
+  const teamRatingOf = (ids: string[]) => initialTeamRating(ids.map(id => rvById.get(id)!));
+  const teamRatings = teamPlayerIds.map(teamRatingOf);
+  let sumRatings = teamRatings.reduce((s, r) => s + r, 0);
+  let sumSqRatings = teamRatings.reduce((s, r) => s + r * r, 0);
 
   for (let iter = 0; iter < 10000; iter++) {
     const gi = Math.floor(Math.random() * numTeams);
@@ -1036,17 +1054,27 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
 
     const idA = teamPlayerIds[gi][pi];
     const idB = teamPlayerIds[gj][pj];
-    const rvA = rvById.get(idA)!;
-    const rvB = rvById.get(idB)!;
 
-    const newTI = teamTotals[gi] - rvA + rvB;
-    const newTJ = teamTotals[gj] - rvB + rvA;
+    const candidateI = [...teamPlayerIds[gi]];
+    const candidateJ = [...teamPlayerIds[gj]];
+    candidateI[pi] = idB;
+    candidateJ[pj] = idA;
+    const newRatingI = teamRatingOf(candidateI);
+    const newRatingJ = teamRatingOf(candidateJ);
 
-    if (newTI * newTI + newTJ * newTJ < teamTotals[gi] ** 2 + teamTotals[gj] ** 2) {
+    // initialTeamRating is nonlinear, so the grand total isn't invariant across
+    // a swap the way a raw sum would be — track sum/sumSq across all teams
+    // directly instead of assuming the total stays constant.
+    const newSumRatings = sumRatings - teamRatings[gi] - teamRatings[gj] + newRatingI + newRatingJ;
+    const newSumSqRatings = sumSqRatings - teamRatings[gi] ** 2 - teamRatings[gj] ** 2 + newRatingI ** 2 + newRatingJ ** 2;
+
+    if (newSumSqRatings - newSumRatings ** 2 / numTeams < sumSqRatings - sumRatings ** 2 / numTeams) {
       teamPlayerIds[gi][pi] = idB;
       teamPlayerIds[gj][pj] = idA;
-      teamTotals[gi] = newTI;
-      teamTotals[gj] = newTJ;
+      teamRatings[gi] = newRatingI;
+      teamRatings[gj] = newRatingJ;
+      sumRatings = newSumRatings;
+      sumSqRatings = newSumSqRatings;
     }
   }
 
@@ -1357,7 +1385,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
   }
 
   const { data: available, error: avErr } = await supabaseAdmin.from("players")
-    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
     .eq("status", "approved").eq("in_active_draft", true).is("team_id", null);
   if (avErr) { console.error("[execAutoPick] available players query failed:", avErr.message); return { done: true }; }
 
@@ -1368,7 +1396,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
     return { done: true };
   }
 
-  const best = [...available].sort((a, b) => rankValue(b) - rankValue(a))[0];
+  const best = [...available].sort((a, b) => playerRating(b) - playerRating(a))[0];
   if (channelId) {
     await sendChannelMessage(channelId,
       `⏰ **Team ${currentTeamNum}** ran out of time! Auto-picking **${best.username}**…`
@@ -1521,11 +1549,11 @@ async function totalUsers() {
 async function playerInfo(username: string) {
   const { data } = await supabaseAdmin
     .from("players")
-    .select("username, status, peak_3v3, current_3v3, peak_2v2, current_2v2, tracker_url, team_id")
+    .select("username, status, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, tracker_url, team_id")
     .ilike("username", username).single();
 
   if (!data) return reply(`❌ No player found: "${username}"`);
-  const rv = rankValue(data);
+  const rv = playerRating(data);
   return reply(
     `**${data.username}**\nStatus: ${data.status}\n` +
     `Peak 3v3: ${data.peak_3v3} | Current: ${data.current_3v3}\n` +
@@ -2753,9 +2781,11 @@ export async function execReportMatchResult(
       supabaseAdmin.from("teams").update({ losses: (loser.losses ?? 0) + 1 }).eq("id", loser.id),
     ]);
 
-    // Update season ratings. Lazy-init from roster RVs on first match. Skipped
-    // for administrative forfeits (DQ cascade) — those scores never happened.
-    if (!skipRatingUpdate) {
+    // Update season ratings. Lazy-init from roster ratings on first match.
+    // Forfeits are a complete no-op here — the games never happened, so they
+    // must not move either team's rating (skipRatingUpdate is kept as a
+    // separate explicit flag for non-forfeit administrative skips).
+    if (!forfeit && !skipRatingUpdate) {
       applySeasonRatingUpdate(
         homeTeam.id, awayTeam.id,
         homeTeam.season_rating as number | null,

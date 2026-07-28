@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { calculatePlayerRating } from "@/app/lib/rating";
 import { AdminTeamsManager } from "./admin-teams-manager";
 import { TeamsGrid } from "./teams-grid";
 import { BackButton } from "./back-button";
@@ -22,7 +23,7 @@ export default async function TeamsPage({
       .select("id, name, logo_url, logo_offset_x, logo_offset_y, is_locked, is_disqualified, disqualified_at"),
     supabaseAdmin
       .from("players")
-      .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, tracker_url, is_captain, team_id")
+      .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, tracker_url, is_captain, team_id")
       .eq("status", "approved")
       .not("team_id", "is", null),
     supabaseAdmin.from("league_settings").select("active_tournament_id, season_active").single(),
@@ -59,12 +60,12 @@ export default async function TeamsPage({
 
   // All approved players not currently on a team — passed to AdminTeamsManager as the
   // bench swap pool, regardless of whether they entered the active tournament/draft.
-  type AvailablePlayer = { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; team_id: string | null };
+  type AvailablePlayer = { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null; team_id: string | null };
   let availablePlayers: AvailablePlayer[] = [];
   if (userIsAdmin) {
     const { data: participants } = await supabaseAdmin
       .from("players")
-      .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, team_id")
+      .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, team_id")
       .eq("status", "approved")
       .is("team_id", null);
     availablePlayers = (participants ?? []) as AvailablePlayer[];
@@ -85,21 +86,26 @@ export default async function TeamsPage({
     return byTeam[t.id].length > 0;
   });
 
-  // Sort rosters: captain first, then by RV
+  const ratingOf = (p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }) =>
+    calculatePlayerRating({
+      at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+      at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+      at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+    });
+
+  // Sort rosters: captain first, then by rating
   Object.values(byTeam).forEach((roster) => {
     roster?.sort((a, b) => {
       if (a.is_captain !== b.is_captain) return a.is_captain ? -1 : 1;
-      const rvA = (Number(a.peak_2v2) + Number(a.current_2v2)) * 0.3 + (Number(a.peak_3v3) + Number(a.current_3v3)) * 0.2;
-      const rvB = (Number(b.peak_2v2) + Number(b.current_2v2)) * 0.3 + (Number(b.peak_3v3) + Number(b.current_3v3)) * 0.2;
-      return rvB - rvA;
+      return ratingOf(b) - ratingOf(a);
     });
   });
 
-  // Sort teams by average RV
+  // Sort teams by average rating
   const teamAvgMmr = (teamId: string): number => {
     const roster = byTeam[teamId] ?? [];
     if (!roster.length) return 0;
-    const total = roster.reduce((sum, p) => sum + (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2, 0);
+    const total = roster.reduce((sum, p) => sum + ratingOf(p), 0);
     return total / roster.length;
   };
   teams.sort((a, b) => teamAvgMmr(b.id) - teamAvgMmr(a.id));
@@ -123,7 +129,8 @@ export default async function TeamsPage({
             teams={teams}
             byTeam={byTeam as Record<string, {
               id: string; username: string; display_name: string | null; discord_id: string | null; avatar: string | null;
-              peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; tracker_url: string;
+              peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+              peak_1v1: string | null; current_1v1: string | null; tracker_url: string;
               is_captain: boolean | null; team_id: string | null;
             }[]>}
             avgMmr={Object.fromEntries(teams.map(t => [t.id, Math.round(teamAvgMmr(t.id))]))}
@@ -136,7 +143,8 @@ export default async function TeamsPage({
             teams={teams}
             byTeam={byTeam as Record<string, {
               id: string; username: string; display_name: string | null; discord_id: string | null; avatar: string | null;
-              peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; tracker_url: string;
+              peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+              peak_1v1: string | null; current_1v1: string | null; tracker_url: string;
               is_captain: boolean | null; team_id: string | null;
             }[]>}
             avgMmr={Object.fromEntries(teams.map((t) => [t.id, Math.round(teamAvgMmr(t.id))]))}

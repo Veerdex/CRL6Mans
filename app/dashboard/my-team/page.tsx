@@ -4,6 +4,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { calculatePlayerRating } from "@/app/lib/rating";
 import {
   getRoundName, getMatchLabel,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -42,6 +43,7 @@ import {
 type RosterPlayer = {
   id: string; username: string; display_name: string | null; discord_id: string; avatar: string | null;
   peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+  peak_1v1: string | null; current_1v1: string | null;
   tracker_url: string; is_captain: boolean;
 };
 
@@ -72,7 +74,11 @@ type MatchInfo = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function peakMmr(p: RosterPlayer) {
-  return (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2;
+  return calculatePlayerRating({
+    at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+    at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+    at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+  });
 }
 
 // Swaps any subbed-out roster player for their approved substitute, so the "who's
@@ -206,7 +212,7 @@ export default async function MyTeamPage() {
     supabaseAdmin.from("teams")
       .select("id, name, logo_url, logo_offset_x, logo_offset_y, is_locked").eq("id", teamId).single(),
     supabaseAdmin.from("players")
-      .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, tracker_url, is_captain")
+      .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, tracker_url, is_captain")
       .eq("team_id", teamId).eq("status", "approved"),
     supabaseAdmin.from("teams").select("id, name, logo_url, logo_offset_x, logo_offset_y"),
     supabaseAdmin.from("league_settings")
@@ -220,7 +226,15 @@ export default async function MyTeamPage() {
   if (!team) redirect("/dashboard");
 
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
-  const subsEnabled = (settings?.subs_enabled as boolean | null) ?? true;
+  let tournamentJoinMode: "players" | "teams" | null = null;
+  if (activeTournamentId) {
+    const { data: tourney } = await supabaseAdmin
+      .from("tournaments").select("join_mode").eq("id", activeTournamentId).single();
+    tournamentJoinMode = (tourney?.join_mode as "players" | "teams" | undefined) ?? null;
+  }
+  // Team sign-up tournaments pre-form rosters — substitutions aren't offered for that format.
+  const subsAllowedForFormat = tournamentJoinMode !== "teams";
+  const subsEnabled = ((settings?.subs_enabled as boolean | null) ?? true) && subsAllowedForFormat;
   const seasonActive = settings?.season_active ?? false;
   const preset       = (settings?.season_format as { preset?: string })?.preset ?? "single_elimination";
   // isDE covers all formats that use a double-elimination bracket (full or qualifier)
@@ -361,9 +375,9 @@ export default async function MyTeamPage() {
     const { data: mySubPlayersRaw } = mySubIds.length
       ? await supabaseAdmin
           .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
           .in("id", mySubIds)
-      : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] };
+      : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] };
     const mySubDetails = Object.fromEntries(
       (mySubPlayersRaw ?? []).map((p) => [p.id, { name: p.display_name ?? p.username, rv: peakMmrSub(p) }])
     );
@@ -381,11 +395,11 @@ export default async function MyTeamPage() {
       if (opponentId) {
         const oppTeamData = teamMap[opponentId] ?? null;
         const { data: oppRoster } = await supabaseAdmin
-          .from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
+          .from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
           .eq("team_id", opponentId).eq("status", "approved");
-        const oppPlayers = (oppRoster ?? []) as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[];
+        const oppPlayers = (oppRoster ?? []) as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[];
         const oppAvgMmr = oppPlayers.length
-          ? Math.round(oppPlayers.reduce((s, p) => s + (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2, 0) / oppPlayers.length)
+          ? Math.round(oppPlayers.reduce((s, p) => s + peakMmrSub(p), 0) / oppPlayers.length)
           : 0;
 
         const { data: oppApprovedSubsRaw } = await supabaseAdmin
@@ -397,7 +411,7 @@ export default async function MyTeamPage() {
         const { data: oppSubPlayersRaw } = oppSubIds.length
           ? await supabaseAdmin
               .from("players")
-              .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
+              .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
               .in("id", oppSubIds)
           : { data: [] as typeof oppPlayers };
         const oppSubDetails = Object.fromEntries(
@@ -480,16 +494,20 @@ export default async function MyTeamPage() {
   const { data: subPlayersRaw } = allSubCandidateIds.length > 0
     ? await supabaseAdmin
         .from("players")
-        .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
+        .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
         .in("id", allSubCandidateIds)
-    : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] };
+    : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] };
 
   const subPlayerMap = Object.fromEntries(
     (subPlayersRaw ?? []).map((p) => [p.id, p])
   );
 
-  function peakMmrSub(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }) {
-    return Math.round((Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2);
+  function peakMmrSub(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1?: string | null; current_1v1?: string | null }) {
+    return Math.round(calculatePlayerRating({
+      at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+      at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+      at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+    }));
   }
 
   // Admin-set round schedules define the allowed scheduling window per round.
@@ -592,7 +610,7 @@ export default async function MyTeamPage() {
   // Incoming sub requests: pending requests from our upcoming opponent (we accept/reject).
   const myMatchIds = myMatches.map((m) => m.id);
   let incomingSubRequests: IncomingSubRequest[] = [];
-  if (!activeTournamentId && myMatchIds.length > 0) {
+  if (subsAllowedForFormat && myMatchIds.length > 0) {
     const { data: incomingRaw } = await supabaseAdmin
       .from("sub_requests")
       .select("id, team_id, match_id, player_out_id, sub_player_id, reason, created_at")
@@ -610,9 +628,9 @@ export default async function MyTeamPage() {
     const { data: incPlayers } = ids.length
       ? await supabaseAdmin
           .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
           .in("id", ids)
-      : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] };
+      : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] };
     const incPlayerMap = Object.fromEntries((incPlayers ?? []).map((p) => [p.id, p]));
 
     incomingSubRequests = ((incomingRaw ?? []) as {
@@ -640,10 +658,10 @@ export default async function MyTeamPage() {
     : null;
 
   let availableSubs: AvailableSub[] = [];
-  if (!activeTournamentId) {
+  if (subsAllowedForFormat) {
     const { data: subsRaw } = await supabaseAdmin
       .from("players")
-      .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, team_id, draft_entered")
+      .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, team_id, draft_entered")
       .eq("status", "approved")
       .eq("sub_willing", true);
 
@@ -651,7 +669,8 @@ export default async function MyTeamPage() {
     availableSubs = (
       (subsRaw ?? []) as {
         id: string; username: string; display_name: string | null;
-        peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; team_id: string | null; draft_entered: boolean;
+        peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+        peak_1v1: string | null; current_1v1: string | null; team_id: string | null; draft_entered: boolean;
       }[]
     )
       .filter((p) => {
@@ -659,12 +678,13 @@ export default async function MyTeamPage() {
         if (nextMatchOpponentId && p.team_id === nextMatchOpponentId) return false;
         return p.draft_entered || p.team_id !== null;
       })
-      .map(({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3 }) => ({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3 }));
+      .map(({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1 }) => ({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1 }));
   }
 
   const subRoster: SubRosterPlayer[] = ((roster ?? []) as RosterPlayer[]).map((p) => ({
     id: p.id, username: p.username, display_name: p.display_name ?? null,
     peak_2v2: p.peak_2v2, current_2v2: p.current_2v2, peak_3v3: p.peak_3v3, current_3v3: p.current_3v3,
+    peak_1v1: p.peak_1v1, current_1v1: p.current_1v1,
   }));
 
   // ── Recent results for carousel ──────────────────────────────────────────
@@ -760,7 +780,7 @@ export default async function MyTeamPage() {
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-[10px] text-zinc-600 mb-0.5">RV</p>
-                    <p className="text-sm font-mono text-zinc-300">{Math.round((Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2).toLocaleString()}</p>
+                    <p className="text-sm font-mono text-zinc-300">{Math.round(peakMmr(p)).toLocaleString()}</p>
                   </div>
                 </a>
               ))}
@@ -859,8 +879,8 @@ export default async function MyTeamPage() {
             })()}
           </Card>
 
-          {/* Sub panels are season-only — tournaments don't allow substitutions */}
-          {!activeTournamentId && (
+          {/* Team sign-up tournaments pre-form rosters — no sub panels for that format */}
+          {subsAllowedForFormat && (
             <>
               <OpposingSubRequestPanel requests={incomingSubRequests} />
               {nextMatch && (

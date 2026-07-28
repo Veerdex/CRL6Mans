@@ -1,6 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
 import { addRole, removeRole, addRoleById, removeRoleById } from "./discord-api";
+import { calculatePlayerRating } from "./rating";
 
 export type PlayerStatus = "unregistered" | "pending" | "approved" | "rejected" | "banned";
 
@@ -15,6 +16,8 @@ export type Player = {
   current_3v3: string;
   peak_2v2: string;
   current_2v2: string;
+  peak_1v1: string | null;
+  current_1v1: string | null;
   tracker_url: string;
   college_image_url: string;
   draft_entered: boolean;
@@ -54,6 +57,8 @@ type PendingPlayerRow = {
   current_3v3: string;
   peak_2v2: string;
   current_2v2: string;
+  peak_1v1: string | null;
+  current_1v1: string | null;
   college_image_url: string;
   created_at: string;
 };
@@ -80,6 +85,8 @@ function toPlayer(
     current_3v3: pending?.current_3v3 ?? "0",
     peak_2v2: pending?.peak_2v2 ?? "0",
     current_2v2: pending?.current_2v2 ?? "0",
+    peak_1v1: pending?.peak_1v1 ?? null,
+    current_1v1: pending?.current_1v1 ?? null,
     tracker_url: pending?.tracker_url ?? "",
     college_image_url: pending?.college_image_url ?? "",
     draft_entered: tier3?.draft_entered ?? false,
@@ -139,7 +146,7 @@ export async function getApprovedPlayers(): Promise<Player[]> {
   const [{ data: pendingRows }, { data: playerRows }] = await Promise.all([
     supabaseAdmin
       .from("pending_players")
-      .select("account_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, college_image_url, created_at")
+      .select("account_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, college_image_url, created_at")
       .in("account_id", accountIds),
     supabaseAdmin.from("players").select("account_id, team_id, draft_entered").in("account_id", accountIds),
   ]);
@@ -151,11 +158,17 @@ export async function getApprovedPlayers(): Promise<Player[]> {
     toPlayer(a as AccountRow, pendingByAccount.get(a.id) ?? null, tier3ByAccount.get(a.id) ?? null)
   );
 
-  return players.sort((a, b) => {
-    const aRv = (Number(a.peak_2v2) + Number(a.current_2v2)) * 0.3 + (Number(a.peak_3v3) + Number(a.current_3v3)) * 0.2;
-    const bRv = (Number(b.peak_2v2) + Number(b.current_2v2)) * 0.3 + (Number(b.peak_3v3) + Number(b.current_3v3)) * 0.2;
-    return bRv - aRv;
-  });
+  const ratingOf = (p: Player) =>
+    calculatePlayerRating({
+      at_1v1: Number(p.peak_1v1 ?? 0),
+      season_1v1: Number(p.current_1v1 ?? 0),
+      at_2v2: Number(p.peak_2v2 ?? 0),
+      season_2v2: Number(p.current_2v2 ?? 0),
+      at_3v3: Number(p.peak_3v3 ?? 0),
+      season_3v3: Number(p.current_3v3 ?? 0),
+    });
+
+  return players.sort((a, b) => ratingOf(b) - ratingOf(a));
 }
 
 export async function getAllPendingPlayers(): Promise<Player[]> {

@@ -29,7 +29,7 @@ export async function enterDraft(confirmTrackerSame = false): Promise<{ error?: 
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("id, status, draft_entered, kick_reason, kicked_until, tracker_confirmed_at, peak_2v2, peak_3v3")
+    .select("id, status, draft_entered, kick_reason, kicked_until, tracker_confirmed_at, peak_2v2, peak_3v3, peak_1v1, current_1v1")
     .eq("discord_id", session.userId)
     .single();
 
@@ -37,6 +37,8 @@ export async function enterDraft(confirmTrackerSame = false): Promise<{ error?: 
   if (player.status !== "approved") return { error: "Your registration must be approved first." };
   if (isCurrentlyKicked(player.kick_reason, player.kicked_until)) return { error: "You are not eligible to join the draft." };
   if (player.draft_entered) return { error: "You are already in the draft." };
+  if (player.peak_1v1 == null || player.current_1v1 == null)
+    return { error: "You need to submit your 1v1 MMR before joining the draft. Add it in Settings → Request Changes." };
 
   const inServer = await isGuildMember(session.userId);
   if (!inServer) return { inviteRequired: true };

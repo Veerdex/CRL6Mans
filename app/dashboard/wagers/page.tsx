@@ -4,6 +4,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
+import { calculatePlayerRating } from "@/app/lib/rating";
 import { computeMatchPrediction, computeMatchPredictionFromRating, type MatchPrediction } from "./prediction";
 import { WagersClient } from "./wagers-client";
 import { WagesLeaderboardOnly } from "./leaderboard-view";
@@ -29,16 +30,22 @@ function formatStageName(stage: string): string {
   return map[stage] ?? stage.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function rvOf(p: {
+function playerRatingOf(p: {
   peak_2v2: string | null;
   current_2v2: string | null;
   peak_3v3: string | null;
   current_3v3: string | null;
+  peak_1v1: string | null;
+  current_1v1: string | null;
 }): number {
-  return (
-    (Number(p.peak_2v2 ?? 0) + Number(p.current_2v2 ?? 0)) * 0.3 +
-    (Number(p.peak_3v3 ?? 0) + Number(p.current_3v3 ?? 0)) * 0.2
-  );
+  return calculatePlayerRating({
+    at_1v1: Number(p.peak_1v1 ?? 0),
+    season_1v1: Number(p.current_1v1 ?? 0),
+    at_2v2: Number(p.peak_2v2 ?? 0),
+    season_2v2: Number(p.current_2v2 ?? 0),
+    at_3v3: Number(p.peak_3v3 ?? 0),
+    season_3v3: Number(p.current_3v3 ?? 0),
+  });
 }
 
 export default async function WagersPage() {
@@ -206,7 +213,7 @@ export default async function WagersPage() {
         supabaseAdmin.from("teams").select("id, name, logo_url, season_rating").in("id", teamIds),
         supabaseAdmin
           .from("players")
-          .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+          .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
           .in("team_id", teamIds)
           .eq("status", "approved"),
       ])
@@ -219,15 +226,15 @@ export default async function WagersPage() {
     seasonRatings[t.id] = t.season_rating != null ? Number(t.season_rating) : null;
   }
 
-  // Group player RVs by team (fallback when season_rating not yet set)
-  const rvsByTeam: Record<string, number[]> = {};
+  // Group player ratings by team (fallback when season_rating not yet set)
+  const ratingsByTeam: Record<string, number[]> = {};
   for (const p of rosterPlayers ?? []) {
     if (!p.team_id) continue;
-    (rvsByTeam[p.team_id] ??= []).push(rvOf(p));
+    (ratingsByTeam[p.team_id] ??= []).push(playerRatingOf(p));
   }
 
   // Compute predictions — prefer stored season_rating (reflects match history),
-  // fall back to raw player RVs for teams that haven't played yet.
+  // fall back to raw player ratings for teams that haven't played yet.
   const matchPredictions: Record<string, MatchPrediction> = {};
   for (const m of matches) {
     const hRating = seasonRatings[m.home_team_id];
@@ -235,7 +242,7 @@ export default async function WagersPage() {
     matchPredictions[m.id] =
       hRating != null && aRating != null
         ? computeMatchPredictionFromRating(hRating, aRating, m.bestOf)
-        : computeMatchPrediction(rvsByTeam[m.home_team_id] ?? [], rvsByTeam[m.away_team_id] ?? [], m.bestOf);
+        : computeMatchPrediction(ratingsByTeam[m.home_team_id] ?? [], ratingsByTeam[m.away_team_id] ?? [], m.bestOf);
   }
 
   // Grid predictions are frozen by the tournament-scheduler cron shortly after a

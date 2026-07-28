@@ -31,6 +31,7 @@ export async function addTestUser() {
 
   const peak3v3 = rand(800, 1500);
   const peak2v2 = rand(800, 1500);
+  const peak1v1 = rand(800, 1500);
 
   const { error } = await supabaseAdmin.from("players").insert({
     discord_id: discordId,
@@ -43,6 +44,8 @@ export async function addTestUser() {
     current_3v3: String(peak3v3 - rand(0, 150)),
     peak_2v2: String(peak2v2),
     current_2v2: String(peak2v2 - rand(0, 150)),
+    peak_1v1: String(peak1v1),
+    current_1v1: String(peak1v1 - rand(0, 150)),
     college_image_url: "",
     updated_at: new Date().toISOString(),
   });
@@ -61,6 +64,7 @@ export async function addBulkTestUsers(count = 32) {
     const suffix = Math.random().toString(36).slice(2, 6);
     const peak3v3 = rand(800, 1500);
     const peak2v2 = rand(800, 1500);
+    const peak1v1 = rand(800, 1500);
     return {
       discord_id: `test_${now}_${i}_${suffix}`,
       username: `${name}_${suffix}`,
@@ -72,6 +76,8 @@ export async function addBulkTestUsers(count = 32) {
       current_3v3: String(peak3v3 - rand(0, 150)),
       peak_2v2: String(peak2v2),
       current_2v2: String(peak2v2 - rand(0, 150)),
+      peak_1v1: String(peak1v1),
+      current_1v1: String(peak1v1 - rand(0, 150)),
       college_image_url: "",
       updated_at: new Date().toISOString(),
     };
@@ -275,6 +281,7 @@ export async function addBulkTournamentTestUsers(tournamentId: string, count = 3
     const suffix = Math.random().toString(36).slice(2, 6);
     const peak3v3 = rand(800, 1500);
     const peak2v2 = rand(800, 1500);
+    const peak1v1 = rand(800, 1500);
     return {
       discord_id: `test_${now}_${i}_${suffix}`,
       username: `${name}_${suffix}`,
@@ -286,6 +293,8 @@ export async function addBulkTournamentTestUsers(tournamentId: string, count = 3
       current_3v3: String(peak3v3 - rand(0, 150)),
       peak_2v2: String(peak2v2),
       current_2v2: String(peak2v2 - rand(0, 150)),
+      peak_1v1: String(peak1v1),
+      current_1v1: String(peak1v1 - rand(0, 150)),
       college_image_url: "",
       updated_at: new Date().toISOString(),
     };

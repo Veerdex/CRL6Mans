@@ -17,7 +17,7 @@ export default async function SettingsPage() {
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("id, status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, sub_willing, theme, nav_layout, display_name, notification_prefs")
+    .select("id, status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, sub_willing, theme, nav_layout, display_name, notification_prefs")
     .eq("discord_id", session.userId)
     .single();
 
@@ -40,7 +40,7 @@ export default async function SettingsPage() {
     const [{ data: pendingRow }, { data: rejectedRow }, { data: platformAccountRows }] = await Promise.all([
       supabaseAdmin
         .from("player_edit_requests")
-        .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at")
+        .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, created_at")
         .eq("player_id", player.id)
         .eq("status", "pending")
         .maybeSingle(),
@@ -67,6 +67,8 @@ export default async function SettingsPage() {
           current_3v3: pendingRow.current_3v3,
           peak_2v2:    pendingRow.peak_2v2,
           current_2v2: pendingRow.current_2v2,
+          peak_1v1:    pendingRow.peak_1v1 ?? "",
+          current_1v1: pendingRow.current_1v1 ?? "",
           created_at:  pendingRow.created_at,
         }
       : null;
@@ -138,6 +140,8 @@ export default async function SettingsPage() {
               current_3v3: player.current_3v3  ?? "",
               peak_2v2:    player.peak_2v2     ?? "",
               current_2v2: player.current_2v2  ?? "",
+              peak_1v1:    player.peak_1v1     ?? "",
+              current_1v1: player.current_1v1  ?? "",
               sub_willing: player.sub_willing  ?? false,
             }}
             pending={pending}

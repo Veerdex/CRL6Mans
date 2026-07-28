@@ -6,6 +6,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { getBestOfForMatch } from "@/app/lib/discord-bot";
+import { calculatePlayerRating } from "@/app/lib/rating";
 import {
   computeMatchPredictionFromRating,
   computeMatchPrediction,
@@ -71,20 +72,25 @@ async function computeServerOdds(
   } else {
     const { data: players } = await supabaseAdmin
       .from("players")
-      .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+      .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
       .in("team_id", [homeTeamId, awayTeamId])
       .eq("status", "approved");
 
-    const rvs = (teamId: string) =>
+    const playerRatings = (teamId: string) =>
       (players ?? [])
         .filter((p) => p.team_id === teamId)
-        .map(
-          (p) =>
-            (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 +
-            (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2,
+        .map((p) =>
+          calculatePlayerRating({
+            at_1v1: Number(p.peak_1v1 ?? 0),
+            season_1v1: Number(p.current_1v1 ?? 0),
+            at_2v2: Number(p.peak_2v2 ?? 0),
+            season_2v2: Number(p.current_2v2 ?? 0),
+            at_3v3: Number(p.peak_3v3 ?? 0),
+            season_3v3: Number(p.current_3v3 ?? 0),
+          }),
         );
 
-    prediction = computeMatchPrediction(rvs(homeTeamId), rvs(awayTeamId), bestOf);
+    prediction = computeMatchPrediction(playerRatings(homeTeamId), playerRatings(awayTeamId), bestOf);
   }
 
   return {

@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { calculatePlayerRating } from "@/app/lib/rating";
 import { BracketCanvas } from "./bracket-canvas";
 import {
   getRoundName, getMatchLabel, getLBMatchLabel, getFeederLabel,
@@ -785,11 +786,15 @@ export async function GroupBracketView({ qualifiersPerGroup, topDirectQualifiers
   if (groupTeamIds.length) {
     const { data: groupPlayers } = await supabaseAdmin
       .from("players")
-      .select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3")
+      .select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
       .in("team_id", groupTeamIds);
-    const rvOf = (p: { peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null }) =>
-      Math.round((Number(p.peak_2v2 ?? 0) + Number(p.current_2v2 ?? 0)) * 0.3 + (Number(p.peak_3v3 ?? 0) + Number(p.current_3v3 ?? 0)) * 0.2);
-    const byTeam: Record<string, { display_name: string | null; username: string; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null }[]> = {};
+    const rvOf = (p: { peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null; peak_1v1?: string | null; current_1v1?: string | null }) =>
+      Math.round(calculatePlayerRating({
+        at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+        at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+        at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+      }));
+    const byTeam: Record<string, { display_name: string | null; username: string; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null; peak_1v1: string | null; current_1v1: string | null }[]> = {};
     for (const p of (groupPlayers ?? [])) {
       if (!p.team_id) continue;
       (byTeam[p.team_id] ??= []).push(p as never);

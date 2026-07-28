@@ -9,6 +9,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { editRole, addRole, addRoleById, removeRoleById, removeRole } from "@/app/lib/discord-api";
 import { validateImageUpload } from "@/app/lib/uploads";
 import { applyPlayerRVChangeToTeamRating, execDisqualifyTeam } from "@/app/lib/discord-bot";
+import { calculatePlayerRating } from "@/app/lib/rating";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -94,17 +95,19 @@ export async function updateTeamInfo(formData: FormData) {
 async function assignCaptainIfMissing(teamId: string): Promise<void> {
   const { data: members } = await supabaseAdmin
     .from("players")
-    .select("id, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, is_captain")
+    .select("id, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, is_captain")
     .eq("team_id", teamId);
 
   if (!members?.length || members.length <= 2) return;
   if (members.some((m) => m.is_captain)) return;
 
-  const best = members.reduce((a, b) => {
-    const aRv = (Number(a.peak_2v2) + Number(a.current_2v2)) * 0.3 + (Number(a.peak_3v3) + Number(a.current_3v3)) * 0.2;
-    const bRv = (Number(b.peak_2v2) + Number(b.current_2v2)) * 0.3 + (Number(b.peak_3v3) + Number(b.current_3v3)) * 0.2;
-    return aRv >= bRv ? a : b;
-  });
+  const ratingOf = (p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }) =>
+    calculatePlayerRating({
+      at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+      at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+      at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+    });
+  const best = members.reduce((a, b) => (ratingOf(a) >= ratingOf(b) ? a : b));
 
   await supabaseAdmin.from("players").update({ is_captain: true }).eq("id", best.id);
   if (best.discord_id) addRole(best.discord_id, "Captain").catch(() => {});
@@ -119,9 +122,11 @@ type PlayerRow = {
   current_2v2: string;
   peak_3v3: string;
   current_3v3: string;
+  peak_1v1: string | null;
+  current_1v1: string | null;
 };
 
-const PLAYER_RV_SELECT = "id, discord_id, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3";
+const PLAYER_RV_SELECT = "id, discord_id, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1";
 
 export async function swapPlayersBetweenTeams(playerAId: string, playerBId: string) {
   const session = await getSession();
@@ -141,6 +146,7 @@ export async function swapPlayersBetweenTeams(playerAId: string, playerBId: stri
   const teamBId = b.team_id as string;
   const rvFields = (p: PlayerRow) => ({
     peak_2v2: p.peak_2v2, current_2v2: p.current_2v2, peak_3v3: p.peak_3v3, current_3v3: p.current_3v3,
+    peak_1v1: p.peak_1v1, current_1v1: p.current_1v1,
   });
 
   await Promise.all([
@@ -193,6 +199,7 @@ export async function swapRosterPlayerWithBenchPlayer(rosterPlayerId: string, be
   const bench = benchPlayer as PlayerRow;
   const rvFields = (p: PlayerRow) => ({
     peak_2v2: p.peak_2v2, current_2v2: p.current_2v2, peak_3v3: p.peak_3v3, current_3v3: p.current_3v3,
+    peak_1v1: p.peak_1v1, current_1v1: p.current_1v1,
   });
 
   await applyPlayerRVChangeToTeamRating(roster.id, teamId, rvFields(roster), rvFields(bench)).catch(() => {});

@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { type Player } from "@/app/lib/players";
+import { calculatePlayerRating } from "@/app/lib/rating";
 import PlayersList from "./players-list";
 export default async function PlayersPage() {
   const cookieStore = await cookies();
@@ -13,7 +14,7 @@ export default async function PlayersPage() {
     supabaseAdmin
       .from("players")
       .select(
-        "id, discord_id, username, display_name, avatar, peak_3v3, current_3v3, peak_2v2, current_2v2, tracker_url, team_id, created_at, status, draft_entered"
+        "id, discord_id, username, display_name, avatar, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, tracker_url, team_id, created_at, status, draft_entered"
       )
       .eq("status", "approved")
       .eq("draft_entered", true),
@@ -24,11 +25,13 @@ export default async function PlayersPage() {
       .not("player_id", "is", null),
   ]);
 
-  const players = ((playersRaw ?? []) as Player[]).sort((a, b) => {
-    const aRv = (Number(a.peak_2v2) + Number(a.current_2v2)) * 0.3 + (Number(a.peak_3v3) + Number(a.current_3v3)) * 0.2;
-    const bRv = (Number(b.peak_2v2) + Number(b.current_2v2)) * 0.3 + (Number(b.peak_3v3) + Number(b.current_3v3)) * 0.2;
-    return bRv - aRv;
-  });
+  const ratingOf = (p: Player) =>
+    calculatePlayerRating({
+      at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+      at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+      at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+    });
+  const players = ((playersRaw ?? []) as Player[]).sort((a, b) => ratingOf(b) - ratingOf(a));
 
   const teamNames: Record<string, string> = {};
   teams?.forEach((t) => { teamNames[t.id] = t.name; });

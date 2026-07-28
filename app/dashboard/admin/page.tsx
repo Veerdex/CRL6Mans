@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { getAllPendingPlayers, isModeratorVerified, isDirector, isCEO, isCurrentlyKicked, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { calculatePlayerRating } from "@/app/lib/rating";
 import { LeagueControls } from "./league-controls";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
 import { InsightsChart, type InsightsPoint } from "./insights-chart";
@@ -66,19 +67,19 @@ export default async function AdminPage() {
   const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }] = await Promise.all([
     getAllPendingPlayers(),
     supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending").maybeSingle(),
-    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
+    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
     supabaseAdmin.from("sub_requests").select("id, team_id, player_out_id, sub_player_id, sub_player_ids, reason, admin_note, requested_by_discord_id, created_at").eq("status", "escalated").order("created_at", { ascending: true }),
-    supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at").eq("status", "pending").order("created_at", { ascending: true }),
+    supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, created_at").eq("status", "pending").order("created_at", { ascending: true }),
     supabaseAdmin.from("tournaments").select("*").order("created_at", { ascending: false }),
     supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
     supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar, status, ban_reason, kick_reason, kicked_until, created_at").order("username"),
     supabaseAdmin.from("matches").select("stage, round, discord_channel_id"),
-    supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2"),
+    supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1"),
   ]);
 
-  type RawPlayerRow = { account_id: string; team_id: string | null; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null };
+  type RawPlayerRow = { account_id: string; team_id: string | null; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; peak_1v1: string | null; current_1v1: string | null };
   const playersByAccountId = new Map(((playerRows ?? []) as RawPlayerRow[]).map(p => [p.account_id, p]));
 
   const [{ data: pendingPlatformClaimRows }, { data: verifiedPlatformAccountRows }, { data: allPlatformAccountRows }] = await Promise.all([
@@ -475,8 +476,8 @@ export default async function AdminPage() {
     { data: subRequesters },
   ] = await Promise.all([
     subTeamIds.length      ? supabaseAdmin.from("teams").select("id, name").in("id", subTeamIds) : { data: [] as { id: string; name: string }[] },
-    subOutIds.length       ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3").in("id", subOutIds) : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] },
-    subInIds.length        ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3").in("id", subInIds) : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] },
+    subOutIds.length       ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").in("id", subOutIds) : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] },
+    subInIds.length        ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").in("id", subInIds) : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] },
     subRequesterIds.length ? supabaseAdmin.from("players").select("discord_id, username, display_name").in("discord_id", subRequesterIds) : { data: [] as { discord_id: string; username: string; display_name: string | null }[] },
   ]);
 
@@ -485,8 +486,12 @@ export default async function AdminPage() {
   const subInMap        = Object.fromEntries((subPlayersIn  ?? []).map(p => [p.id, p]));
   const subRequesterMap = Object.fromEntries((subRequesters ?? []).map(p => [p.discord_id, p]));
 
-  function subPeakMmr(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }) {
-    return Math.round((Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2);
+  function subPeakMmr(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1?: string | null; current_1v1?: string | null }) {
+    return Math.round(calculatePlayerRating({
+      at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+      at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+      at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+    }));
   }
 
   const subRequestCards: SubRequestCardData[] = subReqs.map(req => {
@@ -518,13 +523,14 @@ export default async function AdminPage() {
   type RawEditRequest = {
     id: string; player_id: string; username: string;
     tracker_url: string; peak_3v3: string; current_3v3: string; peak_2v2: string; current_2v2: string;
+    peak_1v1: string | null; current_1v1: string | null;
     created_at: string;
   };
   const editReqs = (pendingEditRequests ?? []) as RawEditRequest[];
   const editPlayerIds = [...new Set(editReqs.map(r => r.player_id))];
   const { data: editPlayers } = editPlayerIds.length
-    ? await supabaseAdmin.from("players").select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2").in("id", editPlayerIds)
-    : { data: [] as { id: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null }[] };
+    ? await supabaseAdmin.from("players").select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1").in("id", editPlayerIds)
+    : { data: [] as { id: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; peak_1v1: string | null; current_1v1: string | null }[] };
   const editPlayerMap = Object.fromEntries((editPlayers ?? []).map(p => [p.id, p]));
 
   const playerEditRequestCards: PlayerEditRequestCardData[] = editReqs.map(req => {
@@ -537,11 +543,15 @@ export default async function AdminPage() {
       current3v3:      req.current_3v3,
       peak2v2:         req.peak_2v2,
       current2v2:      req.current_2v2,
+      peak1v1:         req.peak_1v1 ?? "",
+      current1v1:      req.current_1v1 ?? "",
       liveTrackerUrl:  live?.tracker_url  ?? "",
       livePeak3v3:     live?.peak_3v3     ?? "",
       liveCurrent3v3:  live?.current_3v3  ?? "",
       livePeak2v2:     live?.peak_2v2     ?? "",
       liveCurrent2v2:  live?.current_2v2  ?? "",
+      livePeak1v1:     live?.peak_1v1     ?? "",
+      liveCurrent1v1:  live?.current_1v1  ?? "",
       createdAt:       req.created_at,
     };
   });
@@ -715,6 +725,8 @@ export default async function AdminPage() {
         current_3v3: pr.current_3v3 ?? "0",
         peak_2v2: pr.peak_2v2 ?? "0",
         current_2v2: pr.current_2v2 ?? "0",
+        peak_1v1: pr.peak_1v1 ?? null,
+        current_1v1: pr.current_1v1 ?? null,
         banReason: a.ban_reason ?? null,
         kickReason: a.kick_reason ?? null,
         kickedUntil: a.kicked_until ?? null,

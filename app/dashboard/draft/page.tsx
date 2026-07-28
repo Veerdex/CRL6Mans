@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { calculatePlayerRating } from "@/app/lib/rating";
 import { DraftLive } from "./draft-live";
 
 function getTeamNumberForPick(pickIndex: number, numTeams: number): number {
@@ -10,8 +11,16 @@ function getTeamNumberForPick(pickIndex: number, numTeams: number): number {
   return roundIndex % 2 === 0 ? numTeams - pickInRound : pickInRound + 1;
 }
 
-function rankValue(p: { peak_2v2: string | number; current_2v2: string | number; peak_3v3: string | number; current_3v3: string | number }) {
-  return ((Number(p.peak_2v2) + Number(p.current_2v2)) * 1.2 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.8) / 4;
+function rankValue(p: {
+  peak_2v2: string | number; current_2v2: string | number;
+  peak_3v3: string | number; current_3v3: string | number;
+  peak_1v1?: string | number | null; current_1v1?: string | number | null;
+}) {
+  return calculatePlayerRating({
+    at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+    at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+    at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+  });
 }
 
 export default async function DraftPage() {
@@ -48,7 +57,7 @@ export default async function DraftPage() {
   // Available players
   const { data: available } = await supabaseAdmin
     .from("players")
-    .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
     .eq("status", "approved").eq("in_active_draft", true).is("team_id", null);
   const availableSorted = [...(available ?? [])].sort((a, b) => rankValue(b) - rankValue(a));
 

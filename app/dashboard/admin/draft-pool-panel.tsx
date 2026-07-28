@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { removePlayerFromDraft } from "./league-actions";
 import { removeTournamentEntry, removeTeamSignup } from "./tournament-actions";
 import { PlayerName } from "@/app/dashboard/player-name";
+import { calculatePlayerRating } from "@/app/lib/rating";
 
 export type DraftPoolEntry = {
   id: string;
@@ -16,6 +17,8 @@ export type DraftPoolEntry = {
   current_2v2: string;
   peak_3v3: string;
   current_3v3: string;
+  peak_1v1: string | null;
+  current_1v1: string | null;
   draft_entered_at: string | null;
 };
 
@@ -42,7 +45,11 @@ export type DraftPoolTournamentGroup = {
 };
 
 function rankValue(p: DraftPoolEntry): number {
-  return (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2;
+  return calculatePlayerRating({
+    at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+    at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+    at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+  });
 }
 
 function Avatar({ discordId, avatar }: { discordId: string; avatar: string | null }) {

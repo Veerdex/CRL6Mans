@@ -1,5 +1,6 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
+import { calculatePlayerRating } from "./rating";
 import {
   generateSEMatchInserts, generateDEMatchInserts, generateSEPlaceholderInserts,
   DE_WINNERS, DE_LOSERS, wbLoserTarget,
@@ -143,17 +144,25 @@ function buildPlayedSet(
   return s;
 }
 
-// Compute average RV per team from player rows.
+// Compute average player rating per team from player rows.
 function computeAvgRV(
   teamIds: string[],
-  players: { team_id: string | null; peak_2v2: number | null; current_2v2: number | null; peak_3v3: number | null; current_3v3: number | null }[],
+  players: {
+    team_id: string | null;
+    peak_2v2: number | null; current_2v2: number | null;
+    peak_3v3: number | null; current_3v3: number | null;
+    peak_1v1: number | null; current_1v1: number | null;
+  }[],
 ): Record<string, number> {
   const rv: Record<string, number> = {};
   for (const id of teamIds) {
     const roster = players.filter(p => p.team_id === id);
     const sum = roster.reduce((s, p) =>
-      s + (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 +
-           (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2, 0);
+      s + calculatePlayerRating({
+        at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+        at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+        at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+      }), 0);
     rv[id] = roster.length ? sum / roster.length : 0;
   }
   return rv;
@@ -605,7 +614,7 @@ export async function buildAndSaveSwissFromSEQualifier(): Promise<{ error?: stri
   const qualifiedIds = qualified.map(t => t.id);
   const { data: rvPlayers } = await supabaseAdmin
     .from("players")
-    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
     .in("team_id", qualifiedIds);
   const rvByTeam = computeAvgRV(qualifiedIds, rvPlayers ?? []);
   const seeded = [...qualified].sort((a, b) => (rvByTeam[b.id] ?? 0) - (rvByTeam[a.id] ?? 0));
@@ -668,7 +677,7 @@ export async function buildAndSaveSwissFromDEQualifier(): Promise<{ error?: stri
   const allIds = [...wbSurvivors, ...lbSurvivors].map(t => t.id);
   const { data: rvPlayers } = await supabaseAdmin
     .from("players")
-    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
     .in("team_id", allIds);
   const rvByTeam = computeAvgRV(allIds, rvPlayers ?? []);
   const seeded = [
@@ -916,7 +925,7 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
   // Only include teams that have at least one player assigned — this prevents
   // empty slot rows (configured for future seasons) from being seeded into the bracket.
   const { data: players } = await supabaseAdmin
-    .from("players").select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3").not("team_id", "is", null);
+    .from("players").select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").not("team_id", "is", null);
 
   const activeTeamIds = [...new Set((players ?? []).map((p) => p.team_id as string).filter(Boolean))];
   if (!activeTeamIds.length) return { error: "No teams found." };
@@ -929,7 +938,11 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
   (teamsRaw ?? []).forEach((t) => {
     const roster = players?.filter((p) => p.team_id === t.id) ?? [];
     const sum = roster.reduce(
-      (s, p) => s + (Number(p.peak_2v2) + Number(p.current_2v2)) * 0.3 + (Number(p.peak_3v3) + Number(p.current_3v3)) * 0.2, 0
+      (s, p) => s + calculatePlayerRating({
+        at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+        at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+        at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+      }), 0
     );
     avgMmr[t.id] = roster.length ? sum / roster.length : 0;
   });

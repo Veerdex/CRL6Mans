@@ -1,20 +1,8 @@
 // ── Rating math ─────────────────────────────────────────────────────────────
-// The per-game curve and RV→rating transforms live in app/lib/rating.ts so the
-// season updater and this predictor read a rating gap the same way.
+// The per-game curve and roster-aggregation math live in app/lib/rating.ts so
+// the season updater and this predictor read a rating gap the same way.
 
-import {
-  perGameExpected,
-  teamRatingFromRVs,
-  PREDICTION_CONFIDENCE,
-} from "@/app/lib/rating";
-
-// perGameExpected returns a probability in [0, 1] (not a percentage). Uses the
-// hidden PREDICTION_CONFIDENCE calibration multiplier — not the per-bucket
-// eloConfidence used on the rating-update path — since this only affects the
-// displayed/wagered probability, never actual season_rating movement.
-function perGameProbability(ratingA: number, ratingB: number): number {
-  return perGameExpected(ratingA, ratingB, PREDICTION_CONFIDENCE);
-}
+import { winProbability, initialTeamRating } from "@/app/lib/rating";
 
 function nChooseK(n: number, k: number): number {
   let result = 1;
@@ -81,7 +69,7 @@ export type MatchPrediction = {
 
 function computeFromRatings(homeRating: number, awayRating: number, bestOf: number): MatchPrediction {
   const winsNeeded = Math.ceil(bestOf / 2);
-  const perGameH = perGameProbability(homeRating, awayRating);
+  const perGameH = winProbability(homeRating, awayRating);
   const perGameA = 1 - perGameH;
 
   const homeWinProb = seriesWinProbability(perGameH, winsNeeded);
@@ -117,16 +105,16 @@ export function computeMatchPredictionFromRating(
   return computeFromRatings(homeRating, awayRating, bestOf);
 }
 
-// Computes team ratings from raw player RVs, then predicts. Roster aggregation
-// and the update path's K-factor/confidence are both fixed regardless of stage.
+// Computes team ratings from raw per-player ratings (calculatePlayerRating
+// output), then predicts. Roster aggregation is fixed regardless of stage.
 export function computeMatchPrediction(
-  homeRvs: number[],
-  awayRvs: number[],
+  homePlayerRatings: number[],
+  awayPlayerRatings: number[],
   bestOf: number,
 ): MatchPrediction {
   return computeFromRatings(
-    teamRatingFromRVs(homeRvs),
-    teamRatingFromRVs(awayRvs),
+    initialTeamRating(homePlayerRatings),
+    initialTeamRating(awayPlayerRatings),
     bestOf,
   );
 }

@@ -23,7 +23,7 @@ export default async function RegisterPage() {
   const { data: existing } = account
     ? await supabaseAdmin
         .from("pending_players")
-        .select("tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, college_image_url, sub_willing")
+        .select("tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, college_image_url, sub_willing")
         .eq("account_id", account.id)
         .single()
     : { data: null };
@@ -72,6 +72,8 @@ export default async function RegisterPage() {
         current_3v3:       existing.current_3v3,
         peak_2v2:          existing.peak_2v2,
         current_2v2:       existing.current_2v2,
+        peak_1v1:          existing.peak_1v1 ?? "",
+        current_1v1:       existing.current_1v1 ?? "",
         college_image_url: existing.college_image_url,
         sub_willing:       existing.sub_willing ?? false,
       }

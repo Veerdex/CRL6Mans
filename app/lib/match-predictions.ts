@@ -1,17 +1,24 @@
 import { supabaseAdmin } from "./supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 import { computeMatchPrediction, computeMatchPredictionFromRating } from "@/app/dashboard/wagers/prediction";
+import { calculatePlayerRating } from "@/app/lib/rating";
 
-function rvOf(p: {
+function playerRatingOf(p: {
   peak_2v2: string | null;
   current_2v2: string | null;
   peak_3v3: string | null;
   current_3v3: string | null;
+  peak_1v1: string | null;
+  current_1v1: string | null;
 }): number {
-  return (
-    (Number(p.peak_2v2 ?? 0) + Number(p.current_2v2 ?? 0)) * 0.3 +
-    (Number(p.peak_3v3 ?? 0) + Number(p.current_3v3 ?? 0)) * 0.2
-  );
+  return calculatePlayerRating({
+    at_1v1: Number(p.peak_1v1 ?? 0),
+    season_1v1: Number(p.current_1v1 ?? 0),
+    at_2v2: Number(p.peak_2v2 ?? 0),
+    season_2v2: Number(p.current_2v2 ?? 0),
+    at_3v3: Number(p.peak_3v3 ?? 0),
+    season_3v3: Number(p.current_3v3 ?? 0),
+  });
 }
 
 // Freezes the win% shown in the wagers "all matches" grid the moment both teams
@@ -63,7 +70,7 @@ export async function freezeUnfrozenMatchPredictions(): Promise<void> {
     supabaseAdmin.from("teams").select("id, season_rating").in("id", teamIds),
     supabaseAdmin
       .from("players")
-      .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
+      .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
       .in("team_id", teamIds)
       .eq("status", "approved"),
   ]);
@@ -73,10 +80,10 @@ export async function freezeUnfrozenMatchPredictions(): Promise<void> {
     seasonRatings[t.id] = t.season_rating != null ? Number(t.season_rating) : null;
   }
 
-  const rvsByTeam: Record<string, number[]> = {};
+  const ratingsByTeam: Record<string, number[]> = {};
   for (const p of rosterPlayers ?? []) {
     if (!p.team_id) continue;
-    (rvsByTeam[p.team_id] ??= []).push(rvOf(p));
+    (ratingsByTeam[p.team_id] ??= []).push(playerRatingOf(p));
   }
 
   await Promise.all(
@@ -89,7 +96,7 @@ export async function freezeUnfrozenMatchPredictions(): Promise<void> {
       const pred =
         hRating != null && aRating != null
           ? computeMatchPredictionFromRating(hRating, aRating, bestOf)
-          : computeMatchPrediction(rvsByTeam[homeTeamId] ?? [], rvsByTeam[awayTeamId] ?? [], bestOf);
+          : computeMatchPrediction(ratingsByTeam[homeTeamId] ?? [], ratingsByTeam[awayTeamId] ?? [], bestOf);
       return supabaseAdmin
         .from("matches")
         .update({

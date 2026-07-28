@@ -6,74 +6,119 @@ OVERVIEW
 --------
 The wagers tab ("Westside Wages") lets players place coin bets on match outcomes.
 Odds are derived from a win-probability model built on team ratings. After each
-match, team ratings are updated using a custom Elo-style formula that factors in
-series score and goal differential.
+match, team ratings are updated using a zero-sum, series-score-based formula.
 
 There are two separate systems working together:
-  1. Win prediction / odds calculation (what odds to show before the game)
+  1. Player/team rating calculation + win prediction (what odds to show before the game)
   2. Season rating update (how team ratings change after the game)
 
+Model name: crl-final-rating-v1. All the math below lives in app/lib/rating.ts,
+shared by the wager predictor (app/dashboard/wagers/prediction.ts) and the
+season updater (app/lib/discord-bot.ts) so both interpret a rating gap the
+same way.
+
 
 =======================================
-PART 1 — WIN PREDICTION & ODDS SYSTEM
+PART 1 — PLAYER RATING
 =======================================
 
-Files: app/dashboard/wagers/prediction.ts
-       app/dashboard/wagers/page.tsx
+File: app/lib/rating.ts (calculatePlayerRating)
 
+Each player supplies six MMR values: all-time peak and season peak for 1v1,
+2v2, and 3v3. (1v1 is optional at registration but required before a player
+can enter the draft — see enterDraft's gate.)
 
-STEP 1 — DATA SOURCE (which rating to use)
--------------------------------------------
-When both teams have played at least one season match, the page uses their stored
-  teams.season_rating  (a 0–1000 floating-point number updated each game)
-as the input directly.
+STEP 1 — AVERAGE EACH PLAYLIST
+---------------------------------
+  average_1v1 = (peak_1v1 + season_1v1) / 2
+  average_2v2 = (peak_2v2 + season_2v2) / 2
+  average_3v3 = (peak_3v3 + season_3v3) / 2
 
-If one or both teams haven't played yet (no season_rating), it falls back to
-computing a base rating from raw player MMR using the formula below.
+STEP 2 — CONVERT 1v1 AND 3v3 ONTO THE 2v2 SCALE
+---------------------------------------------------
+2v2 is used as-is (it's the reference scale). 1v1 and 3v3 go through their own
+degree-5/degree-6 polynomial conversion (fit against real player data, clamped
+to a sane input/output range) so all three playlists become comparable:
 
-Player RV (Rank Value) used as the raw input:
-  RV = (peak_2v2 + current_2v2) * 0.3 + (peak_3v3 + current_3v3) * 0.2
+  convert1v1(x)  — quintic in x, clamped to [100, 1800] in, [100, 2800] out
+  convert3v3(x)  — degree-6 in normalized t = (x-100)/2100, same output clamp
 
-
-STEP 2 — PLAYER RV → POWER SCORE (0–1000 scale)
+STEP 3 — WEIGHTED POWER MEAN ACROSS PLAYLISTS
 --------------------------------------------------
-Each player's RV is converted to a comparable power score via a sigmoid:
+Each converted playlist value gets a direct multiplier and a playlist weight,
+then they're combined with a power mean (p = 10, i.e. strongly biased toward
+the player's best playlist rather than a plain average):
 
-  rvToPower(rv) = 1000 / (1 + e^(-(rv - 1200) / 220))
+  DIRECT_MULTIPLIERS = { 1v1: 0.868, 2v2: 1.0, 3v3: 0.625 }
+  PLAYLIST_WEIGHTS   = { 1v1: 0.423, 2v2: 0.531, 3v3: 1.0 }
 
-  - RV of 1200 → power ≈ 500 (midpoint)
-  - Higher RV curves toward 1000; lower curves toward 0
-  - The 220 divisor controls the steepness of the curve
+  playerRating = powerMean(
+    [convert1v1(avg1v1)*0.868, avg2v2*1.0, convert3v3(avg3v3)*0.625],
+    weights = [0.423, 0.531, 1.0],
+    p = 10
+  )
 
-
-STEP 3 — TEAM BASE RATING FROM PLAYERS
-----------------------------------------
-Used only when teams.season_rating is not yet available.
-
-  teamBaseRating = (power1 + power2 + power3) / 3
-
-If fewer than 3 players are rostered, missing slots are padded with the team's
-own average power to avoid penalizing short rosters unfairly.
+Typical player ratings land in the ~1000-1800 range.
 
 
-STEP 4 — PER-GAME WIN PROBABILITY
------------------------------------
-Given two team ratings (either from season_rating or teamBaseRating), the
-per-game probability that team A wins a single game is:
+=======================================
+PART 2 — TEAM RATING
+=======================================
 
-  P(A wins 1 game) = 100 / (1 + 10^(-(ratingA - ratingB) / 200))
+File: app/lib/rating.ts (initialTeamRating)
 
-This is the standard Elo expected-score formula. Result is in 0–100, divided
-by 100 before the series calculation below.
+A CRL team is exactly three players. Given the three players' ratings:
 
-Example: ratingA=600, ratingB=400 → P ≈ 76%
+STEP 1 — BASE RATING (power mean, p ≈ 11.4)
+------------------------------------------------
+  baseRating = powerMean([r1, r2, r3], weights=[1,1,1], p=11.406)
+
+(Short rosters are padded with the roster's own average; long rosters keep
+only the top 3 by rating.)
+
+STEP 2 — CARRY-GAP BONUS
+----------------------------
+A team carried hard by one strong player is slightly stronger than the power
+mean alone suggests (the strong player can take over more games). Sort the
+three ratings descending as [strongest, second, weakest]:
+
+  carryGap = strongest - (second + weakest) / 2
+  teamRating = baseRating + 0.199 * carryGap
+
+Used both as the fallback team rating (when a team has no season_rating yet)
+and as the reference point for teamRatingDeltaFromRatingChange, which computes
+the marginal effect of a single roster change (e.g. an approved MMR edit)
+without needing to re-derive the whole season history.
 
 
-STEP 5 — SERIES WIN PROBABILITY (negative binomial)
------------------------------------------------------
-For a Best-of-N series, winsNeeded = ceil(N / 2).
+=======================================
+PART 3 — PER-GAME WIN PROBABILITY
+=======================================
 
-The probability of winning the series is summed over all ways to win:
+File: app/lib/rating.ts (winProbability)
+
+Given two team ratings (either from teams.season_rating or a freshly computed
+initialTeamRating), the probability that team A wins a single game is a flat
+logistic curve:
+
+  P(A wins 1 game) = 1 / (1 + 10^((ratingB - ratingA) / 300))
+
+This is calibrated as a genuine per-game probability (verified against the
+CPS evaluator, which scores it directly against raw per-game share), so it
+feeds straight into the series-probability math below with no extra scaling.
+
+Example: ratingA = 1500, ratingB = 1400 → P ≈ 63%
+
+
+=======================================
+PART 4 — SERIES WIN PROBABILITY & ODDS
+=======================================
+
+File: app/dashboard/wagers/prediction.ts
+
+STEP 1 — SERIES WIN PROBABILITY (negative binomial)
+-------------------------------------------------------
+For a Best-of-N series, winsNeeded = ceil(N / 2). Sum over all ways to win:
 win the last game, and lose anywhere from 0 to (winsNeeded - 1) prior games.
 
   P(series win) = SUM over losses in [0, winsNeeded - 1]:
@@ -81,162 +126,80 @@ win the last game, and lose anywhere from 0 to (winsNeeded - 1) prior games.
     * perGameP ^ winsNeeded
     * (1 - perGameP) ^ losses
 
-  where C(n, k) = n! / (k! * (n-k)!)  [binomial coefficient]
+STEP 2 — OVER/UNDER PROBABILITIES
+--------------------------------------
+The model enumerates every possible game scoreline (home wins W, home losses
+L) for all W,L combos that produce a valid series result, sums probability
+mass by total game count T = W + L, then slices that distribution at each
+Over/Under line (e.g. 2.5, 3.5, 4.5 for BO5) to get Over%/Under%.
 
-Example for BO3 (winsNeeded = 2), perGameP = 0.76:
-  losses=0: C(1,0) * 0.76^2 * 0.24^0 = 0.578
-  losses=1: C(2,1) * 0.76^2 * 0.24^1 = 0.278
-  Total series win probability ≈ 85.6%
-
-
-STEP 6 — OVER/UNDER PROBABILITIES
-------------------------------------
-The model enumerates every possible game scorelined:
-  (home wins W, home losses L) for all W,L combos that produce a valid series result.
-
-For each total game count T = W + L, probability mass is summed across all
-outcomes that produce that total. This distribution is then sliced at each
-Over/Under line (e.g., 2.5, 3.5, 4.5 for BO5) to produce Over% and Under%.
-
-
-STEP 7 — ODDS / PAYOUT MULTIPLIER
-------------------------------------
+STEP 3 — ODDS / PAYOUT MULTIPLIER
+--------------------------------------
 A 5% house vig is applied:
 
   HOUSE_VIG = 0.05
   payoutMultiplier(prob) = round((0.95 / prob) * 100) / 100
 
-Example: P = 85.6% → multiplier = round((0.95 / 0.856) * 100) / 100 ≈ 1.11x
-
 The multiplier is displayed in the UI as American-style odds as well:
   If multiplier >= 2.0: odds = +(multiplier - 1) * 100   (underdog, e.g. +150)
   If multiplier < 2.0:  odds = -(100 / (multiplier - 1)) (favorite, e.g. -200)
 
-
-STEP 8 — PARLAY BETS
-----------------------
-Parlay legs use the same odds multiplier per leg. The combined parlay multiplier
-is the product of all individual leg multipliers:
-
-  combined_multiplier = leg1_multiplier * leg2_multiplier * ... * legN_multiplier
-
-All legs must win for the parlay to pay out.
+STEP 4 — PARLAY BETS
+-------------------------
+Parlay legs use the same odds multiplier per leg. The combined parlay
+multiplier is the product of all individual leg multipliers; all legs must
+win for the parlay to pay out.
 
 
 ===============================================
-PART 2 — SEASON RATING UPDATE (POST-GAME ELO)
+PART 5 — SEASON RATING UPDATE (POST-MATCH)
 ===============================================
 
-File: app/lib/discord-bot.ts  (applySeasonRatingUpdate, seriesExpected, computeActualScore)
-
-
-CONSTANTS
-----------
-  RATING_K            = 67       (max rating change per match)
-  SERIES_BASE_SCALE   = 220      (base scale for expected calculation)
-  EDGE_STRENGTH       = 1.5      (sharpens the expected curve vs raw Elo)
-  GAP_SOFTNESS        = 30       (widens the curve when ratings are far apart)
-  GD_SENSITIVITY      = 1.0      (controls goal-differential impact)
-  SWEEP_GD_REFERENCE  = 3        (GD threshold to trigger sweep bonus)
-  SWEEP_GD_BONUS_SCALE = 0.12   (log-scale bonus for dominant sweeps)
-
+File: app/lib/rating.ts (applyRatingUpdate), app/lib/discord-bot.ts
+      (applySeasonRatingUpdate)
 
 INITIALIZATION (first match only)
------------------------------------
-If a team's season_rating is null (has not played), it is initialized from raw
-player RVs using the same sigmoid as the prediction system:
+-------------------------------------
+If a team's season_rating is null (hasn't played), it's initialized from its
+current roster via initialTeamRating (Part 2).
 
-  rvToTeamPower(rv) = 1000 / (1 + e^(-(rv - 1200) / 220))
-  initialRating = average of each player's power score (top 3 players)
+STEP 1 — SERIES SCORE SHARE
+--------------------------------
+Rather than a binary win/loss, the "actual" result is a compressed share of
+games won in the series (SERIES_SCORE_EXPONENT = 0.335 — a 2-0 sweep counts
+for more than a 2-1 win, but not twice as much):
 
+  updateShareA = gamesWonA^0.335 / (gamesWonA^0.335 + gamesWonB^0.335)
 
-STEP 1 — GOAL DIFFERENTIAL INPUT
+STEP 2 — RATING DELTA (zero-sum)
+-------------------------------------
+  probabilityA = winProbability(ratingA, ratingB)     — Part 3
+  deltaA       = EFFECTIVE_K * (updateShareA - probabilityA)
+  newRatingA   = ratingA + deltaA
+  newRatingB   = ratingB - deltaA
+
+  EFFECTIVE_K = BASE_K (35) * UPDATE_MULTIPLIER (2.25) = 78.75
+
+Whatever one team gains, the other loses exactly — no rating is created or
+destroyed by a match result. An outperforming underdog (winning more/bigger
+than its win probability implied) gains rating; a favorite that barely
+squeaks by loses a little instead of gaining.
+
+FORFEITS ARE A COMPLETE NO-OP
 ----------------------------------
-The admin reports home_score, away_score (series wins), and total goal diff
-across all games (tracked via replay parsing when replays are submitted).
+If a match is reported as a forfeit, the games never happened — the rating
+update is skipped entirely for both teams, regardless of any other admin
+"skip rating update" flag.
 
-  gdPerGame = goalDiff / (homeScore + awayScore)
-
-"goalDiff" is raw goals-for minus goals-against for the home team across the
-entire series. Divided by total games played to normalize across BO3/BO5.
-
-
-STEP 2 — EXPECTED SCORE
+STEP 3 — FINAL WRITE
 -------------------------
-Uses a steeper Elo curve than the prediction model, with a softening term when
-ratings are far apart (to prevent extreme mismatches from causing huge swings):
-
-  diff                = ratingA - ratingB
-  effectiveScale      = 220 + 30 * |diff| / 220
-  seriesExpected(A,B) = 1 / (1 + 10^(-(diff * 1.5) / effectiveScale))
-
-The EDGE_STRENGTH = 1.5 makes the expected curve steeper (bigger favorites are
-expected to win more convincingly) compared to the prediction model's curve.
-The GAP_SOFTNESS = 30 adds slack at extremes.
-
-
-STEP 3 — ACTUAL SCORE (incorporating goal differential)
----------------------------------------------------------
-The "actual" result is not binary (0 or 1). It incorporates how convincingly a
-team won by blending series win ratio with a goal-differential boost.
-
-  winRatio     = wins / (wins + losses)
-  absGd        = |gdPerGame|
-  gdBoost      = tanh(absGd / GD_SENSITIVITY)       # tanh(x) caps near 1
-  decisiveness = |winRatio - 0.5| / 0.5             # 0 = tie, 1 = sweep
-  gdPower      = 0.1 + 0.9 * decisiveness           # GD matters more in sweeps
-  sign         = +1 if gdPerGame >= 0 else -1
-
-  actual = 0.5
-         + (winRatio - 0.5)                         # base win/loss term
-         + sign * gdBoost * (0.5 - |winRatio - 0.5|) * gdPower
-                                                     # GD modifier
-
-A sweep (0 losses) with high GD also gets a bonus:
-  if losses == 0 and absGd > SWEEP_GD_REFERENCE:
-    actual += sign * 0.12 * ln(1 + (absGd - SWEEP_GD_REFERENCE))
-
-Result is clamped to [-0.5, 1.5].
-
-Interpretation:
-  - 2-0 win with +3 GD/game → actual ≈ 1.1 (significantly above 1)
-  - 2-1 win with +1 GD/game → actual ≈ 0.7 (slightly above 0.5)
-  - 2-0 sweep with +5 GD/game → actual ≈ 1.25+ (dominant performance)
-
-
-STEP 4 — RATING DELTA
------------------------
-  delta = actual - expected
-
-A positive delta means the team over-performed vs expectation; negative means
-under-performed. For a dominant underdog upset, delta is very positive.
-
-
-STEP 5 — K-FACTOR SCALING
----------------------------
-A straight K=67 multiplier would cause massive swings at extreme ratings. Two
-modifiers prevent this:
-
-  avgRating        = (ratingA + ratingB) / 2
-  slopeMultiplier  = avgRating * (1000 - avgRating) / 250000
-    → peaks at 1.0 when avgRating=500, falls toward 0 at 0 or 1000
-
-  boundary factor  = (1000 - rating) / 1000  if delta >= 0 (gaining)
-                   = rating / 1000            if delta < 0  (losing)
-    → prevents ratings from escaping the 0–1000 range
-
-  new_rating = clamp(10, 990,  rating + K * delta * boundary * slope)
-
-
-STEP 6 — FINAL WRITE
-----------------------
 Both home and away teams get their season_rating updated simultaneously via
 Supabase. The next time odds are computed for either team, the new rating is
 used as the starting point.
 
 
 ==================================
-PART 3 — BET RESOLUTION (COINS)
+PART 6 — BET RESOLUTION (COINS)
 ==================================
 
 File: app/lib/discord-bot.ts  (resolveMatchWagers, voidMatchWagers)
@@ -249,7 +212,7 @@ Placing a bet:
   - Status set to "pending"
 
 When match result is reported (execReportMatchResult):
-  - Rating update runs first (applySeasonRatingUpdate)
+  - Rating update runs first (applySeasonRatingUpdate), skipped entirely on forfeit
   - Then wager resolution fires asynchronously:
     - Winning bets: increment_crl_coins(player_id, round(amount * odds_multiplier))
     - Losing bets: no coins returned (already debited at placement)

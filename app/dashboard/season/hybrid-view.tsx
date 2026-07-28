@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { calculatePlayerRating } from "@/app/lib/rating";
 import { HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF } from "@/app/lib/bracket";
 import { BracketCanvas } from "./bracket-canvas";
 
@@ -226,12 +227,16 @@ export async function HybridBracketView({ variant = "12" }: { variant?: "12" | "
   if (teamIds.length) {
     const [{ data: teamsData }, { data: playersData }] = await Promise.all([
       supabaseAdmin.from("teams").select("id, name, logo_url").in("id", teamIds),
-      supabaseAdmin.from("players").select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3").in("team_id", teamIds),
+      supabaseAdmin.from("players").select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").in("team_id", teamIds),
     ]);
     (teamsData ?? []).forEach(t => { teams[t.id] = { name: t.name, logo_url: (t as { logo_url?: string | null }).logo_url ?? null }; });
-    const rvOf = (p: { peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null }) =>
-      Math.round((Number(p.peak_2v2 ?? 0) + Number(p.current_2v2 ?? 0)) * 0.3 + (Number(p.peak_3v3 ?? 0) + Number(p.current_3v3 ?? 0)) * 0.2);
-    const byTeam: Record<string, { display_name: string | null; username: string; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null }[]> = {};
+    const rvOf = (p: { peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null; peak_1v1?: string | null; current_1v1?: string | null }) =>
+      Math.round(calculatePlayerRating({
+        at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
+        at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
+        at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
+      }));
+    const byTeam: Record<string, { display_name: string | null; username: string; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null; peak_1v1: string | null; current_1v1: string | null }[]> = {};
     for (const p of (playersData ?? [])) {
       if (!p.team_id) continue;
       (byTeam[p.team_id] ??= []).push(p as never);
