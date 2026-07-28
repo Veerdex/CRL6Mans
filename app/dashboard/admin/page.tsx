@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { decrypt } from "@/app/lib/session";
 import { getAllPendingPlayers, isModeratorVerified, isDirector, isCEO, isCurrentlyKicked, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -1104,6 +1105,12 @@ export default async function AdminPage() {
           value={(tournaments ?? []).filter((t: Tournament) => t.status === "scheduled" || t.status === "active").length}
           description="Create and launch standalone tournaments (separate from the main season), track their signup/draft/active phases, and browse the archive of completed seasons and tournaments."
         >
+          <Link
+            href="/dashboard/admin/view-archive"
+            className="inline-block text-sm font-medium text-indigo-400 hover:text-indigo-300 underline underline-offset-2 mb-3"
+          >
+            View a downloaded archive file →
+          </Link>
           <TournamentManager
             tournaments={(tournaments ?? []) as Tournament[]}
             seasons={(seasons ?? []) as Season[]}
