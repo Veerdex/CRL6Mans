@@ -21,23 +21,28 @@ function playerRatingOf(p: {
   });
 }
 
-// Freezes the win% shown in the wagers "all matches" grid, and locks in the
-// match's betting mode, the moment both teams are known for a match — run
-// from the per-minute tournament-scheduler cron so it happens shortly after
-// match creation, well before the match is ever played. This is deliberately
-// NOT run from the wagers page render path: freezing predictions on first
-// view would capture whatever the team rating happens to be at that moment,
-// which drifts to a post-game value for matches nobody viewed the grid for
-// until after they were reported. Locking betting_mode here (rather than
-// only on first bet, in placeBets' lockMatchBettingMode) is what keeps a
-// director's later mode toggle from flipping matches that are already
-// visible/bettable but haven't had a bet placed yet.
+// Freezes the win% shown in the wagers "all matches" grid the moment both teams
+// are known for a match, and locks in the match's betting mode the moment its
+// schedule is accepted — run from the per-minute tournament-scheduler cron so
+// both happen promptly, well before the match is ever played. This is
+// deliberately NOT run from the wagers page render path: freezing predictions
+// on first view would capture whatever the team rating happens to be at that
+// moment, which drifts to a post-game value for matches nobody viewed the grid
+// for until after they were reported. Betting mode locks on schedule_accepted
+// rather than on team assignment because a group/round-robin stage schedules
+// every round's matchup upfront (see the same distinction in wagers/page.tsx's
+// gridMatchesRaw) — locking on team assignment there would freeze an entire
+// season's worth of group matches to whatever mode was live at bracket-build
+// time, long before a director's later toggle could ever reach them. Locking
+// here (rather than only on first bet, in placeBets' lockMatchBettingMode) is
+// what keeps a director's toggle from flipping matches that are already
+// scheduled and visible/bettable but haven't had a bet placed yet.
 export async function freezeUnfrozenMatchPredictions(): Promise<void> {
   const [{ data: ls }, { data: allMatches }] = await Promise.all([
     supabaseAdmin.from("league_settings").select("season_format, betting_mode").single(),
     supabaseAdmin
       .from("matches")
-      .select("id, stage, round, status, home_team_id, away_team_id, predicted_home_win_prob, predicted_away_win_prob, betting_mode")
+      .select("id, stage, round, status, home_team_id, away_team_id, predicted_home_win_prob, predicted_away_win_prob, betting_mode, schedule_accepted")
       .not("home_team_id", "is", null)
       .not("away_team_id", "is", null),
   ]);
@@ -49,11 +54,11 @@ export async function freezeUnfrozenMatchPredictions(): Promise<void> {
   // grid is supposed to show. Only matches still in progress have a legitimate
   // "before" rating to freeze; already-completed matches are backfilled
   // separately (see scripts/backfill-match-predictions.mjs). Completed matches
-  // still get their betting_mode locked, if somehow missing, since that has no
-  // such drift concern.
+  // still get their betting_mode locked, if somehow missing and schedule_accepted,
+  // since that has no such drift concern.
   const needsWork = (allMatches ?? []).filter(
     (m) =>
-      m.betting_mode == null ||
+      (m.betting_mode == null && m.schedule_accepted) ||
       (m.status !== "completed" && (m.predicted_home_win_prob == null || m.predicted_away_win_prob == null)),
   );
   if (!needsWork.length) return;
