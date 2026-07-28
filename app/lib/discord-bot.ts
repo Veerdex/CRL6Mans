@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "./supabase";
+import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
@@ -819,14 +820,18 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   if (settings.season_active)
     return { ok: false, message: "❌ A season is currently active. End the season before starting a new draft." };
 
-  const { data: enteredAll } = await supabaseAdmin
-    .from("players")
-    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at")
-    .eq("status", "approved")
-    .eq("draft_entered", true)
-    .order("draft_entered_at", { ascending: true, nullsFirst: false });
+  const enteredAll = await fetchAllRows((from, to) =>
+    supabaseAdmin
+      .from("players")
+      .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at")
+      .eq("status", "approved")
+      .eq("draft_entered", true)
+      .order("draft_entered_at", { ascending: true, nullsFirst: false })
+      .order("id")
+      .range(from, to)
+  );
 
-  if (!enteredAll?.length) return { ok: false, message: "No players have entered the draft." };
+  if (!enteredAll.length) return { ok: false, message: "No players have entered the draft." };
 
   // Validate pre-created team slots (identified by slot_number, not current name)
   const { data: allPreTeams } = await supabaseAdmin
@@ -982,14 +987,18 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
   if (settings.season_active)
     return { ok: false, message: "❌ A season is active. End it before forming new teams." };
 
-  const { data: enteredAll } = await supabaseAdmin
-    .from("players")
-    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at")
-    .eq("status", "approved")
-    .eq("draft_entered", true)
-    .order("draft_entered_at", { ascending: true, nullsFirst: false });
+  const enteredAll = await fetchAllRows((from, to) =>
+    supabaseAdmin
+      .from("players")
+      .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at")
+      .eq("status", "approved")
+      .eq("draft_entered", true)
+      .order("draft_entered_at", { ascending: true, nullsFirst: false })
+      .order("id")
+      .range(from, to)
+  );
 
-  if (!enteredAll?.length) return { ok: false, message: "No players have entered the pool." };
+  if (!enteredAll.length) return { ok: false, message: "No players have entered the pool." };
 
   // Validate pre-created team slots + role IDs (same checks as the snake draft)
   const { data: allPreTeams } = await supabaseAdmin

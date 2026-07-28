@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { isCurrentlyKicked } from "@/app/lib/players";
+import { fetchAllRows } from "@/app/lib/paginate";
 
 export type TopStatAccolade = { label: string; playerName: string; value: string; isMvp: boolean };
 export type TopStats = { accolades: TopStatAccolade[]; mvpUsername: string | null };
@@ -27,20 +28,32 @@ function mvpScore(a: Agg): number {
  * here belongs to the event that's completing.
  */
 export async function computeTopStats(): Promise<TopStats> {
-  const [{ data: statsRaw }, { data: players }] = await Promise.all([
-    supabaseAdmin
-      .from("player_game_stats")
-      .select("player_id, goals, assists, saves, shots, score")
-      .not("player_id", "is", null),
-    supabaseAdmin.from("players").select("id, username, display_name, status, kick_reason, kicked_until").eq("status", "approved"),
+  const [statsRaw, players] = await Promise.all([
+    fetchAllRows((from, to) =>
+      supabaseAdmin
+        .from("player_game_stats")
+        .select("player_id, goals, assists, saves, shots, score")
+        .not("player_id", "is", null)
+        .order("match_id")
+        .order("game_number")
+        .range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      supabaseAdmin
+        .from("players")
+        .select("id, username, display_name, status, kick_reason, kicked_until")
+        .eq("status", "approved")
+        .order("id")
+        .range(from, to)
+    ),
   ]);
 
-  const eligible = (players ?? []).filter((p) => !isCurrentlyKicked(p.kick_reason, p.kicked_until));
+  const eligible = players.filter((p) => !isCurrentlyKicked(p.kick_reason, p.kicked_until));
   const nameById = Object.fromEntries(eligible.map((p) => [p.id, p.display_name ?? p.username]));
   const usernameById = Object.fromEntries(eligible.map((p) => [p.id, p.username]));
 
   const agg = new Map<string, Agg>();
-  for (const r of (statsRaw ?? []) as {
+  for (const r of statsRaw as {
     player_id: string; goals: number; assists: number; saves: number; shots: number; score: number;
   }[]) {
     if (!r.player_id || !nameById[r.player_id]) continue;

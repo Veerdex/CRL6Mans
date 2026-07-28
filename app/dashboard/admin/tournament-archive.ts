@@ -6,6 +6,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { calculatePlayerRating } from "@/app/lib/rating";
+import { fetchAllRows } from "@/app/lib/paginate";
 import { ARCHIVE_SCHEMA_VERSION } from "./archive-schema";
 
 export type TournamentArchive = {
@@ -81,21 +82,37 @@ export type ArchiveMeta = {
  * Must run BEFORE resetSeason()/completeSeason() wipe matches and teams.
  */
 export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentArchive> {
-  const [{ data: allTeams }, { data: allMatches }, { data: allPlayers }, { data: allStats }] = await Promise.all([
-    supabaseAdmin.from("teams").select("id, name, logo_url, wins, losses"),
-    supabaseAdmin
-      .from("matches")
-      .select("id, stage, round, match_number, home_team_id, away_team_id, home_score, away_score, status, scheduled_at, week")
-      .order("stage")
-      .order("round")
-      .order("match_number"),
-    supabaseAdmin
-      .from("players")
-      .select("id, username, display_name, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1"),
-    supabaseAdmin
-      .from("player_game_stats")
-      .select("match_id, game_number, player_id, goals, assists, saves, shots, score")
-      .not("player_id", "is", null),
+  const [allTeams, allMatches, allPlayers, allStats] = await Promise.all([
+    fetchAllRows((from, to) =>
+      supabaseAdmin.from("teams").select("id, name, logo_url, wins, losses").order("id").range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      supabaseAdmin
+        .from("matches")
+        .select("id, stage, round, match_number, home_team_id, away_team_id, home_score, away_score, status, scheduled_at, week")
+        .order("stage")
+        .order("round")
+        .order("match_number")
+        .order("id")
+        .range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      supabaseAdmin
+        .from("players")
+        .select("id, username, display_name, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+        .order("id")
+        .range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      supabaseAdmin
+        .from("player_game_stats")
+        .select("match_id, game_number, player_id, goals, assists, saves, shots, score")
+        .not("player_id", "is", null)
+        .order("match_id")
+        .order("game_number")
+        .order("player_id")
+        .range(from, to)
+    ),
   ]);
 
   const playerById = new Map((allPlayers ?? []).map((p) => [p.id, p]));

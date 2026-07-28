@@ -8,6 +8,7 @@ import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
 import { computeTopStats, type TopStats } from "@/app/lib/game-stats";
+import { fetchAllRows } from "@/app/lib/paginate";
 import { computeFullArchive } from "./tournament-archive";
 import { resetSeason } from "./league-actions";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
@@ -397,21 +398,27 @@ export async function activateTournament(id: string) {
 
 /** Champion + final standings derived from completed matches. Snapshots rosters, logos, and stat leaders before reset. */
 async function computeSummary(): Promise<TournamentSummary> {
-  const [{ data: allTeams }, { data: completedMatches }, topStats] = await Promise.all([
-    supabaseAdmin.from("teams").select("id, name, logo_url"),
-    supabaseAdmin
-      .from("matches")
-      .select("home_team_id, away_team_id, home_score, away_score")
-      .eq("status", "completed")
-      .not("home_score", "is", null)
-      .not("away_score", "is", null)
-      .not("home_team_id", "is", null)
-      .not("away_team_id", "is", null),
+  const [allTeams, completedMatches, topStats] = await Promise.all([
+    fetchAllRows((from, to) =>
+      supabaseAdmin.from("teams").select("id, name, logo_url").order("id").range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      supabaseAdmin
+        .from("matches")
+        .select("home_team_id, away_team_id, home_score, away_score")
+        .eq("status", "completed")
+        .not("home_score", "is", null)
+        .not("away_score", "is", null)
+        .not("home_team_id", "is", null)
+        .not("away_team_id", "is", null)
+        .order("id")
+        .range(from, to)
+    ),
     computeTopStats(),
   ]);
 
   const records: Record<string, { wins: number; losses: number }> = {};
-  for (const m of completedMatches ?? []) {
+  for (const m of completedMatches) {
     if (!m.home_team_id || !m.away_team_id) continue;
     records[m.home_team_id] ??= { wins: 0, losses: 0 };
     records[m.away_team_id] ??= { wins: 0, losses: 0 };

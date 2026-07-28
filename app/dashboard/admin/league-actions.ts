@@ -10,6 +10,7 @@ import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 import { APP_NAME } from "@/app/lib/constants";
 import { computeTopStats } from "@/app/lib/game-stats";
+import { fetchAllRows } from "@/app/lib/paginate";
 import { computeFullArchive } from "./tournament-archive";
 
 const TEAM_ROLE_COLOR = 0x3498db; // blue
@@ -604,21 +605,27 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
   if (!settings?.season_active) return { error: "No active season to complete." };
 
   // Snapshot standings, logos, rosters, and stat leaders BEFORE resetSeason wipes matches/teams.
-  const [{ data: allTeams }, { data: completedMatches }, topStats] = await Promise.all([
-    supabaseAdmin.from("teams").select("id, name, logo_url"),
-    supabaseAdmin
-      .from("matches")
-      .select("home_team_id, away_team_id, home_score, away_score")
-      .eq("status", "completed")
-      .not("home_score", "is", null)
-      .not("away_score", "is", null)
-      .not("home_team_id", "is", null)
-      .not("away_team_id", "is", null),
+  const [allTeams, completedMatches, topStats] = await Promise.all([
+    fetchAllRows((from, to) =>
+      supabaseAdmin.from("teams").select("id, name, logo_url").order("id").range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      supabaseAdmin
+        .from("matches")
+        .select("home_team_id, away_team_id, home_score, away_score")
+        .eq("status", "completed")
+        .not("home_score", "is", null)
+        .not("away_score", "is", null)
+        .not("home_team_id", "is", null)
+        .not("away_team_id", "is", null)
+        .order("id")
+        .range(from, to)
+    ),
     computeTopStats(),
   ]);
 
   const records: Record<string, { wins: number; losses: number }> = {};
-  for (const m of completedMatches ?? []) {
+  for (const m of completedMatches) {
     if (!m.home_team_id || !m.away_team_id) continue;
     records[m.home_team_id] ??= { wins: 0, losses: 0 };
     records[m.away_team_id] ??= { wins: 0, losses: 0 };
