@@ -268,3 +268,4 @@ Cron jobs (`/api/cron/*`) do not run locally — test them by hitting the route 
 - **Auth guard pattern**: every protected page calls `decrypt(...)` at the top; redirect to `/login` on null session, redirect to `/dashboard` if status check fails.
 - **No comments unless the why is non-obvious.** Well-named identifiers are the docs.
 - **No error handling for impossible cases.** Trust internal guarantees; only validate at system boundaries.
+- **"cpd"** is shorthand the user uses for "commit, push, deploy" — do the full sequence when asked for it.
