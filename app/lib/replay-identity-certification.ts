@@ -165,7 +165,7 @@ export async function evaluateAndPersistGameCertification(input: {
 }
 
 // Step 8: guards every path that can finalize an already-pending match
-// (opposing-captain confirm, the 5-minute auto-confirm timeout) against
+// (a teammate's confirm, the auto-confirm timeout) against
 // clearing an identity discrepancy. submitSeriesResult/reportMatchResult
 // already gate at submission, but a discrepancy can appear afterward — e.g. a
 // stray replay re-upload for this match while confirmation is pending — so

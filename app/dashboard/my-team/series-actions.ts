@@ -213,7 +213,8 @@ export async function confirmSeriesResult(
 }
 
 // Client-fired when a confirmation deadline passes while someone has the page open —
-// auto-finalizes any series whose 5-minute confirm window has elapsed. Idempotent.
+// auto-finalizes any series whose confirm window has elapsed (15 min for a standalone
+// season, 5 min for a discrete tournament). Idempotent.
 export async function processScoreConfirmationsNow(): Promise<{ ok: boolean }> {
   const player = await getTeamMember();
   if (!player) return { ok: false };

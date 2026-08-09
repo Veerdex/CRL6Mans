@@ -913,6 +913,7 @@ export default async function MyTeamPage() {
           scoreSubmittedAt={nextMatch?.score_submitted_at ?? null}
           opponentNotReady={opponentNotReady}
           opponentName={opponentName}
+          isTournament={!!activeTournamentId}
         />
       )}
 

@@ -26,8 +26,9 @@ export async function GET(request: Request) {
   const fired: string[] = [];
   const passed = (iso: string | null | undefined) => !!iso && new Date(iso).getTime() <= now;
 
-  // Auto-finalize series results unconfirmed past the 5-minute window. Applies to
-  // seasons and tournaments alike, so it runs before any active-tournament gating.
+  // Auto-finalize series results unconfirmed past the confirm window (15 min for a
+  // standalone season, 5 min for a discrete tournament). Applies to seasons and
+  // tournaments alike, so it runs before any active-tournament gating.
   try {
     await processExpiredScoreConfirmations();
   } catch { /* best-effort */ }

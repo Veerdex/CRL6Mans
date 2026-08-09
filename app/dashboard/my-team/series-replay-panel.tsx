@@ -11,14 +11,18 @@ import {
 } from "./series-actions";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
 
-const SCORE_CONFIRM_WINDOW_MS = 5 * 60 * 1000;
+const TOURNAMENT_SCORE_CONFIRM_WINDOW_MS = 5 * 60 * 1000;
+const SEASON_SCORE_CONFIRM_WINDOW_MS = 15 * 60 * 1000;
 
-// Ticks every second; when the 5-minute confirm window elapses it asks the server to
-// auto-finalize. Returns remaining ms (null when no pending submission).
-function useConfirmCountdown(scoreSubmittedAt: string | null): number | null {
+// Ticks every second; when the confirm window elapses (15 min for a standalone
+// season, 5 min for a discrete tournament — must mirror processExpiredScoreConfirmations
+// in app/lib/discord-bot.ts) it asks the server to auto-finalize. Returns remaining ms
+// (null when no pending submission).
+function useConfirmCountdown(scoreSubmittedAt: string | null, isTournament: boolean): number | null {
   const router = useRouter();
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const deadline = scoreSubmittedAt ? new Date(scoreSubmittedAt).getTime() + SCORE_CONFIRM_WINDOW_MS : null;
+  const windowMs = isTournament ? TOURNAMENT_SCORE_CONFIRM_WINDOW_MS : SEASON_SCORE_CONFIRM_WINDOW_MS;
+  const deadline = scoreSubmittedAt ? new Date(scoreSubmittedAt).getTime() + windowMs : null;
   useEffect(() => {
     if (deadline === null) return;
     const t = setInterval(() => setNowMs(Date.now()), 1000);
@@ -67,6 +71,7 @@ interface Props {
   scoreSubmittedAt?: string | null;
   opponentNotReady?: boolean;
   opponentName?: string | null;
+  isTournament?: boolean;
 }
 
 function initSlots(bestOf: number): SlotState[] {
@@ -177,7 +182,7 @@ function ConfirmedView({
 // ── Pending-confirmation view (shown to whichever captain submitted) ───────────
 
 function WaitingView({
-  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, matchId, scoreSubmittedAt,
+  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, matchId, scoreSubmittedAt, isTournament,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
@@ -185,11 +190,12 @@ function WaitingView({
   pendingAwayScore: number;
   matchId: string;
   scoreSubmittedAt: string | null;
+  isTournament: boolean;
 }) {
   const router = useRouter();
   const [cancelling, startCancel] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const remaining = useConfirmCountdown(scoreSubmittedAt);
+  const remaining = useConfirmCountdown(scoreSubmittedAt, isTournament);
 
   function handleCancel() {
     setError(null);
@@ -307,7 +313,7 @@ function ConfirmResultModal({
 // ── Opponent-submitted view (shown to the confirming captain) ─────────────────
 
 function OpponentSubmittedView({
-  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, submitterTeamName, matchId, myTeamId, scoreSubmittedAt,
+  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, submitterTeamName, matchId, myTeamId, scoreSubmittedAt, isTournament,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
@@ -317,13 +323,14 @@ function OpponentSubmittedView({
   matchId: string;
   myTeamId: string;
   scoreSubmittedAt: string | null;
+  isTournament: boolean;
 }) {
   const router = useRouter();
   const [confirming, startConfirm] = useTransition();
   const [disputing, startDispute] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const remaining = useConfirmCountdown(scoreSubmittedAt);
+  const remaining = useConfirmCountdown(scoreSubmittedAt, isTournament);
 
   const iAmHome = myTeamId === homeTeam?.id;
   const myWins = iAmHome ? pendingHomeScore : pendingAwayScore;
@@ -416,6 +423,7 @@ export function SeriesReplayPanel({
   myTeamId, pendingHomeScore, pendingAwayScore, scoreSubmittedByTeamId, scoreConfirmed,
   scoreSubmittedAt = null,
   opponentNotReady = false, opponentName = null,
+  isTournament = false,
 }: Props) {
   const router = useRouter();
   const [slots, setSlots] = useState<SlotState[]>(() => initSlots(bestOf));
@@ -593,6 +601,7 @@ export function SeriesReplayPanel({
           pendingAwayScore={pendingAwayScore}
           matchId={matchId}
           scoreSubmittedAt={scoreSubmittedAt ?? null}
+          isTournament={isTournament}
         />
       </div>
     );
@@ -614,6 +623,7 @@ export function SeriesReplayPanel({
           matchId={matchId}
           myTeamId={myTeamId}
           scoreSubmittedAt={scoreSubmittedAt ?? null}
+          isTournament={isTournament}
         />
       </div>
     );

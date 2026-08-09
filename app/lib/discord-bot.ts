@@ -2119,12 +2119,18 @@ export async function processExpiredCheckIns(): Promise<void> {
 
 // ─── Score auto-confirm ─────────────────────────────────────────────────────────
 
-const SCORE_CONFIRM_WINDOW_MS = 5 * 60 * 1000;
+const TOURNAMENT_SCORE_CONFIRM_WINDOW_MS = 5 * 60 * 1000;
+const SEASON_SCORE_CONFIRM_WINDOW_MS = 15 * 60 * 1000;
 
-// Auto-finalizes submitted series results the opposing team hasn't confirmed within
-// 5 minutes. Same outcome as a manual confirm — the submitted score stands.
+// Auto-finalizes submitted series results the opposing team hasn't confirmed in time
+// (15 minutes for a standalone season, 5 minutes for a discrete tournament). Same
+// outcome as a manual confirm — the submitted score stands.
 export async function processExpiredScoreConfirmations(): Promise<void> {
-  const cutoff = new Date(Date.now() - SCORE_CONFIRM_WINDOW_MS).toISOString();
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("active_tournament_id").maybeSingle();
+  const isTournament = !!(settings?.active_tournament_id as string | null | undefined);
+  const windowMs = isTournament ? TOURNAMENT_SCORE_CONFIRM_WINDOW_MS : SEASON_SCORE_CONFIRM_WINDOW_MS;
+  const cutoff = new Date(Date.now() - windowMs).toISOString();
   const { data: matches } = await supabaseAdmin
     .from("matches")
     .select("id, pending_home_score, pending_away_score, home_team_id, away_team_id, score_submitted_by_team_id")
@@ -2156,7 +2162,7 @@ export async function processExpiredScoreConfirmations(): Promise<void> {
     const otherTeam = m.score_submitted_by_team_id === m.home_team_id ? m.away_team_id : m.home_team_id;
     if (otherTeam) pushToTeam(otherTeam as string, {
       title: "Result auto-submitted",
-      body: "You didn't confirm the reported score within 5 minutes, so it was finalized automatically.",
+      body: `You didn't confirm the reported score within ${windowMs / 60000} minutes, so it was finalized automatically.`,
       url: "/dashboard/my-team", tag: "score-auto",
     }).catch(() => {});
   }
