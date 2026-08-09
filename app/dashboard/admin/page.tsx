@@ -9,8 +9,8 @@ import { LeagueControls } from "./league-controls";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
 import { InsightsChart, type InsightsPoint } from "./insights-chart";
 import { FormatEditor, type SeasonFormatConfig } from "../season/format-editor";
-import { CollapsibleSection } from "./collapsible-section";
-import { AdminTabsProvider, AdminTabsBar, AdminTabSection } from "./admin-tabs";
+import { AdminSubSection } from "./admin-sub-section";
+import { AdminTabsProvider, AdminSidebar, AdminSection, type SidebarSection } from "./admin-tabs";
 import { RegistrationCard } from "./registration-card";
 import { PlayerPanel, type CombinedPlayer, type PlatformAccountSummary } from "./player-panel";
 import { GuestAccountPanel, type GuestAccount } from "./guest-account-panel";
@@ -45,13 +45,15 @@ import { getAllGameScores } from "../game/actions";
 async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean; userIsDirector: boolean }) {
   const staff = await getStaffList();
   return (
-    <CollapsibleSection
+    <AdminSubSection
+      sectionId="players-staff"
+      tabId="staff-management"
       title="Staff Management"
       defaultOpen={false}
       description="Grant or revoke moderator, director, and CEO roles for staff members. A staff member's role determines which players they can moderate — moderators can only act on non-staff, directors can act on moderators too, and CEOs can act on anyone."
     >
       <StaffManager staff={staff} userIsCEO={userIsCEO} userIsDirector={userIsDirector} />
-    </CollapsibleSection>
+    </AdminSubSection>
   );
 }
 
@@ -798,13 +800,79 @@ export default async function AdminPage() {
     else if (e.type === "draft_join") b.draftJoins++;
   }
 
+  const SECTIONS: SidebarSection[] = [
+    {
+      id: "overview",
+      label: "Overview",
+      subTabs: [
+        { id: "insights", label: "Insights" },
+        { id: "notifications", label: "Notifications" },
+        ...(userIsDirector ? [{ id: "team-slots", label: "Team Slots", value: (teamSlots ?? []).length }] : []),
+      ],
+    },
+    {
+      id: "players-staff",
+      label: "Players & Staff",
+      notification: identityDiscrepancyCards.length,
+      subTabs: [
+        { id: "players", label: "Players", value: combinedPlayers.length },
+        { id: "pending-accounts", label: "Unregistered / Pending Accounts", value: guestAccounts.length },
+        ...(userIsDirector ? [{ id: "identity-discrepancies", label: "Identity Discrepancies", notification: identityDiscrepancyCards.length }] : []),
+        { id: "staff-management", label: "Staff Management" },
+      ],
+    },
+    {
+      id: "match-ops",
+      label: "Match Ops",
+      notification: matchesUnderReviewCount + subRequestCards.length + scheduleOverrideCards.length,
+      subTabs: [
+        { id: "match-reporting", label: "Match Reporting", value: matchRows.length, notification: matchesUnderReviewCount || undefined },
+        { id: "sub-requests", label: "Sub Requests", notification: subRequestCards.length || undefined },
+        { id: "schedule-approvals", label: "Schedule Approvals", notification: scheduleOverrideCards.length || undefined },
+      ],
+    },
+    {
+      id: "approvals",
+      label: "Approvals",
+      notification: pending.length + platformClaimCards.length + playerEditRequestCards.length,
+      subTabs: [
+        { id: "registrations-platform", label: "Registrations & Platform Claims", notification: (pending.length + platformClaimCards.length) || undefined },
+        { id: "profile-changes", label: "Profile Change Requests", notification: playerEditRequestCards.length || undefined },
+        { id: "verified-platform", label: "Verified Platform Accounts", value: platformVerifiedCards.length },
+      ],
+    },
+    {
+      id: "season-league",
+      label: "Season & League",
+      notification: userIsDirector && seasonActive ? schedulingUnscheduledCount : 0,
+      subTabs: userIsDirector
+        ? [
+            { id: "announcements", label: "Announcements", value: settings?.announcement_text ? 1 : undefined },
+            ...(seasonActive ? [{ id: "scheduling", label: "Scheduling", notification: schedulingUnscheduledCount || undefined }] : []),
+            { id: "tournaments", label: "Tournaments", value: (tournaments ?? []).filter((t) => t.status === "scheduled" || t.status === "active").length },
+            { id: "season-settings", label: "Season Settings" },
+            { id: "draft-pool", label: "Draft Pool", value: enteredCount + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0) },
+            { id: "league-controls", label: "League Controls" },
+          ]
+        : [],
+    },
+    {
+      id: "wagers",
+      label: "Wagers",
+      subTabs: [
+        { id: "wagers", label: "Wagers" },
+        { id: "game-leaderboard", label: "Game Leaderboard", value: gameScores.length },
+      ],
+    },
+  ];
+
   return (
     <AdminTabsProvider>
-    <div className="p-4 sm:p-6 lg:p-8 space-y-12">
+    <div className="p-4 sm:p-6 lg:p-8">
 
       {/* ── Missing settings row warning ── */}
       {!settings && (
-        <div className="bg-amber-950/40 border border-amber-700/60 rounded-xl px-5 py-4 flex items-start gap-4">
+        <div className="mb-8 bg-amber-950/40 border border-amber-700/60 rounded-xl px-5 py-4 flex items-start gap-4">
           <div className="flex-1 space-y-1">
             <p className="text-sm font-semibold text-amber-300">League settings row is missing</p>
             <p className="text-xs text-amber-500">
@@ -815,30 +883,27 @@ export default async function AdminPage() {
         </div>
       )}
 
-      <AdminTabsBar
-        labels={["Overview", "Players & Staff", "Match Ops", "Approvals", "Season & League", "Wagers"]}
-        counts={[
-          0,
-          identityDiscrepancyCards.length,
-          matchesUnderReviewCount + subRequestCards.length + scheduleOverrideCards.length,
-          pending.length + platformClaimCards.length + playerEditRequestCards.length,
-          userIsDirector && seasonActive ? schedulingUnscheduledCount : 0,
-          0,
-        ]}
-      />
+      <div className="md:flex md:gap-8 md:items-start">
+      <AdminSidebar sections={SECTIONS} />
+      <div className="flex-1 min-w-0 space-y-12">
 
-      <AdminTabSection tab={0}>
+      <AdminSection id="overview">
       {/* ── Insights ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="overview"
+        tabId="insights"
         title="Insights"
+        isDefaultTab
         defaultOpen={false}
         description="Weekly trends for site visits, registrations, and draft joins over the last year. Use it to see whether traffic actually converts into sign-ups, and whether sign-ups convert into drafted players."
       >
         <InsightsChart data={insightsData} />
-      </CollapsibleSection>
+      </AdminSubSection>
 
       {/* ── Notifications ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="overview"
+        tabId="notifications"
         title="Notifications"
         defaultOpen={false}
         description="Controls which admin push notifications you personally receive (new sub requests, escalations, pending registrations, etc). This only affects your own device — it doesn't change what players or other staff receive."
@@ -846,14 +911,17 @@ export default async function AdminPage() {
         <AdminNotificationToggles
           initial={(settings?.admin_notification_prefs as Record<string, boolean> | null) ?? {}}
         />
-      </CollapsibleSection>
-      </AdminTabSection>
+      </AdminSubSection>
+      </AdminSection>
 
-      <AdminTabSection tab={1}>
+      <AdminSection id="players-staff">
       {/* ── Players ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="players-staff"
+        tabId="players"
         title="Players"
         value={combinedPlayers.length}
+        isDefaultTab
         defaultOpen={false}
         description="Every approved and banned player, with MMR, tracker links, staff role, and platform accounts. From here you can edit a player's data, kick or ban them, or reverse a ban — subject to the staff hierarchy."
       >
@@ -861,22 +929,26 @@ export default async function AdminPage() {
         {bannedCount > 0 && (
           <p className="mt-3 text-xs text-red-400/60">{bannedCount} banned player{bannedCount !== 1 ? "s" : ""} shown below active players.</p>
         )}
-      </CollapsibleSection>
+      </AdminSubSection>
 
       {/* ── Unregistered / Pending Accounts ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="players-staff"
+        tabId="pending-accounts"
         title="Unregistered / Pending Accounts"
         value={guestAccounts.length}
         defaultOpen={false}
         description="Discord accounts that have logged in but never made the roster — unregistered, pending review, rejected, or banned before ever being approved. No MMR or tracker data yet; from here you can kick or ban them, or reverse a ban, subject to the staff hierarchy."
       >
         <GuestAccountPanel accounts={guestAccounts} actorRole={actorRole} />
-      </CollapsibleSection>
-      </AdminTabSection>
+      </AdminSubSection>
+      </AdminSection>
 
-      <AdminTabSection tab={0}>
+      <AdminSection id="overview">
       {/* ── Team Slots (Director+) ── */}
-      {userIsDirector && <CollapsibleSection
+      {userIsDirector && <AdminSubSection
+        sectionId="overview"
+        tabId="team-slots"
         title="Team Slots"
         value={(teamSlots ?? []).length}
         defaultOpen={false}
@@ -898,23 +970,28 @@ export default async function AdminPage() {
           <p className="mt-1.5 text-xs text-zinc-600">Downloads a ZIP of every team logo currently uploaded.</p>
         </div>
         <TeamSlotsManager teams={(teamSlots ?? []) as { id: string; name: string; discord_role_id: string | null; slot_number: number | null }[]} />
-      </CollapsibleSection>}
-      </AdminTabSection>
+      </AdminSubSection>}
+      </AdminSection>
 
-      <AdminTabSection tab={2}>
+      <AdminSection id="match-ops">
       {/* ── Match Reporting ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="match-ops"
+        tabId="match-reporting"
         title="Match Reporting"
         value={matchRows.length}
         notification={matchesUnderReviewCount || undefined}
+        isDefaultTab
         defaultOpen={false}
         description="Report scores for scheduled matches, including per-game replay uploads that get parsed for scoreboard stats. Only matches with both teams already assigned show up here. The grey count is matches waiting to be reported; the blue count is matches with a submitted replay awaiting identity review."
       >
         <MatchReporter matches={matchRows} />
-      </CollapsibleSection>
+      </AdminSubSection>
 
       {/* ── Sub Requests ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="match-ops"
+        tabId="sub-requests"
         title="Sub Requests"
         notification={subRequestCards.length}
         defaultOpen={subRequestCards.length > 0}
@@ -929,14 +1006,17 @@ export default async function AdminPage() {
             ))}
           </div>
         )}
-      </CollapsibleSection>
-      </AdminTabSection>
+      </AdminSubSection>
+      </AdminSection>
 
-      <AdminTabSection tab={3}>
+      <AdminSection id="approvals">
       {/* ── Registrations & Platform Claims ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="approvals"
+        tabId="registrations-platform"
         title="Registrations & Platform Claims"
         notification={pending.length + platformClaimCards.length}
+        isDefaultTab
         defaultOpen={pending.length > 0 || platformClaimCards.length > 0}
         description="New player sign-ups awaiting approval or rejection, plus platform account claims (Steam, Epic, console) awaiting verification. A player needs both an approved registration and, once enforcement is on, a verified account to fully participate."
       >
@@ -962,10 +1042,12 @@ export default async function AdminPage() {
             )}
           </div>
         )}
-      </CollapsibleSection>
+      </AdminSubSection>
 
       {/* ── Profile Change Requests ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="approvals"
+        tabId="profile-changes"
         title="Profile Change Requests"
         notification={playerEditRequestCards.length}
         defaultOpen={playerEditRequestCards.length > 0}
@@ -980,10 +1062,12 @@ export default async function AdminPage() {
             ))}
           </div>
         )}
-      </CollapsibleSection>
+      </AdminSubSection>
 
       {/* ── Verified Platform Accounts ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="approvals"
+        tabId="verified-platform"
         title="Verified Platform Accounts"
         value={platformVerifiedCards.length}
         defaultOpen={false}
@@ -998,13 +1082,15 @@ export default async function AdminPage() {
             ))}
           </div>
         )}
-      </CollapsibleSection>
-      </AdminTabSection>
+      </AdminSubSection>
+      </AdminSection>
 
-      <AdminTabSection tab={1}>
+      <AdminSection id="players-staff">
       {/* ── Identity Discrepancies (Director+) ── */}
       {userIsDirector && (
-        <CollapsibleSection
+        <AdminSubSection
+          sectionId="players-staff"
+          tabId="identity-discrepancies"
           title="Identity Discrepancies"
           notification={identityDiscrepancyCards.length}
           defaultOpen={identityDiscrepancyCards.length > 0}
@@ -1023,13 +1109,18 @@ export default async function AdminPage() {
               ))}
             </div>
           )}
-        </CollapsibleSection>
+        </AdminSubSection>
       )}
-      </AdminTabSection>
 
-      <AdminTabSection tab={2}>
+      {/* ── Staff Management ── */}
+      <StaffSection userIsCEO={userIsCEO} userIsDirector={userIsDirector} />
+      </AdminSection>
+
+      <AdminSection id="match-ops">
       {/* ── Schedule Approvals ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="match-ops"
+        tabId="schedule-approvals"
         title="Schedule Approvals"
         notification={scheduleOverrideCards.length}
         defaultOpen={scheduleOverrideCards.length > 0}
@@ -1047,20 +1138,18 @@ export default async function AdminPage() {
             ))}
           </div>
         )}
-      </CollapsibleSection>
-      </AdminTabSection>
+      </AdminSubSection>
+      </AdminSection>
 
-      <AdminTabSection tab={1}>
-      {/* ── Staff Management ── */}
-      <StaffSection userIsCEO={userIsCEO} userIsDirector={userIsDirector} />
-      </AdminTabSection>
-
-      <AdminTabSection tab={4}>
+      <AdminSection id="season-league">
       {/* ── Announcements (Director+) ── */}
       {userIsDirector && (
-        <CollapsibleSection
+        <AdminSubSection
+          sectionId="season-league"
+          tabId="announcements"
           title="Announcements"
           value={settings?.announcement_text ? 1 : undefined}
+          isDefaultTab
           defaultOpen={false}
           description="Post a league-wide announcement to the website banner, the configured Discord channel (set via /setannouncement), or both. There's no history; posting replaces whatever is currently live."
         >
@@ -1070,12 +1159,14 @@ export default async function AdminPage() {
             channelConfigured={!!settings?.announcement_channel_id}
             postedAt={(settings?.announcement_posted_at as string | null) ?? null}
           />
-        </CollapsibleSection>
+        </AdminSubSection>
       )}
 
       {/* ── Scheduling (Director+, visible whenever a season is active) ── */}
       {userIsDirector && seasonActive && (
-        <CollapsibleSection
+        <AdminSubSection
+          sectionId="season-league"
+          tabId="scheduling"
           title="Scheduling"
           notification={schedulingUnscheduledCount || undefined}
           defaultOpen={schedulingUnscheduledCount > 0}
@@ -1095,12 +1186,14 @@ export default async function AdminPage() {
               round1ManualStartPending={!!settings?.round1_manual_start_pending}
             />
           )}
-        </CollapsibleSection>
+        </AdminSubSection>
       )}
 
       {/* ── Tournaments (Director+) ── */}
       {userIsDirector && (
-        <CollapsibleSection
+        <AdminSubSection
+          sectionId="season-league"
+          tabId="tournaments"
           title="Tournaments"
           value={(tournaments ?? []).filter((t: Tournament) => t.status === "scheduled" || t.status === "active").length}
           description="Create and launch standalone tournaments (separate from the main season), track their signup/draft/active phases, and browse the archive of completed seasons and tournaments."
@@ -1117,11 +1210,13 @@ export default async function AdminPage() {
             hasActive={!!settings?.active_tournament_id}
             testingMode={testingMode}
           />
-        </CollapsibleSection>
+        </AdminSubSection>
       )}
 
       {/* ── Season Settings (Director+) ── */}
-      {userIsDirector && <CollapsibleSection
+      {userIsDirector && <AdminSubSection
+        sectionId="season-league"
+        tabId="season-settings"
         title="Season Settings"
         description="Configure the season's format, bracket preset, and participant count. These lock automatically once the season goes active, so changes need to happen before it starts."
       >
@@ -1143,23 +1238,27 @@ export default async function AdminPage() {
             />
           </div>
         </div>
-      </CollapsibleSection>}
+      </AdminSubSection>}
 
       {/* ── Draft Pool (Director+) ── */}
       {userIsDirector && (
-        <CollapsibleSection
+        <AdminSubSection
+          sectionId="season-league"
+          tabId="draft-pool"
           title="Draft Pool"
           value={enteredCount + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0)}
           defaultOpen={false}
           description="Everyone currently signed up to play — the season's 'Enter Draft' pool plus sign-ups for any scheduled standalone tournaments (player or team mode). Remove an entrant before its draft/tournament starts if they need to be pulled from signups."
         >
           <DraftPoolPanel entries={(draftPoolRows ?? []) as DraftPoolEntry[]} tournamentGroups={draftPoolTournamentGroups} />
-        </CollapsibleSection>
+        </AdminSubSection>
       )}
 
       {/* ── League Controls (Director+) ── */}
       {userIsDirector && (
-        <CollapsibleSection
+        <AdminSubSection
+          sectionId="season-league"
+          tabId="league-controls"
           title="League Controls"
           description="Core league-wide toggles: open/close the draft, set match scheduling defaults, MMR floors, and testing mode. These affect every player in the league, not just one section."
         >
@@ -1185,14 +1284,17 @@ export default async function AdminPage() {
             subsEnabled={(settings?.subs_enabled as boolean | null) ?? true}
             isCEO={userIsCEO}
           />
-        </CollapsibleSection>
+        </AdminSubSection>
       )}
-      </AdminTabSection>
+      </AdminSection>
 
-      <AdminTabSection tab={5}>
+      <AdminSection id="wagers">
       {/* ── Wagers ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="wagers"
+        tabId="wagers"
         title="Wagers"
+        isDefaultTab
         description="Manage Westside Wages balances: view every approved player's balance, grant or deduct from one player, or adjust everyone at once. Every adjustment is logged below with who made it and why."
       >
         <div className="space-y-6">
@@ -1223,19 +1325,23 @@ export default async function AdminPage() {
             )}
           </div>
         </div>
-      </CollapsibleSection>
+      </AdminSubSection>
 
       {/* ── Flappy Bird Leaderboard ── */}
-      <CollapsibleSection
+      <AdminSubSection
+        sectionId="wagers"
+        tabId="game-leaderboard"
         title="Game Leaderboard"
         defaultOpen={false}
         value={gameScores.length}
         description="Every submitted Flappy Bird score. Remove a score if it looks bogus or exploited."
       >
         <GameLeaderboardPanel scores={gameScores} />
-      </CollapsibleSection>
-      </AdminTabSection>
+      </AdminSubSection>
+      </AdminSection>
 
+      </div>
+      </div>
     </div>
     </AdminTabsProvider>
   );
