@@ -546,10 +546,16 @@ export async function resetSeason() {
   await supabaseAdmin.from("parlays").delete().not("id", "is", null);
   await supabaseAdmin.from("wagers").delete().not("id", "is", null);
 
-  // Delete matches and reset team stats — team slots (name, discord_role_id) are preserved
+  // Delete matches and reset team stats — team slots (name, discord_role_id) are preserved.
+  // season_rating/initial_rating are cleared too: rosters are about to be fully
+  // unassigned and redrafted, so a rating (and its form-retention anchor) carried
+  // over from the old roster would be meaningless for the new one — the next
+  // match lazy-inits both fresh from initialTeamRating() (see rating.ts).
   await supabaseAdmin.from("sub_requests").delete().not("id", "is", null);
   await supabaseAdmin.from("matches").delete().not("id", "is", null);
-  await supabaseAdmin.from("teams").update({ wins: 0, losses: 0, is_locked: false }).not("id", "is", null);
+  await supabaseAdmin.from("teams")
+    .update({ wins: 0, losses: 0, is_locked: false, season_rating: null, initial_rating: null })
+    .not("id", "is", null);
 
   // Reset all player assignments and draft entries
   await supabaseAdmin

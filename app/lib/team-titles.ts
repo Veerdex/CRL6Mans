@@ -1,7 +1,7 @@
 // Pure — no server dependencies, safe to import anywhere (live bracket fetch
 // wrappers and the client-side archive viewer both call this).
 
-import { calculatePlayerRating } from "./rating";
+import { playerRatingFromRow } from "./rating";
 
 export type TeamTitlePlayer = {
   team_id: string | null;
@@ -19,17 +19,7 @@ export type TeamTitlePlayer = {
 // roster sorted by rating descending — the exact tooltip bracket views show
 // on a team name.
 export function buildTeamTitles(players: TeamTitlePlayer[]): Record<string, string> {
-  const ratingOf = (p: TeamTitlePlayer) =>
-    Math.round(
-      calculatePlayerRating({
-        at_1v1: Number(p.peak_1v1 ?? 0),
-        season_1v1: Number(p.current_1v1 ?? 0),
-        at_2v2: Number(p.peak_2v2 ?? 0),
-        season_2v2: Number(p.current_2v2 ?? 0),
-        at_3v3: Number(p.peak_3v3 ?? 0),
-        season_3v3: Number(p.current_3v3 ?? 0),
-      }),
-    );
+  const ratingOf = (p: TeamTitlePlayer) => Math.round(playerRatingFromRow(p));
 
   const byTeam = new Map<string, TeamTitlePlayer[]>();
   for (const p of players) {

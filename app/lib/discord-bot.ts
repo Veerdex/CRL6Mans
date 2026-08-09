@@ -14,7 +14,7 @@ import {
   getRoundName, GROUP_STAGE_PREFIX, parseGroupNum,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
-import { calculatePlayerRating, initialTeamRating, applyRatingUpdate, teamRatingDeltaFromRatingChange, type PlayerRatingInputs } from "./rating";
+import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow } from "./rating";
 import { hasBlockingIdentityDiscrepancy } from "./replay-identity-certification";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
@@ -703,22 +703,8 @@ type RatingFields = {
   peak_1v1: string | null; current_1v1: string | null;
 };
 
-// enterDraft gates on peak_1v1/current_1v1 being present, so any player who
-// can be on a season roster has already submitted 1v1 data — the ?? 0
-// fallback here only protects legacy rosters from a pre-gating season.
-function ratingInputsOf(p: RatingFields): PlayerRatingInputs {
-  return {
-    at_1v1:     Number(p.peak_1v1 ?? 0),
-    season_1v1: Number(p.current_1v1 ?? 0),
-    at_2v2:     Number(p.peak_2v2),
-    season_2v2: Number(p.current_2v2),
-    at_3v3:     Number(p.peak_3v3),
-    season_3v3: Number(p.current_3v3),
-  };
-}
-
 function playerRating(p: RatingFields): number {
-  return calculatePlayerRating(ratingInputsOf(p));
+  return playerRatingFromRow(p);
 }
 
 // Lazy-initialises a team's season_rating from its current roster ratings.
@@ -745,7 +731,7 @@ export async function applyPlayerRVChangeToTeamRating(
   oldFields: RatingFields,
   newFields: RatingFields,
 ): Promise<void> {
-  const { data: team } = await supabaseAdmin.from("teams").select("season_rating").eq("id", teamId).single();
+  const { data: team } = await supabaseAdmin.from("teams").select("season_rating, initial_rating").eq("id", teamId).single();
   if (!team || team.season_rating == null) return;
 
   const { data: roster } = await supabaseAdmin
@@ -761,9 +747,16 @@ export async function applyPlayerRVChangeToTeamRating(
   const newRatings = (roster ?? []).map((p) => ratingFor(p, newFields));
 
   const delta = teamRatingDeltaFromRatingChange(oldRatings, newRatings);
+  // Shift initial_rating by the same delta so season_rating - initial_rating
+  // (the form-retention deviation) is unchanged by a roster correction — a
+  // profile-edit-driven move must not get mistaken for match-driven form and
+  // decayed away by the next applyFormRetention call.
   await supabaseAdmin
     .from("teams")
-    .update({ season_rating: Number(team.season_rating) + delta })
+    .update({
+      season_rating: Number(team.season_rating) + delta,
+      ...(team.initial_rating != null ? { initial_rating: Number(team.initial_rating) + delta } : {}),
+    })
     .eq("id", teamId);
 }
 
@@ -771,26 +764,43 @@ export async function applyPlayerRVChangeToTeamRating(
 // homeScore/awayScore are games won in the series; the update is exactly
 // zero-sum, so goal differential no longer feeds the rating. Applied
 // identically regardless of stage.
+//
+// initial_rating is lazy-initialised alongside season_rating on a team's
+// first match (both start equal — see rating.ts, priorScale=1 means the raw
+// roster rating *is* the initial rating) and this is the only place either
+// gets written for a match result. Form retention (Section 10 of the spec)
+// pulls the live rating back toward that fixed anchor before the update is
+// computed, so a team's accumulated form decays each match instead of
+// persisting forever.
 async function applySeasonRatingUpdate(
   homeTeamId: string,
   awayTeamId: string,
   homeRatingRaw: number | null,
+  homeInitialRaw: number | null,
   awayRatingRaw: number | null,
+  awayInitialRaw: number | null,
   homeScore: number,
   awayScore: number,
+  bestOf: number,
 ): Promise<void> {
-  const [hRating, aRating] = await Promise.all([
+  const [homeLive, awayLive] = await Promise.all([
     homeRatingRaw != null ? Promise.resolve(Number(homeRatingRaw)) : initTeamSeasonRating(homeTeamId),
     awayRatingRaw != null ? Promise.resolve(Number(awayRatingRaw)) : initTeamSeasonRating(awayTeamId),
   ]);
+  const homeInitial = homeInitialRaw != null ? Number(homeInitialRaw) : homeLive;
+  const awayInitial = awayInitialRaw != null ? Number(awayInitialRaw) : awayLive;
+
+  const hRating = applyFormRetention(homeLive, homeInitial);
+  const aRating = applyFormRetention(awayLive, awayInitial);
+  const winsNeeded = Math.ceil(bestOf / 2);
 
   const { newRatingA: newHome, newRatingB: newAway } = applyRatingUpdate(
-    hRating, aRating, homeScore, awayScore,
+    hRating, aRating, homeScore, awayScore, winsNeeded,
   );
 
   await Promise.all([
-    supabaseAdmin.from("teams").update({ season_rating: newHome }).eq("id", homeTeamId),
-    supabaseAdmin.from("teams").update({ season_rating: newAway }).eq("id", awayTeamId),
+    supabaseAdmin.from("teams").update({ season_rating: newHome, initial_rating: homeInitial }).eq("id", homeTeamId),
+    supabaseAdmin.from("teams").update({ season_rating: newAway, initial_rating: awayInitial }).eq("id", awayTeamId),
   ]);
 }
 
@@ -2787,8 +2797,8 @@ export async function execReportMatchResult(
   if (match.status === "completed") return { ok: false, message: "Match already reported." };
 
   const [{ data: homeTeam }, { data: awayTeam }] = await Promise.all([
-    supabaseAdmin.from("teams").select("id, name, wins, losses, season_rating").eq("id", match.home_team_id).single(),
-    supabaseAdmin.from("teams").select("id, name, wins, losses, season_rating").eq("id", match.away_team_id).single(),
+    supabaseAdmin.from("teams").select("id, name, wins, losses, season_rating, initial_rating").eq("id", match.home_team_id).single(),
+    supabaseAdmin.from("teams").select("id, name, wins, losses, season_rating, initial_rating").eq("id", match.away_team_id).single(),
   ]);
   if (!homeTeam || !awayTeam) return { ok: false, message: "Team not found." };
 
@@ -2815,11 +2825,15 @@ export async function execReportMatchResult(
     // must not move either team's rating (skipRatingUpdate is kept as a
     // separate explicit flag for non-forfeit administrative skips).
     if (!forfeit && !skipRatingUpdate) {
+      const bestOf = await getBestOfForMatch(matchId);
       applySeasonRatingUpdate(
         homeTeam.id, awayTeam.id,
         homeTeam.season_rating as number | null,
+        homeTeam.initial_rating as number | null,
         awayTeam.season_rating as number | null,
+        awayTeam.initial_rating as number | null,
         homeScore, awayScore,
+        bestOf,
       ).catch(() => {});
     }
 

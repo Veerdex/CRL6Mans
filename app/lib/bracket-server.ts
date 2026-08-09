@@ -1,6 +1,6 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
-import { calculatePlayerRating } from "./rating";
+import { playerRatingFromRow, initialTeamRating } from "./rating";
 import {
   generateSEMatchInserts, generateDEMatchInserts, generateSEPlaceholderInserts,
   DE_WINNERS, DE_LOSERS, wbLoserTarget,
@@ -144,7 +144,7 @@ function buildPlayedSet(
   return s;
 }
 
-// Compute average player rating per team from player rows.
+// Compute each team's initial rating (see rating.ts) from its roster's player rows.
 function computeAvgRV(
   teamIds: string[],
   players: {
@@ -157,13 +157,7 @@ function computeAvgRV(
   const rv: Record<string, number> = {};
   for (const id of teamIds) {
     const roster = players.filter(p => p.team_id === id);
-    const sum = roster.reduce((s, p) =>
-      s + calculatePlayerRating({
-        at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
-        at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
-        at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
-      }), 0);
-    rv[id] = roster.length ? sum / roster.length : 0;
+    rv[id] = initialTeamRating(roster.map(playerRatingFromRow));
   }
   return rv;
 }
@@ -937,14 +931,7 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
   const avgMmr: Record<string, number> = {};
   (teamsRaw ?? []).forEach((t) => {
     const roster = players?.filter((p) => p.team_id === t.id) ?? [];
-    const sum = roster.reduce(
-      (s, p) => s + calculatePlayerRating({
-        at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
-        at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
-        at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
-      }), 0
-    );
-    avgMmr[t.id] = roster.length ? sum / roster.length : 0;
+    avgMmr[t.id] = initialTeamRating(roster.map(playerRatingFromRow));
   });
 
   let seeded = [...(teamsRaw ?? [])].sort((a, b) => {

@@ -4,7 +4,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { calculatePlayerRating } from "@/app/lib/rating";
+import { playerRatingFromRow } from "@/app/lib/rating";
 import {
   getRoundName, getMatchLabel,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -74,11 +74,7 @@ type MatchInfo = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function peakMmr(p: RosterPlayer) {
-  return calculatePlayerRating({
-    at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
-    at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
-    at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
-  });
+  return playerRatingFromRow(p);
 }
 
 // Swaps any subbed-out roster player for their approved substitute, so the "who's
@@ -502,12 +498,8 @@ export default async function MyTeamPage() {
     (subPlayersRaw ?? []).map((p) => [p.id, p])
   );
 
-  function peakMmrSub(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1?: string | null; current_1v1?: string | null }) {
-    return Math.round(calculatePlayerRating({
-      at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
-      at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
-      at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
-    }));
+  function peakMmrSub(p: Parameters<typeof playerRatingFromRow>[0]) {
+    return Math.round(playerRatingFromRow(p));
   }
 
   // Admin-set round schedules define the allowed scheduling window per round.

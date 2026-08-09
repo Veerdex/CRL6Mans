@@ -1,25 +1,7 @@
 import { supabaseAdmin } from "./supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
-import { computeMatchPrediction, computeMatchPredictionFromRating } from "@/app/dashboard/wagers/prediction";
-import { calculatePlayerRating } from "@/app/lib/rating";
-
-function playerRatingOf(p: {
-  peak_2v2: string | null;
-  current_2v2: string | null;
-  peak_3v3: string | null;
-  current_3v3: string | null;
-  peak_1v1: string | null;
-  current_1v1: string | null;
-}): number {
-  return calculatePlayerRating({
-    at_1v1: Number(p.peak_1v1 ?? 0),
-    season_1v1: Number(p.current_1v1 ?? 0),
-    at_2v2: Number(p.peak_2v2 ?? 0),
-    season_2v2: Number(p.current_2v2 ?? 0),
-    at_3v3: Number(p.peak_3v3 ?? 0),
-    season_3v3: Number(p.current_3v3 ?? 0),
-  });
-}
+import { computeMatchPredictionFromRating } from "@/app/dashboard/wagers/prediction";
+import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
 
 // Freezes the win% shown in the wagers "all matches" grid the moment both teams
 // are known for a match, and locks in the match's betting mode the moment its
@@ -102,7 +84,7 @@ export async function freezeUnfrozenMatchPredictions(): Promise<void> {
   const ratingsByTeam: Record<string, number[]> = {};
   for (const p of rosterPlayers ?? []) {
     if (!p.team_id) continue;
-    (ratingsByTeam[p.team_id] ??= []).push(playerRatingOf(p));
+    (ratingsByTeam[p.team_id] ??= []).push(playerRatingFromRow(p));
   }
 
   await Promise.all(
@@ -115,12 +97,9 @@ export async function freezeUnfrozenMatchPredictions(): Promise<void> {
         const homeTeamId = m.home_team_id as string;
         const awayTeamId = m.away_team_id as string;
         const bestOf = bestOfForMatch(m);
-        const hRating = seasonRatings[homeTeamId];
-        const aRating = seasonRatings[awayTeamId];
-        const pred =
-          hRating != null && aRating != null
-            ? computeMatchPredictionFromRating(hRating, aRating, bestOf)
-            : computeMatchPrediction(ratingsByTeam[homeTeamId] ?? [], ratingsByTeam[awayTeamId] ?? [], bestOf);
+        const hRating = resolveTeamRating(seasonRatings[homeTeamId] ?? null, ratingsByTeam[homeTeamId] ?? []);
+        const aRating = resolveTeamRating(seasonRatings[awayTeamId] ?? null, ratingsByTeam[awayTeamId] ?? []);
+        const pred = computeMatchPredictionFromRating(hRating, aRating, bestOf);
         update.predicted_home_win_prob = pred.homeWinProb;
         update.predicted_away_win_prob = pred.awayWinProb;
       }

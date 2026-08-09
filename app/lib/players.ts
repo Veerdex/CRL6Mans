@@ -1,7 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
 import { addRole, removeRole, addRoleById, removeRoleById } from "./discord-api";
-import { calculatePlayerRating } from "./rating";
+import { playerRatingFromRow } from "./rating";
 
 export type PlayerStatus = "unregistered" | "pending" | "approved" | "rejected" | "banned";
 
@@ -158,15 +158,7 @@ export async function getApprovedPlayers(): Promise<Player[]> {
     toPlayer(a as AccountRow, pendingByAccount.get(a.id) ?? null, tier3ByAccount.get(a.id) ?? null)
   );
 
-  const ratingOf = (p: Player) =>
-    calculatePlayerRating({
-      at_1v1: Number(p.peak_1v1 ?? 0),
-      season_1v1: Number(p.current_1v1 ?? 0),
-      at_2v2: Number(p.peak_2v2 ?? 0),
-      season_2v2: Number(p.current_2v2 ?? 0),
-      at_3v3: Number(p.peak_3v3 ?? 0),
-      season_3v3: Number(p.current_3v3 ?? 0),
-    });
+  const ratingOf = (p: Player) => playerRatingFromRow(p);
 
   return players.sort((a, b) => ratingOf(b) - ratingOf(a));
 }

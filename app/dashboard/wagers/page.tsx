@@ -3,8 +3,8 @@ import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
-import { calculatePlayerRating, initialTeamRating } from "@/app/lib/rating";
-import { computeMatchPrediction, computeMatchPredictionFromRating, type MatchPrediction } from "./prediction";
+import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
+import { computeMatchPredictionFromRating, type MatchPrediction } from "./prediction";
 import { WagersClient } from "./wagers-client";
 import { WagesLeaderboardOnly } from "./leaderboard-view";
 import type { OverviewMatch } from "./overview-grid";
@@ -29,23 +29,7 @@ function formatStageName(stage: string): string {
   return map[stage] ?? stage.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function playerRatingOf(p: {
-  peak_2v2: string | null;
-  current_2v2: string | null;
-  peak_3v3: string | null;
-  current_3v3: string | null;
-  peak_1v1: string | null;
-  current_1v1: string | null;
-}): number {
-  return calculatePlayerRating({
-    at_1v1: Number(p.peak_1v1 ?? 0),
-    season_1v1: Number(p.current_1v1 ?? 0),
-    at_2v2: Number(p.peak_2v2 ?? 0),
-    season_2v2: Number(p.current_2v2 ?? 0),
-    at_3v3: Number(p.peak_3v3 ?? 0),
-    season_3v3: Number(p.current_3v3 ?? 0),
-  });
-}
+const playerRatingOf = playerRatingFromRow;
 
 export default async function WagersPage() {
   const cookieStore = await cookies();
@@ -262,7 +246,7 @@ export default async function WagersPage() {
   }
 
   function teamRatingFor(teamId: string): number {
-    return seasonRatings[teamId] ?? initialTeamRating(ratingsByTeam[teamId] ?? []);
+    return resolveTeamRating(seasonRatings[teamId] ?? null, ratingsByTeam[teamId] ?? []);
   }
 
   // Standings — same wins/losses-from-completed-matches derivation as
@@ -358,12 +342,9 @@ export default async function WagersPage() {
   // fall back to raw player ratings for teams that haven't played yet.
   const matchPredictions: Record<string, MatchPrediction> = {};
   for (const m of matches) {
-    const hRating = seasonRatings[m.home_team_id];
-    const aRating = seasonRatings[m.away_team_id];
-    matchPredictions[m.id] =
-      hRating != null && aRating != null
-        ? computeMatchPredictionFromRating(hRating, aRating, m.bestOf)
-        : computeMatchPrediction(ratingsByTeam[m.home_team_id] ?? [], ratingsByTeam[m.away_team_id] ?? [], m.bestOf);
+    const hRating = resolveTeamRating(seasonRatings[m.home_team_id] ?? null, ratingsByTeam[m.home_team_id] ?? []);
+    const aRating = resolveTeamRating(seasonRatings[m.away_team_id] ?? null, ratingsByTeam[m.away_team_id] ?? []);
+    matchPredictions[m.id] = computeMatchPredictionFromRating(hRating, aRating, m.bestOf);
   }
 
   // Grid predictions are frozen by the tournament-scheduler cron shortly after a

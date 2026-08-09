@@ -2,44 +2,7 @@
 // The per-game curve and roster-aggregation math live in app/lib/rating.ts so
 // the season updater and this predictor read a rating gap the same way.
 
-import { winProbability, initialTeamRating } from "@/app/lib/rating";
-
-function nChooseK(n: number, k: number): number {
-  let result = 1;
-  for (let i = 0; i < k; i++) result = (result * (n - i)) / (i + 1);
-  return result;
-}
-
-function seriesWinProbability(perGameP: number, winsNeeded: number): number {
-  let total = 0;
-  for (let losses = 0; losses < winsNeeded; losses++) {
-    const gamesPlayed = winsNeeded + losses;
-    total +=
-      nChooseK(gamesPlayed - 1, losses) *
-      Math.pow(perGameP, winsNeeded) *
-      Math.pow(1 - perGameP, losses);
-  }
-  return total;
-}
-
-function scorelineBreakdown(
-  perGameP: number,
-  winsNeeded: number,
-): { wins: number; losses: number; probability: number }[] {
-  const result = [];
-  for (let losses = 0; losses < winsNeeded; losses++) {
-    const gamesPlayed = winsNeeded + losses;
-    result.push({
-      wins: winsNeeded,
-      losses,
-      probability:
-        nChooseK(gamesPlayed - 1, losses) *
-        Math.pow(perGameP, winsNeeded) *
-        Math.pow(1 - perGameP, losses),
-    });
-  }
-  return result;
-}
+import { predictSeries, initialTeamRating, PREDICTION_SCALE } from "@/app/lib/rating";
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -69,18 +32,14 @@ export type MatchPrediction = {
 
 function computeFromRatings(homeRating: number, awayRating: number, bestOf: number): MatchPrediction {
   const winsNeeded = Math.ceil(bestOf / 2);
-  const perGameH = winProbability(homeRating, awayRating);
-  const perGameA = 1 - perGameH;
-
-  const homeWinProb = seriesWinProbability(perGameH, winsNeeded);
+  const { pASeries: homeWinProb, scorelines } = predictSeries(
+    homeRating, awayRating, winsNeeded, PREDICTION_SCALE,
+  );
 
   const probByGames: Record<number, number> = {};
-  for (const b of [
-    ...scorelineBreakdown(perGameH, winsNeeded),
-    ...scorelineBreakdown(perGameA, winsNeeded),
-  ]) {
-    const g = b.wins + b.losses;
-    probByGames[g] = (probByGames[g] ?? 0) + b.probability;
+  for (const s of scorelines) {
+    const g = s.wins + s.losses;
+    probByGames[g] = (probByGames[g] ?? 0) + s.probability;
   }
 
   const ouLines = getOULines(bestOf).map((line) => {

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { calculatePlayerRating } from "@/app/lib/rating";
+import { playerRatingFromRow } from "@/app/lib/rating";
 
 type Team = {
   id: string;
@@ -132,11 +132,7 @@ export function TeamsGrid({ teams, byTeam, avgMmr, myTeamId, initialQuery = "" }
                     <p className="px-5 py-3 text-sm text-zinc-600 italic">No players yet.</p>
                   ) : (
                     roster.map((player) => {
-                      const peak = Math.round(calculatePlayerRating({
-                        at_1v1: Number(player.peak_1v1 ?? 0), season_1v1: Number(player.current_1v1 ?? 0),
-                        at_2v2: Number(player.peak_2v2 ?? 0), season_2v2: Number(player.current_2v2 ?? 0),
-                        at_3v3: Number(player.peak_3v3 ?? 0), season_3v3: Number(player.current_3v3 ?? 0),
-                      }));
+                      const peak = Math.round(playerRatingFromRow(player));
                       return (
                         <a
                           key={player.id}

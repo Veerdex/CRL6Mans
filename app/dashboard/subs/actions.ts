@@ -9,7 +9,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { sendChannelMessage, getGuildRoles, type DiscordEmbed } from "@/app/lib/discord-api";
 import { roleMention } from "@/app/lib/match-notifications";
 import { pushToAdmins, pushToTeam } from "@/app/lib/push";
-import { calculatePlayerRating } from "@/app/lib/rating";
+import { playerRatingFromRow } from "@/app/lib/rating";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -22,13 +22,7 @@ type RankRow = {
   peak_1v1: string | null; current_1v1: string | null;
 };
 
-function peakMmr(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1?: string | null; current_1v1?: string | null }) {
-  return calculatePlayerRating({
-    at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
-    at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
-    at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
-  });
-}
+const peakMmr = playerRatingFromRow;
 
 function rankField(label: string, p: RankRow): { name: string; value: string; inline: true } {
   const rv = Math.round(peakMmr(p));
@@ -166,6 +160,10 @@ export async function submitSubRequest(
 
   // Sub eligibility depends on the player being replaced. If they're below 1400 rating,
   // subs can go up to +100 of that rating. Otherwise, subs must be <= player's rating.
+  // These absolute thresholds were tuned against the old rating formula's output
+  // scale (crl-game-share-elo-v1) and may need recalibration now that ratings are
+  // produced by crl-final-rating-v1 (app/lib/rating.ts) — revisit once real numbers
+  // are visible under the new formula.
   const playerOutMmr = peakMmr(playerOut);
   const subMmr = peakMmr(sub);
   const mmrLimit = playerOutMmr < 1400 ? playerOutMmr + 100 : playerOutMmr;

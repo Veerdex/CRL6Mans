@@ -140,17 +140,13 @@ unregistered → (submits register form) → pending → (admin approves) → ap
 
 **Tournament scheduler** also fires push notifications on key lifecycle events: signups open/close, draft start, season start.
 
-## Rank Value (RV)
+## Rank Value (RV) / rating model
 
-**Formula**: `RV = (peak_2v2 + current_2v2) * 0.3 + (peak_3v3 + current_3v3) * 0.2`
+RV is a player's rating under the `crl-final-rating-v1` model. **`app/lib/rating.ts` is the single source of truth** for the formula — do not restate it here; read that file instead. It's a pure, side-effect-free module shared by the season updater (`app/lib/discord-bot.ts`) and the wager predictor (`app/dashboard/wagers/prediction.ts`), so both interpret ratings identically.
 
-Where:
-- `peak_2v2` = All Time Peak 2v2 MMR
-- `current_2v2` = Season Peak 2v2 MMR
-- `peak_3v3` = All Time Peak 3v3 MMR
-- `current_3v3` = Season Peak 3v3 MMR
+Every call site should go through `playerRatingFromRow()` (player rating from a DB row), `initialTeamRating()` (roster → team rating), and `resolveTeamRating()` (stored `season_rating` if present, else `initialTeamRating`) — never hand-roll the field mapping or the fallback logic locally. 1v1 MMR is **not** part of the rating model; only 2v2/3v3 peak and season MMR feed it. 1v1 fields still exist in the schema/UI for other purposes (registration, profile edits) but are ignored by the rating math.
 
-This is the canonical ranking metric used for draft ordering, team balancing, and sub eligibility checks. The `rankValue()` function in `app/lib/discord-bot.ts` implements this as `((peak_2v2 + current_2v2) * 1.2 + (peak_3v3 + current_3v3) * 0.8) / 4` (algebraically identical).
+`teams.season_rating` is the live rating that moves with match results; `teams.initial_rating` is the fixed anchor a team started at, used by `applyFormRetention()` to pull `season_rating` back toward it before each match's update. Both are lazy-initialised together on a team's first rated match, and `applySeasonRatingUpdate` in `discord-bot.ts` is the only place either gets written from a match result — `applyPlayerRVChangeToTeamRating` (roster/MMR edits) shifts both by the same delta so an edit isn't mistaken for match-driven form.
 
 ---
 

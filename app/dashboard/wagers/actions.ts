@@ -6,10 +6,9 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { getBestOfForMatch } from "@/app/lib/discord-bot";
-import { calculatePlayerRating } from "@/app/lib/rating";
+import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
 import {
   computeMatchPredictionFromRating,
-  computeMatchPrediction,
   payoutMultiplier,
 } from "./prediction";
 
@@ -63,14 +62,10 @@ async function computeServerOdds(
   const away = teams?.find((t) => t.id === awayTeamId);
   if (!home || !away) return null;
 
-  let prediction;
-  if (home.season_rating != null && away.season_rating != null) {
-    prediction = computeMatchPredictionFromRating(
-      Number(home.season_rating),
-      Number(away.season_rating),
-      bestOf,
-    );
-  } else {
+  let homeRating = home.season_rating != null ? Number(home.season_rating) : null;
+  let awayRating = away.season_rating != null ? Number(away.season_rating) : null;
+
+  if (homeRating == null || awayRating == null) {
     const { data: players } = await supabaseAdmin
       .from("players")
       .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
@@ -78,21 +73,13 @@ async function computeServerOdds(
       .eq("status", "approved");
 
     const playerRatings = (teamId: string) =>
-      (players ?? [])
-        .filter((p) => p.team_id === teamId)
-        .map((p) =>
-          calculatePlayerRating({
-            at_1v1: Number(p.peak_1v1 ?? 0),
-            season_1v1: Number(p.current_1v1 ?? 0),
-            at_2v2: Number(p.peak_2v2 ?? 0),
-            season_2v2: Number(p.current_2v2 ?? 0),
-            at_3v3: Number(p.peak_3v3 ?? 0),
-            season_3v3: Number(p.current_3v3 ?? 0),
-          }),
-        );
+      (players ?? []).filter((p) => p.team_id === teamId).map((p) => playerRatingFromRow(p));
 
-    prediction = computeMatchPrediction(playerRatings(homeTeamId), playerRatings(awayTeamId), bestOf);
+    homeRating = resolveTeamRating(homeRating, playerRatings(homeTeamId));
+    awayRating = resolveTeamRating(awayRating, playerRatings(awayTeamId));
   }
+
+  const prediction = computeMatchPredictionFromRating(homeRating, awayRating, bestOf);
 
   return {
     home: payoutMultiplier(prediction.homeWinProb),

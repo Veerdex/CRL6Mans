@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { submitSubRequest, cancelSubRequest, escalateSubRequest } from "@/app/dashboard/subs/actions";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { calculatePlayerRating } from "@/app/lib/rating";
+import { playerRatingFromRow } from "@/app/lib/rating";
 
 export type SubRosterPlayer = {
   id: string;
@@ -52,13 +52,7 @@ interface Props {
   subsEnabled: boolean;
 }
 
-function peakMmr(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1?: string | null; current_1v1?: string | null }) {
-  return calculatePlayerRating({
-    at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
-    at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
-    at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
-  });
-}
+const peakMmr = playerRatingFromRow;
 
 const STATUS_META: Record<SubRequestRow["status"], { label: string; cls: string }> = {
   pending:   { label: "Awaiting opponent", cls: "text-yellow-400 bg-yellow-400/10" },

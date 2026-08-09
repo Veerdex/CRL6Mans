@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { calculatePlayerRating } from "@/app/lib/rating";
+import { playerRatingFromRow } from "@/app/lib/rating";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { ARCHIVE_SCHEMA_VERSION } from "./archive-schema";
 
@@ -127,14 +127,7 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
     ? (allTeams ?? []).filter((t) => participatingIds.has(t.id))
     : (allTeams ?? []);
 
-  const ratingOf = (p: { peak_1v1?: string | null; current_1v1?: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }) =>
-    Math.round(
-      calculatePlayerRating({
-        at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
-        at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
-        at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
-      }),
-    );
+  const ratingOf = (p: Parameters<typeof playerRatingFromRow>[0]) => Math.round(playerRatingFromRow(p));
 
   // Derived from completed matches rather than the teams.wins/losses columns —
   // mirrors season/page.tsx and completeSeason's own finalStandings, since those

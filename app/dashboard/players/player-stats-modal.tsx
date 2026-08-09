@@ -1,7 +1,7 @@
 "use client";
 
 import type { Player } from "@/app/lib/players";
-import { calculatePlayerRating } from "@/app/lib/rating";
+import { playerRatingFromRow } from "@/app/lib/rating";
 import { PlayerName } from "@/app/dashboard/player-name";
 
 export type StatAgg = {
@@ -37,13 +37,7 @@ export function PlayerStatsModal({
   stats?: StatAgg | null;
   onClose: () => void;
 }) {
-  const rv = Math.round(
-    calculatePlayerRating({
-      at_1v1: Number(player.peak_1v1 ?? 0), season_1v1: Number(player.current_1v1 ?? 0),
-      at_2v2: Number(player.peak_2v2 ?? 0), season_2v2: Number(player.current_2v2 ?? 0),
-      at_3v3: Number(player.peak_3v3 ?? 0), season_3v3: Number(player.current_3v3 ?? 0),
-    }),
-  );
+  const rv = Math.round(playerRatingFromRow(player));
 
   const avatarUrl = player.avatar
     ? `https://cdn.discordapp.com/avatars/${player.discord_id}/${player.avatar}.png`

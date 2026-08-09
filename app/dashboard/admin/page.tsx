@@ -4,7 +4,7 @@ import Link from "next/link";
 import { decrypt } from "@/app/lib/session";
 import { getAllPendingPlayers, isModeratorVerified, isDirector, isCEO, isCurrentlyKicked, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { calculatePlayerRating } from "@/app/lib/rating";
+import { playerRatingFromRow } from "@/app/lib/rating";
 import { LeagueControls } from "./league-controls";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
 import { InsightsChart, type InsightsPoint } from "./insights-chart";
@@ -494,12 +494,8 @@ export default async function AdminPage() {
   const subInMap        = Object.fromEntries((subPlayersIn  ?? []).map(p => [p.id, p]));
   const subRequesterMap = Object.fromEntries((subRequesters ?? []).map(p => [p.discord_id, p]));
 
-  function subPeakMmr(p: { peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1?: string | null; current_1v1?: string | null }) {
-    return Math.round(calculatePlayerRating({
-      at_1v1: Number(p.peak_1v1 ?? 0), season_1v1: Number(p.current_1v1 ?? 0),
-      at_2v2: Number(p.peak_2v2 ?? 0), season_2v2: Number(p.current_2v2 ?? 0),
-      at_3v3: Number(p.peak_3v3 ?? 0), season_3v3: Number(p.current_3v3 ?? 0),
-    }));
+  function subPeakMmr(p: Parameters<typeof playerRatingFromRow>[0]) {
+    return Math.round(playerRatingFromRow(p));
   }
 
   const subRequestCards: SubRequestCardData[] = subReqs.map(req => {
