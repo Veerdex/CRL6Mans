@@ -2185,12 +2185,13 @@ export async function processExpiredScoreConfirmations(): Promise<void> {
 // removes stale/incorrect ones (e.g. a player who switched teams, left a team, or
 // rejoined the server). Every approved player is processed, not just rostered ones,
 // so free agents get leftover team/Drafted/Captain roles cleared.
-export async function execSyncRoles(): Promise<{
+export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promise<{
   assigned: number;
   roleNames: string[];
   roleIds: { label: string; id: string }[];
   warnings: string[];
 }> {
+  const syncRegistered = opts?.syncRegistered ?? true;
   const warnings: string[] = [];
 
   const [{ data: teams }, { data: approved }, { data: allPlayers }, { data: settings }] = await Promise.all([
@@ -2207,7 +2208,10 @@ export async function execSyncRoles(): Promise<{
       .single(),
   ]);
 
-  const registeredRoleId = settings?.registered_role_id as string | null;
+  // Leaving this null (rather than gating each use site) makes syncRegistered=false
+  // fall out for free: it's excluded from managedRoleIds (never stripped) and every
+  // `if (registeredRoleId)` re-add check below skips it too.
+  const registeredRoleId = syncRegistered ? (settings?.registered_role_id as string | null) : null;
 
   // Only auto-create Drafted and Captain — team roles are pre-created manually
   const roleMap = await ensureRoles(["Drafted", "Captain"]);
@@ -2284,18 +2288,19 @@ export async function execSyncRoles(): Promise<{
   return { assigned, roleNames, roleIds, warnings };
 }
 
-async function syncRoles(userId: string) {
+async function syncRoles(userId: string, syncRegistered: boolean) {
   const denied = await directorGuard(userId);
   if (denied) return denied;
 
   const { data: teams } = await supabaseAdmin.from("teams").select("id").limit(1);
   if (!teams?.length) return ephemeralReply("❌ No teams found in the database.");
 
-  const { assigned, roleNames, roleIds, warnings } = await execSyncRoles();
+  const { assigned, roleNames, roleIds, warnings } = await execSyncRoles({ syncRegistered });
   const lines = [
     `• Roles reconciled: ${roleNames.join(", ")}`,
     `• Role IDs used: ${roleIds.length ? roleIds.map(r => `${r.label} <@&${r.id}>`).join(", ") : "none (falling back to name lookup)"}`,
     `• Players updated: **${assigned}**`,
+    ...(syncRegistered ? [] : ["ℹ️ Registered role sync skipped (sync_registered: false)."]),
     ...warnings.map(w => `⚠️ ${w}`),
   ];
   return ephemeralReply((warnings.length ? "⚠️ Partial sync" : "✅ Roles synced") + "\n" + lines.join("\n"));
@@ -3307,7 +3312,7 @@ export async function handleCommand(interaction: Interaction) {
 
     switch (sub.name) {
       case "setdraftchannel": return setDraftChannel(userId, interaction.channel_id ?? "");
-      case "syncroles":         return syncRoles(userId);
+      case "syncroles":         return syncRoles(userId, sOpt("sync_registered") === true);
       case "diagroles":         return diagRoles(userId);
       case "setmoderatorid":    return setStaffRoleId(userId, String(sOpt("role")), "moderator");
       case "setdirectorid":     return setStaffRoleId(userId, String(sOpt("role")), "director");

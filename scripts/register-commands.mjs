@@ -49,6 +49,9 @@ const commands = [
         type: SUB_COMMAND,
         name: "syncroles",
         description: "Create missing Discord roles and assign them to all players based on current DB state",
+        options: [
+          { name: "sync_registered", description: "Also reconcile the Registered role", type: BOOLEAN, required: true },
+        ],
       },
       {
         type: SUB_COMMAND,
