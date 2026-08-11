@@ -1200,6 +1200,23 @@ export default async function AdminPage() {
           >
             View a downloaded archive file →
           </Link>
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <a
+              href="/api/admin/export-snapshot?format=json"
+              download
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-zinc-300 hover:text-zinc-100 underline underline-offset-2"
+            >
+              Download live backup (.json) →
+            </a>
+            <a
+              href="/api/admin/export-snapshot?format=csv"
+              download
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-zinc-300 hover:text-zinc-100 underline underline-offset-2"
+            >
+              Download live backup (.zip of .csv) →
+            </a>
+            <span className="text-xs text-zinc-600">Full snapshot of every live table, anytime — doesn&apos;t touch or finalize anything.</span>
+          </div>
           <TournamentManager
             tournaments={(tournaments ?? []) as Tournament[]}
             seasons={(seasons ?? []) as Season[]}
