@@ -38,6 +38,7 @@ import {
   StatLeadersSection,
   SeasonHistorySection,
 } from "./data-section";
+import { StorageUsageSection } from "./storage-section";
 import { RoundScheduler, type ScheduleSection, type RoundMatchInfo } from "./round-scheduler";
 import { ScheduleOverrideCard, type ScheduleOverrideCardData } from "./schedule-override-card";
 import { canonicalStage, stageName, STAGE_ORDER, expectedStageRounds, type RoundScheduleRow } from "./schedule-utils";
@@ -892,6 +893,7 @@ export default async function AdminPage() {
         { id: "competitive", label: "Competitive Snapshot" },
         { id: "leaders", label: "Stat Leaders" },
         { id: "history", label: "Season History" },
+        ...(userIsDirector ? [{ id: "storage", label: "Storage & Limits" }] : []),
       ],
     },
     ...(userIsDirector
@@ -1399,6 +1401,7 @@ export default async function AdminPage() {
         <CompetitiveSnapshotSection />
         <StatLeadersSection />
         <SeasonHistorySection tournaments={tournaments ?? []} seasons={seasons ?? []} />
+        {userIsDirector && <StorageUsageSection />}
       </AdminSection>
 
       {userIsDirector && (
