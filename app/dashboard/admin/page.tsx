@@ -65,7 +65,7 @@ async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean;
   );
 }
 
-export default async function SponsorsSection() {
+async function SponsorsSection() {
   const sponsors = await getSponsorsWithMembers();
   return (
     <AdminSubSection
@@ -81,7 +81,7 @@ export default async function SponsorsSection() {
   );
 }
 
-async function AdminPage() {
+export default async function AdminPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
 
