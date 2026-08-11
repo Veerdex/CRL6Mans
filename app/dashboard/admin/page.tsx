@@ -30,6 +30,14 @@ import type { Tournament, Season } from "./tournament-actions";
 import { InitSettingsButton } from "./init-settings-button";
 import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
+import { getSponsorsWithMembers } from "./sponsor-actions";
+import { SponsorsManager } from "./sponsors-section";
+import {
+  RegistrationFunnelSection,
+  CompetitiveSnapshotSection,
+  StatLeadersSection,
+  SeasonHistorySection,
+} from "./data-section";
 import { RoundScheduler, type ScheduleSection, type RoundMatchInfo } from "./round-scheduler";
 import { ScheduleOverrideCard, type ScheduleOverrideCardData } from "./schedule-override-card";
 import { canonicalStage, stageName, STAGE_ORDER, expectedStageRounds, type RoundScheduleRow } from "./schedule-utils";
@@ -57,7 +65,23 @@ async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean;
   );
 }
 
-export default async function AdminPage() {
+export default async function SponsorsSection() {
+  const sponsors = await getSponsorsWithMembers();
+  return (
+    <AdminSubSection
+      sectionId="sponsors"
+      tabId="sponsors-list"
+      title="Sponsors"
+      isDefaultTab
+      value={sponsors.length}
+      description="Create a sponsor and share its invite link — any Discord account that uses it becomes a linked member of that sponsor, up to the max-uses cap. Raise the cap at any time to let more reps join."
+    >
+      <SponsorsManager sponsors={sponsors} />
+    </AdminSubSection>
+  );
+}
+
+async function AdminPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
 
@@ -860,6 +884,23 @@ export default async function AdminPage() {
         { id: "game-leaderboard", label: "Game Leaderboard", value: gameScores.length },
       ],
     },
+    {
+      id: "data",
+      label: "Data",
+      subTabs: [
+        { id: "funnel", label: "Registration Funnel" },
+        { id: "competitive", label: "Competitive Snapshot" },
+        { id: "leaders", label: "Stat Leaders" },
+        { id: "history", label: "Season History" },
+      ],
+    },
+    ...(userIsDirector
+      ? [{
+          id: "sponsors",
+          label: "Sponsors",
+          subTabs: [{ id: "sponsors-list", label: "Sponsors" }],
+        }]
+      : []),
   ];
 
   return (
@@ -1352,6 +1393,19 @@ export default async function AdminPage() {
         <GameLeaderboardPanel scores={gameScores} />
       </AdminSubSection>
       </AdminSection>
+
+      <AdminSection id="data">
+        <RegistrationFunnelSection analyticsRows={analyticsRows ?? []} />
+        <CompetitiveSnapshotSection />
+        <StatLeadersSection />
+        <SeasonHistorySection tournaments={tournaments ?? []} seasons={seasons ?? []} />
+      </AdminSection>
+
+      {userIsDirector && (
+        <AdminSection id="sponsors">
+          <SponsorsSection />
+        </AdminSection>
+      )}
 
       </div>
       </div>

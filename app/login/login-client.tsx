@@ -134,6 +134,10 @@ export function LoginClient({ error }: { error?: string }) {
           <p className="text-center text-sm text-red-400">
             {error === "cancelled"
               ? "Login cancelled."
+              : error === "invalid_sponsor_link"
+              ? "This sponsor invite link is invalid or has been disabled."
+              : error === "sponsor_link_full"
+              ? "This sponsor invite link has reached its limit. Ask an admin to raise it."
               : "Authentication failed. Please try again."}
           </p>
         )}

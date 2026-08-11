@@ -2,18 +2,41 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createSession } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { getBaseUrl } from "@/app/lib/base-url";
 
-// Prefer an explicit env var; fall back to Vercel's canonical production URL.
 // This prevents host-header injection from affecting redirect destinations.
-const BASE_URL =
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL
-    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : undefined);
-
 function safeRedirect(request: NextRequest, path: string) {
-  const base = BASE_URL ?? new URL(request.url).origin;
+  const base = getBaseUrl(new URL(request.url).origin);
   return NextResponse.redirect(`${base}${path}`);
+}
+
+// Set by app/sponsor/join/[token]/route.ts before kicking off this OAuth
+// flow. Re-validates the token here (not just at the link-click) to close
+// the gap between clicking the link and finishing Discord auth, during
+// which the sponsor could hit max_uses or get disabled.
+type CookieStore = Awaited<ReturnType<typeof cookies>>;
+async function claimSponsorInvite(cookieStore: CookieStore, accountId: string) {
+  const token = cookieStore.get("sponsor_invite_token")?.value;
+  if (!token) return;
+  cookieStore.delete("sponsor_invite_token");
+
+  const { data: sponsor } = await supabaseAdmin
+    .from("sponsors")
+    .select("id, max_uses")
+    .eq("invite_token", token)
+    .eq("status", "active")
+    .single();
+  if (!sponsor) return;
+
+  const { count } = await supabaseAdmin
+    .from("sponsor_members")
+    .select("id", { count: "exact", head: true })
+    .eq("sponsor_id", sponsor.id);
+  if ((count ?? 0) >= sponsor.max_uses) return;
+
+  await supabaseAdmin
+    .from("sponsor_members")
+    .upsert({ sponsor_id: sponsor.id, account_id: accountId }, { onConflict: "account_id", ignoreDuplicates: true });
 }
 
 export async function GET(request: NextRequest) {
@@ -99,12 +122,14 @@ export async function GET(request: NextRequest) {
         },
         { onConflict: "discord_id" }
       )
-      .select("theme, nav_layout, session_version")
+      .select("id, theme, nav_layout, session_version")
       .single();
 
     // Embed the current session_version so it can be validated on revocation.
     const sessionVersion = (account?.session_version as number | null) ?? 0;
     await createSession(user.id, user.username, user.avatar ?? null, sessionVersion);
+
+    if (account?.id) await claimSponsorInvite(cookieStore, account.id as string);
 
     // Mirror the account's saved theme + nav layout into cookies for no-flash SSR.
     const saved = account?.theme;
