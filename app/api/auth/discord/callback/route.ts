@@ -61,7 +61,6 @@ export async function GET(request: NextRequest) {
 
   const storedState = cookieStore.get("oauth_state")?.value;
   if (!storedState || storedState !== state) {
-    console.error("[discord/callback] state mismatch", { hasStoredState: !!storedState, statesMatch: storedState === state });
     clearState();
     return safeRedirect(request, "/login?error=auth_failed");
   }
@@ -70,11 +69,6 @@ export async function GET(request: NextRequest) {
 
   const { DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI } = process.env;
   if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET || !DISCORD_REDIRECT_URI) {
-    console.error("[discord/callback] missing env vars", {
-      hasClientId: !!DISCORD_CLIENT_ID,
-      hasClientSecret: !!DISCORD_CLIENT_SECRET,
-      hasRedirectUri: !!DISCORD_REDIRECT_URI,
-    });
     return safeRedirect(request, "/login?error=auth_failed");
   }
 
@@ -92,8 +86,6 @@ export async function GET(request: NextRequest) {
     });
 
     if (!tokenRes.ok) {
-      const body = await tokenRes.text();
-      console.error("[discord/callback] token exchange failed", { status: tokenRes.status, body, redirectUri: DISCORD_REDIRECT_URI });
       return safeRedirect(request, "/login?error=auth_failed");
     }
 
@@ -104,8 +96,6 @@ export async function GET(request: NextRequest) {
     });
 
     if (!userRes.ok) {
-      const body = await userRes.text();
-      console.error("[discord/callback] user fetch failed", { status: userRes.status, body });
       return safeRedirect(request, "/login?error=auth_failed");
     }
 
