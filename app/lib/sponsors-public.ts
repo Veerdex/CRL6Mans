@@ -55,3 +55,38 @@ export async function getNavSponsors(): Promise<NavSponsors> {
     sideNav: side?.side_nav_image_url ? { name: side.name, imageUrl: side.side_nav_image_url as string } : null,
   };
 }
+
+export type SettingsTabTheme = {
+  name: string;
+  accent: string;
+  shell: string;
+  secondary: string;
+} | null;
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+export async function getSettingsTabTheme(): Promise<SettingsTabTheme> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings")
+    .select("settings_tab_sponsor_id")
+    .single();
+
+  const sponsorId = (settings?.settings_tab_sponsor_id as string | null) ?? null;
+  if (!sponsorId) return null;
+
+  const { data: sponsor } = await supabaseAdmin
+    .from("sponsors")
+    .select("name, status, theme_name, theme_accent, theme_shell, theme_secondary")
+    .eq("id", sponsorId)
+    .eq("status", "active")
+    .single();
+  if (!sponsor?.theme_name) return null;
+
+  const accent = sponsor.theme_accent as string | null;
+  const shell = sponsor.theme_shell as string | null;
+  const secondary = sponsor.theme_secondary as string | null;
+  if (!accent || !shell || !secondary) return null;
+  if (!HEX_COLOR.test(accent) || !HEX_COLOR.test(shell) || !HEX_COLOR.test(secondary)) return null;
+
+  return { name: sponsor.theme_name as string, accent, shell, secondary };
+}

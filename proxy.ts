@@ -9,7 +9,10 @@ const protectedRoutes = ["/dashboard"];
 // React style props and a background-image throughout; styles can't execute JS.
 // Images allow https/data/blob to cover Supabase logos, Discord avatars, and
 // canvas output. Media additionally allows Vercel Blob storage for uploaded
-// sponsor video. Everything else (connect, fonts, workers) is same-origin.
+// sponsor video. Connect additionally allows Vercel Blob storage because
+// client-side sponsor uploads (@vercel/blob/client) PUT the file directly
+// from the browser to that host, bypassing the app server. Everything else
+// (fonts, workers) is same-origin.
 function buildCsp(nonce: string): string {
   // 'wasm-unsafe-eval' lets @react-pdf/renderer compile its WebAssembly layout
   // engine (for PDF export) without permitting general eval(). 'unsafe-eval' is
@@ -24,7 +27,7 @@ function buildCsp(nonce: string): string {
     `style-src 'self' 'unsafe-inline'`,
     `img-src 'self' blob: data: https:`,
     `font-src 'self'`,
-    `connect-src 'self'`,
+    `connect-src 'self' https://*.public.blob.vercel-storage.com`,
     `media-src 'self' blob: https://*.public.blob.vercel-storage.com`,
     `worker-src 'self'`,
     `manifest-src 'self'`,

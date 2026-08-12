@@ -427,9 +427,144 @@ html[data-theme="dark"] {
 [data-theme="crl6mans"] main h1,
 [data-theme="crl6mans"] main h2 { color: #e88a24; }
 
+/* ── SPONSOR (admin-configurable) — three sponsor-picked brand colors on the
+   CRL6Mans base: --sponsor-accent drives the indigo ramp (buttons, active
+   nav, headings), --sponsor-shell colors the sidebar/topbar, and
+   --sponsor-secondary drives the amber ramp (highlights/badges). Surfaces
+   and status colors are the same fixed values CRL6Mans uses — sponsors only
+   control these three roles. Values are injected as inline custom
+   properties on <html> from the active settings-tab sponsor
+   (league_settings.settings_tab_sponsor_id — see app/layout.tsx and
+   app/lib/sponsors-public.ts). Uses html[data-theme=...] (not a bare
+   attribute selector) so it reliably outranks :root's crl6mans tokens
+   regardless of source order. */
+html[data-theme="sponsor"] {
+  --c-bg: #d5dbf2;
+  --c-fg: #1e1d44;
+  --c-white: #1e1d44;
+
+  --c-zinc-50:  #14132a;
+  --c-zinc-100: #1f1f3d;
+  --c-zinc-200: #2a2a4d;
+  --c-zinc-300: #3a3c66;
+  --c-zinc-400: #565a8c;
+  --c-zinc-500: #6d72a6;
+  --c-zinc-600: #8f95c4;
+  --c-zinc-700: #aab1de;
+  --c-zinc-800: #c2c9ec;
+  --c-zinc-900: #f1f3fd;
+  --c-zinc-950: #d5dbf2;
+
+  --c-indigo-50:  color-mix(in oklab, var(--sponsor-accent, #e88a24) 8%, white 92%);
+  --c-indigo-100: color-mix(in oklab, var(--sponsor-accent, #e88a24) 15%, white 85%);
+  --c-indigo-200: color-mix(in oklab, var(--sponsor-accent, #e88a24) 30%, white 70%);
+  --c-indigo-300: color-mix(in oklab, var(--sponsor-accent, #e88a24) 60%, white 40%);
+  --c-indigo-400: color-mix(in oklab, var(--sponsor-accent, #e88a24) 85%, white 15%);
+  --c-indigo-500: color-mix(in oklab, var(--sponsor-accent, #e88a24) 85%, white 15%);
+  --c-indigo-600: var(--sponsor-accent, #e88a24);
+  --c-indigo-700: color-mix(in oklab, var(--sponsor-accent, #e88a24) 85%, black 15%);
+  --c-indigo-800: color-mix(in oklab, var(--sponsor-accent, #e88a24) 70%, black 30%);
+  --c-indigo-900: color-mix(in oklab, var(--sponsor-accent, #e88a24) 15%, white 85%);
+  --c-indigo-950: color-mix(in oklab, var(--sponsor-accent, #e88a24) 8%, white 92%);
+
+  --c-amber-50:  color-mix(in oklab, var(--sponsor-secondary, #e88a24) 8%, white 92%);
+  --c-amber-100: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 15%, white 85%);
+  --c-amber-200: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 30%, white 70%);
+  --c-amber-300: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 85%, black 15%);
+  --c-amber-400: var(--sponsor-secondary, #e88a24);
+  --c-amber-500: var(--sponsor-secondary, #e88a24);
+  --c-amber-600: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 85%, black 15%);
+  --c-amber-700: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 70%, black 30%);
+  --c-amber-800: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 55%, black 45%);
+  --c-amber-900: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 15%, white 85%);
+  --c-amber-950: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 8%, white 92%);
+
+  /* status colors: same fixed set as CRL6Mans/light */
+  --c-emerald-50:#ecfdf5; --c-emerald-100:#d1fae5; --c-emerald-200:#a7f3d0;
+  --c-emerald-300:#047857; --c-emerald-400:#059669; --c-emerald-500:#10b981;
+  --c-emerald-600:#059669; --c-emerald-700:#047857; --c-emerald-800:#065f46;
+  --c-emerald-900:#d1f0df; --c-emerald-950:#e9f9f0;
+  --c-red-50:#fef2f2; --c-red-100:#fee2e2; --c-red-200:#fecaca;
+  --c-red-300:#b91c1c; --c-red-400:#dc2626; --c-red-500:#ef4444;
+  --c-red-600:#dc2626; --c-red-700:#b91c1c; --c-red-800:#991b1b;
+  --c-red-900:#fbdcdc; --c-red-950:#fef0f0;
+  --c-blue-50:#eff6ff; --c-blue-100:#dbeafe; --c-blue-200:#bfdbfe;
+  --c-blue-300:#1d4ed8; --c-blue-400:#2563eb; --c-blue-500:#3b82f6;
+  --c-blue-600:#2563eb; --c-blue-700:#2563eb; --c-blue-800:#1e40af;
+  --c-blue-900:#dbe9fe; --c-blue-950:#eff5ff;
+  --c-yellow-50:#fefce8; --c-yellow-100:#fef9c3; --c-yellow-200:#fef08a;
+  --c-yellow-300:#a16207; --c-yellow-400:#ca8a04; --c-yellow-500:#eab308;
+  --c-yellow-600:#ca8a04; --c-yellow-700:#a16207; --c-yellow-800:#854d0e;
+  --c-yellow-900:#fef9c3; --c-yellow-950:#fefce8;
+}
+
+/* Sponsor shell: same structural overrides as CRL6Mans, colored via
+   --sponsor-shell/--sponsor-accent. Assumes a reasonably dark shell color
+   (sidebar text is hardcoded to a light/white ink), same assumption
+   CRL6Mans bakes in for its blue shell. */
+[data-theme="sponsor"] aside {
+  background-color: var(--sponsor-shell, #3736ac);
+  border-color: color-mix(in oklab, var(--sponsor-shell, #3736ac) 90%, black 10%);
+}
+[data-theme="sponsor"] aside span,
+[data-theme="sponsor"] aside a {
+  color: rgba(255,255,255,0.85);
+}
+[data-theme="sponsor"] aside > div:first-child span {
+  color: var(--sponsor-accent, #e88a24);
+}
+[data-theme="sponsor"] aside .border-zinc-800 { border-color: rgba(255,255,255,0.14); }
+[data-theme="sponsor"] aside a:hover { color: #ffffff; background-color: rgba(255,255,255,0.08); }
+[data-theme="sponsor"] aside a.bg-zinc-800 {
+  background-color: var(--sponsor-accent, #e88a24);
+  color: #ffffff;
+}
+
+[data-theme="sponsor"] nav.fixed.bottom-0 {
+  background-color: var(--sponsor-shell, #3736ac);
+  border-color: color-mix(in oklab, var(--sponsor-shell, #3736ac) 90%, black 10%);
+}
+[data-theme="sponsor"] nav.fixed.bottom-0 .text-zinc-500 { color: rgba(255,255,255,0.6); }
+[data-theme="sponsor"] nav.fixed.bottom-0 .text-white { color: var(--sponsor-accent, #e88a24); }
+
+[data-theme="sponsor"] .app-topbar,
+[data-theme="sponsor"] .app-bottombar {
+  background-color: var(--sponsor-shell, #3736ac);
+  border-color: color-mix(in oklab, var(--sponsor-shell, #3736ac) 90%, black 10%);
+}
+[data-theme="sponsor"] .app-topbar span,
+[data-theme="sponsor"] .app-topbar a,
+[data-theme="sponsor"] .app-bottombar span,
+[data-theme="sponsor"] .app-bottombar a {
+  color: rgba(255,255,255,0.85);
+}
+[data-theme="sponsor"] .app-topbar > span:first-child { color: var(--sponsor-accent, #e88a24); }
+[data-theme="sponsor"] .app-topbar a:hover { color: #ffffff; background-color: rgba(255,255,255,0.08); }
+[data-theme="sponsor"] .app-topbar a.bg-zinc-800 {
+  background-color: var(--sponsor-accent, #e88a24);
+  color: #ffffff;
+}
+[data-theme="sponsor"] .app-topbar .nav-more { color: rgba(255,255,255,0.85); }
+[data-theme="sponsor"] .app-topbar .nav-more:hover { color: #ffffff; background-color: rgba(255,255,255,0.08); }
+[data-theme="sponsor"] .app-topbar .nav-more.bg-zinc-800 { background-color: var(--sponsor-accent, #e88a24); color: #ffffff; }
+
+[data-theme="sponsor"] .app-topbar .nav-more-menu a { color: var(--color-zinc-400); }
+[data-theme="sponsor"] .app-topbar .nav-more-menu a:hover {
+  color: var(--color-white);
+  background-color: color-mix(in oklab, var(--color-zinc-800) 60%, transparent);
+}
+[data-theme="sponsor"] .app-topbar .nav-more-menu a.bg-zinc-800 {
+  color: var(--color-white);
+  background-color: var(--color-zinc-800);
+}
+
+[data-theme="sponsor"] main h1,
+[data-theme="sponsor"] main h2 { color: var(--sponsor-accent, #e88a24); }
+
 /* Stats page background: solid white on light themes, black on dark. */
 [data-theme="crl6mans"] .stats-bg,
-[data-theme="light"] .stats-bg { background-color: #ffffff; }
+[data-theme="light"] .stats-bg,
+[data-theme="sponsor"] .stats-bg { background-color: #ffffff; }
 [data-theme="dark"] .stats-bg { background-color: #000000; }
 
 /* White that must stay white regardless of theme (text/badges on colored accents). */

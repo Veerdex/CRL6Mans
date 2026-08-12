@@ -2,14 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
-import type { Sponsor, SponsorLink, NavPlacement } from "./sponsor-actions";
+import type { Sponsor, SponsorLink, TabPlacement } from "./sponsor-actions";
 import {
   createSponsor,
   updateSponsorMaxUses,
   updateSponsorDetails,
   toggleSponsorStatus,
   removeSponsorMember,
-  updateNavPlacement,
+  updateTabPlacement,
 } from "./sponsor-actions";
 
 function StatusBadge({ status }: { status: "active" | "disabled" }) {
@@ -64,15 +64,24 @@ function LinksEditor({ links, onChange }: { links: SponsorLink[]; onChange: (lin
   );
 }
 
-type ContentKind = "video" | "topNav" | "sideNav";
-type ContentItem = { kind: ContentKind | ""; url: string };
+type ContentKind = "video" | "topNav" | "sideNav" | "theme";
+type ContentItem = {
+  kind: ContentKind | "";
+  url: string;
+  themeName?: string;
+  themeAccent?: string;
+  themeShell?: string;
+  themeSecondary?: string;
+};
 
-const ALL_CONTENT_KINDS: ContentKind[] = ["video", "topNav", "sideNav"];
+const ALL_CONTENT_KINDS: ContentKind[] = ["video", "topNav", "sideNav", "theme"];
 const CONTENT_KIND_LABELS: Record<ContentKind, string> = {
   video: "Video",
   topNav: "Top nav image",
   sideNav: "Side nav image",
+  theme: "Theme",
 };
+const THEME_DEFAULTS = { themeAccent: "#e88a24", themeShell: "#3736ac", themeSecondary: "#e88a24" };
 
 function SponsorPreview({
   name,
@@ -132,6 +141,16 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
     if (sponsor.video_url) items.push({ kind: "video", url: sponsor.video_url });
     if (sponsor.top_nav_image_url) items.push({ kind: "topNav", url: sponsor.top_nav_image_url });
     if (sponsor.side_nav_image_url) items.push({ kind: "sideNav", url: sponsor.side_nav_image_url });
+    if (sponsor.theme_name) {
+      items.push({
+        kind: "theme",
+        url: "",
+        themeName: sponsor.theme_name,
+        themeAccent: sponsor.theme_accent ?? THEME_DEFAULTS.themeAccent,
+        themeShell: sponsor.theme_shell ?? THEME_DEFAULTS.themeShell,
+        themeSecondary: sponsor.theme_secondary ?? THEME_DEFAULTS.themeSecondary,
+      });
+    }
     return items;
   });
   const [links, setLinks] = useState<SponsorLink[]>(sponsor.links);
@@ -144,6 +163,18 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
   function urlForKind(kind: ContentKind, items: ContentItem[] = contentItems): string {
     return items.find((c) => c.kind === kind)?.url ?? "";
   }
+  function themeItem(items: ContentItem[] = contentItems) {
+    return items.find((c) => c.kind === "theme");
+  }
+  function themeFields(items: ContentItem[] = contentItems) {
+    const t = themeItem(items);
+    return {
+      themeName: t?.themeName ?? "",
+      themeAccent: t?.themeAccent ?? "",
+      themeShell: t?.themeShell ?? "",
+      themeSecondary: t?.themeSecondary ?? "",
+    };
+  }
 
   const hasDetailsChanges =
     logoUrl !== (sponsor.logo_url ?? "") ||
@@ -151,6 +182,10 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
     urlForKind("topNav") !== (sponsor.top_nav_image_url ?? "") ||
     urlForKind("sideNav") !== (sponsor.side_nav_image_url ?? "") ||
     promoCode !== (sponsor.promo_code ?? "") ||
+    (themeItem()?.themeName ?? "") !== (sponsor.theme_name ?? "") ||
+    (themeItem()?.themeAccent ?? "") !== (sponsor.theme_accent ?? "") ||
+    (themeItem()?.themeShell ?? "") !== (sponsor.theme_shell ?? "") ||
+    (themeItem()?.themeSecondary ?? "") !== (sponsor.theme_secondary ?? "") ||
     JSON.stringify(links) !== JSON.stringify(sponsor.links);
 
   function handleCopy() {
@@ -187,6 +222,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
         sideNavImageUrl: urlForKind("sideNav"),
         links,
         promoCode,
+        ...themeFields(),
       });
       if (res.error) setError(res.error);
     });
@@ -218,6 +254,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
         sideNavImageUrl: urlForKind("sideNav"),
         links,
         promoCode,
+        ...themeFields(),
       });
       if (res.error) setError(res.error);
     } catch (e) {
@@ -244,6 +281,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
         sideNavImageUrl: urlForKind("sideNav", nextItems),
         links,
         promoCode,
+        ...themeFields(nextItems),
       });
       if (res.error) setError(res.error);
     } catch (e) {
@@ -355,7 +393,10 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
               <div key={i} className="flex flex-wrap items-center gap-2">
                 <select
                   value={item.kind}
-                  onChange={(e) => updateContentItem(i, { kind: e.target.value as ContentKind | "", url: "" })}
+                  onChange={(e) => {
+                    const kind = e.target.value as ContentKind | "";
+                    updateContentItem(i, kind === "theme" ? { kind, url: "", themeName: "", ...THEME_DEFAULTS } : { kind, url: "" });
+                  }}
                   className="w-36 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
                 >
                   <option value="">Select label</option>
@@ -365,7 +406,44 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
                     </option>
                   ))}
                 </select>
-                {item.kind && (
+                {item.kind === "theme" && (
+                  <>
+                    <input
+                      value={item.themeName ?? ""}
+                      onChange={(e) => updateContentItem(i, { themeName: e.target.value })}
+                      placeholder="Theme name"
+                      className="w-32 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600"
+                    />
+                    <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                      Accent
+                      <input
+                        type="color"
+                        value={item.themeAccent ?? THEME_DEFAULTS.themeAccent}
+                        onChange={(e) => updateContentItem(i, { themeAccent: e.target.value })}
+                        className="w-7 h-7 rounded border border-zinc-700 bg-zinc-800 cursor-pointer"
+                      />
+                    </label>
+                    <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                      Sidebar
+                      <input
+                        type="color"
+                        value={item.themeShell ?? THEME_DEFAULTS.themeShell}
+                        onChange={(e) => updateContentItem(i, { themeShell: e.target.value })}
+                        className="w-7 h-7 rounded border border-zinc-700 bg-zinc-800 cursor-pointer"
+                      />
+                    </label>
+                    <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                      Highlight
+                      <input
+                        type="color"
+                        value={item.themeSecondary ?? THEME_DEFAULTS.themeSecondary}
+                        onChange={(e) => updateContentItem(i, { themeSecondary: e.target.value })}
+                        className="w-7 h-7 rounded border border-zinc-700 bg-zinc-800 cursor-pointer"
+                      />
+                    </label>
+                  </>
+                )}
+                {item.kind && item.kind !== "theme" && (
                   <>
                     <input
                       value={item.url}
@@ -382,7 +460,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
                         disabled={uploading !== null}
                         onChange={(e) => {
                           const f = e.target.files?.[0];
-                          if (f && item.kind) handleContentUpload(i, item.kind, f);
+                          if (f && item.kind && item.kind !== "theme") handleContentUpload(i, item.kind, f);
                           e.target.value = "";
                         }}
                       />
@@ -395,6 +473,11 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
               </div>
             );
           })}
+          {contentItems.some((c) => c.kind === "theme") && (
+            <p className="text-[11px] text-zinc-600">
+              Sidebar text is always white — pick a reasonably dark sidebar color for it to stay readable.
+            </p>
+          )}
           <button
             onClick={addContentItem}
             disabled={contentItems.length >= ALL_CONTENT_KINDS.length}
@@ -467,40 +550,65 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
 }
 
 // Each configurable placement is a "tab" an admin can assign a sponsor to.
-// Only two exist today (top nav, side nav) — more will be added here as
-// individual dashboard tabs grow sponsor placements of their own. A sponsor
-// only appears as an option for a placement once it actually has that
-// content filled in, so picking one always has something to show.
+// A sponsor only appears as an option for a placement once it actually has
+// that content filled in, so picking one always has something to show.
 const TAB_PLACEMENTS = [
-  { key: "topNavSponsorId", label: "Top nav", hasContent: (s: Sponsor) => !!s.top_nav_image_url },
-  { key: "sideNavSponsorId", label: "Side nav", hasContent: (s: Sponsor) => !!s.side_nav_image_url },
+  { key: "topNavSponsorId", label: "Top nav", noContent: "image", hasContent: (s: Sponsor) => !!s.top_nav_image_url },
+  { key: "sideNavSponsorId", label: "Side nav", noContent: "image", hasContent: (s: Sponsor) => !!s.side_nav_image_url },
+  { key: "settingsTabSponsorId", label: "Settings theme", noContent: "theme", hasContent: (s: Sponsor) => !!s.theme_name },
 ] as const;
 
-export function TabManagerSection({ sponsors, navPlacement }: { sponsors: Sponsor[]; navPlacement: NavPlacement }) {
+export function TabManagerSection({ sponsors, tabPlacement }: { sponsors: Sponsor[]; tabPlacement: TabPlacement }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [topNavSponsorId, setTopNavSponsorId] = useState(navPlacement.topNavSponsorId ?? "");
-  const [sideNavSponsorId, setSideNavSponsorId] = useState(navPlacement.sideNavSponsorId ?? "");
+  const [topNavSponsorId, setTopNavSponsorId] = useState(tabPlacement.topNavSponsorId ?? "");
+  const [sideNavSponsorId, setSideNavSponsorId] = useState(tabPlacement.sideNavSponsorId ?? "");
+  const [settingsTabSponsorId, setSettingsTabSponsorId] = useState(tabPlacement.settingsTabSponsorId ?? "");
 
   const selected: Record<(typeof TAB_PLACEMENTS)[number]["key"], string> = {
     topNavSponsorId,
     sideNavSponsorId,
+    settingsTabSponsorId,
   };
   const setters: Record<(typeof TAB_PLACEMENTS)[number]["key"], (v: string) => void> = {
     topNavSponsorId: setTopNavSponsorId,
     sideNavSponsorId: setSideNavSponsorId,
+    settingsTabSponsorId: setSettingsTabSponsorId,
   };
 
   const activeSponsors = sponsors.filter((s) => s.status === "active");
 
+  const eligibleByKey: Record<(typeof TAB_PLACEMENTS)[number]["key"], Sponsor[]> = {
+    topNavSponsorId: activeSponsors.filter(TAB_PLACEMENTS[0].hasContent),
+    sideNavSponsorId: activeSponsors.filter(TAB_PLACEMENTS[1].hasContent),
+    settingsTabSponsorId: activeSponsors.filter(TAB_PLACEMENTS[2].hasContent),
+  };
+
+  // A previously-picked sponsor can lose eligibility (e.g. its theme/image was
+  // cleared) without the stored placement ID being cleared along with it. Treat
+  // that as "None" everywhere — display, dirty-check, and save — so the admin
+  // can actually see and clear the stale pointer instead of Save staying disabled.
+  const effectiveSelected: Record<(typeof TAB_PLACEMENTS)[number]["key"], string> = {
+    topNavSponsorId: eligibleByKey.topNavSponsorId.some((s) => s.id === topNavSponsorId) ? topNavSponsorId : "",
+    sideNavSponsorId: eligibleByKey.sideNavSponsorId.some((s) => s.id === sideNavSponsorId) ? sideNavSponsorId : "",
+    settingsTabSponsorId: eligibleByKey.settingsTabSponsorId.some((s) => s.id === settingsTabSponsorId)
+      ? settingsTabSponsorId
+      : "",
+  };
+
   const hasChanges =
-    topNavSponsorId !== (navPlacement.topNavSponsorId ?? "") ||
-    sideNavSponsorId !== (navPlacement.sideNavSponsorId ?? "");
+    effectiveSelected.topNavSponsorId !== (tabPlacement.topNavSponsorId ?? "") ||
+    effectiveSelected.sideNavSponsorId !== (tabPlacement.sideNavSponsorId ?? "") ||
+    effectiveSelected.settingsTabSponsorId !== (tabPlacement.settingsTabSponsorId ?? "");
 
   function handleSave() {
     setError(null);
     startTransition(async () => {
-      const res = await updateNavPlacement(topNavSponsorId || null, sideNavSponsorId || null);
+      const res = await updateTabPlacement(
+        effectiveSelected.topNavSponsorId || null,
+        effectiveSelected.sideNavSponsorId || null,
+        effectiveSelected.settingsTabSponsorId || null
+      );
       if (res.error) setError(res.error);
     });
   }
@@ -508,18 +616,17 @@ export function TabManagerSection({ sponsors, navPlacement }: { sponsors: Sponso
   return (
     <div className="border border-zinc-800 rounded-xl p-4 space-y-3">
       <p className="text-xs text-zinc-500">
-        Only the top nav and side nav placements are configurable for now — more tabs will get their own sponsor
-        placement here later.
+        More tabs will get their own sponsor placement here over time.
       </p>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex flex-wrap gap-3">
         {TAB_PLACEMENTS.map((placement) => {
-          const eligible = activeSponsors.filter(placement.hasContent);
+          const eligible = eligibleByKey[placement.key];
           return (
             <div key={placement.key} className="flex-1 min-w-[160px] space-y-1">
               <span className="text-xs text-zinc-500">{placement.label} sponsor</span>
               <select
-                value={selected[placement.key]}
+                value={effectiveSelected[placement.key]}
                 onChange={(e) => setters[placement.key](e.target.value)}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
               >
@@ -531,7 +638,7 @@ export function TabManagerSection({ sponsors, navPlacement }: { sponsors: Sponso
                 ))}
               </select>
               {eligible.length === 0 && (
-                <p className="text-[11px] text-zinc-600">No active sponsor has a {placement.label.toLowerCase()} image set yet.</p>
+                <p className="text-[11px] text-zinc-600">No active sponsor has a {placement.label.toLowerCase()} {placement.noContent} set yet.</p>
               )}
             </div>
           );
@@ -554,6 +661,9 @@ export function SponsorsManager({ sponsors }: { sponsors: Sponsor[] }) {
   const [name, setName] = useState("");
   const [maxUses, setMaxUses] = useState("1");
   const [logoUrl, setLogoUrl] = useState("");
+  const [selectedSponsorId, setSelectedSponsorId] = useState<string | null>(sponsors[0]?.id ?? null);
+
+  const selectedSponsor = sponsors.find((s) => s.id === selectedSponsorId) ?? sponsors[0] ?? null;
 
   function handleCreate() {
     setError(null);
@@ -575,10 +685,25 @@ export function SponsorsManager({ sponsors }: { sponsors: Sponsor[] }) {
       {sponsors.length === 0 ? (
         <p className="text-sm text-zinc-500">No sponsors yet.</p>
       ) : (
-        <div className="space-y-3">
-          {sponsors.map((s) => (
-            <SponsorCard key={s.id} sponsor={s} />
-          ))}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {sponsors.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setSelectedSponsorId(s.id)}
+                className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  selectedSponsor?.id === s.id
+                    ? "bg-indigo-600 border-indigo-500 text-white"
+                    : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                }`}
+              >
+                {s.status === "disabled" && <span className="w-1.5 h-1.5 rounded-full bg-zinc-600 shrink-0" />}
+                {s.name}
+              </button>
+            ))}
+          </div>
+
+          {selectedSponsor && <SponsorCard key={selectedSponsor.id} sponsor={selectedSponsor} />}
         </div>
       )}
 

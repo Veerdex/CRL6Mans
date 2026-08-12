@@ -9,17 +9,21 @@ import { NotificationButton } from "@/app/dashboard/notification-button";
 import { NotificationPrefsForm } from "./notification-prefs-form";
 import { DisplayNameForm } from "./display-name-form";
 import { PlatformAccountsSection, type ClaimablePlatform, type PlatformAccountRecord } from "./platform-accounts-form";
+import { getSettingsTabTheme } from "@/app/lib/sponsors-public";
 
 export default async function SettingsPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const { data: player } = await supabaseAdmin
-    .from("players")
-    .select("id, status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, sub_willing, theme, nav_layout, display_name, notification_prefs")
-    .eq("discord_id", session.userId)
-    .single();
+  const [{ data: player }, sponsorTheme] = await Promise.all([
+    supabaseAdmin
+      .from("players")
+      .select("id, status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, sub_willing, theme, nav_layout, display_name, notification_prefs")
+      .eq("discord_id", session.userId)
+      .single(),
+    getSettingsTabTheme(),
+  ]);
 
   // Non-approved players (unregistered/pending/rejected) get a reduced settings
   // view — account preferences only. Platform account claims and MMR/tracker
@@ -90,7 +94,7 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-xl">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-xl mx-auto">
       <h1 className="text-2xl font-bold text-white mb-1">Settings</h1>
       <p className="text-zinc-400 text-sm mb-8">
         {isApproved
@@ -98,7 +102,14 @@ export default async function SettingsPage() {
           : "Notifications, nickname, platform account claims, and MMR/tracker edits unlock once your registration is approved."}
       </p>
       <div className="mb-4">
-        <ThemeToggle initial={player?.theme === "dark" || player?.theme === "light" ? player.theme : "crl6mans"} />
+        <ThemeToggle
+          initial={
+            player?.theme === "dark" || player?.theme === "light" || (player?.theme === "sponsor" && sponsorTheme)
+              ? player.theme
+              : "crl6mans"
+          }
+          sponsorTheme={sponsorTheme}
+        />
       </div>
       <div className="mb-4">
         <NavLayoutToggle initial={player?.nav_layout === "topbar" ? "topbar" : "sidebar"} />

@@ -41,6 +41,10 @@ export type Sponsor = {
   side_nav_image_url: string | null;
   links: SponsorLink[];
   promo_code: string | null;
+  theme_name: string | null;
+  theme_accent: string | null;
+  theme_shell: string | null;
+  theme_secondary: string | null;
   members: SponsorMember[];
 };
 
@@ -50,7 +54,7 @@ export async function getSponsorsWithMembers(): Promise<Sponsor[]> {
 
   const { data: sponsors } = await supabaseAdmin
     .from("sponsors")
-    .select("id, name, invite_token, max_uses, status, created_at, logo_url, video_url, top_nav_image_url, side_nav_image_url, links, promo_code")
+    .select("id, name, invite_token, max_uses, status, created_at, logo_url, video_url, top_nav_image_url, side_nav_image_url, links, promo_code, theme_name, theme_accent, theme_shell, theme_secondary")
     .order("created_at", { ascending: true });
   if (!sponsors || sponsors.length === 0) return [];
 
@@ -122,6 +126,10 @@ export async function updateSponsorDetails(
     sideNavImageUrl: string;
     links: SponsorLink[];
     promoCode: string;
+    themeName: string;
+    themeAccent: string;
+    themeShell: string;
+    themeSecondary: string;
   }
 ): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
@@ -141,6 +149,10 @@ export async function updateSponsorDetails(
       side_nav_image_url: details.sideNavImageUrl.trim() || null,
       links,
       promo_code: details.promoCode.trim() || null,
+      theme_name: details.themeName.trim() || null,
+      theme_accent: details.themeAccent.trim() || null,
+      theme_shell: details.themeShell.trim() || null,
+      theme_secondary: details.themeSecondary.trim() || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", sponsorId);
@@ -209,25 +221,28 @@ export async function removeSponsorMember(memberId: string): Promise<{ ok?: bool
   return { ok: true };
 }
 
-export type NavPlacement = {
+export type TabPlacement = {
   topNavSponsorId: string | null;
   sideNavSponsorId: string | null;
+  settingsTabSponsorId: string | null;
 };
 
-export async function getNavPlacement(): Promise<NavPlacement> {
+export async function getTabPlacement(): Promise<TabPlacement> {
   const { data } = await supabaseAdmin
     .from("league_settings")
-    .select("top_nav_sponsor_id, side_nav_sponsor_id")
+    .select("top_nav_sponsor_id, side_nav_sponsor_id, settings_tab_sponsor_id")
     .single();
   return {
     topNavSponsorId: (data?.top_nav_sponsor_id as string | null) ?? null,
     sideNavSponsorId: (data?.side_nav_sponsor_id as string | null) ?? null,
+    settingsTabSponsorId: (data?.settings_tab_sponsor_id as string | null) ?? null,
   };
 }
 
-export async function updateNavPlacement(
+export async function updateTabPlacement(
   topNavSponsorId: string | null,
-  sideNavSponsorId: string | null
+  sideNavSponsorId: string | null,
+  settingsTabSponsorId: string | null
 ): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
@@ -235,7 +250,11 @@ export async function updateNavPlacement(
 
   const { error } = await supabaseAdmin
     .from("league_settings")
-    .update({ top_nav_sponsor_id: topNavSponsorId, side_nav_sponsor_id: sideNavSponsorId })
+    .update({
+      top_nav_sponsor_id: topNavSponsorId,
+      side_nav_sponsor_id: sideNavSponsorId,
+      settings_tab_sponsor_id: settingsTabSponsorId,
+    })
     .not("id", "is", null);
   if (error) return { error: error.message };
 

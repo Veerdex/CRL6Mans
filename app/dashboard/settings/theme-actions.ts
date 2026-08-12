@@ -6,8 +6,8 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 
 const ONE_YEAR = 60 * 60 * 24 * 365;
 
-export type Theme = "light" | "dark" | "crl6mans";
-const THEMES: Theme[] = ["light", "dark", "crl6mans"];
+export type Theme = "light" | "dark" | "crl6mans" | "sponsor";
+const THEMES: Theme[] = ["light", "dark", "crl6mans", "sponsor"];
 
 export async function setTheme(theme: Theme) {
   if (!THEMES.includes(theme)) return { error: "Invalid theme." };

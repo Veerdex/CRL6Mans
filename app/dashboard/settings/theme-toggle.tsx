@@ -3,15 +3,17 @@
 import { useState, useTransition } from "react";
 import { setTheme, type Theme } from "./theme-actions";
 
-const OPTIONS: { value: Theme; label: string }[] = [
+const BASE_OPTIONS: { value: Theme; label: string }[] = [
   { value: "crl6mans", label: "CRL6Mans" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
 ];
 
-export function ThemeToggle({ initial }: { initial: Theme }) {
+export function ThemeToggle({ initial, sponsorTheme }: { initial: Theme; sponsorTheme?: { name: string } | null }) {
   const [theme, setLocal] = useState<Theme>(initial);
   const [, startTransition] = useTransition();
+
+  const OPTIONS = sponsorTheme ? [...BASE_OPTIONS, { value: "sponsor" as Theme, label: sponsorTheme.name }] : BASE_OPTIONS;
 
   const choose = (next: Theme) => {
     if (next === theme) return;

@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
@@ -6,6 +7,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { APP_NAME } from "@/app/lib/constants";
 import { VisitTracker } from "./visit-tracker";
+import { getSettingsTabTheme } from "@/app/lib/sponsors-public";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -38,11 +40,24 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const raw = (await cookies()).get("theme")?.value;
-  const theme = raw === "dark" || raw === "light" || raw === "crl6mans" ? raw : "crl6mans";
+  const validTheme = raw === "dark" || raw === "light" || raw === "crl6mans" || raw === "sponsor" ? raw : "crl6mans";
+  const sponsorTheme = await getSettingsTabTheme();
+  // A stale "sponsor" selection (the admin unset the settings-tab sponsor since
+  // the player picked it) falls back to the default brand theme instead of
+  // rendering with no colors set.
+  const theme = validTheme === "sponsor" && !sponsorTheme ? "crl6mans" : validTheme;
+  const sponsorStyle: CSSProperties = sponsorTheme
+    ? ({
+        "--sponsor-accent": sponsorTheme.accent,
+        "--sponsor-shell": sponsorTheme.shell,
+        "--sponsor-secondary": sponsorTheme.secondary,
+      } as CSSProperties)
+    : {};
   return (
     <html
       lang="en"
       data-theme={theme}
+      style={sponsorStyle}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col overflow-x-hidden bg-zinc-950">

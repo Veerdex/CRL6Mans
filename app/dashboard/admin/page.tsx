@@ -30,7 +30,7 @@ import type { Tournament, Season } from "./tournament-actions";
 import { InitSettingsButton } from "./init-settings-button";
 import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
-import { getSponsorsWithMembers, getNavPlacement } from "./sponsor-actions";
+import { getSponsorsWithMembers, getTabPlacement } from "./sponsor-actions";
 import { SponsorsManager, TabManagerSection } from "./sponsors-section";
 import {
   RegistrationFunnelSection,
@@ -83,7 +83,7 @@ async function SponsorsSection() {
 }
 
 async function TabManagerAdminSection() {
-  const [sponsors, navPlacement] = await Promise.all([getSponsorsWithMembers(), getNavPlacement()]);
+  const [sponsors, tabPlacement] = await Promise.all([getSponsorsWithMembers(), getTabPlacement()]);
   return (
     <AdminSubSection
       sectionId="sponsors"
@@ -91,7 +91,7 @@ async function TabManagerAdminSection() {
       title="Tab Manager"
       description="Configure which sponsor's content shows up on each dashboard tab."
     >
-      <TabManagerSection sponsors={sponsors} navPlacement={navPlacement} />
+      <TabManagerSection sponsors={sponsors} tabPlacement={tabPlacement} />
     </AdminSubSection>
   );
 }
