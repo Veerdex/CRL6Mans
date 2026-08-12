@@ -64,6 +64,16 @@ function LinksEditor({ links, onChange }: { links: SponsorLink[]; onChange: (lin
   );
 }
 
+type ContentKind = "video" | "topNav" | "sideNav";
+type ContentItem = { kind: ContentKind | ""; url: string };
+
+const ALL_CONTENT_KINDS: ContentKind[] = ["video", "topNav", "sideNav"];
+const CONTENT_KIND_LABELS: Record<ContentKind, string> = {
+  video: "Video",
+  topNav: "Top nav image",
+  sideNav: "Side nav image",
+};
+
 function SponsorPreview({
   name,
   logoUrl,
@@ -117,21 +127,29 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
 
   const [logoUrl, setLogoUrl] = useState(sponsor.logo_url ?? "");
-  const [videoUrl, setVideoUrl] = useState(sponsor.video_url ?? "");
-  const [topNavImageUrl, setTopNavImageUrl] = useState(sponsor.top_nav_image_url ?? "");
-  const [sideNavImageUrl, setSideNavImageUrl] = useState(sponsor.side_nav_image_url ?? "");
+  const [contentItems, setContentItems] = useState<ContentItem[]>(() => {
+    const items: ContentItem[] = [];
+    if (sponsor.video_url) items.push({ kind: "video", url: sponsor.video_url });
+    if (sponsor.top_nav_image_url) items.push({ kind: "topNav", url: sponsor.top_nav_image_url });
+    if (sponsor.side_nav_image_url) items.push({ kind: "sideNav", url: sponsor.side_nav_image_url });
+    return items;
+  });
   const [links, setLinks] = useState<SponsorLink[]>(sponsor.links);
   const [promoCode, setPromoCode] = useState(sponsor.promo_code ?? "");
-  const [uploading, setUploading] = useState<"logo" | "video" | "topNav" | "sideNav" | null>(null);
+  const [uploading, setUploading] = useState<"logo" | ContentKind | null>(null);
 
   const inviteUrl =
     typeof window !== "undefined" ? `${window.location.origin}/sponsor/join/${sponsor.invite_token}` : "";
 
+  function urlForKind(kind: ContentKind, items: ContentItem[] = contentItems): string {
+    return items.find((c) => c.kind === kind)?.url ?? "";
+  }
+
   const hasDetailsChanges =
     logoUrl !== (sponsor.logo_url ?? "") ||
-    videoUrl !== (sponsor.video_url ?? "") ||
-    topNavImageUrl !== (sponsor.top_nav_image_url ?? "") ||
-    sideNavImageUrl !== (sponsor.side_nav_image_url ?? "") ||
+    urlForKind("video") !== (sponsor.video_url ?? "") ||
+    urlForKind("topNav") !== (sponsor.top_nav_image_url ?? "") ||
+    urlForKind("sideNav") !== (sponsor.side_nav_image_url ?? "") ||
     promoCode !== (sponsor.promo_code ?? "") ||
     JSON.stringify(links) !== JSON.stringify(sponsor.links);
 
@@ -164,9 +182,9 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
     startTransition(async () => {
       const res = await updateSponsorDetails(sponsor.id, {
         logoUrl,
-        videoUrl,
-        topNavImageUrl,
-        sideNavImageUrl,
+        videoUrl: urlForKind("video"),
+        topNavImageUrl: urlForKind("topNav"),
+        sideNavImageUrl: urlForKind("sideNav"),
         links,
         promoCode,
       });
@@ -174,7 +192,42 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
     });
   }
 
-  async function handleUpload(kind: "logo" | "video" | "topNav" | "sideNav", file: File) {
+  function addContentItem() {
+    setContentItems((items) => [...items, { kind: "", url: "" }]);
+  }
+  function updateContentItem(index: number, patch: Partial<ContentItem>) {
+    setContentItems((items) => items.map((c, i) => (i === index ? { ...c, ...patch } : c)));
+  }
+  function removeContentItem(index: number) {
+    setContentItems((items) => items.filter((_, i) => i !== index));
+  }
+
+  async function handleLogoUpload(file: File) {
+    setError(null);
+    setUploading("logo");
+    try {
+      const blob = await upload(`sponsors/${sponsor.id}-logo-${file.name}`, file, {
+        access: "public",
+        handleUploadUrl: "/api/sponsors/upload-handler",
+      });
+      setLogoUrl(blob.url);
+      const res = await updateSponsorDetails(sponsor.id, {
+        logoUrl: blob.url,
+        videoUrl: urlForKind("video"),
+        topNavImageUrl: urlForKind("topNav"),
+        sideNavImageUrl: urlForKind("sideNav"),
+        links,
+        promoCode,
+      });
+      if (res.error) setError(res.error);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed.");
+    } finally {
+      setUploading(null);
+    }
+  }
+
+  async function handleContentUpload(index: number, kind: ContentKind, file: File) {
     setError(null);
     setUploading(kind);
     try {
@@ -182,20 +235,13 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
         access: "public",
         handleUploadUrl: "/api/sponsors/upload-handler",
       });
-      const nextLogoUrl = kind === "logo" ? blob.url : logoUrl;
-      const nextVideoUrl = kind === "video" ? blob.url : videoUrl;
-      const nextTopNavImageUrl = kind === "topNav" ? blob.url : topNavImageUrl;
-      const nextSideNavImageUrl = kind === "sideNav" ? blob.url : sideNavImageUrl;
-      if (kind === "logo") setLogoUrl(blob.url);
-      else if (kind === "video") setVideoUrl(blob.url);
-      else if (kind === "topNav") setTopNavImageUrl(blob.url);
-      else setSideNavImageUrl(blob.url);
-
+      const nextItems = contentItems.map((c, i) => (i === index ? { ...c, url: blob.url } : c));
+      setContentItems(nextItems);
       const res = await updateSponsorDetails(sponsor.id, {
-        logoUrl: nextLogoUrl,
-        videoUrl: nextVideoUrl,
-        topNavImageUrl: nextTopNavImageUrl,
-        sideNavImageUrl: nextSideNavImageUrl,
+        logoUrl,
+        videoUrl: urlForKind("video", nextItems),
+        topNavImageUrl: urlForKind("topNav", nextItems),
+        sideNavImageUrl: urlForKind("sideNav", nextItems),
         links,
         promoCode,
       });
@@ -292,7 +338,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
                 disabled={uploading !== null}
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) handleUpload("logo", f);
+                  if (f) handleLogoUpload(f);
                   e.target.value = "";
                 }}
               />
@@ -301,81 +347,61 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
         </div>
 
         <div className="space-y-1.5">
-          <span className="text-xs text-zinc-500">Video</span>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={videoUrl}
-              onChange={(e) => setVideoUrl(e.target.value)}
-              placeholder="https://youtube.com/... or https://..."
-              className="flex-1 min-w-[160px] bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600"
-            />
-            <label className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 cursor-pointer transition-colors">
-              {uploading === "video" ? "Uploading…" : "Upload"}
-              <input
-                type="file"
-                accept="video/*"
-                className="hidden"
-                disabled={uploading !== null}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleUpload("video", f);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <span className="text-xs text-zinc-500">Top nav image</span>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={topNavImageUrl}
-              onChange={(e) => setTopNavImageUrl(e.target.value)}
-              placeholder="https://..."
-              className="flex-1 min-w-[160px] bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600"
-            />
-            <label className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 cursor-pointer transition-colors">
-              {uploading === "topNav" ? "Uploading…" : "Upload"}
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                disabled={uploading !== null}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleUpload("topNav", f);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <span className="text-xs text-zinc-500">Side nav image</span>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={sideNavImageUrl}
-              onChange={(e) => setSideNavImageUrl(e.target.value)}
-              placeholder="https://..."
-              className="flex-1 min-w-[160px] bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600"
-            />
-            <label className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 cursor-pointer transition-colors">
-              {uploading === "sideNav" ? "Uploading…" : "Upload"}
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                disabled={uploading !== null}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleUpload("sideNav", f);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-          </div>
+          <span className="text-xs text-zinc-500">Content</span>
+          {contentItems.map((item, i) => {
+            const usedKinds = new Set(contentItems.map((c) => c.kind).filter(Boolean));
+            const availableKinds = ALL_CONTENT_KINDS.filter((k) => k === item.kind || !usedKinds.has(k));
+            return (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <select
+                  value={item.kind}
+                  onChange={(e) => updateContentItem(i, { kind: e.target.value as ContentKind | "", url: "" })}
+                  className="w-36 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
+                >
+                  <option value="">Select label</option>
+                  {availableKinds.map((k) => (
+                    <option key={k} value={k}>
+                      {CONTENT_KIND_LABELS[k]}
+                    </option>
+                  ))}
+                </select>
+                {item.kind && (
+                  <>
+                    <input
+                      value={item.url}
+                      onChange={(e) => updateContentItem(i, { url: e.target.value })}
+                      placeholder={item.kind === "video" ? "https://youtube.com/... or https://..." : "https://..."}
+                      className="flex-1 min-w-[160px] bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600"
+                    />
+                    <label className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 cursor-pointer transition-colors">
+                      {uploading === item.kind ? "Uploading…" : "Upload"}
+                      <input
+                        type="file"
+                        accept={item.kind === "video" ? "video/*" : "image/*"}
+                        className="hidden"
+                        disabled={uploading !== null}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f && item.kind) handleContentUpload(i, item.kind, f);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  </>
+                )}
+                <button onClick={() => removeContentItem(i)} className="text-xs text-red-500 hover:text-red-400 transition-colors">
+                  Remove
+                </button>
+              </div>
+            );
+          })}
+          <button
+            onClick={addContentItem}
+            disabled={contentItems.length >= ALL_CONTENT_KINDS.length}
+            className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            + Add content
+          </button>
         </div>
 
         <LinksEditor links={links} onChange={setLinks} />
@@ -440,11 +466,30 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
   );
 }
 
-function NavPlacementPicker({ sponsors, navPlacement }: { sponsors: Sponsor[]; navPlacement: NavPlacement }) {
+// Each configurable placement is a "tab" an admin can assign a sponsor to.
+// Only two exist today (top nav, side nav) — more will be added here as
+// individual dashboard tabs grow sponsor placements of their own. A sponsor
+// only appears as an option for a placement once it actually has that
+// content filled in, so picking one always has something to show.
+const TAB_PLACEMENTS = [
+  { key: "topNavSponsorId", label: "Top nav", hasContent: (s: Sponsor) => !!s.top_nav_image_url },
+  { key: "sideNavSponsorId", label: "Side nav", hasContent: (s: Sponsor) => !!s.side_nav_image_url },
+] as const;
+
+export function TabManagerSection({ sponsors, navPlacement }: { sponsors: Sponsor[]; navPlacement: NavPlacement }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [topNavSponsorId, setTopNavSponsorId] = useState(navPlacement.topNavSponsorId ?? "");
   const [sideNavSponsorId, setSideNavSponsorId] = useState(navPlacement.sideNavSponsorId ?? "");
+
+  const selected: Record<(typeof TAB_PLACEMENTS)[number]["key"], string> = {
+    topNavSponsorId,
+    sideNavSponsorId,
+  };
+  const setters: Record<(typeof TAB_PLACEMENTS)[number]["key"], (v: string) => void> = {
+    topNavSponsorId: setTopNavSponsorId,
+    sideNavSponsorId: setSideNavSponsorId,
+  };
 
   const activeSponsors = sponsors.filter((s) => s.status === "active");
 
@@ -462,42 +507,35 @@ function NavPlacementPicker({ sponsors, navPlacement }: { sponsors: Sponsor[]; n
 
   return (
     <div className="border border-zinc-800 rounded-xl p-4 space-y-3">
-      <p className="text-sm font-medium text-zinc-300">Nav Placement</p>
       <p className="text-xs text-zinc-500">
-        Pick which active sponsor&apos;s image shows in the dashboard top bar and sidebar.
+        Only the top nav and side nav placements are configurable for now — more tabs will get their own sponsor
+        placement here later.
       </p>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex flex-wrap gap-3">
-        <div className="flex-1 min-w-[160px] space-y-1">
-          <span className="text-xs text-zinc-500">Top nav sponsor</span>
-          <select
-            value={topNavSponsorId}
-            onChange={(e) => setTopNavSponsorId(e.target.value)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
-          >
-            <option value="">None</option>
-            {activeSponsors.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex-1 min-w-[160px] space-y-1">
-          <span className="text-xs text-zinc-500">Side nav sponsor</span>
-          <select
-            value={sideNavSponsorId}
-            onChange={(e) => setSideNavSponsorId(e.target.value)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
-          >
-            <option value="">None</option>
-            {activeSponsors.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {TAB_PLACEMENTS.map((placement) => {
+          const eligible = activeSponsors.filter(placement.hasContent);
+          return (
+            <div key={placement.key} className="flex-1 min-w-[160px] space-y-1">
+              <span className="text-xs text-zinc-500">{placement.label} sponsor</span>
+              <select
+                value={selected[placement.key]}
+                onChange={(e) => setters[placement.key](e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
+              >
+                <option value="">None</option>
+                {eligible.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              {eligible.length === 0 && (
+                <p className="text-[11px] text-zinc-600">No active sponsor has a {placement.label.toLowerCase()} image set yet.</p>
+              )}
+            </div>
+          );
+        })}
       </div>
       <button
         onClick={handleSave}
@@ -510,7 +548,7 @@ function NavPlacementPicker({ sponsors, navPlacement }: { sponsors: Sponsor[]; n
   );
 }
 
-export function SponsorsManager({ sponsors, navPlacement }: { sponsors: Sponsor[]; navPlacement: NavPlacement }) {
+export function SponsorsManager({ sponsors }: { sponsors: Sponsor[] }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -533,8 +571,6 @@ export function SponsorsManager({ sponsors, navPlacement }: { sponsors: Sponsor[
   return (
     <div className="space-y-6">
       {error && <p className="text-sm text-red-400 bg-red-950/30 border border-red-800/50 rounded-lg px-4 py-2">{error}</p>}
-
-      <NavPlacementPicker sponsors={sponsors} navPlacement={navPlacement} />
 
       {sponsors.length === 0 ? (
         <p className="text-sm text-zinc-500">No sponsors yet.</p>

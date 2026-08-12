@@ -31,7 +31,7 @@ import { InitSettingsButton } from "./init-settings-button";
 import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
 import { getSponsorsWithMembers, getNavPlacement } from "./sponsor-actions";
-import { SponsorsManager } from "./sponsors-section";
+import { SponsorsManager, TabManagerSection } from "./sponsors-section";
 import {
   RegistrationFunnelSection,
   CompetitiveSnapshotSection,
@@ -67,7 +67,7 @@ async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean;
 }
 
 async function SponsorsSection() {
-  const [sponsors, navPlacement] = await Promise.all([getSponsorsWithMembers(), getNavPlacement()]);
+  const sponsors = await getSponsorsWithMembers();
   return (
     <AdminSubSection
       sectionId="sponsors"
@@ -77,7 +77,21 @@ async function SponsorsSection() {
       value={sponsors.length}
       description="Create a sponsor and share its invite link — any Discord account that uses it becomes a linked member of that sponsor, up to the max-uses cap. Raise the cap at any time to let more reps join."
     >
-      <SponsorsManager sponsors={sponsors} navPlacement={navPlacement} />
+      <SponsorsManager sponsors={sponsors} />
+    </AdminSubSection>
+  );
+}
+
+async function TabManagerAdminSection() {
+  const [sponsors, navPlacement] = await Promise.all([getSponsorsWithMembers(), getNavPlacement()]);
+  return (
+    <AdminSubSection
+      sectionId="sponsors"
+      tabId="tab-manager"
+      title="Tab Manager"
+      description="Configure which sponsor's content shows up on each dashboard tab."
+    >
+      <TabManagerSection sponsors={sponsors} navPlacement={navPlacement} />
     </AdminSubSection>
   );
 }
@@ -903,7 +917,10 @@ export default async function AdminPage() {
       ? [{
           id: "sponsors",
           label: "Sponsors",
-          subTabs: [{ id: "sponsors-list", label: "Sponsors" }],
+          subTabs: [
+            { id: "sponsors-list", label: "Sponsors" },
+            { id: "tab-manager", label: "Tab Manager" },
+          ],
         }]
       : []),
   ];
@@ -1410,6 +1427,7 @@ export default async function AdminPage() {
       {userIsDirector && (
         <AdminSection id="sponsors">
           <SponsorsSection />
+          <TabManagerAdminSection />
         </AdminSection>
       )}
 
