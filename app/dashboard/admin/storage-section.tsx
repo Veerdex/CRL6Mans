@@ -167,7 +167,7 @@ export async function StorageUsageSection() {
                 usedLabel="Storage Used"
                 used={blobTotalBytes}
                 cap={HOBBY_STORAGE_LIMIT_BYTES}
-                capLabel="5 GB free (Hobby)"
+                capLabel="5 GB cap (Hobby free tier)"
                 extraStat={{ label: "Files", value: blobs.length }}
               />
               <LargestFiles files={blobs.map((b) => ({ path: b.pathname, size: b.size }))} />
@@ -185,7 +185,7 @@ export async function StorageUsageSection() {
                 usedLabel="Storage Used"
                 used={bucketTotalBytes}
                 cap={SUPABASE_STORAGE_FREE_LIMIT_BYTES}
-                capLabel="1 GB free"
+                capLabel="1 GB cap (free tier)"
                 extraStat={{ label: "Files", value: bucketFiles.length }}
               />
               <LargestFiles files={bucketFiles} />
@@ -202,7 +202,7 @@ export async function StorageUsageSection() {
               usedLabel="Database Size"
               used={dbSizeBytes}
               cap={SUPABASE_DB_FREE_LIMIT_BYTES}
-              capLabel="500 MB free"
+              capLabel="500 MB cap (free tier)"
             />
           )}
         </div>
