@@ -23,8 +23,6 @@ export type SponsorMember = {
   avatar: string | null;
 };
 
-export type SponsorTier = "small" | "big";
-
 export type SponsorLink = {
   label: string;
   url: string;
@@ -37,9 +35,10 @@ export type Sponsor = {
   max_uses: number;
   status: "active" | "disabled";
   created_at: string;
-  tier: SponsorTier;
   logo_url: string | null;
   video_url: string | null;
+  top_nav_image_url: string | null;
+  side_nav_image_url: string | null;
   links: SponsorLink[];
   promo_code: string | null;
   members: SponsorMember[];
@@ -51,7 +50,7 @@ export async function getSponsorsWithMembers(): Promise<Sponsor[]> {
 
   const { data: sponsors } = await supabaseAdmin
     .from("sponsors")
-    .select("id, name, invite_token, max_uses, status, created_at, tier, logo_url, video_url, links, promo_code")
+    .select("id, name, invite_token, max_uses, status, created_at, logo_url, video_url, top_nav_image_url, side_nav_image_url, links, promo_code")
     .order("created_at", { ascending: true });
   if (!sponsors || sponsors.length === 0) return [];
 
@@ -91,7 +90,6 @@ export async function getSponsorsWithMembers(): Promise<Sponsor[]> {
 export async function createSponsor(
   name: string,
   maxUses: number,
-  tier: SponsorTier = "small",
   logoUrl?: string
 ): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
@@ -101,13 +99,11 @@ export async function createSponsor(
   const trimmed = name.trim();
   if (!trimmed) return { error: "Sponsor name is required." };
   if (!Number.isInteger(maxUses) || maxUses < 1) return { error: "Max uses must be at least 1." };
-  if (tier !== "small" && tier !== "big") return { error: "Invalid tier." };
 
   const { error } = await supabaseAdmin.from("sponsors").insert({
     name: trimmed,
     invite_token: randomUUID(),
     max_uses: maxUses,
-    tier,
     logo_url: logoUrl?.trim() || null,
   });
   if (error) return { error: error.message };
@@ -120,9 +116,10 @@ export async function createSponsor(
 export async function updateSponsorDetails(
   sponsorId: string,
   details: {
-    tier: SponsorTier;
     logoUrl: string;
     videoUrl: string;
+    topNavImageUrl: string;
+    sideNavImageUrl: string;
     links: SponsorLink[];
     promoCode: string;
   }
@@ -131,8 +128,6 @@ export async function updateSponsorDetails(
   if (!session?.userId) redirect("/login");
   if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit sponsors." };
 
-  if (details.tier !== "small" && details.tier !== "big") return { error: "Invalid tier." };
-
   const links = details.links
     .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
     .filter((l) => l.label && l.url);
@@ -140,9 +135,10 @@ export async function updateSponsorDetails(
   const { error } = await supabaseAdmin
     .from("sponsors")
     .update({
-      tier: details.tier,
       logo_url: details.logoUrl.trim() || null,
       video_url: details.videoUrl.trim() || null,
+      top_nav_image_url: details.topNavImageUrl.trim() || null,
+      side_nav_image_url: details.sideNavImageUrl.trim() || null,
       links,
       promo_code: details.promoCode.trim() || null,
       updated_at: new Date().toISOString(),
@@ -152,6 +148,7 @@ export async function updateSponsorDetails(
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/sponsors");
+  revalidatePath("/dashboard", "layout");
   return { ok: true };
 }
 
@@ -209,5 +206,40 @@ export async function removeSponsorMember(memberId: string): Promise<{ ok?: bool
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/sponsors");
+  return { ok: true };
+}
+
+export type NavPlacement = {
+  topNavSponsorId: string | null;
+  sideNavSponsorId: string | null;
+};
+
+export async function getNavPlacement(): Promise<NavPlacement> {
+  const { data } = await supabaseAdmin
+    .from("league_settings")
+    .select("top_nav_sponsor_id, side_nav_sponsor_id")
+    .single();
+  return {
+    topNavSponsorId: (data?.top_nav_sponsor_id as string | null) ?? null,
+    sideNavSponsorId: (data?.side_nav_sponsor_id as string | null) ?? null,
+  };
+}
+
+export async function updateNavPlacement(
+  topNavSponsorId: string | null,
+  sideNavSponsorId: string | null
+): Promise<{ ok?: boolean; error?: string }> {
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit sponsors." };
+
+  const { error } = await supabaseAdmin
+    .from("league_settings")
+    .update({ top_nav_sponsor_id: topNavSponsorId, side_nav_sponsor_id: sideNavSponsorId })
+    .not("id", "is", null);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard", "layout");
   return { ok: true };
 }

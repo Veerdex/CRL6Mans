@@ -10,35 +10,6 @@ function safeRedirect(request: NextRequest, path: string) {
   return NextResponse.redirect(`${base}${path}`);
 }
 
-// Set by app/sponsor/join/[token]/route.ts before kicking off this OAuth
-// flow. Re-validates the token here (not just at the link-click) to close
-// the gap between clicking the link and finishing Discord auth, during
-// which the sponsor could hit max_uses or get disabled.
-type CookieStore = Awaited<ReturnType<typeof cookies>>;
-async function claimSponsorInvite(cookieStore: CookieStore, accountId: string) {
-  const token = cookieStore.get("sponsor_invite_token")?.value;
-  if (!token) return;
-  cookieStore.delete("sponsor_invite_token");
-
-  const { data: sponsor } = await supabaseAdmin
-    .from("sponsors")
-    .select("id, max_uses")
-    .eq("invite_token", token)
-    .eq("status", "active")
-    .single();
-  if (!sponsor) return;
-
-  const { count } = await supabaseAdmin
-    .from("sponsor_members")
-    .select("id", { count: "exact", head: true })
-    .eq("sponsor_id", sponsor.id);
-  if ((count ?? 0) >= sponsor.max_uses) return;
-
-  await supabaseAdmin
-    .from("sponsor_members")
-    .upsert({ sponsor_id: sponsor.id, account_id: accountId }, { onConflict: "account_id", ignoreDuplicates: true });
-}
-
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get("code");
@@ -128,8 +99,6 @@ export async function GET(request: NextRequest) {
     // Embed the current session_version so it can be validated on revocation.
     const sessionVersion = (account?.session_version as number | null) ?? 0;
     await createSession(user.id, user.username, user.avatar ?? null, sessionVersion);
-
-    if (account?.id) await claimSponsorInvite(cookieStore, account.id as string);
 
     // Mirror the account's saved theme + nav layout into cookies for no-flash SSR.
     const saved = account?.theme;

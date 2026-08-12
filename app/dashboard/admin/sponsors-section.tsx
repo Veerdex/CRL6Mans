@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
-import type { Sponsor, SponsorLink, SponsorTier } from "./sponsor-actions";
+import type { Sponsor, SponsorLink, NavPlacement } from "./sponsor-actions";
 import {
   createSponsor,
   updateSponsorMaxUses,
   updateSponsorDetails,
   toggleSponsorStatus,
   removeSponsorMember,
+  updateNavPlacement,
 } from "./sponsor-actions";
 
 function StatusBadge({ status }: { status: "active" | "disabled" }) {
@@ -20,39 +21,6 @@ function StatusBadge({ status }: { status: "active" | "disabled" }) {
     <span className="text-[11px] font-semibold px-2 py-0.5 rounded border text-zinc-400 bg-zinc-800 border-zinc-700">
       Disabled
     </span>
-  );
-}
-
-function TierBadge({ tier }: { tier: SponsorTier }) {
-  return tier === "big" ? (
-    <span className="text-[11px] font-semibold px-2 py-0.5 rounded border text-amber-400 bg-amber-950/40 border-amber-800/60">
-      Big
-    </span>
-  ) : (
-    <span className="text-[11px] font-semibold px-2 py-0.5 rounded border text-zinc-400 bg-zinc-800 border-zinc-700">
-      Small
-    </span>
-  );
-}
-
-function TierToggle({ tier, onChange }: { tier: SponsorTier; onChange: (tier: SponsorTier) => void }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-xs text-zinc-500">Tier</span>
-      {(["small", "big"] as const).map((t) => (
-        <button
-          key={t}
-          onClick={() => onChange(t)}
-          className={`text-xs px-2.5 py-1 rounded-lg border capitalize transition-colors ${
-            tier === t
-              ? "bg-indigo-600 border-indigo-500 text-white"
-              : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"
-          }`}
-        >
-          {t}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -98,13 +66,11 @@ function LinksEditor({ links, onChange }: { links: SponsorLink[]; onChange: (lin
 
 function SponsorPreview({
   name,
-  tier,
   logoUrl,
   promoCode,
   links,
 }: {
   name: string;
-  tier: SponsorTier;
   logoUrl: string;
   promoCode: string;
   links: SponsorLink[];
@@ -120,7 +86,6 @@ function SponsorPreview({
         )}
         <div className="flex-1">
           <p className="text-sm font-semibold text-white">{name || "Sponsor name"}</p>
-          <TierBadge tier={tier} />
         </div>
       </div>
       {links.filter((l) => l.label && l.url).length > 0 && (
@@ -151,20 +116,22 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
   const [maxUsesInput, setMaxUsesInput] = useState(String(sponsor.max_uses));
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
 
-  const [tier, setTier] = useState<SponsorTier>(sponsor.tier);
   const [logoUrl, setLogoUrl] = useState(sponsor.logo_url ?? "");
   const [videoUrl, setVideoUrl] = useState(sponsor.video_url ?? "");
+  const [topNavImageUrl, setTopNavImageUrl] = useState(sponsor.top_nav_image_url ?? "");
+  const [sideNavImageUrl, setSideNavImageUrl] = useState(sponsor.side_nav_image_url ?? "");
   const [links, setLinks] = useState<SponsorLink[]>(sponsor.links);
   const [promoCode, setPromoCode] = useState(sponsor.promo_code ?? "");
-  const [uploading, setUploading] = useState<"logo" | "video" | null>(null);
+  const [uploading, setUploading] = useState<"logo" | "video" | "topNav" | "sideNav" | null>(null);
 
   const inviteUrl =
     typeof window !== "undefined" ? `${window.location.origin}/sponsor/join/${sponsor.invite_token}` : "";
 
   const hasDetailsChanges =
-    tier !== sponsor.tier ||
     logoUrl !== (sponsor.logo_url ?? "") ||
     videoUrl !== (sponsor.video_url ?? "") ||
+    topNavImageUrl !== (sponsor.top_nav_image_url ?? "") ||
+    sideNavImageUrl !== (sponsor.side_nav_image_url ?? "") ||
     promoCode !== (sponsor.promo_code ?? "") ||
     JSON.stringify(links) !== JSON.stringify(sponsor.links);
 
@@ -195,12 +162,19 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
   function handleSaveDetails() {
     setError(null);
     startTransition(async () => {
-      const res = await updateSponsorDetails(sponsor.id, { tier, logoUrl, videoUrl, links, promoCode });
+      const res = await updateSponsorDetails(sponsor.id, {
+        logoUrl,
+        videoUrl,
+        topNavImageUrl,
+        sideNavImageUrl,
+        links,
+        promoCode,
+      });
       if (res.error) setError(res.error);
     });
   }
 
-  async function handleUpload(kind: "logo" | "video", file: File) {
+  async function handleUpload(kind: "logo" | "video" | "topNav" | "sideNav", file: File) {
     setError(null);
     setUploading(kind);
     try {
@@ -210,13 +184,18 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
       });
       const nextLogoUrl = kind === "logo" ? blob.url : logoUrl;
       const nextVideoUrl = kind === "video" ? blob.url : videoUrl;
+      const nextTopNavImageUrl = kind === "topNav" ? blob.url : topNavImageUrl;
+      const nextSideNavImageUrl = kind === "sideNav" ? blob.url : sideNavImageUrl;
       if (kind === "logo") setLogoUrl(blob.url);
-      else setVideoUrl(blob.url);
+      else if (kind === "video") setVideoUrl(blob.url);
+      else if (kind === "topNav") setTopNavImageUrl(blob.url);
+      else setSideNavImageUrl(blob.url);
 
       const res = await updateSponsorDetails(sponsor.id, {
-        tier,
         logoUrl: nextLogoUrl,
         videoUrl: nextVideoUrl,
+        topNavImageUrl: nextTopNavImageUrl,
+        sideNavImageUrl: nextSideNavImageUrl,
         links,
         promoCode,
       });
@@ -249,7 +228,6 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
     <div className="border border-zinc-800 rounded-xl p-4 space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex-1 text-sm font-semibold text-white">{sponsor.name}</span>
-        <TierBadge tier={sponsor.tier} />
         <StatusBadge status={sponsor.status} />
         <span className="text-xs text-zinc-500">
           {sponsor.members.length} / {sponsor.max_uses} used
@@ -296,8 +274,6 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
       </div>
 
       <div className="border-t border-zinc-800 pt-4 space-y-3">
-        <TierToggle tier={tier} onChange={setTier} />
-
         <div className="space-y-1.5">
           <span className="text-xs text-zinc-500">Logo</span>
           <div className="flex flex-wrap items-center gap-2">
@@ -350,6 +326,58 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
           </div>
         </div>
 
+        <div className="space-y-1.5">
+          <span className="text-xs text-zinc-500">Top nav image</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={topNavImageUrl}
+              onChange={(e) => setTopNavImageUrl(e.target.value)}
+              placeholder="https://..."
+              className="flex-1 min-w-[160px] bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600"
+            />
+            <label className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 cursor-pointer transition-colors">
+              {uploading === "topNav" ? "Uploading…" : "Upload"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={uploading !== null}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleUpload("topNav", f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <span className="text-xs text-zinc-500">Side nav image</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={sideNavImageUrl}
+              onChange={(e) => setSideNavImageUrl(e.target.value)}
+              placeholder="https://..."
+              className="flex-1 min-w-[160px] bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600"
+            />
+            <label className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 cursor-pointer transition-colors">
+              {uploading === "sideNav" ? "Uploading…" : "Upload"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={uploading !== null}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleUpload("sideNav", f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+        </div>
+
         <LinksEditor links={links} onChange={setLinks} />
 
         <div className="flex items-center gap-2">
@@ -377,7 +405,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
           Save details
         </button>
 
-        <SponsorPreview name={sponsor.name} tier={tier} logoUrl={logoUrl} promoCode={promoCode} links={links} />
+        <SponsorPreview name={sponsor.name} logoUrl={logoUrl} promoCode={promoCode} links={links} />
       </div>
 
       {sponsor.members.length > 0 && (
@@ -412,23 +440,91 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
   );
 }
 
-export function SponsorsManager({ sponsors }: { sponsors: Sponsor[] }) {
+function NavPlacementPicker({ sponsors, navPlacement }: { sponsors: Sponsor[]; navPlacement: NavPlacement }) {
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [topNavSponsorId, setTopNavSponsorId] = useState(navPlacement.topNavSponsorId ?? "");
+  const [sideNavSponsorId, setSideNavSponsorId] = useState(navPlacement.sideNavSponsorId ?? "");
+
+  const activeSponsors = sponsors.filter((s) => s.status === "active");
+
+  const hasChanges =
+    topNavSponsorId !== (navPlacement.topNavSponsorId ?? "") ||
+    sideNavSponsorId !== (navPlacement.sideNavSponsorId ?? "");
+
+  function handleSave() {
+    setError(null);
+    startTransition(async () => {
+      const res = await updateNavPlacement(topNavSponsorId || null, sideNavSponsorId || null);
+      if (res.error) setError(res.error);
+    });
+  }
+
+  return (
+    <div className="border border-zinc-800 rounded-xl p-4 space-y-3">
+      <p className="text-sm font-medium text-zinc-300">Nav Placement</p>
+      <p className="text-xs text-zinc-500">
+        Pick which active sponsor&apos;s image shows in the dashboard top bar and sidebar.
+      </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <div className="flex flex-wrap gap-3">
+        <div className="flex-1 min-w-[160px] space-y-1">
+          <span className="text-xs text-zinc-500">Top nav sponsor</span>
+          <select
+            value={topNavSponsorId}
+            onChange={(e) => setTopNavSponsorId(e.target.value)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
+          >
+            <option value="">None</option>
+            {activeSponsors.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[160px] space-y-1">
+          <span className="text-xs text-zinc-500">Side nav sponsor</span>
+          <select
+            value={sideNavSponsorId}
+            onChange={(e) => setSideNavSponsorId(e.target.value)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
+          >
+            <option value="">None</option>
+            {activeSponsors.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <button
+        onClick={handleSave}
+        disabled={isPending || !hasChanges}
+        className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition-colors"
+      >
+        Save
+      </button>
+    </div>
+  );
+}
+
+export function SponsorsManager({ sponsors, navPlacement }: { sponsors: Sponsor[]; navPlacement: NavPlacement }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [maxUses, setMaxUses] = useState("1");
-  const [tier, setTier] = useState<SponsorTier>("small");
   const [logoUrl, setLogoUrl] = useState("");
 
   function handleCreate() {
     setError(null);
     startTransition(async () => {
-      const res = await createSponsor(name, Number(maxUses), tier, logoUrl);
+      const res = await createSponsor(name, Number(maxUses), logoUrl);
       if (res.error) setError(res.error);
       else {
         setName("");
         setMaxUses("1");
-        setTier("small");
         setLogoUrl("");
       }
     });
@@ -437,6 +533,8 @@ export function SponsorsManager({ sponsors }: { sponsors: Sponsor[] }) {
   return (
     <div className="space-y-6">
       {error && <p className="text-sm text-red-400 bg-red-950/30 border border-red-800/50 rounded-lg px-4 py-2">{error}</p>}
+
+      <NavPlacementPicker sponsors={sponsors} navPlacement={navPlacement} />
 
       {sponsors.length === 0 ? (
         <p className="text-sm text-zinc-500">No sponsors yet.</p>
@@ -465,7 +563,6 @@ export function SponsorsManager({ sponsors }: { sponsors: Sponsor[] }) {
           />
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <TierToggle tier={tier} onChange={setTier} />
           <input
             value={logoUrl}
             onChange={(e) => setLogoUrl(e.target.value)}

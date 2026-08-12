@@ -14,11 +14,11 @@ export default async function RegisterPage() {
   // to pre-fill a resubmission live on pending_players (Tier 2).
   const { data: account } = await supabaseAdmin
     .from("accounts")
-    .select("id, status")
+    .select("id, status, is_guest")
     .eq("discord_id", session.userId)
     .single();
 
-  if (account?.status === "approved") redirect("/dashboard");
+  if (account?.status === "approved" || account?.is_guest) redirect("/dashboard");
 
   const { data: existing } = account
     ? await supabaseAdmin

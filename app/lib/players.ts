@@ -110,13 +110,14 @@ export async function getPlayerInfo(discordId: string): Promise<{
   status: PlayerStatus;
   teamId: string | null;
   displayName: string | null;
+  isGuest: boolean;
 }> {
   const { data: account } = await supabaseAdmin
     .from("accounts")
-    .select("id, status, display_name")
+    .select("id, status, display_name, is_guest")
     .eq("discord_id", discordId)
     .single();
-  if (!account) return { status: "unregistered", teamId: null, displayName: null };
+  if (!account) return { status: "unregistered", teamId: null, displayName: null, isGuest: false };
 
   let teamId: string | null = null;
   if (account.status === "approved" || account.status === "banned") {
@@ -132,6 +133,7 @@ export async function getPlayerInfo(discordId: string): Promise<{
     status: account.status as PlayerStatus,
     teamId,
     displayName: (account.display_name as string | null) ?? null,
+    isGuest: !!account.is_guest,
   };
 }
 

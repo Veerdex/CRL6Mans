@@ -53,7 +53,7 @@ function SponsorLinks({ sponsor }: { sponsor: PublicSponsor }) {
   );
 }
 
-function BigSponsorCard({ sponsor }: { sponsor: PublicSponsor }) {
+function SponsorCard({ sponsor }: { sponsor: PublicSponsor }) {
   return (
     <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-6 space-y-4">
       <div className="flex items-center gap-4">
@@ -79,30 +79,9 @@ function BigSponsorCard({ sponsor }: { sponsor: PublicSponsor }) {
   );
 }
 
-function SmallSponsorCard({ sponsor }: { sponsor: PublicSponsor }) {
-  return (
-    <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-4 space-y-2">
-      <div className="flex items-center gap-3">
-        {sponsor.logo_url && (
-          <img
-            src={sponsor.logo_url}
-            alt={sponsor.name}
-            className="w-10 h-10 rounded-lg object-cover border border-zinc-800"
-          />
-        )}
-        <h3 className="text-sm font-semibold text-white">{sponsor.name}</h3>
-      </div>
-      <SponsorLinks sponsor={sponsor} />
-      {sponsor.promo_code && <PromoCopyButton code={sponsor.promo_code} />}
-    </div>
-  );
-}
-
 export default async function SponsorsPage() {
   const session = await decrypt((await cookies()).get("session")?.value);
   const sponsors = await getPublicSponsors();
-  const bigSponsors = sponsors.filter((s) => s.tier === "big");
-  const smallSponsors = sponsors.filter((s) => s.tier === "small");
 
   return (
     <div className="min-h-screen bg-zinc-950 px-6 py-16">
@@ -129,23 +108,11 @@ export default async function SponsorsPage() {
         {sponsors.length === 0 ? (
           <p className="text-center text-zinc-500">No sponsors yet — check back soon.</p>
         ) : (
-          <>
-            {bigSponsors.length > 0 && (
-              <div className="grid gap-6 sm:grid-cols-2">
-                {bigSponsors.map((s) => (
-                  <BigSponsorCard key={s.id} sponsor={s} />
-                ))}
-              </div>
-            )}
-
-            {smallSponsors.length > 0 && (
-              <div className="grid gap-4 sm:grid-cols-3">
-                {smallSponsors.map((s) => (
-                  <SmallSponsorCard key={s.id} sponsor={s} />
-                ))}
-              </div>
-            )}
-          </>
+          <div className="grid gap-6 sm:grid-cols-2">
+            {sponsors.map((s) => (
+              <SponsorCard key={s.id} sponsor={s} />
+            ))}
+          </div>
         )}
       </div>
     </div>

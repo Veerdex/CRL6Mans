@@ -30,7 +30,7 @@ import type { Tournament, Season } from "./tournament-actions";
 import { InitSettingsButton } from "./init-settings-button";
 import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
-import { getSponsorsWithMembers } from "./sponsor-actions";
+import { getSponsorsWithMembers, getNavPlacement } from "./sponsor-actions";
 import { SponsorsManager } from "./sponsors-section";
 import {
   RegistrationFunnelSection,
@@ -67,7 +67,7 @@ async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean;
 }
 
 async function SponsorsSection() {
-  const sponsors = await getSponsorsWithMembers();
+  const [sponsors, navPlacement] = await Promise.all([getSponsorsWithMembers(), getNavPlacement()]);
   return (
     <AdminSubSection
       sectionId="sponsors"
@@ -77,7 +77,7 @@ async function SponsorsSection() {
       value={sponsors.length}
       description="Create a sponsor and share its invite link — any Discord account that uses it becomes a linked member of that sponsor, up to the max-uses cap. Raise the cap at any time to let more reps join."
     >
-      <SponsorsManager sponsors={sponsors} />
+      <SponsorsManager sponsors={sponsors} navPlacement={navPlacement} />
     </AdminSubSection>
   );
 }
@@ -105,7 +105,7 @@ export default async function AdminPage() {
     supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, created_at").eq("status", "pending").order("created_at", { ascending: true }),
     supabaseAdmin.from("tournaments").select("*").order("created_at", { ascending: false }),
     supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
-    supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar, status, ban_reason, kick_reason, kicked_until, created_at").order("username"),
+    supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar, status, ban_reason, kick_reason, kicked_until, created_at, is_guest").order("username"),
     supabaseAdmin.from("matches").select("stage, round, discord_channel_id"),
     supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1"),
   ]);
@@ -732,7 +732,7 @@ export default async function AdminPage() {
     ? (PRESETS.find((p) => p.id === currentPreset)?.name ?? currentPreset)
     : "No format configured";
 
-  type RawAccount = { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null; status: string; ban_reason: string | null; kick_reason: string | null; kicked_until: string | null; created_at: string };
+  type RawAccount = { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null; status: string; ban_reason: string | null; kick_reason: string | null; kicked_until: string | null; created_at: string; is_guest: boolean | null };
 
   // Tier 3 (players) rows only exist for accounts that have been approved at
   // some point, so "has a players row" is what distinguishes the main roster
@@ -766,11 +766,14 @@ export default async function AdminPage() {
     });
   const bannedCount = combinedPlayers.filter(p => p.status === "banned").length;
 
-  // Exact complement of combinedPlayers, so every account renders in exactly
-  // one panel — covers unregistered/pending, rejected (even with a leftover
-  // players row from a prior approval), and banned-without-ever-approved
+  // Exact complement of combinedPlayers, so every non-sponsor account renders
+  // in exactly one panel — covers unregistered/pending, rejected (even with a
+  // leftover players row from a prior approval), and banned-without-ever-approved
   // (no players row, e.g. an admin banning a guest straight from this panel).
+  // Sponsor guest accounts (is_guest) are excluded — they're not prospective
+  // players and are already visible/removable from the Sponsors section.
   const guestAccounts: GuestAccount[] = ((allAccounts ?? []) as RawAccount[])
+    .filter(a => !a.is_guest)
     .filter(a => !((a.status === "approved" || a.status === "banned") && playersByAccountId.has(a.id)))
     .map(a => ({
       id: a.id,

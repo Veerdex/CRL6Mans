@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { getPlayerInfo, getStaffRole, hasMfaEnabled } from "@/app/lib/players";
+import { getNavSponsors } from "@/app/lib/sponsors-public";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import NavLink from "./nav-link";
 import { TopNav, type TopNavEntry } from "./top-nav";
@@ -176,7 +177,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const playerInfo = await (session?.userId
     ? getPlayerInfo(session.userId)
-    : Promise.resolve({ status: "unregistered" as const, teamId: null, displayName: null }));
+    : Promise.resolve({ status: "unregistered" as const, teamId: null, displayName: null, isGuest: false }));
   if (playerInfo.status === "banned") redirect("/login");
 
   // ── Claim pending coin grants on visit ────────────────────────────────────
@@ -188,7 +189,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let coinGrantStart = 0;
   let coinGrantWeekly = 0;
   let teamSignupMessage: string | null = null;
-  if (playerInfo.status !== "rejected" && session?.userId) {
+  if (playerInfo.status !== "rejected" && !playerInfo.isGuest && session?.userId) {
     const { data: accountCoins } = await supabaseAdmin
       .from("accounts")
       .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly")
@@ -239,10 +240,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
     }
   }
 
-  const { status, teamId } = playerInfo;
-  const [settingsRes, playersCountRes] = await Promise.all([
+  const { status, teamId, isGuest } = playerInfo;
+  const [settingsRes, playersCountRes, navSponsors] = await Promise.all([
     supabaseAdmin.from("league_settings").select("draft_active, season_active, active_tournament_id").single(),
     supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true),
+    getNavSponsors(),
   ]);
   // Fresh, uncached lookups on every request: staff role from staff_roles, and
   // Discord 2FA status from players.mfa_enabled (synced on each OAuth login).
@@ -349,9 +351,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   ];
 
   // Pending and unregistered are surfaced identically — both get the
-  // "register" nav link and no other distinguishing chrome.
+  // "register" nav link and no other distinguishing chrome. Guests (sponsor
+  // reps who joined without Discord auth) get neither — no registration, no
+  // draft/team/wager access, just enough to browse and manage their own theme.
   let navKeys: string[];
-  if (status === "approved") {
+  if (isGuest) {
+    navKeys = ["home", "sponsors", "settings"];
+  } else if (status === "approved") {
     navKeys = [
       "home",
       ...(teamId ? ["myteam"] : []),
@@ -367,7 +373,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     navKeys = ["home", "register", ...commonExtras, "game"];
   }
   // Onboarding tab — shown until the player dismisses it ("I got it!").
-  if (!welcomeSeen) navKeys.unshift("welcome");
+  if (!welcomeSeen && !isGuest) navKeys.unshift("welcome");
   if (admin) navKeys.push("admin", "testreplay");
 
   const BOTTOM_KEYS = new Set(["settings", "admin", "testreplay"]);
@@ -395,7 +401,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <header className="app-topbar hidden md:flex items-center gap-3 px-4 h-14 bg-zinc-900 border-b border-zinc-800 shrink-0">
           <span className="text-lg font-bold tracking-tight shrink-0">{APP_NAME}</span>
           <TopNav items={groupedMainNav} />
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
+            {navSponsors.topNav && (
+              <a href="/sponsors" className="shrink-0" title={navSponsors.topNav.name}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={navSponsors.topNav.imageUrl} alt={navSponsors.topNav.name} className="h-8 max-w-[140px] object-contain" />
+              </a>
+            )}
             <NotificationButton />
             {bottomNavItems.map((item) => (
               <NavLink key={item.href} href={item.href}>
@@ -467,6 +479,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <div className="mx-3 mb-3 px-3 py-2 bg-red-900/40 border border-red-700/50 rounded-lg text-xs text-red-300">
             Registration rejected. You may re-submit.
           </div>
+        )}
+
+        {navSponsors.sideNav && (
+          <a href="/sponsors" className="mx-3 mb-3 block" title={navSponsors.sideNav.name}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={navSponsors.sideNav.imageUrl} alt={navSponsors.sideNav.name} className="w-full max-h-16 object-contain" />
+          </a>
         )}
 
         <div className="px-3 pb-2">
