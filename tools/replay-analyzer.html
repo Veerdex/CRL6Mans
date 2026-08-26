@@ -253,6 +253,8 @@
       <input id="fileInput" type="file" accept=".replay" style="display:none">
       <div class="actions">
         <button id="analyzeBtn" class="btn-primary" disabled>Analyze Replay</button>
+        <button id="saveToolBtn" class="btn-outline">Save this tool (.html)</button>
+        <span id="topSaveStatus" class="save-note"></span>
       </div>
     </div>
   </div>
@@ -1566,37 +1568,50 @@ function triggerBlobDownload(filename, content, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function setSaveStatus(text) {
-  const el = document.getElementById("saveStatus");
+function setSaveStatus(text, statusElId) {
+  const el = document.getElementById(statusElId || "saveStatus");
   if (el) el.textContent = text;
 }
 
-async function saveFile(filename, content, mime) {
+async function saveFile(filename, content, mime, statusElId) {
   const downloads = await getDownloadsCapability();
   if (!downloads) { triggerBlobDownload(filename, content, mime); return; }
   try {
     await downloads.save({ filename, data: content });
-    setSaveStatus("Saved " + filename);
+    setSaveStatus("Saved " + filename, statusElId);
   } catch (err) {
     const code = err && err.code;
-    if (code === "declined") { setSaveStatus("Save cancelled."); return; }
+    if (code === "declined") { setSaveStatus("Save cancelled.", statusElId); return; }
     if (code === "rejected_extension" || code === "extension_not_enabled") {
       const fallbackName = filename.replace(/\.[^.]+$/, ".txt");
       try {
         await downloads.save({ filename: fallbackName, data: content });
-        setSaveStatus("Saved as " + fallbackName + " (." + filename.split(".").pop() + " isn't enabled here)");
+        setSaveStatus("Saved as " + fallbackName + " (." + filename.split(".").pop() + " isn't enabled here)", statusElId);
         return;
       } catch (err2) {
-        if (err2 && err2.code === "declined") { setSaveStatus("Save cancelled."); return; }
+        if (err2 && err2.code === "declined") { setSaveStatus("Save cancelled.", statusElId); return; }
       }
     }
     throw err;
   }
 }
 
-function reportSaveError(err) {
-  setSaveStatus((err && err.message) ? err.message : "Couldn't save the file.");
+function reportSaveError(err, statusElId) {
+  setSaveStatus((err && err.message) ? err.message : "Couldn't save the file.", statusElId);
 }
+
+// "Save this tool" — hands the page's own current source off as a real file
+// via the downloads capability (or the plain blob-link fallback outside a
+// capability-granting viewer), since a live page has no other reliable way
+// to become a file a mobile browser's chrome will actually save.
+document.getElementById("saveToolBtn").addEventListener("click", async () => {
+  try {
+    const html = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+    await saveFile("replay-analyzer.html", html, "text/html", "topSaveStatus");
+  } catch (err) {
+    reportSaveError(err, "topSaveStatus");
+  }
+});
 
 function csvEscape(v) {
   const s = String(v);
