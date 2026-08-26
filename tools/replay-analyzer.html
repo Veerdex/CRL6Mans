@@ -4,92 +4,173 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Replay Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0a0a0b;
-    --card: #18181b;
-    --border: #27272a;
-    --text: #e4e4e7;
-    --dim: #a1a1aa;
-    --faint: #71717a;
-    --accent: #6366f1;
-    --accent-dim: #4338ca;
-    --blue: #60a5fa;
-    --orange: #fb923c;
-    --red: #f87171;
-    --green: #34d399;
-    --amber: #fbbf24;
+    --bg: #f2f3f9;
+    --grid: rgba(90, 98, 140, 0.07);
+    --card: #ffffff;
+    --card-2: #f7f7fc;
+    --border: #e1e3ee;
+    --text: #191b28;
+    --dim: #565b74;
+    --faint: #8388a0;
+    --accent: #6a53e0;
+    --accent-ink: #ffffff;
+    --accent-soft: rgba(106, 83, 224, 0.1);
+    --blue: #2f66e0;
+    --blue-soft: rgba(47, 102, 224, 0.09);
+    --orange: #d9721b;
+    --orange-soft: rgba(217, 114, 27, 0.1);
+    --red: #d1425a;
+    --red-soft: rgba(209, 66, 90, 0.1);
+    --amber: #a66a08;
+    --amber-soft: rgba(166, 106, 8, 0.1);
+    --green: #1f8f68;
+    --shadow: 0 1px 2px rgba(30, 32, 60, 0.04), 0 8px 24px -12px rgba(30, 32, 60, 0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0a0b12;
+      --grid: rgba(150, 160, 220, 0.05);
+      --card: #12141e;
+      --card-2: #171a26;
+      --border: #262a3a;
+      --text: #e9eaf4;
+      --dim: #9599b0;
+      --faint: #666b85;
+      --accent: #8f7dff;
+      --accent-ink: #14101f;
+      --accent-soft: rgba(143, 125, 255, 0.14);
+      --blue: #6d9bff;
+      --blue-soft: rgba(109, 155, 255, 0.12);
+      --orange: #ff9d4d;
+      --orange-soft: rgba(255, 157, 77, 0.12);
+      --red: #ff7590;
+      --red-soft: rgba(255, 117, 144, 0.12);
+      --amber: #f0b429;
+      --amber-soft: rgba(240, 180, 41, 0.12);
+      --green: #3ddb9b;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0a0b12;
+    --grid: rgba(150, 160, 220, 0.05);
+    --card: #12141e;
+    --card-2: #171a26;
+    --border: #262a3a;
+    --text: #e9eaf4;
+    --dim: #9599b0;
+    --faint: #666b85;
+    --accent: #8f7dff;
+    --accent-ink: #14101f;
+    --accent-soft: rgba(143, 125, 255, 0.14);
+    --blue: #6d9bff;
+    --blue-soft: rgba(109, 155, 255, 0.12);
+    --orange: #ff9d4d;
+    --orange-soft: rgba(255, 157, 77, 0.12);
+    --red: #ff7590;
+    --red-soft: rgba(255, 117, 144, 0.12);
+    --amber: #f0b429;
+    --amber-soft: rgba(240, 180, 41, 0.12);
+    --green: #3ddb9b;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
   }
   * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
-    background: var(--bg);
+    background:
+      radial-gradient(circle at 1px 1px, var(--grid) 1px, transparent 0) 0 0 / 22px 22px,
+      var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    padding: 32px 16px 80px;
+    font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 36px 16px 90px;
   }
-  .wrap { max-width: 920px; margin: 0 auto; }
-  h1 { font-size: 1.4rem; margin: 0 0 4px; }
-  .sub { color: var(--faint); font-size: 0.85rem; margin: 0 0 24px; }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  .masthead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 {
+    font-family: "Oxanium", "IBM Plex Sans", sans-serif;
+    font-weight: 700; font-size: 1.65rem; letter-spacing: 0.01em; margin: 0;
+    text-wrap: balance;
+  }
+  .kicker {
+    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-soft); padding: 3px 9px; border-radius: 999px;
+  }
+  .sub { color: var(--faint); font-size: 0.88rem; margin: 6px 0 26px; max-width: 62ch; line-height: 1.55; }
   .card {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 14px;
     overflow: hidden;
     margin-bottom: 16px;
+    box-shadow: var(--shadow);
   }
   .card-header {
-    padding: 12px 20px;
+    padding: 13px 20px;
     border-bottom: 1px solid var(--border);
-    font-size: 0.8rem;
+    font-size: 0.72rem;
     font-weight: 600;
     color: var(--dim);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
   }
   .drop {
     border: 2px dashed var(--border);
     border-radius: 10px;
-    padding: 40px 20px;
+    padding: 38px 20px;
     text-align: center;
     cursor: pointer;
     transition: border-color .15s, background .15s;
     user-select: none;
   }
-  .drop:hover, .drop.drag { border-color: var(--accent); background: rgba(99,102,241,0.06); }
-  .drop p { margin: 0; font-size: 0.9rem; color: var(--dim); }
-  .drop .fname { color: #fff; font-weight: 600; }
-  .drop .hint { font-size: 0.75rem; color: var(--faint); margin-top: 4px; }
+  .drop:hover, .drop.drag { border-color: var(--accent); background: var(--accent-soft); }
+  .drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .drop p { margin: 0; font-size: 0.92rem; color: var(--dim); }
+  .drop .fname { color: var(--text); font-weight: 600; font-family: "JetBrains Mono", monospace; font-size: 0.85rem; }
+  .drop .hint { font-size: 0.75rem; color: var(--faint); margin-top: 6px; }
   .row { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
   button {
     font: inherit;
     cursor: pointer;
     border: none;
     border-radius: 8px;
-    padding: 9px 16px;
+    padding: 10px 18px;
     font-size: 0.85rem;
     font-weight: 600;
-    transition: opacity .15s, background .15s;
+    font-family: "IBM Plex Sans", sans-serif;
+    transition: opacity .15s, background .15s, border-color .15s, color .15s;
   }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover:not(:disabled) { background: #5457e5; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
   .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
   .btn-outline:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .save-note { font-size: 0.76rem; color: var(--faint); }
   .error {
-    background: rgba(248,113,113,0.08);
-    border: 1px solid rgba(248,113,113,0.35);
+    background: var(--red-soft);
+    border: 1px solid var(--red);
     border-radius: 10px;
     padding: 14px 18px;
     color: var(--red);
     font-size: 0.85rem;
     margin-bottom: 16px;
     white-space: pre-wrap;
+    font-family: "JetBrains Mono", monospace;
   }
   .warn {
-    background: rgba(251,191,36,0.08);
-    border: 1px solid rgba(251,191,36,0.3);
+    background: var(--amber-soft);
+    border: 1px solid var(--amber);
     border-radius: 10px;
     padding: 12px 18px;
     color: var(--amber);
@@ -97,44 +178,59 @@
     margin-bottom: 16px;
   }
   .summary {
-    display: flex; flex-wrap: wrap; gap: 28px; align-items: center;
-    padding: 18px 20px;
+    display: flex; flex-wrap: wrap; gap: 30px; align-items: center;
+    padding: 20px 22px;
   }
-  .score { display: flex; align-items: baseline; gap: 10px; font-weight: 700; font-size: 1.6rem; font-variant-numeric: tabular-nums; }
-  .score .b { color: var(--blue); } .score .o { color: var(--orange); } .score .dash { color: var(--faint); font-size: 1rem; }
+  .score {
+    display: flex; align-items: baseline; gap: 10px; font-weight: 700; font-size: 2rem;
+    font-family: "Oxanium", monospace; font-variant-numeric: tabular-nums;
+  }
+  .score .b { color: var(--blue); } .score .o { color: var(--orange); } .score .dash { color: var(--faint); font-size: 1.1rem; }
   .meta-item { font-size: 0.82rem; }
-  .meta-item .k { color: var(--faint); margin-right: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .meta-item .k { color: var(--faint); margin-right: 5px; }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 0.85rem; }
   thead th {
-    text-align: left; padding: 8px 14px; font-size: 0.68rem; text-transform: uppercase;
-    letter-spacing: 0.04em; color: var(--faint); border-bottom: 1px solid var(--border);
-    background: rgba(255,255,255,0.02);
+    text-align: left; padding: 9px 14px; font-size: 0.66rem; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--faint); border-bottom: 1px solid var(--border);
+    background: var(--card-2); font-weight: 600;
   }
   thead th.num { text-align: right; }
-  tbody td { padding: 9px 14px; border-bottom: 1px solid rgba(255,255,255,0.04); }
-  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: "JetBrains Mono", monospace; }
   tbody tr:last-child td { border-bottom: none; }
-  tbody tr:hover { background: rgba(255,255,255,0.02); }
-  .team-head { padding: 10px 20px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
-  .team-head.blue { color: var(--blue); background: rgba(96,165,250,0.08); }
-  .team-head.orange { color: var(--orange); background: rgba(251,146,60,0.08); }
-  .pname { color: #fff; font-weight: 600; }
+  tbody tr:hover { background: var(--card-2); }
+  .team-head { padding: 11px 20px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; border-left: 3px solid transparent; }
+  .team-head.blue { color: var(--blue); background: var(--blue-soft); border-left-color: var(--blue); }
+  .team-head.orange { color: var(--orange); background: var(--orange-soft); border-left-color: var(--orange); }
+  .pname { color: var(--text); font-weight: 600; }
   .demo-list { padding: 6px 0; }
-  .demo-row { display: flex; align-items: center; gap: 10px; padding: 10px 20px; font-size: 0.82rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .demo-row { display: flex; align-items: center; gap: 12px; padding: 11px 20px; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
   .demo-row:last-child { border-bottom: none; }
-  .demo-t { color: var(--faint); font-variant-numeric: tabular-nums; width: 52px; flex-shrink: 0; }
-  .demo-empty { padding: 26px 20px; text-align: center; color: var(--faint); font-size: 0.85rem; }
-  .badge { font-size: 0.65rem; font-weight: 700; padding: 2px 7px; border-radius: 5px; text-transform: uppercase; letter-spacing: 0.03em; }
-  .badge.self { background: rgba(248,113,113,0.15); color: var(--red); }
+  .demo-t {
+    color: var(--faint); font-variant-numeric: tabular-nums; width: 54px; flex-shrink: 0;
+    font-family: "JetBrains Mono", monospace; font-size: 0.78rem;
+  }
+  .demo-empty { padding: 28px 20px; text-align: center; color: var(--faint); font-size: 0.85rem; }
+  .badge { font-size: 0.63rem; font-weight: 700; padding: 2px 8px; border-radius: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .badge.self { background: var(--red-soft); color: var(--red); }
   details { font-size: 0.8rem; }
-  summary { cursor: pointer; padding: 12px 20px; color: var(--dim); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  summary {
+    cursor: pointer; padding: 13px 20px; color: var(--dim); font-weight: 600; font-size: 0.72rem;
+    text-transform: uppercase; letter-spacing: 0.06em; list-style: none;
+  }
+  summary::-webkit-details-marker { display: none; }
   summary:hover { color: var(--text); }
+  summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  summary::before { content: "▸ "; display: inline-block; transition: transform .15s; }
+  details[open] summary::before { transform: rotate(90deg); }
   pre {
-    margin: 0; padding: 14px 20px; background: #0d0d10; max-height: 420px; overflow: auto;
-    font-size: 0.72rem; line-height: 1.5; color: #a5b4fc;
+    margin: 0; padding: 15px 20px; background: var(--card-2); max-height: 420px; overflow: auto;
+    font-family: "JetBrains Mono", monospace; font-size: 0.72rem; line-height: 1.6; color: var(--dim);
+    border-top: 1px solid var(--border);
   }
   .spin {
-    width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff;
+    width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: currentColor;
     border-radius: 50%; display: inline-block; animation: spin 0.7s linear infinite; margin-right: 8px; vertical-align: -2px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -142,14 +238,17 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Replay Analyzer</h1>
-  <p class="sub">Standalone .replay parser — runs entirely in your browser, nothing is uploaded anywhere. Now includes demolition tracking (parsed from the network stream, not just end-of-game stats).</p>
+  <div class="masthead">
+    <h1>Replay Analyzer</h1>
+    <span class="kicker">Runs locally</span>
+  </div>
+  <p class="sub">Drop in a .replay file to see the box score and every demolition — parsed straight out of the network stream, not just the end-of-game totals. Nothing is uploaded; it never leaves this page.</p>
 
   <div class="card">
     <div class="row">
-      <div id="drop" class="drop">
-        <p id="dropText">Drag &amp; drop or click to select a <span style="color:#fff">.replay</span> file</p>
-        <p class="hint">Max 64&nbsp;MB &middot; parsed locally, never leaves your machine</p>
+      <div id="drop" class="drop" tabindex="0" role="button" aria-label="Choose a replay file">
+        <p id="dropText">Tap to choose, or drag &amp; drop, a <span style="color:var(--text)">.replay</span> file</p>
+        <p class="hint">Max 64&nbsp;MB &middot; parsed on-device</p>
       </div>
       <input id="fileInput" type="file" accept=".replay" style="display:none">
       <div class="actions">
@@ -1316,6 +1415,9 @@ let lastResult = null;
 let lastFileName = "";
 
 dropEl.addEventListener("click", () => fileInput.click());
+dropEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); }
+});
 dropEl.addEventListener("dragover", (e) => { e.preventDefault(); dropEl.classList.add("drag"); });
 dropEl.addEventListener("dragleave", () => dropEl.classList.remove("drag"));
 dropEl.addEventListener("drop", (e) => {
@@ -1396,9 +1498,9 @@ function render(result) {
       '<td class="num">' + p.demos + "</td><td class=\"num\">" + p.demoed + "</td></tr>"
     ).join("");
     return '<div class="card"><div class="team-head ' + cls + '">' + label + "</div>" +
-      '<table><thead><tr><th>Player</th><th class="num">Score</th><th class="num">Goals</th><th class="num">Assists</th>' +
+      '<div class="table-scroll"><table><thead><tr><th>Player</th><th class="num">Score</th><th class="num">Goals</th><th class="num">Assists</th>' +
       '<th class="num">Saves</th><th class="num">Shots</th><th class="num">Demos</th><th class="num">Demoed</th></tr></thead>' +
-      "<tbody>" + rows + "</tbody></table></div>";
+      "<tbody>" + rows + "</tbody></table></div></div>";
   };
 
   let demoHtml;
@@ -1418,6 +1520,7 @@ function render(result) {
     '<div class="card"><div class="row"><div class="actions">' +
       '<button id="dlCsv" class="btn-outline">Download CSV</button>' +
       '<button id="dlJson" class="btn-outline">Download Raw JSON</button>' +
+      '<span id="saveStatus" class="save-note"></span>' +
     "</div></div></div>";
 
   const rawHtml =
@@ -1426,13 +1529,32 @@ function render(result) {
   resultsEl.innerHTML = summaryHtml + teamTable("Blue Team (team 0)", "blue", team0) + teamTable("Orange Team (team 1)", "orange", team1) +
     demoHtml + actionsHtml + '<div class="card">' + rawHtml + "</div>";
 
-  document.getElementById("dlCsv").addEventListener("click", downloadCsv);
-  document.getElementById("dlJson").addEventListener("click", downloadJson);
+  document.getElementById("dlCsv").addEventListener("click", () => downloadCsv().catch(reportSaveError));
+  document.getElementById("dlJson").addEventListener("click", () => downloadJson().catch(reportSaveError));
 }
 
 function jsonReplacer(key, value) { return typeof value === "bigint" ? value.toString() : value; }
 
-function triggerDownload(filename, content, mime) {
+// Opened as a plain file (double-clicked, or served from any ordinary web
+// host) this page has no `window.claude` at all, so `<a download>` is the
+// right tool. Opened inside the claude.ai artifact viewer, that link is
+// inert by design — the `downloads` capability is the only way to hand the
+// viewer a file there. Try the capability first and fall back to the plain
+// link whenever it's absent or the platform declines it for a reason other
+// than the viewer saying no.
+let downloadsCapability;
+async function getDownloadsCapability() {
+  if (downloadsCapability !== undefined) return downloadsCapability;
+  if (!window.claude || typeof window.claude.use !== "function") return (downloadsCapability = null);
+  try {
+    downloadsCapability = await window.claude.use("downloads");
+  } catch (e) {
+    downloadsCapability = null;
+  }
+  return downloadsCapability;
+}
+
+function triggerBlobDownload(filename, content, mime) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1444,12 +1566,44 @@ function triggerDownload(filename, content, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function setSaveStatus(text) {
+  const el = document.getElementById("saveStatus");
+  if (el) el.textContent = text;
+}
+
+async function saveFile(filename, content, mime) {
+  const downloads = await getDownloadsCapability();
+  if (!downloads) { triggerBlobDownload(filename, content, mime); return; }
+  try {
+    await downloads.save({ filename, data: content });
+    setSaveStatus("Saved " + filename);
+  } catch (err) {
+    const code = err && err.code;
+    if (code === "declined") { setSaveStatus("Save cancelled."); return; }
+    if (code === "rejected_extension" || code === "extension_not_enabled") {
+      const fallbackName = filename.replace(/\.[^.]+$/, ".txt");
+      try {
+        await downloads.save({ filename: fallbackName, data: content });
+        setSaveStatus("Saved as " + fallbackName + " (." + filename.split(".").pop() + " isn't enabled here)");
+        return;
+      } catch (err2) {
+        if (err2 && err2.code === "declined") { setSaveStatus("Save cancelled."); return; }
+      }
+    }
+    throw err;
+  }
+}
+
+function reportSaveError(err) {
+  setSaveStatus((err && err.message) ? err.message : "Couldn't save the file.");
+}
+
 function csvEscape(v) {
   const s = String(v);
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
-function downloadCsv() {
+async function downloadCsv() {
   if (!lastResult) return;
   const header = ["player", "team", "score", "goals", "assists", "saves", "shots", "demos", "demoed"];
   const lines = [header.join(",")];
@@ -1461,12 +1615,12 @@ function downloadCsv() {
   for (const d of lastResult.demolitions) {
     lines.push([fmtClock(d.time), d.attacker, d.victim, d.selfDemolish].map(csvEscape).join(","));
   }
-  triggerDownload((lastFileName || "replay") + "-stats.csv", lines.join("\r\n"), "text/csv");
+  await saveFile((lastFileName || "replay") + "-stats.csv", lines.join("\r\n"), "text/csv");
 }
 
-function downloadJson() {
+async function downloadJson() {
   if (!lastResult) return;
-  triggerDownload((lastFileName || "replay") + "-parsed.json", JSON.stringify(lastResult, jsonReplacer, 2), "application/json");
+  await saveFile((lastFileName || "replay") + "-parsed.json", JSON.stringify(lastResult, jsonReplacer, 2), "application/json");
 }
 </script>
 </body>
