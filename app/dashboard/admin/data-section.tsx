@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
 import { aggregatePlayerGameStats, type StatAggregationInput } from "@/app/lib/player-stat-aggregation";
+import { TAB_LABELS } from "@/app/lib/tab-labels";
 import { AdminSubSection } from "./admin-sub-section";
 
 function StatCard({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
@@ -203,6 +204,77 @@ export function SeasonHistorySection({
           ))}
         </div>
       )}
+    </AdminSubSection>
+  );
+}
+
+function dayKey(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+
+export async function TabVisitsSection() {
+  const DAYS = 30;
+  const since = new Date();
+  since.setDate(since.getDate() - (DAYS - 1));
+  since.setHours(0, 0, 0, 0);
+
+  const { data: rows } = await supabaseAdmin
+    .from("tab_visits")
+    .select("tab, created_at")
+    .gte("created_at", since.toISOString());
+
+  const days: string[] = [];
+  for (let i = 0; i < DAYS; i++) {
+    const d = new Date(since);
+    d.setDate(d.getDate() + i);
+    days.push(dayKey(d));
+  }
+
+  const byTab: Record<string, Record<string, number>> = {};
+  for (const tab of Object.keys(TAB_LABELS)) byTab[tab] = Object.fromEntries(days.map((d) => [d, 0]));
+
+  for (const r of rows ?? []) {
+    if (!(r.tab in byTab)) continue;
+    const key = dayKey(new Date(r.created_at));
+    if (key in byTab[r.tab]) byTab[r.tab][key]++;
+  }
+
+  const tabRows = Object.entries(TAB_LABELS)
+    .map(([tab, label]) => {
+      const daily = days.map((d) => byTab[tab][d]);
+      return { tab, label, daily, total: daily.reduce((a, b) => a + b, 0) };
+    })
+    .sort((a, b) => b.total - a.total);
+
+  const totalVisits = tabRows.reduce((a, r) => a + r.total, 0);
+  const maxDaily = Math.max(1, ...tabRows.flatMap((r) => r.daily));
+
+  return (
+    <AdminSubSection
+      sectionId="data"
+      tabId="tab-visits"
+      title="Tab Visits"
+      value={totalVisits}
+      description="How many times each dashboard tab was visited over the last 30 days, with a day-by-day breakdown."
+    >
+      <div className="space-y-2">
+        {tabRows.map((r) => (
+          <div key={r.tab} className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2.5">
+            <span className="w-24 shrink-0 text-sm text-white font-medium truncate">{r.label}</span>
+            <span className="w-10 shrink-0 text-xs text-zinc-400 font-mono tabular-nums">{r.total}</span>
+            <div className="flex-1 flex items-end gap-[2px] h-8">
+              {r.daily.map((count, i) => (
+                <div
+                  key={days[i]}
+                  title={`${days[i]}: ${count} visit${count === 1 ? "" : "s"}`}
+                  className={`flex-1 rounded-sm ${count > 0 ? "bg-amber-500/70" : "bg-zinc-800"}`}
+                  style={{ height: `${Math.max(count > 0 ? 12 : 4, (count / maxDaily) * 100)}%` }}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </AdminSubSection>
   );
 }

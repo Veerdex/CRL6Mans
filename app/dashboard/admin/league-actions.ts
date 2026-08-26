@@ -315,7 +315,6 @@ export async function addBulkTournamentTestUsers(tournamentId: string, count = 3
   if (entryError) return { error: entryError.message };
 
   revalidatePath("/dashboard/admin");
-  revalidatePath("/dashboard/tournament");
   return { ok: true, message: `Added ${count} test players to this tournament.` };
 }
 
@@ -967,6 +966,30 @@ export async function saveMinMmr(min2v2: number | null, min3v3: number | null) {
 
   revalidatePath("/dashboard/admin");
   return { ok: true, message: "Minimum MMR saved." };
+}
+
+export async function saveSeasonPrizes(prize1st: number | null, prize2nd: number | null, prize3rd4th: number | null) {
+  await verifyAdmin();
+  const norm = (v: number | null): number | null | undefined => {
+    if (v === null || Number.isNaN(v) || v === 0) return null;
+    if (!Number.isInteger(v) || v < 0) return undefined;
+    return v;
+  };
+  const a = norm(prize1st);
+  const b = norm(prize2nd);
+  const c = norm(prize3rd4th);
+  if (a === undefined || b === undefined || c === undefined)
+    return { ok: false, message: "Prize amounts must be non-negative whole numbers." };
+
+  await supabaseAdmin.from("league_settings").update({
+    season_prize_1st: a,
+    season_prize_2nd: b,
+    season_prize_3rd4th: c,
+    updated_at: new Date().toISOString(),
+  }).not("id", "is", null);
+
+  revalidatePath("/dashboard/admin");
+  return { ok: true, message: "Season prize pool saved." };
 }
 
 export async function adminSetNumTeams(count: string) {

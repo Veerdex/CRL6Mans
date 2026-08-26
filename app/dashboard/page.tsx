@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import DraftCard from "./draft-card";
@@ -7,22 +8,37 @@ import { TeamSignupPanel } from "./team-signup-panel";
 import { TournamentJoinCard } from "./tournament-join-card";
 import { getTeamSignupView, type TeamSignupView } from "./team-signup-data";
 import { PastEvents, presetLabel, type PastEvent } from "./past-events";
+import { PresetEmblemRow } from "./preset-emblem-row";
 import { LocalTime } from "./local-time";
 import { TrackerUpdateBanner } from "./tracker-update-banner";
 import { AnnouncementBanner } from "./announcement-banner";
+import { CountdownLabel } from "./countdown-label";
+import { getPublicSponsors } from "@/app/lib/sponsors-public";
+import { cropStyle } from "@/app/lib/media-crop";
+import { buildTimeline, buildStageStarts } from "@/app/lib/tournament-timeline";
+import { TournamentDetailView } from "./tournament-detail";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tournament?: string; tab?: string }>;
+}) {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const [playerRes, settingsRes, draftQueueRes, tournamentsRes, seasonsRes, matchStagesRes] = await Promise.all([
+  const { tournament: tournamentId, tab } = await searchParams;
+  if (tournamentId) {
+    return <TournamentDetailView tournamentId={tournamentId} tab={tab} discordId={session.userId} />;
+  }
+
+  const [playerRes, settingsRes, draftQueueRes, tournamentsRes, seasonsRes, matchStagesRes, publicSponsors] = await Promise.all([
     supabaseAdmin
       .from("players")
       .select("id, status, draft_entered, display_name, must_update_tracker")
       .eq("discord_id", session.userId)
       .single(),
-    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, announcement_text, announcement_destination").single(),
+    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, num_teams, season_format, announcement_text, announcement_destination").single(),
     supabaseAdmin
       .from("players")
       .select("id")
@@ -31,7 +47,7 @@ export default async function DashboardPage() {
       .order("draft_entered_at", { ascending: true, nullsFirst: false }),
     supabaseAdmin
       .from("tournaments")
-      .select("id, name, status, signups_open, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home")
+      .select("id, name, status, signups_open, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, sponsor_id, prize_1st, prize_2nd, prize_3rd4th")
       .in("status", ["scheduled", "active", "completed"])
       .order("created_at", { ascending: false }),
     supabaseAdmin
@@ -41,12 +57,14 @@ export default async function DashboardPage() {
     supabaseAdmin
       .from("matches")
       .select("stage, round, status"),
+    getPublicSponsors(),
   ]);
 
   const player = playerRes.data;
   const settings = settingsRes.data;
   const draftQueue = draftQueueRes.data ?? [];
   const tournaments = tournamentsRes.data ?? [];
+  const sponsorById = new Map(publicSponsors.map((s) => [s.id, s]));
   const activeTournament = tournaments.find((t) => t.status === "active") ?? null;
   const pastTournaments = tournaments.filter((t) => t.status === "completed" && !t.hidden_from_home);
   const seasons = (seasonsRes.data ?? []).filter((s) => !s.hidden_from_home);
@@ -135,7 +153,25 @@ export default async function DashboardPage() {
   const allMatchStages = matchStagesRes.data ?? [];
   const seasonActive = settings?.season_active ?? false;
   const currentSeasonLabel = seasonActive ? computeSeasonStageLabel(allMatchStages) : null;
-  const seasonEventName = activeTournament?.name ?? "Season";
+
+  // Active-event card view-model: covers both a tournament-driven active event and a
+  // legacy manually-run season (mutually exclusive — a season is only "active" on its
+  // own when no tournament is driving it). league_settings.season_format/num_teams are
+  // kept in sync for both paths (activateTournamentRuntime mirrors tournament config in),
+  // so they're a safe source for format/team-count regardless of which path is live.
+  const activeEventName = activeTournament?.name ?? "Season";
+  const activeEventPreset =
+    (activeTournament?.season_format as { preset?: string } | null)?.preset ??
+    (settings?.season_format as { preset?: string } | null)?.preset ??
+    null;
+  const activeEventTeamCount = settings?.num_teams ?? 0;
+  const activeEventSponsorId = (activeTournament as { sponsor_id?: string | null } | null)?.sponsor_id ?? null;
+  const activeEventSponsor = activeEventSponsorId ? sponsorById.get(activeEventSponsorId) ?? null : null;
+  const activeEventPrize1st = (activeTournament as { prize_1st?: number | null } | null)?.prize_1st ?? null;
+  const activeEventPrize2nd = (activeTournament as { prize_2nd?: number | null } | null)?.prize_2nd ?? null;
+  const activeEventPrize3rd4th = (activeTournament as { prize_3rd4th?: number | null } | null)?.prize_3rd4th ?? null;
+  const activeEventTotalPrize = (activeEventPrize1st ?? 0) + (activeEventPrize2nd ?? 0) + (activeEventPrize3rd4th ?? 0) * 2;
+  const activeEventBackgroundUrl = activeEventSponsor?.background_image_url ?? null;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto space-y-8">
@@ -151,7 +187,7 @@ export default async function DashboardPage() {
       {player?.must_update_tracker && <TrackerUpdateBanner />}
 
       <a
-        href="https://crl6mans-queue-bot.vercel.app/"
+        href="https://www.crlw6m.fyi/"
         target="_blank"
         rel="noopener noreferrer"
         className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 hover:border-zinc-700 transition-colors"
@@ -160,104 +196,232 @@ export default async function DashboardPage() {
         <span className="text-zinc-500">↗</span>
       </a>
 
-      {activeTournament && (
-        <div className="bg-gradient-to-br from-indigo-950/40 to-zinc-900 border border-indigo-800/40 rounded-xl p-5">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <p className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">Active Tournament</p>
-          </div>
-          <h2 className="text-xl font-bold text-white mt-1">{activeTournament.name}</h2>
-          {seasonActive && currentSeasonLabel ? (
-            <p className="text-sm text-indigo-300 mt-1">{currentSeasonLabel}</p>
-          ) : (
-            <div className="text-xs text-zinc-400 mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
-              {activeTournament.draft_start_at && <span>Draft: <LocalTime iso={activeTournament.draft_start_at} /></span>}
-              {activeTournament.season_start_at && <span>Tournament: <LocalTime iso={activeTournament.season_start_at} /></span>}
-            </div>
+      {/* Active-event card — covers both a tournament-driven active event and a legacy
+          manually-run active season (the two are mutually exclusive states of the same
+          "what's live right now" concept, so they share one enriched 16:9 card). */}
+      {(activeTournament || seasonActive) && (
+        <div
+          className={`relative aspect-video overflow-hidden border border-indigo-800/40 rounded-xl ${
+            activeEventBackgroundUrl ? "" : "bg-gradient-to-br from-indigo-950/40 to-zinc-900"
+          }`}
+        >
+          {activeEventBackgroundUrl && (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={activeEventBackgroundUrl}
+                alt=""
+                className="absolute inset-0 w-full h-full"
+                style={cropStyle(activeEventSponsor?.content_crop?.background)}
+              />
+              <div className="absolute inset-0 bg-black/70" />
+            </>
           )}
+          <div className="relative h-full overflow-y-auto px-4 py-3 flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <p className="text-[16.5px] font-semibold text-emerald-400 uppercase tracking-wider">
+                  {activeTournament ? "Active Tournament" : "Season Active"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {activeEventSponsor?.logo_url && (
+                  <div className="relative w-10 h-10 rounded-xl border border-zinc-800 overflow-hidden shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={activeEventSponsor.logo_url}
+                      alt={activeEventSponsor.name}
+                      className="absolute inset-0 w-full h-full"
+                      style={cropStyle(activeEventSponsor.content_crop?.logo)}
+                    />
+                  </div>
+                )}
+                <h2 className="text-3xl font-bold text-white truncate">{activeEventName}</h2>
+              </div>
+              {seasonActive && currentSeasonLabel ? (
+                <p className="text-[21px] text-indigo-300">{currentSeasonLabel}</p>
+              ) : (
+                activeTournament && (
+                  <div className="text-lg text-zinc-400 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+                    {activeTournament.draft_start_at && <span>Draft: <LocalTime iso={activeTournament.draft_start_at} /></span>}
+                    {activeTournament.season_start_at && <span>Tournament: <LocalTime iso={activeTournament.season_start_at} /></span>}
+                  </div>
+                )
+              )}
+              <div className="flex flex-wrap items-end gap-x-4 gap-y-1 text-lg text-zinc-400">
+                {activeEventPreset && <PresetEmblemRow preset={activeEventPreset} />}
+                {activeEventTeamCount > 0 && <span>{activeEventTeamCount} teams</span>}
+              </div>
+            </div>
+            {activeEventTotalPrize > 0 && (
+              <div className="shrink-0 flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-4 py-2 min-w-[110px]">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
+                <p className="text-xl font-bold text-amber-400 tabular-nums">${activeEventTotalPrize.toLocaleString()}</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Season draft block */}
-      {isApproved && activeTournament?.join_mode !== "teams" && (
+      {/* Season draft block — only when no season is active yet (the active-event card above covers it once it is). */}
+      {isApproved && activeTournament?.join_mode !== "teams" && !seasonActive && (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-zinc-300">Season</h2>
-          {seasonActive ? (
-            <div className="bg-gradient-to-br from-indigo-950/40 to-zinc-900 border border-indigo-800/40 rounded-xl p-5">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <p className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">Season Active</p>
-              </div>
-              <h2 className="text-xl font-bold text-white">{seasonEventName}</h2>
-              {currentSeasonLabel && (
-                <p className="text-sm text-indigo-300 mt-1">{currentSeasonLabel}</p>
-              )}
-            </div>
-          ) : (
-            <>
-              <DraftCard
-                inDraft={inDraft}
-                draftCount={draftCount}
-                signupsOpen={signupsOpen}
-                draftActive={settings?.draft_active ?? false}
-                seasonActive={false}
-              />
-              <Stat label="Draft pool" value={draftCount} />
-            </>
-          )}
+          <h2 className="text-[21px] font-semibold text-zinc-300">Season</h2>
+          <DraftCard
+            inDraft={inDraft}
+            draftCount={draftCount}
+            signupsOpen={signupsOpen}
+            draftActive={settings?.draft_active ?? false}
+            seasonActive={false}
+          />
+          <Stat label="Draft pool" value={draftCount} />
         </div>
       )}
 
       {/* Open tournaments you can join */}
       {isApproved && openTournaments.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-zinc-300">Open Tournaments</h2>
-          {openPlayerTs.map((t) => (
-            <TournamentJoinCard
-              key={t.id}
-              id={t.id}
-              name={t.name}
-              poolCount={poolCounts[t.id] ?? 0}
-              joined={myEntryIds.has(t.id)}
-              teamAssignment={t.team_assignment as "snake_draft" | "auto_balance" | null}
-              timeline={buildTimeline(t)}
-              minMmr2v2={(t as { min_mmr_2v2?: number | null }).min_mmr_2v2 ?? null}
-              minMmr3v3={(t as { min_mmr_3v3?: number | null }).min_mmr_3v3 ?? null}
-            />
-          ))}
-          {openTeamTs.map((t) =>
-            teamViews[t.id] ? (
+          <h2 className="text-[21px] font-semibold text-zinc-300">Open Tournaments</h2>
+          {openPlayerTs.map((t) => {
+            const timeline = buildTimeline(t);
+            const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
+            const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
+            const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
+            return (
+              <TournamentJoinCard
+                key={t.id}
+                id={t.id}
+                name={t.name}
+                poolCount={poolCounts[t.id] ?? 0}
+                joined={myEntryIds.has(t.id)}
+                teamAssignment={t.team_assignment as "snake_draft" | "auto_balance" | null}
+                timeline={timeline}
+                countdown={nextEvent}
+                prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}
+                prize2nd={(t as { prize_2nd?: number | null }).prize_2nd ?? null}
+                prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
+                minMmr2v2={(t as { min_mmr_2v2?: number | null }).min_mmr_2v2 ?? null}
+                minMmr3v3={(t as { min_mmr_3v3?: number | null }).min_mmr_3v3 ?? null}
+                linkHref={`/dashboard?tournament=${t.id}`}
+                sponsor={sponsor}
+              />
+            );
+          })}
+          {openTeamTs.map((t) => {
+            if (!teamViews[t.id]) return null;
+            const timeline = buildTimeline(t);
+            const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
+            const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
+            const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
+            return (
               <TeamSignupPanel
                 key={t.id}
                 view={teamViews[t.id]}
                 tournamentId={t.id}
                 tournamentName={t.name}
-                timeline={buildTimeline(t)}
+                timeline={timeline}
+                countdown={nextEvent}
+                prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}
+                prize2nd={(t as { prize_2nd?: number | null }).prize_2nd ?? null}
+                prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
+                linkHref={`/dashboard?tournament=${t.id}`}
+                sponsor={sponsor}
               />
-            ) : null
-          )}
+            );
+          })}
         </div>
       )}
 
       {/* Upcoming tournaments (not yet open) */}
       {upcomingTournaments.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-zinc-300">Upcoming Tournaments</h2>
+          <h2 className="text-[21px] font-semibold text-zinc-300">Upcoming Tournaments</h2>
           {upcomingTournaments.map((t) => {
             const items = buildTimeline(t, true);
+            const nextEvent = items.find((i) => new Date(i.iso).getTime() > now) ?? items[items.length - 1] ?? null;
+            const preset = (t.season_format as { preset?: string } | null)?.preset ?? null;
+            const stageStarts = buildStageStarts(
+              (t as { stage_starts?: Record<string, string> | null }).stage_starts ?? null,
+              preset
+            );
+            const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
+            const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
+            const prize1st = (t as { prize_1st?: number | null }).prize_1st ?? null;
+            const prize2nd = (t as { prize_2nd?: number | null }).prize_2nd ?? null;
+            const prize3rd4th = (t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null;
+            const totalPrizePool = (prize1st ?? 0) + (prize2nd ?? 0) + (prize3rd4th ?? 0) * 2;
+            const backgroundUrl = sponsor?.background_image_url ?? null;
             return (
-              <div key={t.id} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 space-y-2">
-                <p className="text-sm font-semibold text-white">{t.name}</p>
-                {items.length > 0 && (
-                  <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                    {items.map(({ label, iso }) => (
-                      <span key={label} className="text-xs text-zinc-500">
-                        {label}: <LocalTime iso={iso} className="text-zinc-400" />
-                      </span>
-                    ))}
-                  </div>
+              <Link
+                key={t.id}
+                href={`/dashboard?tournament=${t.id}`}
+                className={`relative aspect-video overflow-hidden border border-zinc-800 rounded-xl transition-all duration-200 hover:-translate-y-1 hover:border-amber-500/50 hover:shadow-[0_10px_28px_-8px_rgba(232,138,36,0.4)] cursor-pointer block ${backgroundUrl ? "" : "bg-zinc-900"}`}
+              >
+                {backgroundUrl && (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={backgroundUrl}
+                      alt=""
+                      className="absolute inset-0 w-full h-full"
+                      style={cropStyle(sponsor?.content_crop?.background)}
+                    />
+                    <div className="absolute inset-0 bg-black/70" />
+                  </>
                 )}
-              </div>
+                <div className="relative h-full overflow-y-auto px-4 py-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <div className="flex items-center gap-2">
+                      {sponsor?.logo_url && (
+                        <div className="relative w-12 h-12 rounded-xl border border-zinc-800 overflow-hidden shrink-0">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={sponsor.logo_url}
+                            alt={sponsor.name}
+                            className="absolute inset-0 w-full h-full"
+                            style={cropStyle(sponsor.content_crop?.logo)}
+                          />
+                        </div>
+                      )}
+                      <p className="text-4xl font-bold text-white truncate">{t.name}</p>
+                    </div>
+                    {nextEvent && <CountdownLabel label={nextEvent.label} iso={nextEvent.iso} />}
+                    {items.length > 0 && (
+                      <div className="flex flex-col gap-0.5">
+                        {items.map(({ label, iso }) => (
+                          <span key={label} className="text-[13.5px] text-zinc-500">
+                            {label}: <LocalTime iso={iso} className="text-zinc-400" />
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {preset && <PresetEmblemRow preset={preset} className="text-lg" />}
+                    {stageStarts.length > 0 && (
+                      <div className="flex flex-col gap-0.5">
+                        {stageStarts.map(({ label, iso }) => (
+                          <span key={label} className="text-[13.5px] text-zinc-500">
+                            {label} starts: <LocalTime iso={iso} className="text-zinc-400" />
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="shrink-0 flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-4 py-2 min-w-[120px]">
+                    <p className="text-[15px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
+                    <p className="text-[27px] font-bold text-amber-400 tabular-nums">${totalPrizePool.toLocaleString()}</p>
+                    {totalPrizePool > 0 && (
+                      <div className="mt-1 text-[16.5px] text-zinc-400 space-y-0.5">
+                        <p>1st: <span className="text-zinc-200">${(prize1st ?? 0).toLocaleString()}</span></p>
+                        <p>2nd: <span className="text-zinc-200">${(prize2nd ?? 0).toLocaleString()}</span></p>
+                        <p>3rd-4th: <span className="text-zinc-200">${(prize3rd4th ?? 0).toLocaleString()}</span></p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                </div>
+              </Link>
             );
           })}
         </div>
@@ -266,27 +430,6 @@ export default async function DashboardPage() {
       <PastEvents events={pastEvents} />
     </div>
   );
-}
-
-type TournamentRow = {
-  join_mode: string;
-  team_assignment: string | null;
-  draft_open_at: string | null;
-  draft_close_at: string | null;
-  draft_start_at: string | null;
-  season_start_at: string | null;
-};
-
-function buildTimeline(t: TournamentRow, showOpen = false): { label: string; iso: string }[] {
-  const isAuto = t.team_assignment === "auto_balance";
-  return [
-    ...(showOpen && t.draft_open_at ? [{ label: "Sign-ups open", iso: t.draft_open_at }] : []),
-    ...(t.draft_close_at ? [{ label: "Sign-ups close", iso: t.draft_close_at }] : []),
-    ...(t.join_mode === "players" && t.draft_start_at
-      ? [{ label: isAuto ? "Auto-balance executes" : "Draft starts", iso: t.draft_start_at }]
-      : []),
-    ...(t.season_start_at ? [{ label: "Tournament starts", iso: t.season_start_at }] : []),
-  ];
 }
 
 function Stat({ label, value }: { label: string; value: number }) {

@@ -79,7 +79,6 @@ async function checkJoinGate(playerId: string): Promise<string | null> {
 
 function refresh() {
   revalidatePath("/dashboard");
-  revalidatePath("/dashboard/tournament");
 }
 
 export async function createTeam(tournamentId: string, name: string) {

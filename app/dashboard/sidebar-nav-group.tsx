@@ -76,7 +76,7 @@ export function SidebarNavGroup({ label, icon, items }: { label: string; icon: R
         </svg>
       </button>
       {open && (
-        <div className="absolute left-full top-0 ml-1 min-w-44 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl p-1 z-50">
+        <div className="sidebar-flyout absolute left-full top-0 ml-1 min-w-44 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl p-1 z-50">
           {items.map((item) => {
             const itemActive = isActive(item.href, pathname);
             const podium = item.href === PODIUM_HREF;

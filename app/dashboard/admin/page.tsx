@@ -31,12 +31,14 @@ import { InitSettingsButton } from "./init-settings-button";
 import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
 import { getSponsorsWithMembers, getTabPlacement } from "./sponsor-actions";
-import { SponsorsManager, TabManagerSection } from "./sponsors-section";
+import { SponsorsManager, TabManagerSection, SeasonSponsorPicker } from "./sponsors-section";
+import { getPublicSponsors } from "@/app/lib/sponsors-public";
 import {
   RegistrationFunnelSection,
   CompetitiveSnapshotSection,
   StatLeadersSection,
   SeasonHistorySection,
+  TabVisitsSection,
 } from "./data-section";
 import { StorageUsageSection } from "./storage-section";
 import { RoundScheduler, type ScheduleSection, type RoundMatchInfo } from "./round-scheduler";
@@ -109,9 +111,9 @@ export default async function AdminPage() {
   const testingMode           = userIsDirector && cookieStore.get("testing_mode")?.value === "1";
   const notificationsEnabled  = cookieStore.get("notifications_disabled")?.value !== "1";
 
-  const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }] = await Promise.all([
+  const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors] = await Promise.all([
     getAllPendingPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode").maybeSingle(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id").maybeSingle(),
     supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
@@ -122,7 +124,9 @@ export default async function AdminPage() {
     supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar, status, ban_reason, kick_reason, kicked_until, created_at, is_guest").order("username"),
     supabaseAdmin.from("matches").select("stage, round, discord_channel_id"),
     supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1"),
+    getPublicSponsors(),
   ]);
+  const sponsorOptions = publicSponsors.map((s) => ({ id: s.id, name: s.name }));
 
   type RawPlayerRow = { account_id: string; team_id: string | null; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; peak_1v1: string | null; current_1v1: string | null };
   const playersByAccountId = new Map(((playerRows ?? []) as RawPlayerRow[]).map(p => [p.account_id, p]));
@@ -910,6 +914,7 @@ export default async function AdminPage() {
         { id: "competitive", label: "Competitive Snapshot" },
         { id: "leaders", label: "Stat Leaders" },
         { id: "history", label: "Season History" },
+        { id: "tab-visits", label: "Tab Visits" },
         ...(userIsDirector ? [{ id: "storage", label: "Storage & Limits" }] : []),
       ],
     },
@@ -1285,6 +1290,7 @@ export default async function AdminPage() {
             seasons={(seasons ?? []) as Season[]}
             hasActive={!!settings?.active_tournament_id}
             testingMode={testingMode}
+            sponsors={sponsorOptions}
           />
         </AdminSubSection>
       )}
@@ -1311,6 +1317,13 @@ export default async function AdminPage() {
               initialParticipants={seasonParticipants}
               actualTeams={actualTeams}
               isAdmin={!seasonActive}
+            />
+          </div>
+          <div>
+            <h3 className="text-sm font-medium text-zinc-400 mb-3">Sponsor</h3>
+            <SeasonSponsorPicker
+              sponsors={sponsorOptions}
+              initialSponsorId={(settings?.season_sponsor_id as string | null) ?? null}
             />
           </div>
         </div>
@@ -1345,6 +1358,9 @@ export default async function AdminPage() {
             matchPlayHour={settings?.match_play_hour ?? 19}
             minMmr2v2={(settings?.min_mmr_2v2 as number | null) ?? null}
             minMmr3v3={(settings?.min_mmr_3v3 as number | null) ?? null}
+            seasonPrize1st={(settings?.season_prize_1st as number | null) ?? null}
+            seasonPrize2nd={(settings?.season_prize_2nd as number | null) ?? null}
+            seasonPrize3rd4th={(settings?.season_prize_3rd4th as number | null) ?? null}
             draftActive={settings?.draft_active ?? false}
             draftPhase={(settings?.draft_phase as string | null) ?? null}
             hasPickDeadline={!!settings?.pick_deadline}
@@ -1421,6 +1437,7 @@ export default async function AdminPage() {
         <CompetitiveSnapshotSection />
         <StatLeadersSection />
         <SeasonHistorySection tournaments={tournaments ?? []} seasons={seasons ?? []} />
+        <TabVisitsSection />
         {userIsDirector && <StorageUsageSection />}
       </AdminSection>
 

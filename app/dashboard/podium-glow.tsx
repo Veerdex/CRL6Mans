@@ -53,6 +53,14 @@ export function PodiumGlowIcon({ children }: { children: React.ReactNode }) {
 
 // Drop-in replacement for `{item.icon}{item.label}` — glows only when the
 // item is the Podium tab, renders unchanged everywhere else.
+//
+// Never clone the icon here. The nav items are built in a server component
+// and handed to client components as props, so each `icon` crosses the RSC
+// boundary and arrives as a lazy reference whose `type` is undefined until
+// it resolves. `cloneElement` reads `.type` eagerly and would bake that
+// undefined into a real element — "Element type is invalid". Rendering the
+// element directly lets React resolve the lazy itself, and the same element
+// object may safely appear in several mounted nav components at once.
 export function NavLeafContent({ item }: { item: LeafLike }) {
   if (item.href !== PODIUM_HREF) {
     return <>{item.icon}{item.label}</>;

@@ -7,6 +7,7 @@ import { randomUUID } from "crypto";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import type { ContentCrop, CropKind, MediaCrop } from "@/app/lib/media-crop";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -39,12 +40,19 @@ export type Sponsor = {
   video_url: string | null;
   top_nav_image_url: string | null;
   side_nav_image_url: string | null;
+  background_image_url: string | null;
   links: SponsorLink[];
   promo_code: string | null;
   theme_name: string | null;
   theme_accent: string | null;
   theme_shell: string | null;
   theme_secondary: string | null;
+  theme_mode: "light" | "dark";
+  content_crop: ContentCrop;
+  click_url: string | null;
+  phrase: string | null;
+  overview: string | null;
+  promo_description: string | null;
   members: SponsorMember[];
 };
 
@@ -54,7 +62,7 @@ export async function getSponsorsWithMembers(): Promise<Sponsor[]> {
 
   const { data: sponsors } = await supabaseAdmin
     .from("sponsors")
-    .select("id, name, invite_token, max_uses, status, created_at, logo_url, video_url, top_nav_image_url, side_nav_image_url, links, promo_code, theme_name, theme_accent, theme_shell, theme_secondary")
+    .select("id, name, invite_token, max_uses, status, created_at, logo_url, video_url, top_nav_image_url, side_nav_image_url, background_image_url, links, promo_code, theme_name, theme_accent, theme_shell, theme_secondary, theme_mode, content_crop, click_url, phrase, overview, promo_description")
     .order("created_at", { ascending: true });
   if (!sponsors || sponsors.length === 0) return [];
 
@@ -124,12 +132,18 @@ export async function updateSponsorDetails(
     videoUrl: string;
     topNavImageUrl: string;
     sideNavImageUrl: string;
+    backgroundImageUrl: string;
     links: SponsorLink[];
     promoCode: string;
     themeName: string;
     themeAccent: string;
     themeShell: string;
     themeSecondary: string;
+    themeMode: string;
+    clickUrl: string;
+    phrase: string;
+    overview: string;
+    promoDescription: string;
   }
 ): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
@@ -147,14 +161,49 @@ export async function updateSponsorDetails(
       video_url: details.videoUrl.trim() || null,
       top_nav_image_url: details.topNavImageUrl.trim() || null,
       side_nav_image_url: details.sideNavImageUrl.trim() || null,
+      background_image_url: details.backgroundImageUrl.trim() || null,
       links,
       promo_code: details.promoCode.trim() || null,
       theme_name: details.themeName.trim() || null,
       theme_accent: details.themeAccent.trim() || null,
       theme_shell: details.themeShell.trim() || null,
       theme_secondary: details.themeSecondary.trim() || null,
+      theme_mode: details.themeMode === "dark" ? "dark" : "light",
+      click_url: details.clickUrl.trim() || null,
+      phrase: details.phrase.trim() || null,
+      overview: details.overview.trim() || null,
+      promo_description: details.promoDescription.trim() || null,
       updated_at: new Date().toISOString(),
     })
+    .eq("id", sponsorId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/sponsors");
+  revalidatePath("/dashboard", "layout");
+  return { ok: true };
+}
+
+export async function updateContentCrop(
+  sponsorId: string,
+  kind: CropKind,
+  crop: MediaCrop
+): Promise<{ ok?: boolean; error?: string }> {
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit sponsors." };
+
+  const { data: sponsor } = await supabaseAdmin
+    .from("sponsors")
+    .select("content_crop")
+    .eq("id", sponsorId)
+    .single();
+  if (!sponsor) return { error: "Sponsor not found." };
+
+  const nextCrop: ContentCrop = { ...((sponsor.content_crop as ContentCrop) ?? {}), [kind]: crop };
+  const { error } = await supabaseAdmin
+    .from("sponsors")
+    .update({ content_crop: nextCrop, updated_at: new Date().toISOString() })
     .eq("id", sponsorId);
   if (error) return { error: error.message };
 
@@ -237,6 +286,21 @@ export async function getTabPlacement(): Promise<TabPlacement> {
     sideNavSponsorId: (data?.side_nav_sponsor_id as string | null) ?? null,
     settingsTabSponsorId: (data?.settings_tab_sponsor_id as string | null) ?? null,
   };
+}
+
+export async function updateSeasonSponsor(sponsorId: string | null): Promise<{ ok?: boolean; error?: string }> {
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit sponsors." };
+
+  const { error } = await supabaseAdmin
+    .from("league_settings")
+    .update({ season_sponsor_id: sponsorId })
+    .not("id", "is", null);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/admin");
+  return { ok: true };
 }
 
 export async function updateTabPlacement(

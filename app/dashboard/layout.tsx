@@ -1,8 +1,9 @@
-import { redirect } from "next/navigation";
+﻿import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { getPlayerInfo, getStaffRole, hasMfaEnabled } from "@/app/lib/players";
 import { getNavSponsors } from "@/app/lib/sponsors-public";
+import { cropStyle } from "@/app/lib/media-crop";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import NavLink from "./nav-link";
 import { TopNav, type TopNavEntry } from "./top-nav";
@@ -11,6 +12,7 @@ import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
 import { APP_NAME } from "@/app/lib/constants";
 import MobileNav from "./mobile-nav";
 import { ServiceWorkerRegistrar } from "./sw-register";
+import { TabVisitTracker } from "./tab-visit-tracker";
 import { NotificationButton } from "./notification-button";
 import { PullToRefresh } from "./pull-to-refresh";
 import { PwaDesktopHint } from "./pwa-desktop-hint";
@@ -66,11 +68,6 @@ const ALL_NAV: Record<string, NavItem> = {
     href: "/dashboard/season",
     label: "Season",
     icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
-  },
-  tournament: {
-    href: "/dashboard/tournament",
-    label: "Tournament",
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4z"/><path d="M5 4H3v2a3 3 0 0 0 3 3M19 4h2v2a3 3 0 0 1-3 3"/></svg>,
   },
   schedule: {
     href: "/dashboard/schedule",
@@ -133,12 +130,23 @@ const ALL_NAV: Record<string, NavItem> = {
 // keep growing as features get added. A group only renders as a dropdown
 // when 2+ of its keys are actually present for the current user/state —
 // a lone survivor is shown as a plain top-level item instead.
+// Each group icon is its own freshly-created element, not a reference into
+// ALL_NAV — React's key-collision check flags the exact same element object
+// rendered in two list slots (the group header AND a leaf item's own icon).
 const NAV_GROUPS: { label: string; icon: React.ReactNode; keys: string[] }[] = [
-  { label: "Play", icon: ALL_NAV.tournament.icon, keys: ["tournament", "draft", "season", "schedule"] },
-  { label: "League", icon: ALL_NAV.players.icon, keys: ["teams", "players", "stats", "podium"] },
+  {
+    label: "Play",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4z"/><path d="M5 4H3v2a3 3 0 0 0 3 3M19 4h2v2a3 3 0 0 1-3 3"/></svg>,
+    keys: ["draft", "season", "schedule"],
+  },
+  {
+    label: "League",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>,
+    keys: ["teams", "players", "stats", "podium"],
+  },
 ];
 
-function groupNavKeys(keys: string[]): TopNavEntry[] {
+function groupNavKeys(keys: string[], navMap: Record<string, NavItem>): TopNavEntry[] {
   const consumed = new Set<string>();
   const result: TopNavEntry[] = [];
   for (const key of keys) {
@@ -146,11 +154,11 @@ function groupNavKeys(keys: string[]): TopNavEntry[] {
     const group = NAV_GROUPS.find((g) => g.keys.includes(key));
     if (!group) {
       consumed.add(key);
-      result.push(ALL_NAV[key]);
+      result.push(navMap[key]);
       continue;
     }
     group.keys.forEach((k) => consumed.add(k));
-    const groupItems = group.keys.filter((k) => keys.includes(k)).map((k) => ALL_NAV[k]);
+    const groupItems = group.keys.filter((k) => keys.includes(k)).map((k) => navMap[k]);
     if (groupItems.length <= 1) {
       if (groupItems.length === 1) result.push(groupItems[0]);
     } else {
@@ -163,6 +171,7 @@ function groupNavKeys(keys: string[]): TopNavEntry[] {
 function isNavGroup(entry: TopNavEntry): entry is Extract<TopNavEntry, { items: NavItem[] }> {
   return "items" in entry;
 }
+
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
@@ -251,8 +260,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // A staff member without 2FA is treated as non-admin everywhere on the site —
   // this is what makes the check "happen on refresh" rather than being baked
   // into the session JWT at login time.
-  const staffRole = session?.userId ? await getStaffRole(session.userId) : null;
-  const mfaOk = session?.userId ? await hasMfaEnabled(session.userId) : false;
+  const [staffRole, mfaOk] = session?.userId
+    ? await Promise.all([getStaffRole(session.userId), hasMfaEnabled(session.userId)])
+    : [null, false];
   const admin = staffRole !== null && mfaOk;
   const needsMfa = staffRole !== null && !mfaOk;
   const seasonActive = settingsRes.data?.season_active ?? false;
@@ -289,27 +299,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const hasActiveContent = seasonActive || !!activeTournamentId;
 
   // hasJoined: schedule nav — any current team or prior sign-up
-  // inActiveTournament: tournament nav — verified against the specific active tournament
   let hasJoined = !!teamId;
-  let inActiveTournament = false;
 
-  if (status === "approved") {
+  if (status === "approved" && !hasJoined) {
     const { data: me } = await supabaseAdmin
       .from("players").select("id").eq("discord_id", session.userId).single();
     if (me?.id) {
-      const [{ count: entryCount }, { count: memberCount }, { count: activeTourneyCount }] = await Promise.all([
-        !hasJoined
-          ? supabaseAdmin.from("tournament_entries").select("*", { count: "exact", head: true }).eq("player_id", me.id)
-          : Promise.resolve({ count: 1 }),
-        !hasJoined
-          ? supabaseAdmin.from("team_signup_members").select("*", { count: "exact", head: true }).eq("player_id", me.id).eq("status", "accepted")
-          : Promise.resolve({ count: 0 }),
-        activeTournamentId
-          ? supabaseAdmin.from("tournament_entries").select("*", { count: "exact", head: true }).eq("player_id", me.id).eq("tournament_id", activeTournamentId)
-          : Promise.resolve({ count: 0 }),
+      const [{ count: entryCount }, { count: memberCount }] = await Promise.all([
+        supabaseAdmin.from("tournament_entries").select("*", { count: "exact", head: true }).eq("player_id", me.id),
+        supabaseAdmin.from("team_signup_members").select("*", { count: "exact", head: true }).eq("player_id", me.id).eq("status", "accepted"),
       ]);
-      if (!hasJoined) hasJoined = (entryCount ?? 0) > 0 || (memberCount ?? 0) > 0;
-      inActiveTournament = (activeTourneyCount ?? 0) > 0;
+      hasJoined = (entryCount ?? 0) > 0 || (memberCount ?? 0) > 0;
     }
   }
 
@@ -361,7 +361,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
     navKeys = [
       "home",
       ...(teamId ? ["myteam"] : []),
-      ...(inActiveTournament ? ["tournament"] : []),
       ...(hasTeams ? ["teams"] : []),
       ...commonExtras,
       ...(draftActive ? ["draft"] : []),
@@ -376,14 +375,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!welcomeSeen && !isGuest) navKeys.unshift("welcome");
   if (admin) navKeys.push("admin", "testreplay");
 
+  // While a tournament is running, the "Season" tab stands in for it —
+  // no separate tournament nav entry, just a relabel driven by the same
+  // global flag that distinguishes a tournament-run season from a manual one.
+  const navMap: Record<string, NavItem> = activeTournamentId
+    ? { ...ALL_NAV, season: { ...ALL_NAV.season, label: "Tournament" } }
+    : ALL_NAV;
+
   const BOTTOM_KEYS = new Set(["settings", "admin", "testreplay"]);
   const mainNavKeys = navKeys.filter((k) => !BOTTOM_KEYS.has(k));
-  const mainNavItems = mainNavKeys.map((k) => ALL_NAV[k]);
-  const bottomNavItems = navKeys.filter((k) => BOTTOM_KEYS.has(k)).map((k) => ALL_NAV[k]);
+  const mainNavItems = mainNavKeys.map((k) => navMap[k]);
+  const bottomNavItems = navKeys.filter((k) => BOTTOM_KEYS.has(k)).map((k) => navMap[k]);
   const navItems = [...mainNavItems, ...bottomNavItems];
   // Grouped view for desktop only — mobile keeps the flat list above since it
   // already has its own bottom-tab + "More" sheet pattern.
-  const groupedMainNav = groupNavKeys(mainNavKeys);
+  const groupedMainNav = groupNavKeys(mainNavKeys, navMap);
 
   const avatarUrl = session?.avatar
     ? `https://cdn.discordapp.com/avatars/${session.userId}/${session.avatar}.png`
@@ -396,16 +402,36 @@ export default async function DashboardLayout({ children }: { children: React.Re
     return (
       <div className="flex flex-col h-dvh text-white relative z-[1]">
         <ServiceWorkerRegistrar />
+        <TabVisitTracker />
 
         {/* Top bar — desktop only */}
-        <header className="app-topbar hidden md:flex items-center gap-3 px-4 h-14 bg-zinc-900 border-b border-zinc-800 shrink-0">
+        <header
+          className={`app-topbar relative z-20 hidden md:flex items-center gap-3 px-4 h-14 bg-zinc-900 border-b border-zinc-800 shrink-0${navSponsors.topNav ? " has-nav-bg" : ""}`}
+        >
+          {navSponsors.topNav && (
+            <div className="absolute inset-0 overflow-hidden -z-10">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={navSponsors.topNav.imageUrl}
+                alt=""
+                className="absolute inset-0 w-full h-full"
+                style={cropStyle(navSponsors.topNav.crop)}
+              />
+              <div className="absolute inset-0 bg-black/55" />
+            </div>
+          )}
           <span className="text-lg font-bold tracking-tight shrink-0">{APP_NAME}</span>
           <TopNav items={groupedMainNav} />
           <div className="flex items-center gap-3 shrink-0">
             {navSponsors.topNav && (
-              <a href="/sponsors" className="shrink-0" title={navSponsors.topNav.name}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={navSponsors.topNav.imageUrl} alt={navSponsors.topNav.name} className="h-8 max-w-[140px] object-contain" />
+              <a
+                href={navSponsors.topNav.clickUrl || "/sponsors"}
+                target={navSponsors.topNav.clickUrl ? "_blank" : undefined}
+                rel={navSponsors.topNav.clickUrl ? "noopener noreferrer" : undefined}
+                className="shrink-0 text-[10px] text-white/80 hover:text-white transition-colors"
+                title={navSponsors.topNav.name}
+              >
+                Sponsored by {navSponsors.topNav.name}
               </a>
             )}
             <NotificationButton />
@@ -418,7 +444,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </header>
 
-        <main className="flex-1 overflow-hidden flex flex-col">
+        <main className="isolate flex-1 overflow-hidden flex flex-col">
           {needsMfa && <MfaBanner />}
           <div className="flex-1 overflow-hidden">
             <PullToRefresh>{children}</PullToRefresh>
@@ -458,7 +484,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <div className="flex h-dvh text-white relative z-[1]">
       <ServiceWorkerRegistrar />
-      <aside className="hidden md:flex w-56 flex-col bg-zinc-900 border-r border-zinc-800">
+      <TabVisitTracker />
+      <aside
+        className={`relative z-20 hidden md:flex w-56 flex-col bg-zinc-900 border-r border-zinc-800${navSponsors.sideNav ? " has-nav-bg" : ""}`}
+      >
+        {navSponsors.sideNav && (
+          <div className="absolute inset-0 overflow-hidden -z-10">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={navSponsors.sideNav.imageUrl}
+              alt=""
+              className="absolute inset-0 w-full h-full"
+              style={cropStyle(navSponsors.sideNav.crop)}
+            />
+            <div className="absolute inset-0 bg-black/55" />
+          </div>
+        )}
         <div className="px-4 py-5 border-b border-zinc-800">
           <span className="text-lg font-bold tracking-tight">{APP_NAME}</span>
         </div>
@@ -482,9 +523,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
         )}
 
         {navSponsors.sideNav && (
-          <a href="/sponsors" className="mx-3 mb-3 block" title={navSponsors.sideNav.name}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={navSponsors.sideNav.imageUrl} alt={navSponsors.sideNav.name} className="w-full max-h-16 object-contain" />
+          <a
+            href={navSponsors.sideNav.clickUrl || "/sponsors"}
+            target={navSponsors.sideNav.clickUrl ? "_blank" : undefined}
+            rel={navSponsors.sideNav.clickUrl ? "noopener noreferrer" : undefined}
+            className="mx-3 mb-3 block text-[10px] text-white/80 hover:text-white transition-colors"
+            title={navSponsors.sideNav.name}
+          >
+            Sponsored by {navSponsors.sideNav.name}
           </a>
         )}
 
@@ -529,7 +575,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
       </aside>
 
-      <main className="flex-1 overflow-hidden flex flex-col">
+      <main className="isolate flex-1 overflow-hidden flex flex-col">
         {needsMfa && <MfaBanner />}
         <div className="flex-1 overflow-hidden">
           <PullToRefresh>{children}</PullToRefresh>
@@ -547,7 +593,7 @@ function MfaBanner() {
   return (
     <div className="shrink-0 px-4 py-2 bg-red-900/50 border-b border-red-700/50 text-xs sm:text-sm text-red-200 text-center">
       Your staff account needs Discord two-factor authentication enabled to use admin features on this site.
-      Enable 2FA in Discord's User Settings, then log out and back in here to refresh your status.
+      Enable 2FA in Discord&apos;s User Settings, then log out and back in here to refresh your status.
     </div>
   );
 }

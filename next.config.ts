@@ -15,6 +15,9 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   devIndicators: false,
   serverExternalPackages: ["web-push"],
+  turbopack: {
+    root: __dirname,
+  },
   experimental: {
     serverActions: {
       bodySizeLimit: "5mb",

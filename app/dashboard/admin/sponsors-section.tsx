@@ -7,10 +7,14 @@ import {
   createSponsor,
   updateSponsorMaxUses,
   updateSponsorDetails,
+  updateContentCrop,
   toggleSponsorStatus,
   removeSponsorMember,
   updateTabPlacement,
+  updateSeasonSponsor,
 } from "./sponsor-actions";
+import { MediaCropModal } from "./media-crop-modal";
+import type { CropKind } from "@/app/lib/media-crop";
 
 function StatusBadge({ status }: { status: "active" | "disabled" }) {
   return status === "active" ? (
@@ -64,7 +68,7 @@ function LinksEditor({ links, onChange }: { links: SponsorLink[]; onChange: (lin
   );
 }
 
-type ContentKind = "video" | "topNav" | "sideNav" | "theme";
+type ContentKind = "video" | "topNav" | "sideNav" | "background" | "theme" | "link";
 type ContentItem = {
   kind: ContentKind | "";
   url: string;
@@ -72,16 +76,19 @@ type ContentItem = {
   themeAccent?: string;
   themeShell?: string;
   themeSecondary?: string;
+  themeMode?: "light" | "dark";
 };
 
-const ALL_CONTENT_KINDS: ContentKind[] = ["video", "topNav", "sideNav", "theme"];
+const ALL_CONTENT_KINDS: ContentKind[] = ["video", "topNav", "sideNav", "background", "theme", "link"];
 const CONTENT_KIND_LABELS: Record<ContentKind, string> = {
   video: "Video",
   topNav: "Top nav image",
   sideNav: "Side nav image",
+  background: "Tournament card background",
   theme: "Theme",
+  link: "Click-through link",
 };
-const THEME_DEFAULTS = { themeAccent: "#e88a24", themeShell: "#3736ac", themeSecondary: "#e88a24" };
+const THEME_DEFAULTS = { themeAccent: "#e88a24", themeShell: "#3736ac", themeSecondary: "#e88a24", themeMode: "light" as const };
 
 function SponsorPreview({
   name,
@@ -141,6 +148,8 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
     if (sponsor.video_url) items.push({ kind: "video", url: sponsor.video_url });
     if (sponsor.top_nav_image_url) items.push({ kind: "topNav", url: sponsor.top_nav_image_url });
     if (sponsor.side_nav_image_url) items.push({ kind: "sideNav", url: sponsor.side_nav_image_url });
+    if (sponsor.background_image_url) items.push({ kind: "background", url: sponsor.background_image_url });
+    if (sponsor.click_url) items.push({ kind: "link", url: sponsor.click_url });
     if (sponsor.theme_name) {
       items.push({
         kind: "theme",
@@ -149,13 +158,18 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
         themeAccent: sponsor.theme_accent ?? THEME_DEFAULTS.themeAccent,
         themeShell: sponsor.theme_shell ?? THEME_DEFAULTS.themeShell,
         themeSecondary: sponsor.theme_secondary ?? THEME_DEFAULTS.themeSecondary,
+        themeMode: sponsor.theme_mode ?? THEME_DEFAULTS.themeMode,
       });
     }
     return items;
   });
   const [links, setLinks] = useState<SponsorLink[]>(sponsor.links);
   const [promoCode, setPromoCode] = useState(sponsor.promo_code ?? "");
+  const [phrase, setPhrase] = useState(sponsor.phrase ?? "");
+  const [overview, setOverview] = useState(sponsor.overview ?? "");
+  const [promoDescription, setPromoDescription] = useState(sponsor.promo_description ?? "");
   const [uploading, setUploading] = useState<"logo" | ContentKind | null>(null);
+  const [cropModalKind, setCropModalKind] = useState<CropKind | null>(null);
 
   const inviteUrl =
     typeof window !== "undefined" ? `${window.location.origin}/sponsor/join/${sponsor.invite_token}` : "";
@@ -173,6 +187,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
       themeAccent: t?.themeAccent ?? "",
       themeShell: t?.themeShell ?? "",
       themeSecondary: t?.themeSecondary ?? "",
+      themeMode: t?.themeMode ?? THEME_DEFAULTS.themeMode,
     };
   }
 
@@ -181,11 +196,17 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
     urlForKind("video") !== (sponsor.video_url ?? "") ||
     urlForKind("topNav") !== (sponsor.top_nav_image_url ?? "") ||
     urlForKind("sideNav") !== (sponsor.side_nav_image_url ?? "") ||
+    urlForKind("background") !== (sponsor.background_image_url ?? "") ||
+    urlForKind("link") !== (sponsor.click_url ?? "") ||
     promoCode !== (sponsor.promo_code ?? "") ||
+    phrase !== (sponsor.phrase ?? "") ||
+    overview !== (sponsor.overview ?? "") ||
+    promoDescription !== (sponsor.promo_description ?? "") ||
     (themeItem()?.themeName ?? "") !== (sponsor.theme_name ?? "") ||
     (themeItem()?.themeAccent ?? "") !== (sponsor.theme_accent ?? "") ||
     (themeItem()?.themeShell ?? "") !== (sponsor.theme_shell ?? "") ||
     (themeItem()?.themeSecondary ?? "") !== (sponsor.theme_secondary ?? "") ||
+    (themeItem()?.themeMode ?? THEME_DEFAULTS.themeMode) !== (sponsor.theme_mode ?? THEME_DEFAULTS.themeMode) ||
     JSON.stringify(links) !== JSON.stringify(sponsor.links);
 
   function handleCopy() {
@@ -220,8 +241,13 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
         videoUrl: urlForKind("video"),
         topNavImageUrl: urlForKind("topNav"),
         sideNavImageUrl: urlForKind("sideNav"),
+        backgroundImageUrl: urlForKind("background"),
+        clickUrl: urlForKind("link"),
         links,
         promoCode,
+        phrase,
+        overview,
+        promoDescription,
         ...themeFields(),
       });
       if (res.error) setError(res.error);
@@ -252,8 +278,13 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
         videoUrl: urlForKind("video"),
         topNavImageUrl: urlForKind("topNav"),
         sideNavImageUrl: urlForKind("sideNav"),
+        backgroundImageUrl: urlForKind("background"),
+        clickUrl: urlForKind("link"),
         links,
         promoCode,
+        phrase,
+        overview,
+        promoDescription,
         ...themeFields(),
       });
       if (res.error) setError(res.error);
@@ -279,8 +310,13 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
         videoUrl: urlForKind("video", nextItems),
         topNavImageUrl: urlForKind("topNav", nextItems),
         sideNavImageUrl: urlForKind("sideNav", nextItems),
+        backgroundImageUrl: urlForKind("background", nextItems),
+        clickUrl: urlForKind("link", nextItems),
         links,
         promoCode,
+        phrase,
+        overview,
+        promoDescription,
         ...themeFields(nextItems),
       });
       if (res.error) setError(res.error);
@@ -289,6 +325,14 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
     } finally {
       setUploading(null);
     }
+  }
+
+  function cropUrlFor(kind: CropKind): string {
+    return kind === "logo" ? logoUrl : urlForKind(kind);
+  }
+
+  async function handleSaveCrop(kind: CropKind, crop: { x: number; y: number; zoom: number }) {
+    return updateContentCrop(sponsor.id, kind, crop);
   }
 
   function handleToggleStatus() {
@@ -381,6 +425,14 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
                 }}
               />
             </label>
+            <button
+              type="button"
+              onClick={() => setCropModalKind("logo")}
+              disabled={!logoUrl}
+              className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Preview
+            </button>
           </div>
         </div>
 
@@ -395,7 +447,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
                   value={item.kind}
                   onChange={(e) => {
                     const kind = e.target.value as ContentKind | "";
-                    updateContentItem(i, kind === "theme" ? { kind, url: "", themeName: "", ...THEME_DEFAULTS } : { kind, url: "" });
+                    updateContentItem(i, kind === "theme" ? { kind, url: "", themeName: "", themeAccent: THEME_DEFAULTS.themeAccent, themeShell: THEME_DEFAULTS.themeShell, themeSecondary: THEME_DEFAULTS.themeSecondary, themeMode: THEME_DEFAULTS.themeMode } : { kind, url: "" });
                   }}
                   className="w-36 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
                 >
@@ -441,9 +493,25 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
                         className="w-7 h-7 rounded border border-zinc-700 bg-zinc-800 cursor-pointer"
                       />
                     </label>
+                    <select
+                      value={item.themeMode ?? THEME_DEFAULTS.themeMode}
+                      onChange={(e) => updateContentItem(i, { themeMode: e.target.value === "dark" ? "dark" : "light" })}
+                      className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
+                    >
+                      <option value="light">Light base</option>
+                      <option value="dark">Dark base</option>
+                    </select>
                   </>
                 )}
-                {item.kind && item.kind !== "theme" && (
+                {item.kind === "link" && (
+                  <input
+                    value={item.url}
+                    onChange={(e) => updateContentItem(i, { url: e.target.value })}
+                    placeholder="https://..."
+                    className="flex-1 min-w-[160px] bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600"
+                  />
+                )}
+                {item.kind && item.kind !== "theme" && item.kind !== "link" && (
                   <>
                     <input
                       value={item.url}
@@ -465,6 +533,16 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
                         }}
                       />
                     </label>
+                    {(item.kind === "topNav" || item.kind === "sideNav" || item.kind === "background") && (
+                      <button
+                        type="button"
+                        onClick={() => setCropModalKind(item.kind as CropKind)}
+                        disabled={!item.url}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Preview
+                      </button>
+                    )}
                   </>
                 )}
                 <button onClick={() => removeContentItem(i)} className="text-xs text-red-500 hover:text-red-400 transition-colors">
@@ -478,6 +556,21 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
               Sidebar text is always white — pick a reasonably dark sidebar color for it to stay readable.
             </p>
           )}
+          {contentItems.some((c) => c.kind === "topNav" || c.kind === "sideNav") && (
+            <p className="text-[11px] text-zinc-600">
+              Top/side nav images render full-bleed as the bar&apos;s background (with a dark overlay for legibility), not as a small logo — pick a wide/tall photo, not an icon.
+            </p>
+          )}
+          {contentItems.some((c) => c.kind === "background") && (
+            <p className="text-[11px] text-zinc-600">
+              Tournament card background is used on the home page for any tournament this sponsor is attached to (with a dark overlay for legibility) — pick a wide photo, not an icon.
+            </p>
+          )}
+          {contentItems.some((c) => c.kind === "link") && (
+            <p className="text-[11px] text-zinc-600">
+              Click-through link is where the sponsor&apos;s logo/branding takes people when clicked — separate from the named Links list below.
+            </p>
+          )}
           <button
             onClick={addContentItem}
             disabled={contentItems.length >= ALL_CONTENT_KINDS.length}
@@ -488,6 +581,28 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
         </div>
 
         <LinksEditor links={links} onChange={setLinks} />
+
+        <div className="space-y-1.5">
+          <span className="text-xs text-zinc-500">Phrase (short tagline)</span>
+          <input
+            value={phrase}
+            onChange={(e) => setPhrase(e.target.value)}
+            placeholder="Powering the next generation of Rocket League"
+            maxLength={120}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <span className="text-xs text-zinc-500">Overview (paragraph)</span>
+          <textarea
+            value={overview}
+            onChange={(e) => setOverview(e.target.value)}
+            placeholder="A short paragraph about the sponsor — who they are, what they do."
+            rows={3}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600 resize-y"
+          />
+        </div>
 
         <div className="flex items-center gap-2">
           <span className="text-xs text-zinc-500">Promo code</span>
@@ -504,6 +619,21 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
           >
             {promoCopied ? "Copied!" : "Copy"}
           </button>
+        </div>
+
+        <div className="space-y-1.5">
+          <span className="text-xs text-zinc-500">Promo code description</span>
+          <textarea
+            value={promoDescription}
+            onChange={(e) => setPromoDescription(e.target.value)}
+            placeholder="Use {PROMO} for 10% off your next order"
+            rows={2}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600 resize-y"
+          />
+          <p className="text-[11px] text-zinc-600">
+            Keep the <code className="bg-zinc-800 px-1 rounded">{"{PROMO}"}</code> token somewhere in the
+            description — it&apos;s replaced with the actual promo code above wherever this is shown.
+          </p>
         </div>
 
         <button
@@ -544,6 +674,16 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
             </div>
           ))}
         </div>
+      )}
+
+      {cropModalKind && (
+        <MediaCropModal
+          kind={cropModalKind}
+          url={cropUrlFor(cropModalKind)}
+          initialCrop={sponsor.content_crop?.[cropModalKind]}
+          onClose={() => setCropModalKind(null)}
+          onSave={(crop) => handleSaveCrop(cropModalKind, crop)}
+        />
       )}
     </div>
   );
@@ -651,6 +791,56 @@ export function TabManagerSection({ sponsors, tabPlacement }: { sponsors: Sponso
       >
         Save
       </button>
+    </div>
+  );
+}
+
+export function SeasonSponsorPicker({
+  sponsors,
+  initialSponsorId,
+}: {
+  sponsors: { id: string; name: string }[];
+  initialSponsorId: string | null;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [sponsorId, setSponsorId] = useState(initialSponsorId ?? "");
+
+  const hasChanges = sponsorId !== (initialSponsorId ?? "");
+
+  function handleSave() {
+    setError(null);
+    startTransition(async () => {
+      const res = await updateSeasonSponsor(sponsorId || null);
+      if (res.error) setError(res.error);
+    });
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <span className="text-xs text-zinc-500">Season sponsor</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={sponsorId}
+          onChange={(e) => setSponsorId(e.target.value)}
+          className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
+        >
+          <option value="">None</option>
+          {sponsors.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={handleSave}
+          disabled={isPending || !hasChanges}
+          className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition-colors"
+        >
+          Save
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   );
 }

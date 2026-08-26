@@ -33,6 +33,7 @@ export default async function SeasonPage() {
   const participants = (settings?.season_participants as number) ?? 16;
   const seasonActive = settings?.season_active ?? false;
   const numTeams = (settings?.num_teams as number) ?? 0;
+  const isTournament = !!settings?.active_tournament_id;
 
   const isGroupSE           = format?.preset === "group_single_elimination";
   const isGroupSwissSE      = format?.preset === "group_swiss_single_elimination";
@@ -407,11 +408,11 @@ export default async function SeasonPage() {
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Season</h1>
+        <h1 className="text-2xl font-bold text-white">{isTournament ? "Tournament" : "Season"}</h1>
         {seasonActive && (
           <span className="inline-flex items-center gap-1.5 mt-1 text-xs font-medium text-emerald-400">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-            Season in progress
+            {isTournament ? "Tournament in progress" : "Season in progress"}
           </span>
         )}
       </div>

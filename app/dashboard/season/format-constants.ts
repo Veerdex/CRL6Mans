@@ -122,6 +122,24 @@ export const PRESETS: PresetDef[] = [
   },
 ];
 
+// Generic, player-facing explanation of how each stage type plays out —
+// shown on the tournament detail page's Format tab. Independent of the
+// preset-level `description` above (which explains how stages connect to
+// each other, not how any single stage works).
+export const STAGE_TYPE_DESCRIPTIONS: Record<StageType, string> = {
+  group: "Teams are split into groups and play round-robin within their group. The top finishers in each group advance to the next stage.",
+  swiss: "Teams are paired each round against an opponent with a similar record, without repeat matchups. After a fixed number of rounds, the top finishers advance.",
+  single_elimination: "One loss and a team is out. Winners advance each round until a single champion remains.",
+  double_elimination: "A team must lose twice to be eliminated — a winners bracket and a losers bracket run in parallel, and the winners bracket champion faces the losers bracket champion in the grand final.",
+};
+
+export function stageDescription(slotKey: StageSlotKey, stageType: StageType): string {
+  if (slotKey === "hybrid") {
+    return "A double-elimination bracket where teams start in either the upper or lower bracket based on how they qualified. Two losses eliminates a team; the upper and lower bracket winners meet in the grand final.";
+  }
+  return STAGE_TYPE_DESCRIPTIONS[stageType];
+}
+
 export const TIER_LABELS: Record<RoundTier, string> = {
   standard: "Standard Rounds",
   quarterfinals: "Quarterfinals",

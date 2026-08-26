@@ -1,83 +1,10 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { decrypt } from "@/app/lib/session";
-import { getPublicSponsors, type PublicSponsor } from "@/app/lib/sponsors-public";
-import { PromoCopyButton } from "./promo-copy-button";
+import { getPublicSponsors } from "@/app/lib/sponsors-public";
+import { SponsorCard } from "@/app/lib/sponsor-display";
 
 export const dynamic = "force-dynamic";
-
-function getYouTubeEmbedUrl(url: string): string | null {
-  const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtube\.com\/embed\/|youtu\.be\/)([\w-]{11})/,
-  ];
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) return `https://www.youtube.com/embed/${match[1]}`;
-  }
-  return null;
-}
-
-function SponsorVideo({ url, className }: { url: string; className?: string }) {
-  const embedUrl = getYouTubeEmbedUrl(url);
-  if (embedUrl) {
-    return (
-      <iframe
-        src={embedUrl}
-        title="Sponsor video"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-        allowFullScreen
-        className={className}
-      />
-    );
-  }
-  return <video src={url} controls className={className} />;
-}
-
-function SponsorLinks({ sponsor }: { sponsor: PublicSponsor }) {
-  const links = sponsor.links.filter((l) => l.label && l.url);
-  if (links.length === 0) return null;
-  return (
-    <div className="flex flex-wrap gap-3">
-      {links.map((l, i) => (
-        <a
-          key={i}
-          href={l.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-[#e88a24] hover:underline"
-        >
-          {l.label}
-        </a>
-      ))}
-    </div>
-  );
-}
-
-function SponsorCard({ sponsor }: { sponsor: PublicSponsor }) {
-  return (
-    <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-6 space-y-4">
-      <div className="flex items-center gap-4">
-        {sponsor.logo_url && (
-          <img
-            src={sponsor.logo_url}
-            alt={sponsor.name}
-            className="w-16 h-16 rounded-xl object-cover border border-zinc-800"
-          />
-        )}
-        <h2 className="text-2xl font-bold text-white">{sponsor.name}</h2>
-      </div>
-
-      {sponsor.video_url && (
-        <SponsorVideo url={sponsor.video_url} className="w-full aspect-video rounded-xl border-0" />
-      )}
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <SponsorLinks sponsor={sponsor} />
-        {sponsor.promo_code && <PromoCopyButton code={sponsor.promo_code} />}
-      </div>
-    </div>
-  );
-}
 
 export default async function SponsorsPage() {
   const session = await decrypt((await cookies()).get("session")?.value);

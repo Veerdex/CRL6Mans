@@ -211,9 +211,9 @@ html[data-theme="dark"] {
   --c-zinc-100: #f4f4f5;
   --c-zinc-200: #e4e4e7;
   --c-zinc-300: #d4d4d8;
-  --c-zinc-400: #a1a1aa;
-  --c-zinc-500: #71717a;
-  --c-zinc-600: #52525b;
+  --c-zinc-400: #ffffff;
+  --c-zinc-500: #a1a1aa;
+  --c-zinc-600: #8a8a94;
   --c-zinc-700: #3f3f46;
   --c-zinc-800: #27272a;
   --c-zinc-900: #18181b;
@@ -427,17 +427,21 @@ html[data-theme="dark"] {
 [data-theme="crl6mans"] main h1,
 [data-theme="crl6mans"] main h2 { color: #e88a24; }
 
-/* ── SPONSOR (admin-configurable) — three sponsor-picked brand colors on the
-   CRL6Mans base: --sponsor-accent drives the indigo ramp (buttons, active
-   nav, headings), --sponsor-shell colors the sidebar/topbar, and
-   --sponsor-secondary drives the amber ramp (highlights/badges). Surfaces
-   and status colors are the same fixed values CRL6Mans uses — sponsors only
-   control these three roles. Values are injected as inline custom
-   properties on <html> from the active settings-tab sponsor
-   (league_settings.settings_tab_sponsor_id — see app/layout.tsx and
-   app/lib/sponsors-public.ts). Uses html[data-theme=...] (not a bare
-   attribute selector) so it reliably outranks :root's crl6mans tokens
-   regardless of source order. */
+/* ── SPONSOR (admin-configurable) — three sponsor-picked brand colors on a
+   light or dark base (admin's choice — sponsors.theme_mode, defaults to
+   light): --sponsor-accent drives the indigo ramp (buttons, active nav,
+   headings), --sponsor-shell colors the sidebar/topbar, and
+   --sponsor-secondary drives the amber ramp (highlights/badges). Values
+   are injected as inline custom properties on <html> from the active
+   settings-tab sponsor (league_settings.settings_tab_sponsor_id — see
+   app/layout.tsx and app/lib/sponsors-public.ts). Uses html[data-theme=...]
+   (not a bare attribute selector) so it reliably outranks :root's
+   crl6mans tokens regardless of source order.
+
+   This block is the LIGHT-base variant (same fixed surfaces/status colors
+   CRL6Mans uses) and applies whenever data-sponsor-mode isn't "dark". The
+   dark-base variant immediately below overrides it via an extra attribute
+   selector (higher specificity, so source order doesn't matter). */
 html[data-theme="sponsor"] {
   --c-bg: #d5dbf2;
   --c-fg: #1e1d44;
@@ -496,6 +500,73 @@ html[data-theme="sponsor"] {
   --c-yellow-300:#a16207; --c-yellow-400:#ca8a04; --c-yellow-500:#eab308;
   --c-yellow-600:#ca8a04; --c-yellow-700:#a16207; --c-yellow-800:#854d0e;
   --c-yellow-900:#fef9c3; --c-yellow-950:#fefce8;
+}
+
+/* Dark-base variant: same three sponsor-picked colors, but surfaces/status
+   follow the built-in "dark" theme's (non-inverted) scale instead of
+   CRL6Mans's. The indigo/amber ramps mirror the light-base formula above
+   exactly through shade 800 (tint toward white pre-600, shade toward
+   black post-600) and only diverge at 900/950, continuing to darken
+   toward black instead of snapping back to a light tint — matching how
+   the built-in dark theme's own indigo/amber never reverse direction. */
+html[data-theme="sponsor"][data-sponsor-mode="dark"] {
+  --c-bg: #09090b;
+  --c-fg: #ededed;
+  --c-white: #ffffff;
+
+  --c-zinc-50:  #fafafa;
+  --c-zinc-100: #f4f4f5;
+  --c-zinc-200: #e4e4e7;
+  --c-zinc-300: #d4d4d8;
+  --c-zinc-400: #a1a1aa;
+  --c-zinc-500: #71717a;
+  --c-zinc-600: #52525b;
+  --c-zinc-700: #3f3f46;
+  --c-zinc-800: #27272a;
+  --c-zinc-900: #18181b;
+  --c-zinc-950: #09090b;
+
+  --c-indigo-50:  color-mix(in oklab, var(--sponsor-accent, #e88a24) 8%, white 92%);
+  --c-indigo-100: color-mix(in oklab, var(--sponsor-accent, #e88a24) 15%, white 85%);
+  --c-indigo-200: color-mix(in oklab, var(--sponsor-accent, #e88a24) 30%, white 70%);
+  --c-indigo-300: color-mix(in oklab, var(--sponsor-accent, #e88a24) 60%, white 40%);
+  --c-indigo-400: color-mix(in oklab, var(--sponsor-accent, #e88a24) 85%, white 15%);
+  --c-indigo-500: color-mix(in oklab, var(--sponsor-accent, #e88a24) 85%, white 15%);
+  --c-indigo-600: var(--sponsor-accent, #e88a24);
+  --c-indigo-700: color-mix(in oklab, var(--sponsor-accent, #e88a24) 85%, black 15%);
+  --c-indigo-800: color-mix(in oklab, var(--sponsor-accent, #e88a24) 70%, black 30%);
+  --c-indigo-900: color-mix(in oklab, var(--sponsor-accent, #e88a24) 40%, black 60%);
+  --c-indigo-950: color-mix(in oklab, var(--sponsor-accent, #e88a24) 20%, black 80%);
+
+  --c-amber-50:  color-mix(in oklab, var(--sponsor-secondary, #e88a24) 8%, white 92%);
+  --c-amber-100: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 15%, white 85%);
+  --c-amber-200: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 30%, white 70%);
+  --c-amber-300: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 85%, white 15%);
+  --c-amber-400: var(--sponsor-secondary, #e88a24);
+  --c-amber-500: var(--sponsor-secondary, #e88a24);
+  --c-amber-600: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 85%, black 15%);
+  --c-amber-700: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 70%, black 30%);
+  --c-amber-800: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 55%, black 45%);
+  --c-amber-900: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 35%, black 65%);
+  --c-amber-950: color-mix(in oklab, var(--sponsor-secondary, #e88a24) 18%, black 82%);
+
+  /* status colors: same fixed set as the built-in dark theme */
+  --c-emerald-50:#ecfdf5; --c-emerald-100:#d1fae5; --c-emerald-200:#a7f3d0;
+  --c-emerald-300:#6ee7b7; --c-emerald-400:#34d399; --c-emerald-500:#10b981;
+  --c-emerald-600:#059669; --c-emerald-700:#047857; --c-emerald-800:#065f46;
+  --c-emerald-900:#064e3b; --c-emerald-950:#022c22;
+  --c-red-50:#fef2f2; --c-red-100:#fee2e2; --c-red-200:#fecaca;
+  --c-red-300:#fca5a5; --c-red-400:#f87171; --c-red-500:#ef4444;
+  --c-red-600:#dc2626; --c-red-700:#b91c1c; --c-red-800:#991b1b;
+  --c-red-900:#7f1d1d; --c-red-950:#450a0a;
+  --c-blue-50:#eff6ff; --c-blue-100:#dbeafe; --c-blue-200:#bfdbfe;
+  --c-blue-300:#93c5fd; --c-blue-400:#60a5fa; --c-blue-500:#3b82f6;
+  --c-blue-600:#2563eb; --c-blue-700:#1d4ed8; --c-blue-800:#1e40af;
+  --c-blue-900:#1e3a8a; --c-blue-950:#172554;
+  --c-yellow-50:#fefce8; --c-yellow-100:#fef9c3; --c-yellow-200:#fef08a;
+  --c-yellow-300:#fde047; --c-yellow-400:#facc15; --c-yellow-500:#eab308;
+  --c-yellow-600:#ca8a04; --c-yellow-700:#a16207; --c-yellow-800:#854d0e;
+  --c-yellow-900:#713f12; --c-yellow-950:#422006;
 }
 
 /* Sponsor shell: same structural overrides as CRL6Mans, colored via
@@ -561,11 +632,43 @@ html[data-theme="sponsor"] {
 [data-theme="sponsor"] main h1,
 [data-theme="sponsor"] main h2 { color: var(--sponsor-accent, #e88a24); }
 
+/* Sponsor top/side nav background image (app/dashboard/layout.tsx): a
+   full-bleed admin-uploaded image behind the bar, with a fixed dark scrim
+   baked into the same background-image so it reads regardless of the
+   image's own colors. Nav text is forced light here too, overriding
+   whatever text color the active theme would otherwise give it (including
+   light theme's dark ink) — same no-contrast-checking tradeoff already
+   accepted for the sponsor theme's shell text. Placed after the per-theme
+   blocks above so it wins on equal specificity via source order. */
+header.has-nav-bg span,
+header.has-nav-bg a,
+header.has-nav-bg .nav-more,
+aside.has-nav-bg span,
+aside.has-nav-bg a { color: rgba(255,255,255,0.9); }
+header.has-nav-bg a:hover,
+aside.has-nav-bg a:hover { color: #ffffff; background-color: rgba(255,255,255,0.12); }
+header.has-nav-bg > span:first-child,
+aside.has-nav-bg > div:first-child span { color: #ffffff; }
+/* Active-tab pill background/color is left to the active theme's own
+   bg-zinc-800/text-white rules (including crl6mans/sponsor's orange pill
+   override) rather than forced here — those already read fine over the
+   scrim, and overriding them would fight the theme's own branding. */
+/* The "More" dropdown is a separate floating panel with its own solid
+   (theme-correct) background, not the header's image — exclude it from the
+   forced-white rules above so its text stays legible per the active theme. */
+header.has-nav-bg .nav-more-menu a { color: var(--color-zinc-400); }
+header.has-nav-bg .nav-more-menu a:hover,
+header.has-nav-bg .nav-more-menu a.bg-zinc-800 { color: var(--color-white); }
+aside.has-nav-bg .sidebar-flyout a { color: var(--color-zinc-400); }
+aside.has-nav-bg .sidebar-flyout a:hover,
+aside.has-nav-bg .sidebar-flyout a.bg-zinc-800 { color: var(--color-white); }
+
 /* Stats page background: solid white on light themes, black on dark. */
 [data-theme="crl6mans"] .stats-bg,
 [data-theme="light"] .stats-bg,
 [data-theme="sponsor"] .stats-bg { background-color: #ffffff; }
-[data-theme="dark"] .stats-bg { background-color: #000000; }
+[data-theme="dark"] .stats-bg,
+[data-theme="sponsor"][data-sponsor-mode="dark"] .stats-bg { background-color: #000000; }
 
 /* White that must stay white regardless of theme (text/badges on colored accents). */
 @utility text-on-accent { color: #ffffff; }

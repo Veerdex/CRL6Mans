@@ -222,6 +222,12 @@ function emptyStarts(preset: string): string[] {
   return Array(count).fill("");
 }
 
+// New tournaments default every stage after the first to "Follow" — the admin only
+// has to set the first stage's start, and the rest chain off it automatically.
+function emptyFollow(preset: string): boolean[] {
+  return emptyStarts(preset).map((_, i) => i > 0);
+}
+
 // ── Misc ─────────────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<Tournament["status"], string> = {
@@ -246,6 +252,38 @@ function localInputToIso(value: string): string | null {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+// Adds `minutes` to a datetime-local value, formatted back to a datetime-local value.
+function addMinutesLocal(localValue: string, minutes: number): string {
+  if (!localValue) return "";
+  const d = new Date(localValue);
+  if (isNaN(d.getTime())) return "";
+  d.setMinutes(d.getMinutes() + minutes);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Resolves each stage's effective start: a "follow" stage is computed as the previous
+// stage's (effective) start plus its estimated duration, chaining transitively so a
+// change to stage 1 propagates through every downstream "follow" stage.
+function computeEffectiveStarts(raw: string[], follow: boolean[], durations: StageScheduleEntry[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    if (i > 0 && follow[i]) {
+      out.push(addMinutesLocal(out[i - 1] ?? "", durations[i - 1]?.estimatedMinutes ?? 0));
+    } else {
+      out.push(raw[i] ?? "");
+    }
+  }
+  return out;
+}
+
+function fmtLocalDT(localValue: string): string {
+  if (!localValue) return "";
+  const d = new Date(localValue);
+  if (isNaN(d.getTime())) return "";
+  return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+}
+
 // ── Form state ────────────────────────────────────────────────────────────────
 
 type FormState = {
@@ -265,8 +303,13 @@ type FormState = {
   draftCloseAt: string;
   draftStartAt: string;
   stageStarts: string[];
+  stageFollow: boolean[];
   previewTeams: string;
   isTest: boolean;
+  sponsorId: string;
+  prize1st: string;
+  prize2nd: string;
+  prize3rd4th: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -286,8 +329,13 @@ const EMPTY_FORM: FormState = {
   draftCloseAt: "",
   draftStartAt: "",
   stageStarts: [""],
+  stageFollow: [false],
   previewTeams: "",
   isTest: false,
+  sponsorId: "",
+  prize1st: "",
+  prize2nd: "",
+  prize3rd4th: "",
 };
 
 const inputCls =
@@ -301,11 +349,13 @@ export function TournamentManager({
   seasons,
   hasActive,
   testingMode = false,
+  sponsors = [],
 }: {
   tournaments: Tournament[];
   seasons: Season[];
   hasActive: boolean;
   testingMode?: boolean;
+  sponsors?: { id: string; name: string }[];
 }) {
   const [isPending, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -340,6 +390,9 @@ export function TournamentManager({
   const stages = computeStageSchedule(form.preset, teams, groupMaxAdvParsed, form.roundBestOf, groupRoundsParsed);
   const previewCount = parseInt(form.previewTeams) || teams;
   const displayStages = computeStageSchedule(form.preset, previewCount, groupMaxAdvParsed, form.roundBestOf, groupRoundsParsed);
+  // Durations come from displayStages (preview team count) so a "follow" stage's
+  // computed start matches the estimate the admin is actually looking at.
+  const effectiveStageStarts = computeEffectiveStarts(form.stageStarts, form.stageFollow, displayStages);
 
   const buildInput = (): TournamentInput => {
     const trimmedRoundBestOf: RoundBestOfConfig = {};
@@ -362,11 +415,11 @@ export function TournamentManager({
 
     const stage_starts: Record<string, string> = {};
     stages.forEach((s, i) => {
-      const iso = localInputToIso(form.stageStarts[i] ?? "");
+      const iso = localInputToIso(effectiveStageStarts[i] ?? "");
       if (iso) stage_starts[s.key] = iso;
     });
 
-    const season_start_at = localInputToIso(form.stageStarts[0] ?? "");
+    const season_start_at = localInputToIso(effectiveStageStarts[0] ?? "");
 
     return {
       name: form.name,
@@ -387,6 +440,10 @@ export function TournamentManager({
       min_mmr_2v2: form.minMmr2v2 ? parseInt(form.minMmr2v2) || null : null,
       min_mmr_3v3: form.minMmr3v3 ? parseInt(form.minMmr3v3) || null : null,
       is_test: form.isTest,
+      sponsor_id: form.sponsorId || null,
+      prize_1st: form.prize1st ? parseInt(form.prize1st) || null : null,
+      prize_2nd: form.prize2nd ? parseInt(form.prize2nd) || null : null,
+      prize_3rd4th: form.prize3rd4th ? parseInt(form.prize3rd4th) || null : null,
     };
   };
 
@@ -410,7 +467,7 @@ export function TournamentManager({
     const stageInfos = stages.map((s, i) => ({
       label: s.label,
       estimatedMinutes: (displayStages[i] ?? s).estimatedMinutes,
-      start: form.stageStarts[i] ? new Date(form.stageStarts[i]) : null,
+      start: effectiveStageStarts[i] ? new Date(effectiveStageStarts[i]) : null,
     }));
 
     const firstStart = stageInfos[0]?.start;
@@ -421,6 +478,7 @@ export function TournamentManager({
     }
 
     for (let i = 1; i < stageInfos.length; i++) {
+      if (form.stageFollow[i]) continue; // computed from the previous stage, always valid by construction
       const prev = stageInfos[i - 1];
       const curr = stageInfos[i];
       if (curr.start && !prev.start)
@@ -460,6 +518,17 @@ export function TournamentManager({
     const tStages = computeStageSchedule(preset, tTeams, tGroupAdv, tBof, tGroupRounds);
     const savedStarts = (t as { stage_starts?: Record<string, string> | null }).stage_starts ?? null;
 
+    // Restore Follow state: if a saved stage start matches what the previous stage's
+    // (saved start + estimated duration) formula would produce, treat it as chained.
+    const inferredFollow = tStages.map((s, i) => {
+      if (i === 0 || !savedStarts) return false;
+      const prevIso = savedStarts[tStages[i - 1].key];
+      const curIso = savedStarts[s.key];
+      if (!prevIso || !curIso) return false;
+      const prevEndMs = new Date(prevIso).getTime() + tStages[i - 1].estimatedMinutes * 60_000;
+      return Math.abs(new Date(curIso).getTime() - prevEndMs) < 60_000;
+    });
+
     setForm({
       name: t.name,
       joinMode: t.join_mode,
@@ -475,12 +544,32 @@ export function TournamentManager({
       draftCloseAt: isoToLocalInput(t.draft_close_at),
       draftStartAt: isoToLocalInput(t.draft_start_at),
       stageStarts: tStages.map(s => isoToLocalInput(savedStarts?.[s.key] ?? null)),
+      stageFollow: inferredFollow,
       previewTeams: "",
       minMmr2v2: t.min_mmr_2v2 ? String(t.min_mmr_2v2) : "",
       minMmr3v3: t.min_mmr_3v3 ? String(t.min_mmr_3v3) : "",
       isTest: t.is_test ?? false,
+      sponsorId: t.sponsor_id ?? "",
+      prize1st: t.prize_1st ? String(t.prize_1st) : "",
+      prize2nd: t.prize_2nd ? String(t.prize_2nd) : "",
+      prize3rd4th: t.prize_3rd4th ? String(t.prize_3rd4th) : "",
     });
     setFeedback(null);
+  };
+
+  const handleToggleFollow = (i: number) => {
+    setForm((f) => {
+      const nextFollow = [...f.stageFollow];
+      nextFollow[i] = !nextFollow[i];
+      let nextStarts = f.stageStarts;
+      if (!nextFollow[i]) {
+        // Turning off: snapshot the last computed value so the field doesn't go blank.
+        const computed = computeEffectiveStarts(f.stageStarts, f.stageFollow, displayStages);
+        nextStarts = [...f.stageStarts];
+        nextStarts[i] = computed[i] || nextStarts[i];
+      }
+      return { ...f, stageFollow: nextFollow, stageStarts: nextStarts };
+    });
   };
 
   const run = (fn: () => Promise<{ ok?: boolean; error?: string; message?: string }>) => {
@@ -630,6 +719,7 @@ export function TournamentManager({
                   preset: p,
                   minTeams: d.min,
                   stageStarts: emptyStarts(p),
+                  stageFollow: emptyFollow(p),
                   // Re-seed slots for the new preset, preserving values for slot
                   // keys shared with the previous preset (e.g. "single_elimination").
                   roundBestOf: { ...defaultRoundBestOfForPreset(p as PresetId), ...f.roundBestOf },
@@ -638,6 +728,20 @@ export function TournamentManager({
             >
               {PRESETS.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className={labelCls}>Sponsor (optional)</label>
+            <select
+              className={inputCls}
+              value={form.sponsorId}
+              onChange={(e) => setForm({ ...form, sponsorId: e.target.value })}
+            >
+              <option value="">None</option>
+              {sponsors.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
           </div>
@@ -721,6 +825,46 @@ export function TournamentManager({
           </div>
         )}
 
+        {/* Prize pool */}
+        <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
+          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Prize Pool (optional)</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className={labelCls}>1st place</label>
+              <input
+                type="number"
+                min={0}
+                className={inputCls}
+                value={form.prize1st}
+                onChange={(e) => setForm({ ...form, prize1st: e.target.value })}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className={labelCls}>2nd place</label>
+              <input
+                type="number"
+                min={0}
+                className={inputCls}
+                value={form.prize2nd}
+                onChange={(e) => setForm({ ...form, prize2nd: e.target.value })}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className={labelCls}>3rd-4th place (each)</label>
+              <input
+                type="number"
+                min={0}
+                className={inputCls}
+                value={form.prize3rd4th}
+                onChange={(e) => setForm({ ...form, prize3rd4th: e.target.value })}
+                placeholder="0"
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Best Of settings — one block per independently-configurable stage */}
         {slotsForPreset(form.preset).map((slot) => {
           const slotConfig = form.roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
@@ -801,30 +945,56 @@ export function TournamentManager({
               {stages.map((stage, i) => {
                 const display = displayStages[i] ?? stage;
                 const prevDisplay = i > 0 ? (displayStages[i - 1] ?? stages[i - 1]) : null;
-                const prevStart = i > 0 && form.stageStarts[i - 1] ? new Date(form.stageStarts[i - 1]) : null;
+                const follows = form.stageFollow[i] ?? false;
+                const prevStart = i > 0 && effectiveStageStarts[i - 1] ? new Date(effectiveStageStarts[i - 1]) : null;
                 const prevEnd = prevStart && prevDisplay
                   ? new Date(prevStart.getTime() + prevDisplay.estimatedMinutes * 60_000)
                   : null;
-                const thisStart = form.stageStarts[i] ? new Date(form.stageStarts[i]) : null;
-                const tooEarly = !!(thisStart && prevEnd && thisStart <= prevEnd);
+                const thisStart = effectiveStageStarts[i] ? new Date(effectiveStageStarts[i]) : null;
+                const tooEarly = !follows && !!(thisStart && prevEnd && thisStart <= prevEnd);
 
                 return (
                   <div key={stage.key}>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs text-zinc-400 w-24 shrink-0">{stage.label}</span>
-                      <input
-                        type="datetime-local"
-                        value={form.stageStarts[i] ?? ""}
-                        onChange={(e) => {
-                          const next = [...form.stageStarts];
-                          next[i] = e.target.value;
-                          setForm(f => ({ ...f, stageStarts: next }));
-                        }}
-                        className={`flex-1 bg-zinc-800 border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 ${
-                          tooEarly ? "border-red-500" : "border-zinc-700"
-                        }`}
-                      />
-                      <span className="text-xs text-zinc-500 shrink-0 w-16 text-right">
+
+                      {i > 0 && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={follows}
+                            onClick={() => handleToggleFollow(i)}
+                            className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 transition-colors duration-200 focus:outline-none ${
+                              follows ? "bg-indigo-600 border-indigo-600" : "bg-zinc-700 border-zinc-700"
+                            }`}
+                          >
+                            <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${follows ? "translate-x-4" : "translate-x-0"}`} />
+                          </button>
+                          <span className="text-xs text-zinc-500 shrink-0">
+                            Follow {stages[i - 1].label}
+                            {follows && effectiveStageStarts[i] && (
+                              <span className="text-zinc-500 ml-1">→ {fmtLocalDT(effectiveStageStarts[i])}</span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+
+                      {!follows && (
+                        <input
+                          type="datetime-local"
+                          value={form.stageStarts[i] ?? ""}
+                          onChange={(e) => {
+                            const next = [...form.stageStarts];
+                            next[i] = e.target.value;
+                            setForm(f => ({ ...f, stageStarts: next }));
+                          }}
+                          className={`flex-1 bg-zinc-800 border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 ${
+                            tooEarly ? "border-red-500" : "border-zinc-700"
+                          }`}
+                        />
+                      )}
+                      <span className="text-xs text-zinc-500 shrink-0 w-16 text-right ml-auto">
                         {fmtDuration(display.estimatedMinutes)}
                       </span>
                     </div>

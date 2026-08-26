@@ -121,8 +121,10 @@ do I need to do" without digging into other pages.
   started yet, this card shows the upcoming draft or tournament start time
   instead.
 - A "Season" area shows a draft-join card when a season is about to form
-  teams but hasn't yet, or a simple "Season Active" badge once one is
-  underway.
+  teams but hasn't yet. Once a season is underway it shows a "Season Active"
+  badge — unless a tournament is active and already covers the same event
+  via the "Active Tournament" card above, in which case this area is hidden
+  entirely rather than showing the same event as active twice.
 - An "Open Tournaments" area lists anything currently accepting sign-ups —
   either an individual join card (players-mode) or a team sign-up panel
   (teams-mode) — each laid out as a timeline: sign-ups open, sign-ups close,
@@ -356,20 +358,14 @@ stage (used for Group and Swiss stages), or scaled up round-by-round for
 bracket-shaped stages — a shorter best-of for standard rounds, increasing at
 quarterfinals, semifinals, and the final.
 
-### The Tournament overview page
+### The Season / Tournament tab
 
-`/dashboard/tournament` is the player-facing landing page for whatever's
-currently happening (separate from the admin's own tournament management
-tools, described in the Admin Dashboard section). If something's active, it
-shows a plain-language phase card — "Draft in progress," "Season in
-progress," or "Getting started" as a fallback — with a matching action
-button ("Go to Live Draft," "View Season," or "My Team"). A "Your Upcoming
-Tournaments" section lists anything the player has already joined that
-hasn't started yet, showing whether sign-ups are open or closed and the
-scheduled start time if one's been set. Depending on whether the event uses
-individual or team sign-ups, a matching join panel is shown; if the player
-hasn't joined anything, the page just says "You haven't joined a tournament
-yet. Open tournaments appear on your dashboard."
+There is no separate tournament overview page — `/dashboard/season` is the
+one nav tab for whatever's currently happening (separate from the admin's
+own tournament management tools, described in the Admin Dashboard section).
+It relabels itself "Tournament" instead of "Season" whenever a tournament
+(rather than a standalone manual season) is the one currently active,
+driven by `league_settings.active_tournament_id`.
 
 ### League-wide toggles that shape all of this
 

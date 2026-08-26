@@ -57,6 +57,7 @@ export default async function RootLayout({
     <html
       lang="en"
       data-theme={theme}
+      data-sponsor-mode={theme === "sponsor" ? sponsorTheme?.mode ?? "light" : undefined}
       style={sponsorStyle}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >

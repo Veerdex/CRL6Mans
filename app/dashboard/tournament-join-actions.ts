@@ -76,7 +76,6 @@ export async function joinTournament(tournamentId: string, confirmTrackerSame = 
   if (!error) logAnalyticsEvent("draft_join").catch(() => {});
 
   revalidatePath("/dashboard");
-  revalidatePath("/dashboard/tournament");
   return { ok: true, message: "Joined." };
 }
 
@@ -99,6 +98,5 @@ export async function leaveTournament(tournamentId: string) {
     .eq("player_id", player.id);
 
   revalidatePath("/dashboard");
-  revalidatePath("/dashboard/tournament");
   return { ok: true, message: "Left." };
 }

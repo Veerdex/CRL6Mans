@@ -1550,7 +1550,7 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 function site() {
-  return ephemeralReply("🔗 https://crl6mans-queue-bot.vercel.app/");
+  return ephemeralReply("🔗 https://www.crlw6m.fyi/");
 }
 
 async function totalPlayers() {

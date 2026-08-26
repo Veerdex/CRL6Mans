@@ -117,7 +117,7 @@ export function TopNav({ items }: { items: TopNavEntry[] }) {
       <div ref={measureRef} aria-hidden className="absolute left-0 top-0 flex items-center gap-1 invisible pointer-events-none">
         {items.map((entry) => (
           <span key={entryKey(entry)} className={ITEM_CLS}>
-            {entry.icon}{entry.label}{isGroup(entry) && <ChevronIcon open={false} />}
+            <>{entry.icon}</>{entry.label}{isGroup(entry) && <ChevronIcon open={false} />}
           </span>
         ))}
         <span className={`${ITEM_CLS} nav-more`}><MoreIcon />More</span>

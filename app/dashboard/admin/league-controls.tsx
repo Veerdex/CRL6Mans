@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate, setIsTestSeason, setSubsEnabled } from "./league-actions";
+import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, saveSeasonPrizes, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate, setIsTestSeason, setSubsEnabled } from "./league-actions";
 import { auditMatchChannels, applyChannelChanges, type ChannelAuditItem, type ChannelAuditResult } from "./channel-debug-actions";
 import { ExportAndResetSeasonButton } from "./export-pdf-button";
 
@@ -20,6 +20,9 @@ interface LeagueControlsProps {
   matchPlayHour: number;
   minMmr2v2: number | null;
   minMmr3v3: number | null;
+  seasonPrize1st: number | null;
+  seasonPrize2nd: number | null;
+  seasonPrize3rd4th: number | null;
   draftActive: boolean;
   draftPhase: string | null;
   hasPickDeadline: boolean;
@@ -61,7 +64,7 @@ const COMMANDS: Record<ActionKey, { label: string; code: string; description: st
   },
 };
 
-export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, teamSlotCount, draftFormatMax, seasonFormatLabel, isTestSeason, subsEnabled, isCEO }: LeagueControlsProps) {
+export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, seasonPrize1st, seasonPrize2nd, seasonPrize3rd4th, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, teamSlotCount, draftFormatMax, seasonFormatLabel, isTestSeason, subsEnabled, isCEO }: LeagueControlsProps) {
   const [isPending, startTransition] = useTransition();
   const [active, setActive] = useState<ActionKey | null>(null);
   const [codeInput, setCodeInput] = useState("");
@@ -90,6 +93,9 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
   const [playHour, setPlayHour] = useState(matchPlayHour);
   const [min2v2, setMin2v2] = useState(minMmr2v2 != null ? String(minMmr2v2) : "");
   const [min3v3, setMin3v3] = useState(minMmr3v3 != null ? String(minMmr3v3) : "");
+  const [prize1st, setPrize1st] = useState(seasonPrize1st != null ? String(seasonPrize1st) : "");
+  const [prize2nd, setPrize2nd] = useState(seasonPrize2nd != null ? String(seasonPrize2nd) : "");
+  const [prize3rd4th, setPrize3rd4th] = useState(seasonPrize3rd4th != null ? String(seasonPrize3rd4th) : "");
 
   useEffect(() => {
     if (!pendingFinalConfirm) return;
@@ -304,6 +310,65 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
           className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
         >
           Save Minimum MMR
+        </button>
+      </div>
+
+      {/* Season prize pool */}
+      <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-4 space-y-4">
+        <div>
+          <p className="text-sm font-medium text-white">Season Prize Pool</p>
+          <p className="text-xs text-zinc-500 mt-0.5">
+            1st, 2nd, and 3rd-4th place payouts for the standalone manual season. Leave blank or 0 for none.
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-4 max-w-md">
+          <div className="space-y-1.5">
+            <label className="text-xs text-zinc-500">1st place</label>
+            <input
+              type="number"
+              min={0}
+              value={prize1st}
+              onChange={e => setPrize1st(e.target.value)}
+              placeholder="0"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs text-zinc-500">2nd place</label>
+            <input
+              type="number"
+              min={0}
+              value={prize2nd}
+              onChange={e => setPrize2nd(e.target.value)}
+              placeholder="0"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs text-zinc-500">3rd-4th (each)</label>
+            <input
+              type="number"
+              min={0}
+              value={prize3rd4th}
+              onChange={e => setPrize3rd4th(e.target.value)}
+              placeholder="0"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </div>
+        </div>
+        <button
+          onClick={() => startTransition(async () => {
+            const result = await saveSeasonPrizes(
+              prize1st.trim() === "" ? null : Number(prize1st),
+              prize2nd.trim() === "" ? null : Number(prize2nd),
+              prize3rd4th.trim() === "" ? null : Number(prize3rd4th),
+            );
+            showFeedback(result.message, result.ok);
+          })}
+          disabled={isPending}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          Save Prize Pool
         </button>
       </div>
 

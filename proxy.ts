@@ -9,25 +9,27 @@ const protectedRoutes = ["/dashboard"];
 // React style props and a background-image throughout; styles can't execute JS.
 // Images allow https/data/blob to cover Supabase logos, Discord avatars, and
 // canvas output. Media additionally allows Vercel Blob storage for uploaded
-// sponsor video. Connect additionally allows Vercel Blob storage because
-// client-side sponsor uploads (@vercel/blob/client) PUT the file directly
-// from the browser to that host, bypassing the app server. Everything else
-// (fonts, workers) is same-origin.
+// sponsor video. Connect additionally allows vercel.com and Vercel Blob
+// storage: client-side sponsor uploads (@vercel/blob/client) PUT the file
+// bytes directly from the browser to https://vercel.com/api/blob (the actual
+// upload API host), while the storage subdomain only serves the finished
+// asset back out — both need to be reachable, bypassing the app server for
+// the upload itself. Everything else (fonts, workers) is same-origin.
 function buildCsp(nonce: string): string {
   // 'wasm-unsafe-eval' lets @react-pdf/renderer compile its WebAssembly layout
   // engine (for PDF export) without permitting general eval(). 'unsafe-eval' is
   // added only in dev — React's Fast Refresh/DevTools use eval() to reconstruct
   // stack traces, but production React never calls it, so prod stays strict.
   const scriptSrc = process.env.NODE_ENV === "production"
-    ? `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`
-    : `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval' 'unsafe-eval'`;
+    ? `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval' https://va.vercel-scripts.com`
+    : `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval' 'unsafe-eval' https://va.vercel-scripts.com`;
   return [
     `default-src 'self'`,
     scriptSrc,
     `style-src 'self' 'unsafe-inline'`,
     `img-src 'self' blob: data: https:`,
     `font-src 'self'`,
-    `connect-src 'self' https://*.public.blob.vercel-storage.com`,
+    `connect-src 'self' https://vercel.com https://*.public.blob.vercel-storage.com`,
     `media-src 'self' blob: https://*.public.blob.vercel-storage.com`,
     `worker-src 'self'`,
     `manifest-src 'self'`,
