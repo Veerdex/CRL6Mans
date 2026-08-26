@@ -71,8 +71,11 @@ export const config = {
   matcher: [
     // Run on all pages except static assets and API routes. Skip prefetch
     // requests so a throwaway nonce isn't generated for them.
+    // replay-analyzer.html is a standalone static tool (public/) with its
+    // own inline <script> and no server templating to carry a CSP nonce
+    // into, so it's excluded here the same way favicon.ico is.
     {
-      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+      source: "/((?!api|_next/static|_next/image|favicon.ico|replay-analyzer.html).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },
