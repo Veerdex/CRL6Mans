@@ -13,8 +13,50 @@ import {
   updateTabPlacement,
   updateSeasonSponsor,
 } from "./sponsor-actions";
+import { savePatreonUrl } from "./league-actions";
 import { MediaCropModal } from "./media-crop-modal";
 import type { CropKind } from "@/app/lib/media-crop";
+
+function PatreonLinkCard({ patreonUrl }: { patreonUrl: string | null }) {
+  const [isPending, startTransition] = useTransition();
+  const [urlInput, setUrlInput] = useState(patreonUrl ?? "");
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const handleSave = () => startTransition(async () => {
+    const result = await savePatreonUrl(urlInput);
+    setMessage({ text: result.message, ok: result.ok });
+  });
+
+  return (
+    <div className="border border-zinc-800 rounded-xl p-4 space-y-3">
+      <div>
+        <p className="text-sm font-medium text-white">Patreon Link</p>
+        <p className="text-xs text-zinc-500 mt-0.5">
+          Powers the &quot;Become a Patron&quot; button on the public Support Us page. A general league setting, not tied to any one sponsor. Leave blank to hide the button.
+        </p>
+      </div>
+      <input
+        type="url"
+        value={urlInput}
+        onChange={e => setUrlInput(e.target.value)}
+        placeholder="https://patreon.com/your-page"
+        className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+      />
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          disabled={isPending || urlInput === (patreonUrl ?? "")}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          Save Patreon Link
+        </button>
+        {message && (
+          <span className={`text-xs ${message.ok ? "text-emerald-400" : "text-red-400"}`}>{message.text}</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function StatusBadge({ status }: { status: "active" | "disabled" }) {
   return status === "active" ? (
@@ -845,7 +887,7 @@ export function SeasonSponsorPicker({
   );
 }
 
-export function SponsorsManager({ sponsors }: { sponsors: Sponsor[] }) {
+export function SponsorsManager({ sponsors, patreonUrl }: { sponsors: Sponsor[]; patreonUrl: string | null }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -870,6 +912,8 @@ export function SponsorsManager({ sponsors }: { sponsors: Sponsor[] }) {
 
   return (
     <div className="space-y-6">
+      <PatreonLinkCard patreonUrl={patreonUrl} />
+
       {error && <p className="text-sm text-red-400 bg-red-950/30 border border-red-800/50 rounded-lg px-4 py-2">{error}</p>}
 
       {sponsors.length === 0 ? (

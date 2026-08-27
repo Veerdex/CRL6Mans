@@ -68,7 +68,7 @@ async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean;
   );
 }
 
-async function SponsorsSection() {
+async function SponsorsSection({ patreonUrl }: { patreonUrl: string | null }) {
   const sponsors = await getSponsorsWithMembers();
   return (
     <AdminSubSection
@@ -79,7 +79,7 @@ async function SponsorsSection() {
       value={sponsors.length}
       description="Create a sponsor and share its invite link — any Discord account that uses it becomes a linked member of that sponsor, up to the max-uses cap. Raise the cap at any time to let more reps join."
     >
-      <SponsorsManager sponsors={sponsors} />
+      <SponsorsManager sponsors={sponsors} patreonUrl={patreonUrl} />
     </AdminSubSection>
   );
 }
@@ -1361,7 +1361,6 @@ export default async function AdminPage() {
             seasonPrize1st={(settings?.season_prize_1st as number | null) ?? null}
             seasonPrize2nd={(settings?.season_prize_2nd as number | null) ?? null}
             seasonPrize3rd4th={(settings?.season_prize_3rd4th as number | null) ?? null}
-            patreonUrl={(settings?.patreon_url as string | null) ?? null}
             draftActive={settings?.draft_active ?? false}
             draftPhase={(settings?.draft_phase as string | null) ?? null}
             hasPickDeadline={!!settings?.pick_deadline}
@@ -1444,7 +1443,7 @@ export default async function AdminPage() {
 
       {userIsDirector && (
         <AdminSection id="sponsors">
-          <SponsorsSection />
+          <SponsorsSection patreonUrl={(settings?.patreon_url as string | null) ?? null} />
           <TabManagerAdminSection />
         </AdminSection>
       )}

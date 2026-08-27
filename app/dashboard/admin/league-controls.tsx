@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, saveSeasonPrizes, savePatreonUrl, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate, setIsTestSeason, setSubsEnabled } from "./league-actions";
+import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, saveSeasonPrizes, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate, setIsTestSeason, setSubsEnabled } from "./league-actions";
 import { auditMatchChannels, applyChannelChanges, type ChannelAuditItem, type ChannelAuditResult } from "./channel-debug-actions";
 import { ExportAndResetSeasonButton } from "./export-pdf-button";
 
@@ -23,7 +23,6 @@ interface LeagueControlsProps {
   seasonPrize1st: number | null;
   seasonPrize2nd: number | null;
   seasonPrize3rd4th: number | null;
-  patreonUrl: string | null;
   draftActive: boolean;
   draftPhase: string | null;
   hasPickDeadline: boolean;
@@ -65,7 +64,7 @@ const COMMANDS: Record<ActionKey, { label: string; code: string; description: st
   },
 };
 
-export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, seasonPrize1st, seasonPrize2nd, seasonPrize3rd4th, patreonUrl, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, teamSlotCount, draftFormatMax, seasonFormatLabel, isTestSeason, subsEnabled, isCEO }: LeagueControlsProps) {
+export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, seasonPrize1st, seasonPrize2nd, seasonPrize3rd4th, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, teamSlotCount, draftFormatMax, seasonFormatLabel, isTestSeason, subsEnabled, isCEO }: LeagueControlsProps) {
   const [isPending, startTransition] = useTransition();
   const [active, setActive] = useState<ActionKey | null>(null);
   const [codeInput, setCodeInput] = useState("");
@@ -97,7 +96,6 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
   const [prize1st, setPrize1st] = useState(seasonPrize1st != null ? String(seasonPrize1st) : "");
   const [prize2nd, setPrize2nd] = useState(seasonPrize2nd != null ? String(seasonPrize2nd) : "");
   const [prize3rd4th, setPrize3rd4th] = useState(seasonPrize3rd4th != null ? String(seasonPrize3rd4th) : "");
-  const [patreonUrlInput, setPatreonUrlInput] = useState(patreonUrl ?? "");
 
   useEffect(() => {
     if (!pendingFinalConfirm) return;
@@ -371,33 +369,6 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
           className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
         >
           Save Prize Pool
-        </button>
-      </div>
-
-      {/* Patreon link */}
-      <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-4 space-y-4">
-        <div>
-          <p className="text-sm font-medium text-white">Patreon Link</p>
-          <p className="text-xs text-zinc-500 mt-0.5">
-            Powers the &quot;Become a Patron&quot; button on the public Support Us page. Leave blank to hide the button.
-          </p>
-        </div>
-        <input
-          type="url"
-          value={patreonUrlInput}
-          onChange={e => setPatreonUrlInput(e.target.value)}
-          placeholder="https://patreon.com/your-page"
-          className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-        />
-        <button
-          onClick={() => startTransition(async () => {
-            const result = await savePatreonUrl(patreonUrlInput);
-            showFeedback(result.message, result.ok);
-          })}
-          disabled={isPending}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          Save Patreon Link
         </button>
       </div>
 
