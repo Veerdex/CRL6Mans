@@ -8,6 +8,7 @@ import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { classifyClipUrl, isLinkOnlyPlatform } from "@/app/lib/clip-embed";
 import { fetchClipThumbnail } from "@/app/lib/link-preview";
+import { computeClipExpiry } from "@/app/lib/clip-schedule";
 
 const MAX_ACTIVE_SUBMISSIONS_PER_PLAYER = 5;
 const MAX_TITLE_LENGTH = 150;
@@ -60,6 +61,7 @@ export async function submitClip(title: string, url: string): Promise<{ ok?: boo
     platform: classified.platform,
     embed_url: classified.embedUrl,
     thumbnail_url: thumbnailUrl,
+    expires_at: computeClipExpiry(new Date()).toISOString(),
   });
   if (error) {
     if (error.code === "23505") return { error: "This clip has already been submitted this week." };
