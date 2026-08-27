@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import { submitClip, toggleClipLike, deleteClip } from "@/app/media/actions";
 import { ClipConfirmModal } from "@/app/media/clip-confirm-modal";
 import { isLinkOnlyPlatform, type ClipPlatform } from "@/app/lib/clip-embed";
@@ -43,9 +43,22 @@ function ClipCard({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // Reflects the toggle instantly instead of waiting on the server action +
+  // revalidatePath round trip. Automatically reverts to the real liked/
+  // likes_count props once that round trip settles (success or error).
+  const [optimisticLike, setOptimisticLike] = useOptimistic(
+    { liked, likes_count: clip.likes_count },
+    (_state, nextLiked: boolean) => ({
+      liked: nextLiked,
+      likes_count: clip.likes_count + (nextLiked ? 1 : -1),
+    })
+  );
+
   function handleLike() {
     setLikeError(null);
+    const nextLiked = !liked;
     startTransition(async () => {
+      setOptimisticLike(nextLiked);
       const result = await toggleClipLike(clip.id);
       if (result?.error) setLikeError(result.error);
     });
@@ -102,13 +115,13 @@ function ClipCard({
           onClick={handleLike}
           disabled={!canParticipate || isPending}
           className={`inline-flex items-center gap-1.5 text-sm font-medium transition-colors disabled:opacity-40 ${
-            liked ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"
+            optimisticLike.liked ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"
           }`}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill={liked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill={optimisticLike.liked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
             <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
           </svg>
-          {clip.likes_count}
+          {optimisticLike.likes_count}
         </button>
         {isModerator && (
           <button
@@ -150,6 +163,7 @@ export function MediaFeed({
 }) {
   const [sortMode, setSortMode] = useState<SortMode>("chronological");
   const [search, setSearch] = useState("");
+  const [onlyLiked, setOnlyLiked] = useState(false);
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -158,15 +172,16 @@ export function MediaFeed({
   const likedSet = useMemo(() => new Set(likedClipIds), [likedClipIds]);
 
   const visibleClips = useMemo(() => {
-    const filtered = search.trim()
+    let filtered = search.trim()
       ? clips.filter((c) => c.title.toLowerCase().includes(search.trim().toLowerCase()))
       : clips;
+    if (onlyLiked) filtered = filtered.filter((c) => likedSet.has(c.id));
     const sorted = [...filtered];
     if (sortMode === "likes_desc") sorted.sort((a, b) => b.likes_count - a.likes_count);
     else if (sortMode === "likes_asc") sorted.sort((a, b) => a.likes_count - b.likes_count);
     else sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     return sorted;
-  }, [clips, search, sortMode]);
+  }, [clips, search, sortMode, onlyLiked, likedSet]);
 
   const [visibleCount, setVisibleCount] = useState(INITIAL_BATCH);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -175,7 +190,7 @@ export function MediaFeed({
   // changes, so switching away and back doesn't leave a stale scroll depth
   // mixed with a new result set. Adjusting state during render (React's
   // documented pattern for this) instead of an effect avoids an extra commit.
-  const filterKey = `${search}|${sortMode}`;
+  const filterKey = `${search}|${sortMode}|${onlyLiked}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   if (filterKey !== prevFilterKey) {
     setPrevFilterKey(filterKey);
@@ -257,19 +272,33 @@ export function MediaFeed({
           placeholder="Search clips…"
           className="w-full sm:max-w-xs rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
         />
-        <select
-          value={sortMode}
-          onChange={(e) => setSortMode(e.target.value as SortMode)}
-          className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500"
-        >
-          <option value="chronological">Newest first</option>
-          <option value="likes_desc">Most liked</option>
-          <option value="likes_asc">Least liked</option>
-        </select>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-zinc-300 select-none">
+            <input
+              type="checkbox"
+              checked={onlyLiked}
+              onChange={(e) => setOnlyLiked(e.target.checked)}
+              disabled={!canParticipate}
+              className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-40"
+            />
+            Only liked
+          </label>
+          <select
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as SortMode)}
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500"
+          >
+            <option value="chronological">Newest first</option>
+            <option value="likes_desc">Most liked</option>
+            <option value="likes_asc">Least liked</option>
+          </select>
+        </div>
       </div>
 
       {visibleClips.length === 0 ? (
-        <p className="text-center text-zinc-500 py-8">No clips yet — be the first to submit one.</p>
+        <p className="text-center text-zinc-500 py-8">
+          {onlyLiked ? "You haven't liked any clips yet." : "No clips yet — be the first to submit one."}
+        </p>
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2">
