@@ -147,7 +147,12 @@ const NAV_GROUPS: { label: string; icon: React.ReactNode; keys: string[] }[] = [
   {
     label: "League",
     icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>,
-    keys: ["teams", "players", "stats", "podium"],
+    keys: ["myteam", "teams", "players", "stats", "podium"],
+  },
+  {
+    label: "Community",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v3.5M12 10.5L6.3 17M12 10.5l5.7 6.5"/></svg>,
+    keys: ["wagers", "media", "game"],
   },
 ];
 
@@ -368,10 +373,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
       "home",
       ...(teamId ? ["myteam"] : []),
       ...(hasTeams ? ["teams"] : []),
-      ...commonExtras,
       ...(draftActive ? ["draft"] : []),
       ...(seasonActive ? ["season"] : []),
       ...(hasActiveContent ? ["schedule"] : []),
+      ...commonExtras,
       "game",
     ];
   } else {
