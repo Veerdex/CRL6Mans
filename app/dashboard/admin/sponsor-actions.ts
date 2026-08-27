@@ -121,7 +121,7 @@ export async function createSponsor(
   if (error) return { error: error.message };
 
   revalidatePath("/dashboard/admin");
-  revalidatePath("/sponsors");
+  revalidatePath("/dashboard/sponsors");
   return { ok: true };
 }
 
@@ -179,7 +179,7 @@ export async function updateSponsorDetails(
   if (error) return { error: error.message };
 
   revalidatePath("/dashboard/admin");
-  revalidatePath("/sponsors");
+  revalidatePath("/dashboard/sponsors");
   revalidatePath("/dashboard", "layout");
   return { ok: true };
 }
@@ -208,7 +208,7 @@ export async function updateContentCrop(
   if (error) return { error: error.message };
 
   revalidatePath("/dashboard/admin");
-  revalidatePath("/sponsors");
+  revalidatePath("/dashboard/sponsors");
   revalidatePath("/dashboard", "layout");
   return { ok: true };
 }
@@ -229,7 +229,7 @@ export async function updateSponsorMaxUses(
   if (error) return { error: error.message };
 
   revalidatePath("/dashboard/admin");
-  revalidatePath("/sponsors");
+  revalidatePath("/dashboard/sponsors");
   return { ok: true };
 }
 
@@ -253,7 +253,7 @@ export async function toggleSponsorStatus(sponsorId: string): Promise<{ ok?: boo
   if (error) return { error: error.message };
 
   revalidatePath("/dashboard/admin");
-  revalidatePath("/sponsors");
+  revalidatePath("/dashboard/sponsors");
   return { ok: true };
 }
 
@@ -266,7 +266,7 @@ export async function removeSponsorMember(memberId: string): Promise<{ ok?: bool
   if (error) return { error: error.message };
 
   revalidatePath("/dashboard/admin");
-  revalidatePath("/sponsors");
+  revalidatePath("/dashboard/sponsors");
   return { ok: true };
 }
 

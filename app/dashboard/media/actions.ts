@@ -68,7 +68,7 @@ export async function submitClip(title: string, url: string): Promise<{ ok?: boo
     return { error: error.message };
   }
 
-  revalidatePath("/media");
+  revalidatePath("/dashboard/media");
   return { ok: true };
 }
 
@@ -97,7 +97,7 @@ export async function toggleClipLike(clipId: string): Promise<{ ok?: boolean; er
     .eq("clip_id", clipId);
   await supabaseAdmin.from("clips").update({ likes_count: count ?? 0 }).eq("id", clipId);
 
-  revalidatePath("/media");
+  revalidatePath("/dashboard/media");
   return { ok: true };
 }
 
@@ -109,7 +109,7 @@ export async function deleteClip(clipId: string): Promise<{ ok?: boolean; error?
   const { error } = await supabaseAdmin.from("clips").delete().eq("id", clipId);
   if (error) return { error: error.message };
 
-  revalidatePath("/media");
+  revalidatePath("/dashboard/media");
   return { ok: true };
 }
 
@@ -124,6 +124,6 @@ export async function clearClipOfWeek(): Promise<{ ok?: boolean; error?: string 
     .not("id", "is", null);
   if (error) return { error: error.message };
 
-  revalidatePath("/media");
+  revalidatePath("/dashboard/media");
   return { ok: true };
 }

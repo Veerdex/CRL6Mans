@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { clearClipOfWeek } from "@/app/media/actions";
-import { ClipConfirmModal } from "@/app/media/clip-confirm-modal";
-import type { Clip } from "@/app/media/media-feed";
+import { clearClipOfWeek } from "@/app/dashboard/media/actions";
+import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
+import type { Clip } from "@/app/dashboard/media/media-feed";
 
 function clipOfWeekEmbedSrc(clip: Clip): string {
   if (clip.platform === "youtube") return `${clip.embed_url}?autoplay=1&mute=1`;

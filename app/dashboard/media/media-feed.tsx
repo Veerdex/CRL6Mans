@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
-import { submitClip, toggleClipLike, deleteClip } from "@/app/media/actions";
-import { ClipConfirmModal } from "@/app/media/clip-confirm-modal";
+import { submitClip, toggleClipLike, deleteClip } from "@/app/dashboard/media/actions";
+import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
 import { isLinkOnlyPlatform, type ClipPlatform } from "@/app/lib/clip-embed";
 
 const INITIAL_BATCH = 20;

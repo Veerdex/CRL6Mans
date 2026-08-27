@@ -1,7 +1,7 @@
 import { cropStyle } from "@/app/lib/media-crop";
 import type { PublicSponsor } from "@/app/lib/sponsors-public";
 import { formatPromoDescription } from "@/app/lib/sponsor-promo";
-import { PromoCopyButton } from "@/app/sponsors/promo-copy-button";
+import { PromoCopyButton } from "@/app/dashboard/sponsors/promo-copy-button";
 
 function getYouTubeEmbedUrl(url: string): string | null {
   const patterns = [

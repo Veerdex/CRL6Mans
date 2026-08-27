@@ -1048,6 +1048,18 @@ export async function setSubsEnabled(enabled: boolean) {
   return { ok: true, message: enabled ? "Substitute requests enabled." : "Substitute requests disabled." };
 }
 
+export async function savePatreonUrl(url: string) {
+  await verifyAdmin();
+  const trimmed = url.trim();
+  if (trimmed && !/^https:\/\/(www\.)?patreon\.com\//i.test(trimmed))
+    return { ok: false, message: "Must be a https://patreon.com/... URL." };
+  await supabaseAdmin.from("league_settings")
+    .update({ patreon_url: trimmed || null, updated_at: new Date().toISOString() }).not("id", "is", null);
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/support");
+  return { ok: true, message: trimmed ? "Patreon link saved." : "Patreon link cleared." };
+}
+
 export async function setIsTestSeason(value: boolean) {
   await verifyAdmin();
   const { data: settings } = await supabaseAdmin
