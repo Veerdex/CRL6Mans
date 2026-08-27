@@ -24,7 +24,7 @@ export const ALLOWED_CLIP_HOSTS = [
   "instagram.com", "www.instagram.com",
 ];
 
-const YOUTUBE_ID_PATTERN = /(?:youtube\.com\/watch\?v=|youtube\.com\/embed\/|youtu\.be\/)([\w-]{11})/;
+const YOUTUBE_ID_PATTERN = /(?:youtube\.com\/watch\?v=|youtube\.com\/embed\/|youtube\.com\/shorts\/|youtu\.be\/)([\w-]{11})/;
 const MEDAL_ID_PATTERN = /medal\.tv\/(?:games\/[\w-]+\/)?clips\/([\w-]+)/;
 const STREAMABLE_ID_PATTERN = /streamable\.com\/([\w-]+)/;
 
