@@ -38,7 +38,7 @@ app/
   api/
     admin/                # Internal admin API routes
     auth/discord/         # OAuth2 initiation + callback
-    cron/                 # Vercel cron jobs (draft-autopick, tournament-scheduler)
+    cron/                 # Vercel cron jobs (draft-autopick, tournament-scheduler, clip-reset)
     discord/interactions/ # Discord slash command handler (POST, nacl-verified)
     push/                 # Web push subscription endpoint
   dashboard/
@@ -136,7 +136,7 @@ unregistered → (submits register form) → pending → (admin approves) → ap
 - Mirrors tournament config into `league_settings` (single source of truth for the draft/season machinery).
 - Idempotent — safe to call mid-draft.
 
-**Cron**: `vercel.json` has both `/api/cron/draft-autopick` and `/api/cron/tournament-scheduler` on a daily fallback schedule (`0 0 * * *` — Vercel Hobby plan limit). **Per-minute execution must be configured via an external pinger** (e.g. cron-job.org) hitting both endpoints with the correct `Authorization: Bearer <CRON_SECRET>` header. The autopick timer is 45 seconds; the client fires it instantly when the deadline passes, so the cron only matters when nobody has the draft page open.
+**Cron**: `vercel.json` has `/api/cron/draft-autopick`, `/api/cron/tournament-scheduler`, and `/api/cron/clip-reset` on a daily fallback schedule (`0 0 * * *` — Vercel Hobby plan limit). **Per-minute execution must be configured via an external pinger** (e.g. cron-job.org) hitting all three endpoints with the correct `Authorization: Bearer <CRON_SECRET>` header. The autopick timer is 45 seconds; the client fires it instantly when the deadline passes, so the cron only matters when nobody has the draft page open. `clip-reset` crowns the Media tab's weekly Clip of the Week (most recent Sunday 00:00 America/Los_Angeles) and only matters at that one weekly boundary, but still needs the per-minute pinger to fire close to it.
 
 **Tournament scheduler** also fires push notifications on key lifecycle events: signups open/close, draft start, season start.
 
@@ -224,6 +224,8 @@ Three themes: `crl6mans` (default), `dark`, `light`.
 | `staff_roles` | `discord_id` + `role` (`moderator`/`director`/`ceo`) — source of truth for staff permissions |
 | `push_subscriptions` | Web push endpoints for browser notifications |
 | `player_game_stats` | Per-player, per-game scoreboard stats (goals/assists/saves/shots/score) parsed from submitted series replays |
+| `clips` | Media tab clip submissions (YouTube/medal.tv/Streamable); `archived_at` marks past weeks instead of deleting |
+| `clip_likes` | One row per (clip, player) like on the Media tab |
 
 ---
 

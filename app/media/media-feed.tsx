@@ -1,0 +1,291 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { submitClip, toggleClipLike, deleteClip } from "@/app/media/actions";
+import { ClipConfirmModal } from "@/app/media/clip-confirm-modal";
+import { isLinkOnlyPlatform, type ClipPlatform } from "@/app/lib/clip-embed";
+
+const INITIAL_BATCH = 20;
+const BATCH_SIZE = 10;
+
+export type Clip = {
+  id: string;
+  title: string;
+  url: string;
+  embed_url: string;
+  thumbnail_url: string | null;
+  platform: ClipPlatform;
+  likes_count: number;
+  created_at: string;
+};
+
+const LINK_ONLY_LABELS: Record<string, string> = {
+  tiktok: "Watch on TikTok",
+  twitter: "Watch on X",
+  instagram: "Watch on Instagram",
+};
+
+type SortMode = "chronological" | "likes_desc" | "likes_asc";
+
+function ClipCard({
+  clip,
+  liked,
+  canParticipate,
+  isModerator,
+}: {
+  clip: Clip;
+  liked: boolean;
+  canParticipate: boolean;
+  isModerator: boolean;
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [likeError, setLikeError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  function handleLike() {
+    setLikeError(null);
+    startTransition(async () => {
+      const result = await toggleClipLike(clip.id);
+      if (result?.error) setLikeError(result.error);
+    });
+  }
+
+  function handleDelete() {
+    setDeleteError(null);
+    startTransition(async () => {
+      const result = await deleteClip(clip.id);
+      if (result?.error) {
+        setDeleteError(result.error);
+        return;
+      }
+      setConfirmOpen(false);
+    });
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
+      {isLinkOnlyPlatform(clip.platform) ? (
+        <a
+          href={clip.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border border-zinc-800 bg-black text-sm font-medium text-amber-400 hover:text-amber-300 transition-colors"
+        >
+          {clip.thumbnail_url ? (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={clip.thumbnail_url}
+                alt=""
+                referrerPolicy="no-referrer"
+                loading="lazy"
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+              <span className="absolute bottom-2 left-3 text-white group-hover:text-amber-300 transition-colors">
+                {LINK_ONLY_LABELS[clip.platform]} ↗
+              </span>
+            </>
+          ) : (
+            <span>{LINK_ONLY_LABELS[clip.platform]} ↗</span>
+          )}
+        </a>
+      ) : (
+        <div className="aspect-video w-full overflow-hidden rounded-lg border border-zinc-800 bg-black">
+          <iframe src={clip.embed_url} className="w-full h-full" allowFullScreen />
+        </div>
+      )}
+      <p className="text-white font-medium">{clip.title}</p>
+      <div className="flex items-center justify-between">
+        <button
+          onClick={handleLike}
+          disabled={!canParticipate || isPending}
+          className={`inline-flex items-center gap-1.5 text-sm font-medium transition-colors disabled:opacity-40 ${
+            liked ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"
+          }`}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill={liked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+          </svg>
+          {clip.likes_count}
+        </button>
+        {isModerator && (
+          <button
+            onClick={() => setConfirmOpen(true)}
+            className="text-zinc-500 hover:text-red-400 transition-colors"
+            aria-label="Delete clip"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            </svg>
+          </button>
+        )}
+      </div>
+      {likeError && <p className="text-xs text-red-400">{likeError}</p>}
+
+      <ClipConfirmModal
+        open={confirmOpen}
+        title="Delete this clip?"
+        description={deleteError ?? "This permanently removes the clip and its likes. This can't be undone."}
+        onConfirm={handleDelete}
+        onClose={() => { setConfirmOpen(false); setDeleteError(null); }}
+        isPending={isPending}
+      />
+    </div>
+  );
+}
+
+export function MediaFeed({
+  clips,
+  likedClipIds,
+  canParticipate,
+  isModerator,
+}: {
+  clips: Clip[];
+  likedClipIds: string[];
+  canParticipate: boolean;
+  isModerator: boolean;
+}) {
+  const [sortMode, setSortMode] = useState<SortMode>("chronological");
+  const [search, setSearch] = useState("");
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const likedSet = useMemo(() => new Set(likedClipIds), [likedClipIds]);
+
+  const visibleClips = useMemo(() => {
+    const filtered = search.trim()
+      ? clips.filter((c) => c.title.toLowerCase().includes(search.trim().toLowerCase()))
+      : clips;
+    const sorted = [...filtered];
+    if (sortMode === "likes_desc") sorted.sort((a, b) => b.likes_count - a.likes_count);
+    else if (sortMode === "likes_asc") sorted.sort((a, b) => a.likes_count - b.likes_count);
+    else sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return sorted;
+  }, [clips, search, sortMode]);
+
+  const [visibleCount, setVisibleCount] = useState(INITIAL_BATCH);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Reset the window back to the initial batch whenever the filter/sort
+  // changes, so switching away and back doesn't leave a stale scroll depth
+  // mixed with a new result set. Adjusting state during render (React's
+  // documented pattern for this) instead of an effect avoids an extra commit.
+  const filterKey = `${search}|${sortMode}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    setVisibleCount(INITIAL_BATCH);
+  }
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((count) => Math.min(count + BATCH_SIZE, visibleClips.length));
+        }
+      },
+      { rootMargin: "400px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [visibleClips.length]);
+
+  const shownClips = visibleClips.slice(0, visibleCount);
+  const hasMore = visibleCount < visibleClips.length;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitError(null);
+    startTransition(async () => {
+      const result = await submitClip(title, url);
+      if (result?.error) {
+        setSubmitError(result.error);
+        return;
+      }
+      setTitle("");
+      setUrl("");
+    });
+  }
+
+  return (
+    <div className="space-y-6">
+      {canParticipate ? (
+        <form onSubmit={handleSubmit} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
+          <h2 className="text-sm font-semibold text-white">Submit a clip</h2>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Clip title"
+            maxLength={150}
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
+          />
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://youtube.com/watch?v=..."
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
+          />
+          {submitError && <p className="text-sm text-red-400">{submitError}</p>}
+          <button
+            type="submit"
+            disabled={isPending || !title.trim() || !url.trim()}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            {isPending ? "Submitting…" : "Submit clip"}
+          </button>
+        </form>
+      ) : (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 text-center text-sm text-zinc-400">
+          <a href="/login" className="text-amber-400 hover:underline">Log in</a> as an approved player to submit clips and like your favorites.
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search clips…"
+          className="w-full sm:max-w-xs rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
+        />
+        <select
+          value={sortMode}
+          onChange={(e) => setSortMode(e.target.value as SortMode)}
+          className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500"
+        >
+          <option value="chronological">Newest first</option>
+          <option value="likes_desc">Most liked</option>
+          <option value="likes_asc">Least liked</option>
+        </select>
+      </div>
+
+      {visibleClips.length === 0 ? (
+        <p className="text-center text-zinc-500 py-8">No clips yet — be the first to submit one.</p>
+      ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {shownClips.map((clip) => (
+              <ClipCard
+                key={clip.id}
+                clip={clip}
+                liked={likedSet.has(clip.id)}
+                canParticipate={canParticipate}
+                isModerator={isModerator}
+              />
+            ))}
+          </div>
+          {hasMore && <div ref={sentinelRef} className="h-1" />}
+        </>
+      )}
+    </div>
+  );
+}

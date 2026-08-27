@@ -349,10 +349,13 @@ export async function sendDm(userId: string, content: string): Promise<void> {
 }
 
 export type DiscordEmbed = {
+  title?: string;
+  url?: string;
   color?: number;
   description?: string;
   fields?: Array<{ name: string; value: string; inline?: boolean }>;
   footer?: { text: string };
+  thumbnail?: { url: string };
 };
 
 export async function sendChannelMessage(channelId: string, content: string, embeds?: DiscordEmbed[]): Promise<void> {

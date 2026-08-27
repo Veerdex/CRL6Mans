@@ -33,7 +33,7 @@ function buildCsp(nonce: string): string {
     `media-src 'self' blob: https://*.public.blob.vercel-storage.com`,
     `worker-src 'self'`,
     `manifest-src 'self'`,
-    `frame-src https://www.youtube.com`,
+    `frame-src https://www.youtube.com https://medal.tv https://streamable.com`,
     `frame-ancestors 'none'`,
     `base-uri 'self'`,
     `form-action 'self'`,

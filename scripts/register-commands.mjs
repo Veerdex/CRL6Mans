@@ -39,6 +39,11 @@ const commands = [
       },
       {
         type: SUB_COMMAND,
+        name: "setclipschannel",
+        description: "Set the channel where the weekly Clip of the Week embed is posted — run in the target channel",
+      },
+      {
+        type: SUB_COMMAND,
         name: "setmatchcategoryanchor",
         description: "Place new match categories after this one — omit to reset to bottom",
         options: [

@@ -1656,6 +1656,15 @@ async function setAnnouncementChannel(userId: string, channelId: string) {
   return ephemeralReply(`✅ Announcement channel set to <#${channelId}>.`);
 }
 
+async function setClipsChannel(userId: string, channelId: string) {
+  const denied = await directorGuard(userId);
+  if (denied) return denied;
+  const { error } = await supabaseAdmin.from("league_settings")
+    .update({ clips_channel_id: channelId, updated_at: new Date().toISOString() }).not("id", "is", null);
+  if (error) return ephemeralReply(`❌ DB error: ${error.message}`);
+  return ephemeralReply(`✅ Clips channel set to <#${channelId}>.`);
+}
+
 // Reports what's still missing before the Discord server is fully wired up for the
 // website — run after /admin disconnect, or on a brand-new server, to see what's left.
 async function adminChecklist(userId: string) {
@@ -3322,6 +3331,7 @@ export async function handleCommand(interaction: Interaction) {
       case "removerole":        return removeRoleCmd(userId, String(sOpt("user")), String(sOpt("role")));
       case "setruleschannel":   return setRulesChannel(userId, interaction.channel_id ?? "");
       case "setannouncement":   return setAnnouncementChannel(userId, interaction.channel_id ?? "");
+      case "setclipschannel":   return setClipsChannel(userId, interaction.channel_id ?? "");
       case "setmatchcategoryanchor": {
         const categoryId = sOpt("category");
         return setMatchCategoryAnchor(userId, categoryId ? String(categoryId) : undefined);
