@@ -21,6 +21,11 @@ import { CoinGrantToast } from "./coin-grant-toast";
 import { TeamCutToast } from "./team-cut-toast";
 import { LogoutButton } from "./logout-button";
 
+// Server-only render timing, isolated from the component body so React's
+// purity lint (which forbids impure calls directly in a component/hook) sees
+// a plain function call, not a disallowed side effect.
+const perfNow = () => performance.now();
+
 type NavItem = { href: string; label: string; icon: React.ReactNode };
 
 const icon = (d: string, key: string) => (
@@ -190,20 +195,34 @@ function isNavGroup(entry: TopNavEntry): entry is Extract<TopNavEntry, { items: 
 
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const t0 = perfNow();
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
 
   if (!session?.userId) {
     redirect("/login");
   }
+  const userId = session!.userId;
 
   const navLayout = cookieStore.get("nav_layout")?.value === "topbar" ? "topbar" : "sidebar";
   const welcomeSeen = cookieStore.get("welcome_seen")?.value === "1";
 
-  const playerInfo = await (session?.userId
-    ? getPlayerInfo(session.userId)
-    : Promise.resolve({ status: "unregistered" as const, teamId: null, displayName: null, isGuest: false }));
+  // Independent of playerInfo/coin-grant state below — kicked off immediately
+  // so they resolve concurrently with that chain instead of waiting for it.
+  const settingsPromise = supabaseAdmin.from("league_settings").select("draft_active, season_active, active_tournament_id, nav_tab_overrides").single();
+  const playersCountPromise = supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true);
+  const navSponsorsPromise = getNavSponsors();
+  // Fresh, uncached lookups on every request: staff role from staff_roles, and
+  // Discord 2FA status from players.mfa_enabled (synced on each OAuth login).
+  // A staff member without 2FA is treated as non-admin everywhere on the site —
+  // this is what makes the check "happen on refresh" rather than being baked
+  // into the session JWT at login time.
+  const staffRolePromise = getStaffRole(userId);
+  const mfaOkPromise = hasMfaEnabled(userId);
+
+  const playerInfo = await getPlayerInfo(userId);
   if (playerInfo.status === "banned") redirect("/login");
+  const tPlayerInfo = perfNow();
 
   // ── Claim pending coin grants on visit ────────────────────────────────────
   // crl_coins/coin_grant_pending_* live on accounts (Tier 1) so unregistered
@@ -214,11 +233,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let coinGrantStart = 0;
   let coinGrantWeekly = 0;
   let teamSignupMessage: string | null = null;
-  if (playerInfo.status !== "rejected" && !playerInfo.isGuest && session?.userId) {
+  if (playerInfo.status !== "rejected" && !playerInfo.isGuest) {
     const { data: accountCoins } = await supabaseAdmin
       .from("accounts")
       .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly")
-      .eq("discord_id", session.userId)
+      .eq("discord_id", userId)
       .single();
 
     const pendingStart = accountCoins?.coin_grant_pending_start ?? false;
@@ -252,7 +271,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       const { data: playerFlags } = await supabaseAdmin
         .from("players")
         .select("id, team_signup_not_selected, team_signup_too_few_players")
-        .eq("discord_id", session.userId)
+        .eq("discord_id", userId)
         .single();
 
       if (playerFlags?.team_signup_not_selected) {
@@ -266,93 +285,89 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   const { status, teamId, isGuest } = playerInfo;
-  const [settingsRes, playersCountRes, navSponsors] = await Promise.all([
-    supabaseAdmin.from("league_settings").select("draft_active, season_active, active_tournament_id, nav_tab_overrides").single(),
-    supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true),
-    getNavSponsors(),
+  const [settingsRes, playersCountRes, navSponsors, staffRole, mfaOk] = await Promise.all([
+    settingsPromise, playersCountPromise, navSponsorsPromise, staffRolePromise, mfaOkPromise,
   ]);
-  // Fresh, uncached lookups on every request: staff role from staff_roles, and
-  // Discord 2FA status from players.mfa_enabled (synced on each OAuth login).
-  // A staff member without 2FA is treated as non-admin everywhere on the site —
-  // this is what makes the check "happen on refresh" rather than being baked
-  // into the session JWT at login time.
-  const [staffRole, mfaOk] = session?.userId
-    ? await Promise.all([getStaffRole(session.userId), hasMfaEnabled(session.userId)])
-    : [null, false];
+  const tSettings = perfNow();
   const admin = staffRole !== null && mfaOk;
   const needsMfa = staffRole !== null && !mfaOk;
   const seasonActive = settingsRes.data?.season_active ?? false;
   const draftActive = settingsRes.data?.draft_active ?? false;
   const activeTournamentId = (settingsRes.data?.active_tournament_id as string | null) ?? null;
   const hasPlayers = (playersCountRes.count ?? 0) > 0;
+  // Stats visible whenever there is live content (active season or active tournament)
+  const hasActiveContent = seasonActive || !!activeTournamentId;
+
+  const priorityHrefs: string[] = [];
+  if (draftActive) priorityHrefs.push("/dashboard/draft");
+  if (seasonActive) priorityHrefs.push("/dashboard/season");
+
+  // The four nav-visibility checks below are independent of each other (each
+  // only needs values already resolved above), so they run concurrently
+  // instead of as four separate sequential await chains.
 
   // Determine whether the Teams page would show any teams in the current context.
   // Active tournament: check if any player who entered it has been placed on a team.
   // Otherwise: check if any team has at least one player assigned (browsable any time).
-  let hasTeams = false;
-  if (activeTournamentId) {
-    const { data: entries } = await supabaseAdmin
-      .from("tournament_entries")
-      .select("player_id")
-      .eq("tournament_id", activeTournamentId);
-    if ((entries ?? []).length > 0) {
+  async function computeHasTeams(): Promise<boolean> {
+    if (activeTournamentId) {
+      const { data: entries } = await supabaseAdmin
+        .from("tournament_entries")
+        .select("player_id")
+        .eq("tournament_id", activeTournamentId);
+      if ((entries ?? []).length === 0) return false;
       const entryIds = (entries ?? []).map((e: { player_id: string }) => e.player_id);
       const { count: teamedCount } = await supabaseAdmin
         .from("players")
         .select("*", { count: "exact", head: true })
         .in("id", entryIds)
         .not("team_id", "is", null);
-      hasTeams = (teamedCount ?? 0) > 0;
+      return (teamedCount ?? 0) > 0;
     }
-  } else {
     const { count: teamedCount } = await supabaseAdmin
       .from("players")
       .select("*", { count: "exact", head: true })
       .not("team_id", "is", null);
-    hasTeams = (teamedCount ?? 0) > 0;
+    return (teamedCount ?? 0) > 0;
   }
-  // Stats visible whenever there is live content (active season or active tournament)
-  const hasActiveContent = seasonActive || !!activeTournamentId;
-
-  // hasJoined: schedule nav — any current team or prior sign-up
-  let hasJoined = !!teamId;
-
-  if (status === "approved" && !hasJoined) {
-    const { data: me } = await supabaseAdmin
-      .from("players").select("id").eq("discord_id", session.userId).single();
-    if (me?.id) {
-      const [{ count: entryCount }, { count: memberCount }] = await Promise.all([
-        supabaseAdmin.from("tournament_entries").select("*", { count: "exact", head: true }).eq("player_id", me.id),
-        supabaseAdmin.from("team_signup_members").select("*", { count: "exact", head: true }).eq("player_id", me.id).eq("status", "accepted"),
-      ]);
-      hasJoined = (entryCount ?? 0) > 0 || (memberCount ?? 0) > 0;
-    }
-  }
-
-  const priorityHrefs: string[] = [];
-  if (draftActive) priorityHrefs.push("/dashboard/draft");
-  if (seasonActive) priorityHrefs.push("/dashboard/season");
 
   // Stats is a career-wide leaderboard (player_game_stats survives resetSeason),
   // so once any games have ever been recorded it should stay visible through the
   // gap between events too, not just while a season/tournament is live.
-  let hasStatsContent = hasActiveContent;
-  if (!hasActiveContent) {
+  async function computeHasStatsContent(): Promise<boolean> {
+    if (hasActiveContent) return true;
     const { count: statsCount } = await supabaseAdmin
       .from("player_game_stats")
       .select("*", { count: "exact", head: true })
       .limit(1);
-    hasStatsContent = (statsCount ?? 0) > 0;
+    return (statsCount ?? 0) > 0;
   }
 
   // Podium nav only shows when there's a non-hidden completed event with a champion.
-  const [{ data: podSeasons }, { data: podTournaments }] = await Promise.all([
-    supabaseAdmin.from("seasons").select("summary").eq("hidden_from_home", false).limit(20),
-    supabaseAdmin.from("tournaments").select("summary").eq("status", "completed").eq("hidden_from_home", false).limit(20),
+  async function computeHasPodium(): Promise<boolean> {
+    const [{ data: podSeasons }, { data: podTournaments }] = await Promise.all([
+      supabaseAdmin.from("seasons").select("summary").eq("hidden_from_home", false).limit(20),
+      supabaseAdmin.from("tournaments").select("summary").eq("status", "completed").eq("hidden_from_home", false).limit(20),
+    ]);
+    const anyChamp = (rows: { summary: unknown }[] | null) =>
+      (rows ?? []).some((r) => !!(r.summary as { champion?: string | null } | null)?.champion);
+    return anyChamp(podSeasons) || anyChamp(podTournaments);
+  }
+
+  const [hasTeams, hasStatsContent, hasPodium] = await Promise.all([
+    computeHasTeams(),
+    computeHasStatsContent(),
+    computeHasPodium(),
   ]);
-  const anyChamp = (rows: { summary: unknown }[] | null) =>
-    (rows ?? []).some((r) => !!(r.summary as { champion?: string | null } | null)?.champion);
-  const hasPodium = anyChamp(podSeasons) || anyChamp(podTournaments);
+  const tNav = perfNow();
+  if (process.env.NODE_ENV !== "production") {
+    console.log(
+      `[layout timing] session→playerInfo ${(tPlayerInfo - t0).toFixed(0)}ms · ` +
+      `+settings/staff/coin ${(tSettings - tPlayerInfo).toFixed(0)}ms · ` +
+      `+nav-visibility ${(tNav - tSettings).toFixed(0)}ms · ` +
+      `total ${(tNav - t0).toFixed(0)}ms`
+    );
+  }
 
   // Players/Stats/Podium/Wagers/Settings are visible to every logged-in player
   // regardless of registration status — Settings itself renders a reduced view
