@@ -14,10 +14,12 @@ export type PlayerStatRow = {
   totalSaves: number;
   totalShots: number;
   totalScore: number;
+  totalDemos: number;
+  totalDemoed: number;
 };
 
-type SortKey = "mvp" | "goals" | "assists" | "saves" | "score" | "shots" | "shootingPct"
-             | "totalGoals" | "totalAssists" | "totalSaves" | "totalScore" | "totalShots";
+type SortKey = "mvp" | "goals" | "assists" | "saves" | "score" | "shots" | "shootingPct" | "demos" | "demoed"
+             | "totalGoals" | "totalAssists" | "totalSaves" | "totalScore" | "totalShots" | "totalDemos" | "totalDemoed";
 type SortDir = "desc" | "asc";
 
 function mvpScore(row: PlayerStatRow): number {
@@ -44,11 +46,15 @@ function sortValue(row: PlayerStatRow, key: SortKey): number {
     case "score":        return g > 0 ? row.totalScore / g : 0;
     case "shots":        return g > 0 ? row.totalShots / g : 0;
     case "shootingPct":  return shootingPct(row);
+    case "demos":        return g > 0 ? row.totalDemos / g : 0;
+    case "demoed":       return g > 0 ? row.totalDemoed / g : 0;
     case "totalGoals":   return row.totalGoals;
     case "totalAssists": return row.totalAssists;
     case "totalSaves":   return row.totalSaves;
     case "totalScore":   return row.totalScore;
     case "totalShots":   return row.totalShots;
+    case "totalDemos":   return row.totalDemos;
+    case "totalDemoed":  return row.totalDemoed;
   }
 }
 
@@ -60,11 +66,15 @@ const COLS: { key: SortKey; label: string; title: string; decimals: number; suff
   { key: "score",        label: "Sc/G",  title: "Score per game",                             decimals: 0,                group: "avg" },
   { key: "shots",        label: "Sh/G",  title: "Shots per game",                             decimals: 2,                group: "avg" },
   { key: "shootingPct",  label: "Sh%",   title: "Shooting percentage (goals / shots)",        decimals: 1, suffix: "%",   group: "avg" },
+  { key: "demos",        label: "D/G",   title: "Demos per game",                             decimals: 2,                group: "avg" },
+  { key: "demoed",       label: "Dd/G",  title: "Times demoed per game",                       decimals: 2,                group: "avg" },
   { key: "totalGoals",   label: "Gls",   title: "Total goals",                                decimals: 0,                group: "tot" },
   { key: "totalAssists", label: "Ast",   title: "Total assists",                              decimals: 0,                group: "tot" },
   { key: "totalSaves",   label: "Sv",    title: "Total saves",                                decimals: 0,                group: "tot" },
   { key: "totalScore",   label: "Score", title: "Total score",                                decimals: 0,                group: "tot" },
   { key: "totalShots",   label: "Sh",    title: "Total shots",                                decimals: 0,                group: "tot" },
+  { key: "totalDemos",   label: "Dm",    title: "Total demos",                                decimals: 0,                group: "tot" },
+  { key: "totalDemoed",  label: "Dmd",   title: "Total times demoed",                          decimals: 0,                group: "tot" },
 ];
 
 export function StatsTable({ rows }: { rows: PlayerStatRow[] }) {

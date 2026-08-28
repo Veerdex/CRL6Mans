@@ -15,6 +15,8 @@ export type StatAggregationInput = {
   saves: number;
   shots: number;
   score: number;
+  demos: number;
+  demoed: number;
 };
 
 export function aggregatePlayerGameStats(rows: StatAggregationInput[]): PlayerStatRow[] {
@@ -27,6 +29,8 @@ export function aggregatePlayerGameStats(rows: StatAggregationInput[]): PlayerSt
     totalSaves: number;
     totalShots: number;
     totalScore: number;
+    totalDemos: number;
+    totalDemoed: number;
     games: number;
   };
 
@@ -34,7 +38,8 @@ export function aggregatePlayerGameStats(rows: StatAggregationInput[]): PlayerSt
   for (const r of rows) {
     const prev = aggMap.get(r.key) ?? {
       username: r.username, displayName: r.displayName, teamName: r.teamName,
-      totalGoals: 0, totalAssists: 0, totalSaves: 0, totalShots: 0, totalScore: 0, games: 0,
+      totalGoals: 0, totalAssists: 0, totalSaves: 0, totalShots: 0, totalScore: 0,
+      totalDemos: 0, totalDemoed: 0, games: 0,
     };
     aggMap.set(r.key, {
       username: prev.username, displayName: prev.displayName, teamName: prev.teamName,
@@ -43,6 +48,8 @@ export function aggregatePlayerGameStats(rows: StatAggregationInput[]): PlayerSt
       totalSaves:   prev.totalSaves   + r.saves,
       totalShots:   prev.totalShots   + r.shots,
       totalScore:   prev.totalScore   + r.score,
+      totalDemos:   prev.totalDemos   + r.demos,
+      totalDemoed:  prev.totalDemoed  + r.demoed,
       games:        prev.games        + 1,
     });
   }
@@ -58,5 +65,7 @@ export function aggregatePlayerGameStats(rows: StatAggregationInput[]): PlayerSt
     totalSaves: agg.totalSaves,
     totalShots: agg.totalShots,
     totalScore: agg.totalScore,
+    totalDemos: agg.totalDemos,
+    totalDemoed: agg.totalDemoed,
   }));
 }

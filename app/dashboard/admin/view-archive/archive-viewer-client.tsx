@@ -200,6 +200,7 @@ function buildTabs(archive: TournamentArchive): SeasonTab[] {
     displayName: s.displayName,
     teamName: s.teamName,
     goals: s.goals, assists: s.assists, saves: s.saves, shots: s.shots, score: s.score,
+    demos: s.demos ?? 0, demoed: s.demoed ?? 0,
   }));
 
   tabs.push({

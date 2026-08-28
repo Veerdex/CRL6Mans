@@ -59,6 +59,8 @@ export type AnalyzedGameStat = {
   saves: number;
   shots: number;
   score: number;
+  demos: number;
+  demoed: number;
 };
 
 // Parses + resolves a replay but does NOT write to the DB. The resolved stats are
@@ -260,6 +262,8 @@ export async function adminAnalyzeGameReplay(
     saves: p.saves,
     shots: p.shots,
     score: p.score,
+    demos: p.demos,
+    demoed: p.demoed,
   }));
 
   // Identity resolution + certification persistence (Steps 6 + 7). Never
@@ -365,6 +369,8 @@ export async function reportMatchResult(
         saves: s.saves,
         shots: s.shots,
         score: s.score,
+        demos: s.demos,
+        demoed: s.demoed,
       })),
     );
     if (rows.length) await supabaseAdmin.from("player_game_stats").insert(rows);

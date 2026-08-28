@@ -55,6 +55,8 @@ export type TournamentArchive = {
     saves: number;
     shots: number;
     score: number;
+    demos: number;
+    demoed: number;
   }[];
 };
 
@@ -106,7 +108,7 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
     fetchAllRows((from, to) =>
       supabaseAdmin
         .from("player_game_stats")
-        .select("match_id, game_number, player_id, goals, assists, saves, shots, score")
+        .select("match_id, game_number, player_id, goals, assists, saves, shots, score, demos, demoed")
         .not("player_id", "is", null)
         .order("match_id")
         .order("game_number")
@@ -187,6 +189,7 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
       displayName: player?.display_name ?? null,
       teamName,
       goals: s.goals, assists: s.assists, saves: s.saves, shots: s.shots, score: s.score,
+      demos: s.demos, demoed: s.demoed,
     };
   });
 

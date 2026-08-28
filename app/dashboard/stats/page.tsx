@@ -14,7 +14,7 @@ export default async function StatsPage() {
   const [{ data: statsRaw }, { data: playersRaw }, { data: teamsRaw }] = await Promise.all([
     supabaseAdmin
       .from("player_game_stats")
-      .select("player_id, goals, assists, saves, shots, score")
+      .select("player_id, goals, assists, saves, shots, score, demos, demoed")
       .not("player_id", "is", null),
     supabaseAdmin.from("players").select("id, username, display_name, team_id").eq("status", "approved"),
     supabaseAdmin.from("teams").select("id, name"),
@@ -33,6 +33,7 @@ export default async function StatsPage() {
         displayName: (player as typeof player & { display_name?: string | null }).display_name ?? null,
         teamName: player.team_id ? (teamNames[player.team_id] ?? null) : null,
         goals: r.goals, assists: r.assists, saves: r.saves, shots: r.shots, score: r.score,
+        demos: r.demos, demoed: r.demoed,
       };
     });
   const rows = aggregatePlayerGameStats(inputs);

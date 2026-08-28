@@ -126,6 +126,8 @@ export async function submitSeriesResult(
         saves: s.saves,
         shots: s.shots,
         score: s.score,
+        demos: s.demos,
+        demoed: s.demoed,
       })),
     );
     if (rows.length) await supabaseAdmin.from("player_game_stats").insert(rows);
@@ -454,6 +456,8 @@ export async function uploadGameReplay(
     saves: p.saves,
     shots: p.shots,
     score: p.score,
+    demos: p.demos,
+    demoed: p.demoed,
   }));
 
   // Identity resolution + certification persistence (Steps 6 + 7). Never

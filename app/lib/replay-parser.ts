@@ -7,6 +7,8 @@
 // MMR trailer records. A full network-parser result can still be attached with
 // mergeNetworkIdentities() when neither header source is available.
 
+import { parseDemoCounts } from "./replay-network-parser";
+
 export type ReplayPlatform =
   | "steam"
   | "epic"
@@ -26,6 +28,8 @@ export type PlayerStat = {
   assists: number;
   saves: number;
   shots: number;
+  demos: number;
+  demoed: number;
 
   // Identity fields are strings on purpose. Steam/Xbox IDs exceed Number's
   // safe-integer range and must never be converted to JavaScript numbers.
@@ -533,6 +537,8 @@ function parseReplayWithBoolWidth(buf: Buffer, debug: boolean, boolWidth: 1 | 4)
       assists: asNumber(rawPlayer.Assists),
       saves: asNumber(rawPlayer.Saves),
       shots: asNumber(rawPlayer.Shots),
+      demos: 0,
+      demoed: 0,
       platform,
       onlineId,
       identityKey: key,
@@ -568,6 +574,32 @@ function parseReplayWithBoolWidth(buf: Buffer, debug: boolean, boolWidth: 1 | 4)
       `Found ${unclaimedBakkesModIds.length} unclaimed BakkesMod Epic ID(s) for `
       + `${unresolvedEpicPlayers.length} unresolved Epic player(s); automatic association refused`,
     );
+  }
+
+  try {
+    const { counts: demoCounts, frameCoverage } = parseDemoCounts({
+      buf,
+      headerEnd,
+      majorVersion,
+      minorVersion,
+      netVersion,
+      numFrames: asNumber(props.NumFrames),
+      maxChannels: asNumber(props.MaxChannels),
+      matchType: asString(props.MatchType),
+      buildVersion: asString(props.BuildVersion),
+    });
+    if (frameCoverage < 0.99) {
+      throw new Error(`Network stream ended early (frameCoverage=${frameCoverage.toFixed(3)})`);
+    }
+    for (const player of players) {
+      const counts = demoCounts.get(player.name);
+      if (counts) {
+        player.demos = counts.demos;
+        player.demoed = counts.demoed;
+      }
+    }
+  } catch (error) {
+    warnings.push(`Demo counts unavailable: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   return {

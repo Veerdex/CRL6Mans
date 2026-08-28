@@ -71,6 +71,8 @@ function basePlayer(overrides: Partial<PlayerStat> = {}): PlayerStat {
     assists: 0,
     saves: 0,
     shots: 0,
+    demos: 0,
+    demoed: 0,
     platform: null,
     onlineId: null,
     identityKey: null,

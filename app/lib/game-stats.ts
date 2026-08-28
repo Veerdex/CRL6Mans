@@ -13,6 +13,8 @@ type Agg = {
   saves: number;
   shots: number;
   score: number;
+  demos: number;
+  demoed: number;
 };
 
 function mvpScore(a: Agg): number {
@@ -32,7 +34,7 @@ export async function computeTopStats(): Promise<TopStats> {
     fetchAllRows((from, to) =>
       supabaseAdmin
         .from("player_game_stats")
-        .select("player_id, goals, assists, saves, shots, score")
+        .select("player_id, goals, assists, saves, shots, score, demos, demoed")
         .not("player_id", "is", null)
         .order("match_id")
         .order("game_number")
@@ -55,9 +57,10 @@ export async function computeTopStats(): Promise<TopStats> {
   const agg = new Map<string, Agg>();
   for (const r of statsRaw as {
     player_id: string; goals: number; assists: number; saves: number; shots: number; score: number;
+    demos: number; demoed: number;
   }[]) {
     if (!r.player_id || !nameById[r.player_id]) continue;
-    const prev = agg.get(r.player_id) ?? { username: nameById[r.player_id], games: 0, goals: 0, assists: 0, saves: 0, shots: 0, score: 0 };
+    const prev = agg.get(r.player_id) ?? { username: nameById[r.player_id], games: 0, goals: 0, assists: 0, saves: 0, shots: 0, score: 0, demos: 0, demoed: 0 };
     agg.set(r.player_id, {
       username: prev.username,
       games: prev.games + 1,
@@ -66,6 +69,8 @@ export async function computeTopStats(): Promise<TopStats> {
       saves: prev.saves + (r.saves ?? 0),
       shots: prev.shots + (r.shots ?? 0),
       score: prev.score + (r.score ?? 0),
+      demos: prev.demos + (r.demos ?? 0),
+      demoed: prev.demoed + (r.demoed ?? 0),
     });
   }
 
@@ -86,6 +91,7 @@ export async function computeTopStats(): Promise<TopStats> {
   const points = leader((a) => (a.games > 0 ? a.score / a.games : 0));
   const goals = leader((a) => (a.games > 0 ? a.goals / a.games : 0));
   const assists = leader((a) => (a.games > 0 ? a.assists / a.games : 0));
+  const demos = leader((a) => (a.games > 0 ? a.demos / a.games : 0));
 
   const accolades: TopStatAccolade[] = [];
   let mvpUsername: string | null = null;
@@ -97,6 +103,7 @@ export async function computeTopStats(): Promise<TopStats> {
   if (points) accolades.push({ label: "Points Per Game", playerName: points.agg.username, value: Math.round(points.value).toString(), isMvp: false });
   if (goals) accolades.push({ label: "Goals Per Game", playerName: goals.agg.username, value: goals.value.toFixed(2), isMvp: false });
   if (assists) accolades.push({ label: "Assists Per Game", playerName: assists.agg.username, value: assists.value.toFixed(2), isMvp: false });
+  if (demos) accolades.push({ label: "Demos Per Game", playerName: demos.agg.username, value: demos.value.toFixed(2), isMvp: false });
 
   return { accolades, mvpUsername };
 }

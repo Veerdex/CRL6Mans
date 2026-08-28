@@ -157,6 +157,8 @@ export async function reverifyGameIdentity(
     assists: 0,
     saves: 0,
     shots: 0,
+    demos: 0,
+    demoed: 0,
   }));
 
   const context = await buildResolverContext(matchId, activePlayers);

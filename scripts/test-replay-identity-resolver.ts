@@ -23,6 +23,8 @@ function player(overrides: Partial<PlayerStat>): PlayerStat {
     assists: 0,
     saves: 0,
     shots: 1,
+    demos: 0,
+    demoed: 0,
     platform: "steam",
     onlineId: "1",
     identityKey: "steam:1",
