@@ -9,21 +9,42 @@ import { NotificationButton } from "@/app/dashboard/notification-button";
 import { NotificationPrefsForm } from "./notification-prefs-form";
 import { DisplayNameForm } from "./display-name-form";
 import { PlatformAccountsSection, type ClaimablePlatform, type PlatformAccountRecord } from "./platform-accounts-form";
+import { PatreonConnectCard, type PatreonInfo } from "./patreon-connect-card";
 import { getSettingsTabTheme } from "@/app/lib/sponsors-public";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ patreon?: string }>;
+}) {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const [{ data: player }, sponsorTheme] = await Promise.all([
+  const { patreon: patreonBanner } = await searchParams;
+
+  const [{ data: player }, sponsorTheme, { data: account }] = await Promise.all([
     supabaseAdmin
       .from("players")
       .select("id, status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, sub_willing, theme, nav_layout, display_name, notification_prefs")
       .eq("discord_id", session.userId)
       .single(),
     getSettingsTabTheme(),
+    supabaseAdmin
+      .from("accounts")
+      .select("patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_connected_at")
+      .eq("discord_id", session.userId)
+      .single(),
   ]);
+
+  const patreonInfo: PatreonInfo = account?.patreon_connected_at
+    ? {
+        status: account.patreon_status as "active_patron" | "declined_patron" | "former_patron" | null,
+        tierTitle: account.patreon_tier_title as string | null,
+        entitledCents: account.patreon_entitled_cents as number | null,
+        isPublic: !!account.patreon_public,
+      }
+    : null;
 
   // Non-approved players (unregistered/pending/rejected) get a reduced settings
   // view — account preferences only. Platform account claims and MMR/tracker
@@ -113,6 +134,9 @@ export default async function SettingsPage() {
       </div>
       <div className="mb-4">
         <NavLayoutToggle initial={player?.nav_layout === "topbar" ? "topbar" : "sidebar"} />
+      </div>
+      <div className="mb-4">
+        <PatreonConnectCard info={patreonInfo} banner={patreonBanner} />
       </div>
       <div className="mb-6 space-y-3">
         <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Notifications</p>

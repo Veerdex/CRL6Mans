@@ -1,5 +1,6 @@
 import { getPatreonUrl } from "@/app/lib/patreon-public";
 import { APP_NAME } from "@/app/lib/constants";
+import { supabaseAdmin } from "@/app/lib/supabase";
 
 const REASONS = [
   "Tournament prize pools that make competing worth it",
@@ -8,7 +9,15 @@ const REASONS = [
 ];
 
 export default async function SupportPage() {
-  const patreonUrl = await getPatreonUrl();
+  const [patreonUrl, { data: patrons }] = await Promise.all([
+    getPatreonUrl(),
+    supabaseAdmin
+      .from("accounts")
+      .select("display_name, username, patreon_tier_title, patreon_entitled_cents")
+      .eq("patreon_status", "active_patron")
+      .eq("patreon_public", true)
+      .order("patreon_entitled_cents", { ascending: false }),
+  ]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -42,6 +51,25 @@ export default async function SupportPage() {
           </a>
         ) : (
           <p className="text-sm text-zinc-500">Patron sign-ups are coming soon — check back shortly.</p>
+        )}
+
+        {patrons && patrons.length > 0 && (
+          <div className="space-y-3 pt-4">
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Our Patrons</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {patrons.map((p, i) => (
+                <span
+                  key={i}
+                  className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-300"
+                >
+                  {(p.display_name as string | null) || (p.username as string | null)}
+                  {p.patreon_tier_title ? (
+                    <span className="text-zinc-500"> — {p.patreon_tier_title as string}</span>
+                  ) : null}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>

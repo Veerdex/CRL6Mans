@@ -40,6 +40,7 @@ import {
   SeasonHistorySection,
   TabVisitsSection,
 } from "./data-section";
+import { PatreonAdminSection } from "./patreon-section";
 import { StorageUsageSection } from "./storage-section";
 import { RoundScheduler, type ScheduleSection, type RoundMatchInfo } from "./round-scheduler";
 import { ScheduleOverrideCard, type ScheduleOverrideCardData } from "./schedule-override-card";
@@ -922,6 +923,7 @@ export default async function AdminPage() {
         { id: "leaders", label: "Stat Leaders" },
         { id: "history", label: "Season History" },
         { id: "tab-visits", label: "Tab Visits" },
+        { id: "patrons", label: "Patrons" },
         ...(userIsDirector ? [{ id: "storage", label: "Storage & Limits" }] : []),
       ],
     },
@@ -1445,6 +1447,7 @@ export default async function AdminPage() {
         <StatLeadersSection />
         <SeasonHistorySection tournaments={tournaments ?? []} seasons={seasons ?? []} />
         <TabVisitsSection />
+        <PatreonAdminSection userIsDirector={userIsDirector} />
         {userIsDirector && <StorageUsageSection />}
       </AdminSection>
 

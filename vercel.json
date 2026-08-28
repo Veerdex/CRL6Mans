@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/clip-reset",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/patreon-sync",
+      "schedule": "0 0 * * *"
     }
   ]
 }
