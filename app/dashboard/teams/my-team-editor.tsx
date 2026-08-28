@@ -96,14 +96,14 @@ export function MyTeamEditor({
   // After season starts: locked by default (auto-locked on season start); admin can unlock.
   const canEdit = !seasonActive || isAdmin || !team.is_locked;
 
+  // Locked-and-not-admin: hide the section entirely rather than showing an inert card.
+  if (!canEdit) return null;
+
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
       <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
         <h2 className="text-base font-semibold text-white">{label}</h2>
         <div className="flex items-center gap-2">
-          {seasonActive && team.is_locked && !isAdmin && (
-            <span className="text-xs text-amber-400">🔒 Locked</span>
-          )}
           {isAdmin && (
             <button
               onClick={handleLockToggle}
@@ -116,8 +116,7 @@ export function MyTeamEditor({
         </div>
       </div>
 
-      {!canEdit ? null : (
-        <div className="p-5 space-y-5">
+      <div className="p-5 space-y-5">
           {/* Team name */}
           <div>
             <label className="block text-xs text-zinc-500 mb-1.5">Team Name</label>
@@ -257,7 +256,6 @@ export function MyTeamEditor({
             )}
           </div>
         </div>
-      )}
     </div>
   );
 }

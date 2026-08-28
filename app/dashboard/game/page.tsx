@@ -14,11 +14,11 @@ export default async function GamePage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
-      <div className="flex items-center gap-2 flex-wrap mb-1">
+      <div className="flex items-center justify-center gap-2 flex-wrap mb-1">
         <h1 className="text-2xl font-bold text-white">Game</h1>
         <SponsoredByLine tabKey="game" />
       </div>
-      <p className="text-sm text-zinc-400 mb-8 mt-1">
+      <p className="text-sm text-zinc-400 mb-8 mt-1 text-center">
         A little something for the waiting room. Beat the leaderboard.
       </p>
       <FlappyBird

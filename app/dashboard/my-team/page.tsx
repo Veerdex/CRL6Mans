@@ -745,6 +745,25 @@ export default async function MyTeamPage() {
         </div>
       </div>
 
+      {/* ── Score Confirmation ── */}
+      {seasonActive && !isEliminated && (
+        <SeriesReplayPanel
+          matchId={nextMatch?.id ?? null}
+          homeTeam={seriesHomeTeam}
+          awayTeam={seriesAwayTeam}
+          bestOf={bestOf}
+          myTeamId={teamId}
+          pendingHomeScore={nextMatch?.pending_home_score ?? null}
+          pendingAwayScore={nextMatch?.pending_away_score ?? null}
+          scoreSubmittedByTeamId={nextMatch?.score_submitted_by_team_id ?? null}
+          scoreConfirmed={nextMatch?.score_confirmed ?? false}
+          scoreSubmittedAt={nextMatch?.score_submitted_at ?? null}
+          opponentNotReady={opponentNotReady}
+          opponentName={opponentName}
+          isTournament={!!activeTournamentId}
+        />
+      )}
+
       {/* ── Main grid ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -893,25 +912,6 @@ export default async function MyTeamPage() {
 
         </div>
       </div>
-
-      {/* ── Score Confirmation ── */}
-      {seasonActive && !isEliminated && (
-        <SeriesReplayPanel
-          matchId={nextMatch?.id ?? null}
-          homeTeam={seriesHomeTeam}
-          awayTeam={seriesAwayTeam}
-          bestOf={bestOf}
-          myTeamId={teamId}
-          pendingHomeScore={nextMatch?.pending_home_score ?? null}
-          pendingAwayScore={nextMatch?.pending_away_score ?? null}
-          scoreSubmittedByTeamId={nextMatch?.score_submitted_by_team_id ?? null}
-          scoreConfirmed={nextMatch?.score_confirmed ?? false}
-          scoreSubmittedAt={nextMatch?.score_submitted_at ?? null}
-          opponentNotReady={opponentNotReady}
-          opponentName={opponentName}
-          isTournament={!!activeTournamentId}
-        />
-      )}
 
       {/* ── Group Stage Schedule ── */}
       {seasonActive && hasGroupStage && (() => {
