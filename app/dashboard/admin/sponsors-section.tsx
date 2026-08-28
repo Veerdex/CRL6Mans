@@ -12,10 +12,12 @@ import {
   removeSponsorMember,
   updateTabPlacement,
   updateSeasonSponsor,
+  setNavTabOverride,
 } from "./sponsor-actions";
 import { savePatreonUrl } from "./league-actions";
 import { MediaCropModal } from "./media-crop-modal";
 import type { CropKind } from "@/app/lib/media-crop";
+import { NAV_TAB_OPTIONS, type NavTabOverrides, type NavTabVisibility } from "@/app/lib/nav-tabs";
 
 function PatreonLinkCard({ patreonUrl }: { patreonUrl: string | null }) {
   const [isPending, startTransition] = useTransition();
@@ -727,6 +729,67 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
           onSave={(crop) => handleSaveCrop(cropModalKind, crop)}
         />
       )}
+    </div>
+  );
+}
+
+const VISIBILITY_STYLES: Record<NavTabVisibility, string> = {
+  hidden: "bg-red-950/40 border-red-800/60 text-red-300",
+  auto: "bg-zinc-800 border-zinc-700 text-zinc-400",
+  shown: "bg-emerald-950/40 border-emerald-800/60 text-emerald-300",
+};
+
+export function NavTabVisibilityGrid({ overrides }: { overrides: NavTabOverrides }) {
+  const [isPending, startTransition] = useTransition();
+  const [localOverrides, setLocalOverrides] = useState<NavTabOverrides>(overrides);
+  const [error, setError] = useState<string | null>(null);
+
+  function handleChange(key: string, value: NavTabVisibility) {
+    setError(null);
+    setLocalOverrides((prev) => {
+      const next = { ...prev };
+      if (value === "auto") delete next[key];
+      else next[key] = value;
+      return next;
+    });
+    startTransition(async () => {
+      const res = await setNavTabOverride(key, value);
+      if (res.error) setError(res.error);
+    });
+  }
+
+  return (
+    <div className="border border-zinc-800 rounded-xl p-4 space-y-3">
+      <div>
+        <p className="text-sm font-medium text-white">Tab Visibility</p>
+        <p className="text-xs text-zinc-500 mt-0.5">
+          Force a nav tab to always show or always hide, overriding the normal automatic rules. Auto is the default — it&apos;s what determines visibility today.
+        </p>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+        {NAV_TAB_OPTIONS.map(({ key, label }) => {
+          const value = localOverrides[key] ?? "auto";
+          return (
+            <div
+              key={key}
+              className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5"
+            >
+              <span className="text-xs text-zinc-300 truncate">{label}</span>
+              <select
+                value={value}
+                onChange={(e) => handleChange(key, e.target.value as NavTabVisibility)}
+                disabled={isPending}
+                className={`text-[11px] rounded border px-1.5 py-0.5 focus:outline-none disabled:opacity-50 ${VISIBILITY_STYLES[value]}`}
+              >
+                <option value="hidden">Hidden</option>
+                <option value="auto">Auto</option>
+                <option value="shown">Shown</option>
+              </select>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

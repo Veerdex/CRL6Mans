@@ -8,6 +8,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import type { ContentCrop, CropKind, MediaCrop } from "@/app/lib/media-crop";
+import { NAV_TAB_OPTIONS, type NavTabOverrides, type NavTabVisibility } from "@/app/lib/nav-tabs";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -319,6 +320,38 @@ export async function updateTabPlacement(
       side_nav_sponsor_id: sideNavSponsorId,
       settings_tab_sponsor_id: settingsTabSponsorId,
     })
+    .not("id", "is", null);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard", "layout");
+  return { ok: true };
+}
+
+export async function getNavTabOverrides(): Promise<NavTabOverrides> {
+  const { data } = await supabaseAdmin
+    .from("league_settings")
+    .select("nav_tab_overrides")
+    .single();
+  return (data?.nav_tab_overrides as NavTabOverrides | null) ?? {};
+}
+
+export async function setNavTabOverride(
+  key: string,
+  visibility: NavTabVisibility
+): Promise<{ ok?: boolean; error?: string }> {
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit sponsors." };
+  if (!NAV_TAB_OPTIONS.some((t) => t.key === key)) return { error: "Invalid tab." };
+
+  const overrides = { ...(await getNavTabOverrides()) };
+  if (visibility === "auto") delete overrides[key];
+  else overrides[key] = visibility;
+
+  const { error } = await supabaseAdmin
+    .from("league_settings")
+    .update({ nav_tab_overrides: overrides })
     .not("id", "is", null);
   if (error) return { error: error.message };
 

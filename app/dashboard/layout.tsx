@@ -9,6 +9,7 @@ import NavLink from "./nav-link";
 import { TopNav, type TopNavEntry } from "./top-nav";
 import { SidebarNavGroup } from "./sidebar-nav-group";
 import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
+import { applyNavTabOverrides, type NavTabOverrides } from "@/app/lib/nav-tabs";
 import { APP_NAME } from "@/app/lib/constants";
 import MobileNav from "./mobile-nav";
 import { ServiceWorkerRegistrar } from "./sw-register";
@@ -266,7 +267,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const { status, teamId, isGuest } = playerInfo;
   const [settingsRes, playersCountRes, navSponsors] = await Promise.all([
-    supabaseAdmin.from("league_settings").select("draft_active, season_active, active_tournament_id").single(),
+    supabaseAdmin.from("league_settings").select("draft_active, season_active, active_tournament_id, nav_tab_overrides").single(),
     supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true),
     getNavSponsors(),
   ]);
@@ -388,6 +389,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   } else {
     navKeys = ["home", "register", ...commonExtras, "game"];
   }
+  navKeys = applyNavTabOverrides(navKeys, (settingsRes.data?.nav_tab_overrides as NavTabOverrides | null) ?? {});
+
   // Onboarding tab — shown until the player dismisses it ("I got it!").
   if (!welcomeSeen && !isGuest) navKeys.unshift("welcome");
   if (admin) navKeys.push("admin", "testreplay");

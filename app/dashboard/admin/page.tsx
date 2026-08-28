@@ -30,8 +30,8 @@ import type { Tournament, Season } from "./tournament-actions";
 import { InitSettingsButton } from "./init-settings-button";
 import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
-import { getSponsorsWithMembers, getTabPlacement } from "./sponsor-actions";
-import { SponsorsManager, TabManagerSection, SeasonSponsorPicker } from "./sponsors-section";
+import { getSponsorsWithMembers, getTabPlacement, getNavTabOverrides } from "./sponsor-actions";
+import { SponsorsManager, TabManagerSection, SeasonSponsorPicker, NavTabVisibilityGrid } from "./sponsors-section";
 import { getPublicSponsors } from "@/app/lib/sponsors-public";
 import {
   RegistrationFunnelSection,
@@ -85,7 +85,11 @@ async function SponsorsSection({ patreonUrl }: { patreonUrl: string | null }) {
 }
 
 async function TabManagerAdminSection() {
-  const [sponsors, tabPlacement] = await Promise.all([getSponsorsWithMembers(), getTabPlacement()]);
+  const [sponsors, tabPlacement, navTabOverrides] = await Promise.all([
+    getSponsorsWithMembers(),
+    getTabPlacement(),
+    getNavTabOverrides(),
+  ]);
   return (
     <AdminSubSection
       sectionId="sponsors"
@@ -93,7 +97,10 @@ async function TabManagerAdminSection() {
       title="Tab Manager"
       description="Configure which sponsor's content shows up on each dashboard tab."
     >
-      <TabManagerSection sponsors={sponsors} tabPlacement={tabPlacement} />
+      <div className="space-y-4">
+        <NavTabVisibilityGrid overrides={navTabOverrides} />
+        <TabManagerSection sponsors={sponsors} tabPlacement={tabPlacement} />
+      </div>
     </AdminSubSection>
   );
 }
