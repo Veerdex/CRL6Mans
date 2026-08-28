@@ -1,6 +1,7 @@
 import { getPatreonUrl } from "@/app/lib/patreon-public";
 import { APP_NAME } from "@/app/lib/constants";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
 const REASONS = [
   "Tournament prize pools that make competing worth it",
@@ -23,7 +24,10 @@ export default async function SupportPage() {
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="max-w-2xl mx-auto space-y-10 text-center">
         <div className="space-y-2">
-          <h1 className="text-4xl font-bold text-white tracking-tight">Support {APP_NAME}</h1>
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <h1 className="text-4xl font-bold text-white tracking-tight">Support {APP_NAME}</h1>
+            <SponsoredByLine tabKey="patreon" />
+          </div>
           <p className="text-zinc-400">
             {`${APP_NAME} is run by the community, for the community. If you'd like to help keep it going, you can become a Patron — every tier helps.`}
           </p>

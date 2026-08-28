@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { placeBets, placeParlayBet, type BetInput, type ParlayLegInput, type BettingMode } from "./actions";
 import { getOULines, getTotalSlots, HOUSE_VIG, type MatchPrediction } from "./prediction";
 import { LeaderboardView, type LeaderboardEntry } from "./leaderboard-view";
@@ -229,6 +229,7 @@ export function WagersClient({
   coinBalance,
   currentUsername,
   leaderboard,
+  sponsoredByLine,
 }: {
   eventName: string;
   currentStage: string;
@@ -248,6 +249,7 @@ export function WagersClient({
   coinBalance: number;
   currentUsername: string;
   leaderboard: LeaderboardEntry[];
+  sponsoredByLine?: ReactNode;
 }) {
   const [selectedMatchId, setSelectedMatchId] = useState(defaultMatchId || matches[0]?.id || "");
   const [straightSelections, setStraightSelections] = useState<Record<string, { betType: string; amount: string }>>({});
@@ -481,7 +483,10 @@ export function WagersClient({
       {/* Top bar */}
       <div className="flex items-center justify-between gap-2 px-4 sm:px-5 py-3 border-b border-zinc-800 bg-zinc-950 shrink-0">
         <div className="min-w-0">
-          <h1 className="text-base font-bold text-white truncate">{eventName}</h1>
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h1 className="text-base font-bold text-white truncate">{eventName}</h1>
+            {sponsoredByLine}
+          </div>
           {currentStage && <p className="text-xs text-zinc-500 truncate">{currentStage}</p>}
         </div>
         <div className="flex items-center gap-2 shrink-0">

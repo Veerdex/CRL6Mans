@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
-import { aggregatePlayerGameStats, type StatAggregationInput } from "@/app/lib/player-stat-aggregation";
 import { TAB_LABELS } from "@/app/lib/tab-labels";
+import { PRESETS } from "@/app/dashboard/season/format-constants";
+import type { Tournament, Season } from "./tournament-actions";
 import { AdminSubSection } from "./admin-sub-section";
 
 function StatCard({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
@@ -14,194 +14,193 @@ function StatCard({ label, value, sub }: { label: string; value: number | string
   );
 }
 
-export function RegistrationFunnelSection({ analyticsRows }: { analyticsRows: { type: string }[] }) {
+export function AnalyticsSummaryCards({ analyticsRows }: { analyticsRows: { type: string }[] }) {
   let visits = 0, registrations = 0, draftJoins = 0;
   for (const e of analyticsRows) {
     if (e.type === "visit") visits++;
     else if (e.type === "registration") registrations++;
     else if (e.type === "draft_join") draftJoins++;
   }
-  const regRate = visits > 0 ? (registrations / visits) * 100 : 0;
-  const draftRate = registrations > 0 ? (draftJoins / registrations) * 100 : 0;
 
   return (
-    <AdminSubSection
-      sectionId="data"
-      tabId="funnel"
-      title="Registration Funnel"
-      isDefaultTab
-      description="How visitors convert into registered players, and how many registered players go on to enter a draft, over the last 52 tracked weeks."
-    >
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-        <StatCard label="Visits" value={visits} />
-        <StatCard label="Registrations" value={registrations} sub={`${regRate.toFixed(1)}% of visits`} />
-        <StatCard label="Draft Joins" value={draftJoins} sub={`${draftRate.toFixed(1)}% of registrations`} />
-      </div>
-    </AdminSubSection>
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+      <StatCard label="Visits" value={visits} />
+      <StatCard label="Registrations" value={registrations} />
+      <StatCard label="Draft Joins" value={draftJoins} />
+    </div>
   );
 }
 
-export async function CompetitiveSnapshotSection() {
-  const [{ data: teams }, { data: rosterPlayers }, { count: completedMatches }] = await Promise.all([
-    supabaseAdmin.from("teams").select("id, name, season_rating"),
-    supabaseAdmin
-      .from("players")
-      .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3")
-      .eq("status", "approved"),
-    supabaseAdmin.from("matches").select("id", { count: "exact", head: true }).eq("status", "completed"),
-  ]);
+const PRESET_NAMES: Record<string, string> = Object.fromEntries(PRESETS.map((p) => [p.id, p.name]));
 
-  const ratingsByTeam: Record<string, number[]> = {};
-  for (const p of rosterPlayers ?? []) {
-    if (!p.team_id) continue;
-    (ratingsByTeam[p.team_id] ??= []).push(playerRatingFromRow(p));
-  }
+const EVENT_STATUS_LABELS: Record<string, string> = {
+  scheduled: "Not Started",
+  active: "Active",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
 
-  const teamRatings = (teams ?? []).map((t) => ({
-    id: t.id,
-    name: t.name,
-    rating: resolveTeamRating(t.season_rating != null ? Number(t.season_rating) : null, ratingsByTeam[t.id] ?? []),
-  }));
+const EVENT_STATUS_COLORS: Record<string, string> = {
+  scheduled: "text-zinc-400",
+  active: "text-emerald-400",
+  completed: "text-blue-400",
+  cancelled: "text-red-400",
+};
 
-  const topTeam = teamRatings.length ? teamRatings.reduce((a, b) => (b.rating > a.rating ? b : a)) : null;
-  const spread =
-    teamRatings.length > 1
-      ? Math.max(...teamRatings.map((t) => t.rating)) - Math.min(...teamRatings.map((t) => t.rating))
-      : 0;
+type EventOverviewRow = {
+  id: string;
+  name: string;
+  status: string;
+  format: string;
+  playerCount: number;
+  startedAt: string | null;
+  endedAt: string | null;
+  sponsorName: string | null;
+  champion: string | null;
+};
 
-  return (
-    <AdminSubSection
-      sectionId="data"
-      tabId="competitive"
-      title="Competitive Snapshot"
-      description="Live team ratings under the crl-final-rating-v1 model, and how many matches have been completed so far."
-    >
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-        <StatCard label="Teams" value={teamRatings.length} />
-        <StatCard label="Completed Matches" value={completedMatches ?? 0} />
-        <StatCard label="Top Team" value={topTeam?.name ?? "—"} sub={topTeam ? `${Math.round(topTeam.rating)} rating` : undefined} />
-        <StatCard label="Rating Spread" value={Math.round(spread)} sub="max − min live rating" />
-      </div>
-    </AdminSubSection>
-  );
+// Completed events carry a full_archive snapshot (teams + rosters) taken right
+// before matches/teams get wiped — roster size is the number of players the
+// draft actually placed, and stays accurate forever. Events that haven't
+// completed yet have no archive, so those fall back to live signup counts.
+function archivePlayerCount(fullArchive: unknown): number | null {
+  const archive = fullArchive as { teams?: { roster?: unknown[] }[] } | null;
+  if (!archive?.teams) return null;
+  return archive.teams.reduce((sum, t) => sum + (t.roster?.length ?? 0), 0);
 }
 
-type StatKey = "totalGoals" | "totalAssists" | "totalSaves" | "totalShots";
-const STAT_CATEGORIES: { label: string; stat: StatKey }[] = [
-  { label: "Goals", stat: "totalGoals" },
-  { label: "Assists", stat: "totalAssists" },
-  { label: "Saves", stat: "totalSaves" },
-  { label: "Shots", stat: "totalShots" },
-];
-
-export async function StatLeadersSection() {
-  const [{ data: statsRaw }, { data: playersRaw }, { data: teamsRaw }] = await Promise.all([
-    supabaseAdmin
-      .from("player_game_stats")
-      .select("player_id, goals, assists, saves, shots, score")
-      .not("player_id", "is", null),
-    supabaseAdmin.from("players").select("id, username, display_name, team_id").eq("status", "approved"),
-    supabaseAdmin.from("teams").select("id, name"),
-  ]);
-
-  const teamNames = Object.fromEntries((teamsRaw ?? []).map((t) => [t.id, t.name]));
-  const playerMap = Object.fromEntries((playersRaw ?? []).map((p) => [p.id, p]));
-
-  const inputs: StatAggregationInput[] = (statsRaw ?? [])
-    .filter((r) => r.player_id && playerMap[r.player_id])
-    .map((r) => {
-      const player = playerMap[r.player_id];
-      return {
-        key: r.player_id,
-        username: player.username,
-        displayName: player.display_name ?? null,
-        teamName: player.team_id ? (teamNames[player.team_id] ?? null) : null,
-        goals: r.goals, assists: r.assists, saves: r.saves, shots: r.shots, score: r.score,
-      };
-    });
-  const rows = aggregatePlayerGameStats(inputs);
-
-  function top3(stat: StatKey) {
-    return [...rows].sort((a, b) => b[stat] - a[stat]).slice(0, 3);
-  }
-
-  return (
-    <AdminSubSection
-      sectionId="data"
-      tabId="leaders"
-      title="Stat Leaders"
-      description="Top 3 players in each core scoreboard stat, aggregated across every submitted replay."
-    >
-      <div className="grid sm:grid-cols-2 gap-4">
-        {STAT_CATEGORIES.map((c) => {
-          const leaders = top3(c.stat);
-          return (
-            <div key={c.stat} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-              <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">{c.label}</p>
-              {leaders.length === 0 ? (
-                <p className="text-sm text-zinc-600">No data yet.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {leaders.map((r, i) => (
-                    <div key={r.playerId} className="flex items-center gap-2 text-sm">
-                      <span className="text-zinc-600 w-4">{i + 1}.</span>
-                      <span className="flex-1 text-white">{r.displayName ?? r.username}</span>
-                      <span className="text-zinc-400 font-mono">{r[c.stat]}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </AdminSubSection>
-  );
+function eventFormatName(seasonFormat: unknown, fullArchive: unknown): string {
+  const preset =
+    (seasonFormat as { preset?: string } | null)?.preset ??
+    (fullArchive as { meta?: { formatPreset?: string | null } } | null)?.meta?.formatPreset;
+  if (!preset) return "—";
+  return PRESET_NAMES[preset] ?? preset;
 }
 
-type SummaryShape = { champion?: string | null; runnerUp?: string | null } | null;
-type SeasonHistoryRow = { id: string; name: string; champion: string | null; runnerUp: string | null; date: string | null };
+function formatEventDate(iso: string | null) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
 
-export function SeasonHistorySection({
+export async function EventOverviewSection({
   tournaments,
   seasons,
+  sponsorNameById,
 }: {
-  tournaments: { id: string; name: string; status: string; summary: unknown; ended_at: string | null }[];
-  seasons: { id: string; name: string; summary: unknown; ended_at: string | null; created_at: string | null }[];
+  tournaments: Tournament[];
+  seasons: Season[];
+  sponsorNameById: Map<string, string>;
 }) {
-  const rows: SeasonHistoryRow[] = [
-    ...tournaments
-      .filter((t) => t.status === "completed")
-      .map((t) => {
-        const s = t.summary as SummaryShape;
-        return { id: t.id, name: t.name, champion: s?.champion ?? null, runnerUp: s?.runnerUp ?? null, date: t.ended_at };
-      }),
-    ...seasons.map((s) => {
-      const summary = s.summary as SummaryShape;
-      return { id: s.id, name: s.name, champion: summary?.champion ?? null, runnerUp: summary?.runnerUp ?? null, date: s.ended_at ?? s.created_at };
-    }),
-  ].sort((a, b) => (b.date ? new Date(b.date).getTime() : 0) - (a.date ? new Date(a.date).getTime() : 0));
+  // Only tournaments without an archive yet (not completed) need a live signup
+  // count — tournament_entries/team_signup_members rows are never deleted, so
+  // this stays accurate for scheduled and active tournaments alike.
+  const liveCountIds = tournaments.filter((t) => !t.full_archive).map((t) => t.id);
+
+  const [{ data: entryRows }, { data: teamSignupRows }] = liveCountIds.length
+    ? await Promise.all([
+        supabaseAdmin.from("tournament_entries").select("tournament_id, player_id").in("tournament_id", liveCountIds),
+        supabaseAdmin
+          .from("team_signups")
+          .select("tournament_id, team_signup_members(player_id)")
+          .in("tournament_id", liveCountIds),
+      ])
+    : [
+        { data: [] as { tournament_id: string; player_id: string }[] },
+        { data: [] as { tournament_id: string; team_signup_members: { player_id: string }[] }[] },
+      ];
+
+  const liveCountByTournament = new Map<string, number>();
+  for (const tid of liveCountIds) {
+    const ids = new Set<string>();
+    for (const r of entryRows ?? []) if (r.tournament_id === tid) ids.add(r.player_id);
+    for (const s of teamSignupRows ?? []) {
+      if (s.tournament_id !== tid) continue;
+      for (const m of s.team_signup_members) ids.add(m.player_id);
+    }
+    liveCountByTournament.set(tid, ids.size);
+  }
+
+  const tournamentRows: EventOverviewRow[] = tournaments.map((t) => ({
+    id: t.id,
+    name: t.name,
+    status: t.status,
+    format: eventFormatName(t.season_format, t.full_archive),
+    playerCount: archivePlayerCount(t.full_archive) ?? liveCountByTournament.get(t.id) ?? 0,
+    startedAt: t.started_at,
+    endedAt: t.ended_at,
+    sponsorName: t.sponsor_id ? (sponsorNameById.get(t.sponsor_id) ?? "Yes") : null,
+    champion: t.summary?.champion ?? null,
+  }));
+
+  const seasonRows: EventOverviewRow[] = seasons.map((s) => ({
+    id: s.id,
+    name: s.name,
+    status: "completed",
+    format: eventFormatName(s.season_format, s.full_archive),
+    playerCount: archivePlayerCount(s.full_archive) ?? 0,
+    startedAt: s.started_at,
+    endedAt: s.ended_at,
+    sponsorName: null,
+    champion: s.summary?.champion ?? null,
+  }));
+
+  const rows = [...tournamentRows, ...seasonRows].sort((a, b) => {
+    const aTime = a.startedAt ? new Date(a.startedAt).getTime() : 0;
+    const bTime = b.startedAt ? new Date(b.startedAt).getTime() : 0;
+    return bTime - aTime;
+  });
 
   return (
     <AdminSubSection
       sectionId="data"
-      tabId="history"
-      title="Season History"
+      tabId="event-overview"
+      title="Event Overview"
       value={rows.length}
-      description="Every completed season and tournament, with its champion and runner-up."
+      description="Every tournament and season — format, draft size, schedule, and sponsorship — in one list."
     >
       {rows.length === 0 ? (
-        <p className="text-sm text-zinc-500">No completed events yet.</p>
+        <p className="text-sm text-zinc-500">No events yet.</p>
       ) : (
-        <div className="space-y-2">
-          {rows.map((r) => (
-            <div key={r.id} className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3">
-              <span className="flex-1 text-sm text-white font-medium">{r.name}</span>
-              {r.champion && <span className="text-xs text-amber-400">🏆 {r.champion}</span>}
-              {r.runnerUp && <span className="text-xs text-zinc-500">2nd: {r.runnerUp}</span>}
-              {r.date && <span className="text-xs text-zinc-600">{new Date(r.date).toLocaleDateString()}</span>}
-            </div>
-          ))}
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-zinc-800 bg-zinc-900">
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Event</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Status</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Format</th>
+                <th className="px-4 py-2.5 text-right text-xs font-semibold text-zinc-400 whitespace-nowrap">Players</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Started</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Day</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Ended</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Sponsored</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Champion</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-b border-zinc-800/40 last:border-b-0 bg-zinc-900/50">
+                  <td className="px-4 py-2.5 font-medium text-white whitespace-nowrap">{r.name}</td>
+                  <td className={`px-4 py-2.5 whitespace-nowrap ${EVENT_STATUS_COLORS[r.status] ?? "text-zinc-400"}`}>
+                    {EVENT_STATUS_LABELS[r.status] ?? r.status}
+                  </td>
+                  <td className="px-4 py-2.5 text-zinc-300 whitespace-nowrap">{r.format}</td>
+                  <td className="px-4 py-2.5 text-right text-zinc-300 tabular-nums">{r.playerCount}</td>
+                  <td className="px-4 py-2.5 text-zinc-400 whitespace-nowrap">{formatEventDate(r.startedAt)}</td>
+                  <td className="px-4 py-2.5 text-zinc-400 whitespace-nowrap">
+                    {r.startedAt ? new Date(r.startedAt).toLocaleDateString(undefined, { weekday: "long" }) : "—"}
+                  </td>
+                  <td className="px-4 py-2.5 text-zinc-400 whitespace-nowrap">{formatEventDate(r.endedAt)}</td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    {r.sponsorName ? <span className="text-emerald-400">{r.sponsorName}</span> : <span className="text-zinc-600">No</span>}
+                  </td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    {r.champion ? <span className="text-amber-400">🏆 {r.champion}</span> : <span className="text-zinc-600">—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </AdminSubSection>

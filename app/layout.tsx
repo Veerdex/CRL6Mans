@@ -51,6 +51,11 @@ export default async function RootLayout({
         "--sponsor-accent": sponsorTheme.accent,
         "--sponsor-shell": sponsorTheme.shell,
         "--sponsor-secondary": sponsorTheme.secondary,
+        "--sponsor-bg": sponsorTheme.bg,
+        "--sponsor-surface": sponsorTheme.surface,
+        "--sponsor-border": sponsorTheme.border,
+        "--sponsor-text": sponsorTheme.text,
+        "--sponsor-muted": sponsorTheme.muted,
       } as CSSProperties)
     : {};
   return (

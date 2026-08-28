@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { type Player } from "@/app/lib/players";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import PlayersList from "./players-list";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 export default async function PlayersPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
@@ -48,7 +49,10 @@ export default async function PlayersPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
-      <h1 className="text-2xl font-bold text-white mb-6">Players</h1>
+      <div className="flex items-center gap-2 flex-wrap mb-6">
+        <h1 className="text-2xl font-bold text-white">Players</h1>
+        <SponsoredByLine tabKey="players" />
+      </div>
       {players.length === 0 ? (
         <p className="text-zinc-500 text-sm">No players have entered the draft pool yet.</p>
       ) : (

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { getLeaderboard } from "./actions";
 import FlappyBird from "./flappy-bird";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
 export default async function GamePage() {
   const cookieStore = await cookies();
@@ -13,8 +14,11 @@ export default async function GamePage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
-      <h1 className="text-2xl font-bold text-white mb-1">Game</h1>
-      <p className="text-sm text-zinc-400 mb-8">
+      <div className="flex items-center gap-2 flex-wrap mb-1">
+        <h1 className="text-2xl font-bold text-white">Game</h1>
+        <SponsoredByLine tabKey="game" />
+      </div>
+      <p className="text-sm text-zinc-400 mb-8 mt-1">
         A little something for the waiting room. Beat the leaderboard.
       </p>
       <FlappyBird

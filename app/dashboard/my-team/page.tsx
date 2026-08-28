@@ -15,6 +15,7 @@ import {
 import { getBestOfForMatch } from "@/app/lib/discord-bot";
 import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { MyTeamEditor } from "@/app/dashboard/teams/my-team-editor";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 import {
   SubRequestPanel,
   type SubRosterPlayer,
@@ -713,7 +714,10 @@ export default async function MyTeamPage() {
       <div className="flex items-center gap-4 sm:gap-6 min-w-0">
         <TeamLogo team={team} size="lg" />
         <div className="space-y-2 min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold text-white truncate" title={team.name}>{team.name}</h1>
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            <h1 className="text-2xl sm:text-3xl font-bold text-white truncate" title={team.name}>{team.name}</h1>
+            <SponsoredByLine tabKey="myteam" />
+          </div>
           <div className="flex flex-wrap items-center gap-3 text-sm">
             {seasonActive && (
               <>

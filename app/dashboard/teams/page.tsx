@@ -6,6 +6,7 @@ import { playerRatingFromRow } from "@/app/lib/rating";
 import { AdminTeamsManager } from "./admin-teams-manager";
 import { TeamsGrid } from "./teams-grid";
 import { BackButton } from "./back-button";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
 export default async function TeamsPage({
   searchParams,
@@ -116,7 +117,10 @@ export default async function TeamsPage({
       {from === "season" && <BackButton label="Back to Season" />}
       {/* All Teams */}
       <section>
-        <h1 className="text-xl font-bold text-white mb-4">Teams</h1>
+        <div className="flex items-center gap-2 flex-wrap mb-4">
+          <h1 className="text-xl font-bold text-white">Teams</h1>
+          <SponsoredByLine tabKey="teams" />
+        </div>
         {teams.length === 0 ? (
           <p className="text-zinc-400">No teams yet — the draft hasn&apos;t started.</p>
         ) : userIsAdmin ? (

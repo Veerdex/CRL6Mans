@@ -79,11 +79,42 @@ export async function getNavSponsors(): Promise<NavSponsors> {
   };
 }
 
+export type TabSponsor = { name: string; logoUrl: string | null; logoCrop: ContentCrop["logo"] };
+
+export async function getTabSponsor(tabKey: string): Promise<TabSponsor | null> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings")
+    .select("tab_sponsors")
+    .single();
+
+  const sponsorId = (settings?.tab_sponsors as Record<string, string> | null)?.[tabKey] ?? null;
+  if (!sponsorId) return null;
+
+  const { data: sponsor } = await supabaseAdmin
+    .from("sponsors")
+    .select("name, logo_url, content_crop")
+    .eq("id", sponsorId)
+    .eq("status", "active")
+    .single();
+  if (!sponsor?.name) return null;
+
+  return {
+    name: sponsor.name as string,
+    logoUrl: (sponsor.logo_url as string | null) ?? null,
+    logoCrop: (sponsor.content_crop as ContentCrop | null)?.logo,
+  };
+}
+
 export type SettingsTabTheme = {
   name: string;
   accent: string;
   shell: string;
   secondary: string;
+  bg: string;
+  surface: string;
+  border: string;
+  text: string;
+  muted: string;
   mode: "light" | "dark";
 } | null;
 
@@ -100,23 +131,33 @@ export async function getSettingsTabTheme(): Promise<SettingsTabTheme> {
 
   const { data: sponsor } = await supabaseAdmin
     .from("sponsors")
-    .select("name, status, theme_name, theme_accent, theme_shell, theme_secondary, theme_mode")
+    .select("name, status, theme_id")
     .eq("id", sponsorId)
     .eq("status", "active")
     .single();
-  if (!sponsor?.theme_name) return null;
+  const themeId = (sponsor?.theme_id as string | null) ?? null;
+  if (!themeId) return null;
 
-  const accent = sponsor.theme_accent as string | null;
-  const shell = sponsor.theme_shell as string | null;
-  const secondary = sponsor.theme_secondary as string | null;
-  if (!accent || !shell || !secondary) return null;
-  if (!HEX_COLOR.test(accent) || !HEX_COLOR.test(shell) || !HEX_COLOR.test(secondary)) return null;
+  const { data: theme } = await supabaseAdmin
+    .from("themes")
+    .select("name, mode, bg, surface, border, text, muted, accent, secondary, shell")
+    .eq("id", themeId)
+    .single();
+  if (!theme) return null;
+
+  const colors = [theme.bg, theme.surface, theme.border, theme.text, theme.muted, theme.accent, theme.secondary, theme.shell];
+  if (colors.some((c) => typeof c !== "string" || !HEX_COLOR.test(c))) return null;
 
   return {
-    name: sponsor.theme_name as string,
-    accent,
-    shell,
-    secondary,
-    mode: sponsor.theme_mode === "dark" ? "dark" : "light",
+    name: theme.name as string,
+    accent: theme.accent as string,
+    shell: theme.shell as string,
+    secondary: theme.secondary as string,
+    bg: theme.bg as string,
+    surface: theme.surface as string,
+    border: theme.border as string,
+    text: theme.text as string,
+    muted: theme.muted as string,
+    mode: theme.mode === "dark" ? "dark" : "light",
   };
 }

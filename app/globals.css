@@ -443,21 +443,21 @@ html[data-theme="dark"] {
    dark-base variant immediately below overrides it via an extra attribute
    selector (higher specificity, so source order doesn't matter). */
 html[data-theme="sponsor"] {
-  --c-bg: #d5dbf2;
-  --c-fg: #1e1d44;
-  --c-white: #1e1d44;
+  --c-bg: var(--sponsor-bg, #d5dbf2);
+  --c-fg: var(--sponsor-text, #1e1d44);
+  --c-white: var(--sponsor-text, #1e1d44);
 
   --c-zinc-50:  #14132a;
   --c-zinc-100: #1f1f3d;
   --c-zinc-200: #2a2a4d;
   --c-zinc-300: #3a3c66;
   --c-zinc-400: #565a8c;
-  --c-zinc-500: #6d72a6;
+  --c-zinc-500: var(--sponsor-muted, #6d72a6);
   --c-zinc-600: #8f95c4;
   --c-zinc-700: #aab1de;
-  --c-zinc-800: #c2c9ec;
-  --c-zinc-900: #f1f3fd;
-  --c-zinc-950: #d5dbf2;
+  --c-zinc-800: var(--sponsor-border, #c2c9ec);
+  --c-zinc-900: var(--sponsor-surface, #f1f3fd);
+  --c-zinc-950: var(--sponsor-bg, #d5dbf2);
 
   --c-indigo-50:  color-mix(in oklab, var(--sponsor-accent, #e88a24) 8%, white 92%);
   --c-indigo-100: color-mix(in oklab, var(--sponsor-accent, #e88a24) 15%, white 85%);
@@ -510,21 +510,21 @@ html[data-theme="sponsor"] {
    toward black instead of snapping back to a light tint — matching how
    the built-in dark theme's own indigo/amber never reverse direction. */
 html[data-theme="sponsor"][data-sponsor-mode="dark"] {
-  --c-bg: #09090b;
-  --c-fg: #ededed;
-  --c-white: #ffffff;
+  --c-bg: var(--sponsor-bg, #09090b);
+  --c-fg: var(--sponsor-text, #ededed);
+  --c-white: var(--sponsor-text, #ffffff);
 
   --c-zinc-50:  #fafafa;
   --c-zinc-100: #f4f4f5;
   --c-zinc-200: #e4e4e7;
   --c-zinc-300: #d4d4d8;
   --c-zinc-400: #a1a1aa;
-  --c-zinc-500: #71717a;
+  --c-zinc-500: var(--sponsor-muted, #71717a);
   --c-zinc-600: #52525b;
   --c-zinc-700: #3f3f46;
-  --c-zinc-800: #27272a;
-  --c-zinc-900: #18181b;
-  --c-zinc-950: #09090b;
+  --c-zinc-800: var(--sponsor-border, #27272a);
+  --c-zinc-900: var(--sponsor-surface, #18181b);
+  --c-zinc-950: var(--sponsor-bg, #09090b);
 
   --c-indigo-50:  color-mix(in oklab, var(--sponsor-accent, #e88a24) 8%, white 92%);
   --c-indigo-100: color-mix(in oklab, var(--sponsor-accent, #e88a24) 15%, white 85%);

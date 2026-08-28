@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 const CONFETTI_COLORS = [
   "#e88a24", "#fbbf24", "#fde68a",
@@ -42,6 +42,7 @@ export type PodiumClientProps = {
   players: RichPlayer[];
   mvpPlayerId: string | null;
   accolades: Accolade[];
+  sponsoredByLine?: ReactNode;
 };
 
 function playerAvatarUrl(p: RichPlayer): string {
@@ -222,6 +223,7 @@ export function PodiumClient({
   players,
   mvpPlayerId,
   accolades,
+  sponsoredByLine,
 }: PodiumClientProps) {
   const dateStr = eventDate
     ? new Date(eventDate).toLocaleDateString(undefined, { dateStyle: "long" })
@@ -264,6 +266,7 @@ export function PodiumClient({
               {eventKind}
             </span>
             {dateStr && <span className="text-sm text-zinc-500">{dateStr}</span>}
+            {sponsoredByLine}
           </div>
         </div>
 

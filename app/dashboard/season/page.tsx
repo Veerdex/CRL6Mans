@@ -9,6 +9,7 @@ import { HybridBracketView } from "./hybrid-view";
 import { SimulateControls } from "./simulate-controls";
 import { StandingsClient, type StandingsRow } from "./standings-table";
 import { SeasonTabs, type SeasonTab } from "./season-tabs";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 import { getNumGroups, SWISS_STAGE, SWISS_ADVANCE_WINS, SWISS8_ADVANCE_WINS, SE_QUALIFIER, DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS, HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF } from "@/app/lib/bracket";
 
 export default async function SeasonPage() {
@@ -408,7 +409,10 @@ export default async function SeasonPage() {
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">{isTournament ? "Tournament" : "Season"}</h1>
+        <div className="flex items-center gap-2 flex-wrap">
+          <h1 className="text-2xl font-bold text-white">{isTournament ? "Tournament" : "Season"}</h1>
+          <SponsoredByLine tabKey="season" />
+        </div>
         {seasonActive && (
           <span className="inline-flex items-center gap-1.5 mt-1 text-xs font-medium text-emerald-400">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />

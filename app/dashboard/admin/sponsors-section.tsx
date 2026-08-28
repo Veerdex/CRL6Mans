@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
-import type { Sponsor, SponsorLink, TabPlacement } from "./sponsor-actions";
+import type { Sponsor, SponsorLink, TabPlacement, TabSponsors } from "./sponsor-actions";
 import {
   createSponsor,
   updateSponsorMaxUses,
@@ -13,11 +13,14 @@ import {
   updateTabPlacement,
   updateSeasonSponsor,
   setNavTabOverride,
+  setTabSponsor,
+  setAllTabSponsors,
 } from "./sponsor-actions";
 import { savePatreonUrl } from "./league-actions";
 import { MediaCropModal } from "./media-crop-modal";
 import type { CropKind } from "@/app/lib/media-crop";
 import { NAV_TAB_OPTIONS, type NavTabOverrides, type NavTabVisibility } from "@/app/lib/nav-tabs";
+import type { Theme } from "./theme-actions";
 
 function PatreonLinkCard({ patreonUrl }: { patreonUrl: string | null }) {
   const [isPending, startTransition] = useTransition();
@@ -116,11 +119,7 @@ type ContentKind = "video" | "topNav" | "sideNav" | "background" | "theme" | "li
 type ContentItem = {
   kind: ContentKind | "";
   url: string;
-  themeName?: string;
-  themeAccent?: string;
-  themeShell?: string;
-  themeSecondary?: string;
-  themeMode?: "light" | "dark";
+  themeId?: string;
 };
 
 const ALL_CONTENT_KINDS: ContentKind[] = ["video", "topNav", "sideNav", "background", "theme", "link"];
@@ -132,7 +131,6 @@ const CONTENT_KIND_LABELS: Record<ContentKind, string> = {
   theme: "Theme",
   link: "Click-through link",
 };
-const THEME_DEFAULTS = { themeAccent: "#e88a24", themeShell: "#3736ac", themeSecondary: "#e88a24", themeMode: "light" as const };
 
 function SponsorPreview({
   name,
@@ -178,7 +176,7 @@ function SponsorPreview({
   );
 }
 
-function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
+function SponsorCard({ sponsor, themes }: { sponsor: Sponsor; themes: Theme[] }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -194,16 +192,8 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
     if (sponsor.side_nav_image_url) items.push({ kind: "sideNav", url: sponsor.side_nav_image_url });
     if (sponsor.background_image_url) items.push({ kind: "background", url: sponsor.background_image_url });
     if (sponsor.click_url) items.push({ kind: "link", url: sponsor.click_url });
-    if (sponsor.theme_name) {
-      items.push({
-        kind: "theme",
-        url: "",
-        themeName: sponsor.theme_name,
-        themeAccent: sponsor.theme_accent ?? THEME_DEFAULTS.themeAccent,
-        themeShell: sponsor.theme_shell ?? THEME_DEFAULTS.themeShell,
-        themeSecondary: sponsor.theme_secondary ?? THEME_DEFAULTS.themeSecondary,
-        themeMode: sponsor.theme_mode ?? THEME_DEFAULTS.themeMode,
-      });
+    if (sponsor.theme_id) {
+      items.push({ kind: "theme", url: "", themeId: sponsor.theme_id });
     }
     return items;
   });
@@ -226,13 +216,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
   }
   function themeFields(items: ContentItem[] = contentItems) {
     const t = themeItem(items);
-    return {
-      themeName: t?.themeName ?? "",
-      themeAccent: t?.themeAccent ?? "",
-      themeShell: t?.themeShell ?? "",
-      themeSecondary: t?.themeSecondary ?? "",
-      themeMode: t?.themeMode ?? THEME_DEFAULTS.themeMode,
-    };
+    return { themeId: t?.themeId || null };
   }
 
   const hasDetailsChanges =
@@ -246,11 +230,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
     phrase !== (sponsor.phrase ?? "") ||
     overview !== (sponsor.overview ?? "") ||
     promoDescription !== (sponsor.promo_description ?? "") ||
-    (themeItem()?.themeName ?? "") !== (sponsor.theme_name ?? "") ||
-    (themeItem()?.themeAccent ?? "") !== (sponsor.theme_accent ?? "") ||
-    (themeItem()?.themeShell ?? "") !== (sponsor.theme_shell ?? "") ||
-    (themeItem()?.themeSecondary ?? "") !== (sponsor.theme_secondary ?? "") ||
-    (themeItem()?.themeMode ?? THEME_DEFAULTS.themeMode) !== (sponsor.theme_mode ?? THEME_DEFAULTS.themeMode) ||
+    (themeItem()?.themeId || null) !== (sponsor.theme_id ?? null) ||
     JSON.stringify(links) !== JSON.stringify(sponsor.links);
 
   function handleCopy() {
@@ -491,7 +471,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
                   value={item.kind}
                   onChange={(e) => {
                     const kind = e.target.value as ContentKind | "";
-                    updateContentItem(i, kind === "theme" ? { kind, url: "", themeName: "", themeAccent: THEME_DEFAULTS.themeAccent, themeShell: THEME_DEFAULTS.themeShell, themeSecondary: THEME_DEFAULTS.themeSecondary, themeMode: THEME_DEFAULTS.themeMode } : { kind, url: "" });
+                    updateContentItem(i, kind === "theme" ? { kind, url: "", themeId: "" } : { kind, url: "" });
                   }}
                   className="w-36 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
                 >
@@ -503,49 +483,18 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
                   ))}
                 </select>
                 {item.kind === "theme" && (
-                  <>
-                    <input
-                      value={item.themeName ?? ""}
-                      onChange={(e) => updateContentItem(i, { themeName: e.target.value })}
-                      placeholder="Theme name"
-                      className="w-32 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white placeholder:text-zinc-600"
-                    />
-                    <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-                      Accent
-                      <input
-                        type="color"
-                        value={item.themeAccent ?? THEME_DEFAULTS.themeAccent}
-                        onChange={(e) => updateContentItem(i, { themeAccent: e.target.value })}
-                        className="w-7 h-7 rounded border border-zinc-700 bg-zinc-800 cursor-pointer"
-                      />
-                    </label>
-                    <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-                      Sidebar
-                      <input
-                        type="color"
-                        value={item.themeShell ?? THEME_DEFAULTS.themeShell}
-                        onChange={(e) => updateContentItem(i, { themeShell: e.target.value })}
-                        className="w-7 h-7 rounded border border-zinc-700 bg-zinc-800 cursor-pointer"
-                      />
-                    </label>
-                    <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-                      Highlight
-                      <input
-                        type="color"
-                        value={item.themeSecondary ?? THEME_DEFAULTS.themeSecondary}
-                        onChange={(e) => updateContentItem(i, { themeSecondary: e.target.value })}
-                        className="w-7 h-7 rounded border border-zinc-700 bg-zinc-800 cursor-pointer"
-                      />
-                    </label>
-                    <select
-                      value={item.themeMode ?? THEME_DEFAULTS.themeMode}
-                      onChange={(e) => updateContentItem(i, { themeMode: e.target.value === "dark" ? "dark" : "light" })}
-                      className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
-                    >
-                      <option value="light">Light base</option>
-                      <option value="dark">Dark base</option>
-                    </select>
-                  </>
+                  <select
+                    value={item.themeId ?? ""}
+                    onChange={(e) => updateContentItem(i, { themeId: e.target.value })}
+                    className="flex-1 min-w-[160px] bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
+                  >
+                    <option value="">Select a saved theme…</option>
+                    {themes.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
                 )}
                 {item.kind === "link" && (
                   <input
@@ -597,7 +546,7 @@ function SponsorCard({ sponsor }: { sponsor: Sponsor }) {
           })}
           {contentItems.some((c) => c.kind === "theme") && (
             <p className="text-[11px] text-zinc-600">
-              Sidebar text is always white — pick a reasonably dark sidebar color for it to stay readable.
+              Design and save themes in the Theme Designer tab, then pick one here. Sidebar text is always white — pick a reasonably dark sidebar color for it to stay readable.
             </p>
           )}
           {contentItems.some((c) => c.kind === "topNav" || c.kind === "sideNav") && (
@@ -800,7 +749,7 @@ export function NavTabVisibilityGrid({ overrides }: { overrides: NavTabOverrides
 const TAB_PLACEMENTS = [
   { key: "topNavSponsorId", label: "Top nav", noContent: "image", hasContent: (s: Sponsor) => !!s.top_nav_image_url },
   { key: "sideNavSponsorId", label: "Side nav", noContent: "image", hasContent: (s: Sponsor) => !!s.side_nav_image_url },
-  { key: "settingsTabSponsorId", label: "Settings theme", noContent: "theme", hasContent: (s: Sponsor) => !!s.theme_name },
+  { key: "settingsTabSponsorId", label: "Settings theme", noContent: "theme", hasContent: (s: Sponsor) => !!s.theme_id },
 ] as const;
 
 export function TabManagerSection({ sponsors, tabPlacement }: { sponsors: Sponsor[]; tabPlacement: TabPlacement }) {
@@ -900,6 +849,103 @@ export function TabManagerSection({ sponsors, tabPlacement }: { sponsors: Sponso
   );
 }
 
+export function TabSponsorGrid({ sponsors, tabSponsors }: { sponsors: Sponsor[]; tabSponsors: TabSponsors }) {
+  const [isPending, startTransition] = useTransition();
+  const [localTabSponsors, setLocalTabSponsors] = useState<TabSponsors>(tabSponsors);
+  const [error, setError] = useState<string | null>(null);
+  const [applyAllValue, setApplyAllValue] = useState("");
+
+  const activeSponsors = sponsors.filter((s) => s.status === "active");
+
+  function handleChange(key: string, sponsorId: string) {
+    setError(null);
+    setLocalTabSponsors((prev) => {
+      const next = { ...prev };
+      if (sponsorId) next[key] = sponsorId;
+      else delete next[key];
+      return next;
+    });
+    startTransition(async () => {
+      const res = await setTabSponsor(key, sponsorId || null);
+      if (res.error) setError(res.error);
+    });
+  }
+
+  function handleApplyAll() {
+    setError(null);
+    setLocalTabSponsors(
+      applyAllValue ? Object.fromEntries(NAV_TAB_OPTIONS.map(({ key }) => [key, applyAllValue])) : {}
+    );
+    startTransition(async () => {
+      const res = await setAllTabSponsors(applyAllValue || null);
+      if (res.error) setError(res.error);
+    });
+  }
+
+  return (
+    <div className="border border-zinc-800 rounded-xl p-4 space-y-3">
+      <div>
+        <p className="text-sm font-medium text-white">Tab Sponsors</p>
+        <p className="text-xs text-zinc-500 mt-0.5">
+          Shows a &quot;Sponsored by ___&quot; line on each tab&apos;s page. Independent of the placements above — any active sponsor is eligible, no image/theme required.
+        </p>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {activeSponsors.length === 0 ? (
+        <p className="text-xs text-zinc-600">No active sponsors yet.</p>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 pb-1">
+            <select
+              value={applyAllValue}
+              onChange={(e) => setApplyAllValue(e.target.value)}
+              disabled={isPending}
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white disabled:opacity-50"
+            >
+              <option value="">None</option>
+              {activeSponsors.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleApplyAll}
+              disabled={isPending}
+              className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition-colors whitespace-nowrap"
+            >
+              Apply to all
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+          {NAV_TAB_OPTIONS.map(({ key, label }) => {
+            const value = localTabSponsors[key] ?? "";
+            return (
+              <div key={key} className="space-y-1">
+                <span className="text-xs text-zinc-500">{label}</span>
+                <select
+                  value={value}
+                  onChange={(e) => handleChange(key, e.target.value)}
+                  disabled={isPending}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white disabled:opacity-50"
+                >
+                  <option value="">None</option>
+                  {activeSponsors.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function SeasonSponsorPicker({
   sponsors,
   initialSponsorId,
@@ -950,7 +996,15 @@ export function SeasonSponsorPicker({
   );
 }
 
-export function SponsorsManager({ sponsors, patreonUrl }: { sponsors: Sponsor[]; patreonUrl: string | null }) {
+export function SponsorsManager({
+  sponsors,
+  themes,
+  patreonUrl,
+}: {
+  sponsors: Sponsor[];
+  themes: Theme[];
+  patreonUrl: string | null;
+}) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -1000,7 +1054,7 @@ export function SponsorsManager({ sponsors, patreonUrl }: { sponsors: Sponsor[];
             ))}
           </div>
 
-          {selectedSponsor && <SponsorCard key={selectedSponsor.id} sponsor={selectedSponsor} />}
+          {selectedSponsor && <SponsorCard key={selectedSponsor.id} sponsor={selectedSponsor} themes={themes} />}
         </div>
       )}
 

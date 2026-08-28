@@ -4,6 +4,7 @@ import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { MediaFeed, type Clip } from "@/app/dashboard/media/media-feed";
 import { ClipOfWeek } from "@/app/dashboard/media/clip-of-week";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
 export default async function MediaPage() {
   const session = await decrypt((await cookies()).get("session")?.value);
@@ -54,7 +55,10 @@ export default async function MediaPage() {
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="max-w-4xl mx-auto space-y-10">
         <div className="text-center space-y-2">
-          <h1 className="text-4xl font-bold text-white tracking-tight">Media</h1>
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <h1 className="text-4xl font-bold text-white tracking-tight">Media</h1>
+            <SponsoredByLine tabKey="media" />
+          </div>
           <p className="text-zinc-400">Clips from the community — like your favorites, the top clip each week gets crowned.</p>
         </div>
 

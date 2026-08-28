@@ -4,6 +4,7 @@ import { ScheduleView, type ScheduleMatch } from "./schedule-view";
 import { ScheduleCalendar } from "./schedule-calendar";
 import { buildCalEntries, buildPinnedMatchEntries, type PinnedMatch } from "./calendar-entries";
 import { SeasonTabs } from "@/app/dashboard/season/season-tabs";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
 export default async function SchedulePage() {
   const [{ data: matchRows }, { data: teamsRaw }, { data: settings }] = await Promise.all([
@@ -108,7 +109,10 @@ export default async function SchedulePage() {
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Schedule</h1>
+        <div className="flex items-center gap-2 flex-wrap">
+          <h1 className="text-2xl font-bold text-white">Schedule</h1>
+          <SponsoredByLine tabKey="schedule" />
+        </div>
         <p className="text-sm text-zinc-500 mt-1">All upcoming matches and their confirmed play times.</p>
       </div>
       <SeasonTabs

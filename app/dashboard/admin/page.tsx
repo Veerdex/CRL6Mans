@@ -30,17 +30,19 @@ import type { Tournament, Season } from "./tournament-actions";
 import { InitSettingsButton } from "./init-settings-button";
 import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
-import { getSponsorsWithMembers, getTabPlacement, getNavTabOverrides } from "./sponsor-actions";
-import { SponsorsManager, TabManagerSection, SeasonSponsorPicker, NavTabVisibilityGrid } from "./sponsors-section";
+import { getSponsorsWithMembers, getTabPlacement, getNavTabOverrides, getTabSponsors } from "./sponsor-actions";
+import { SponsorsManager, TabManagerSection, SeasonSponsorPicker, NavTabVisibilityGrid, TabSponsorGrid } from "./sponsors-section";
+import { getThemes } from "./theme-actions";
+import { ThemeDesignerSection } from "./theme-designer-section";
 import { getPublicSponsors } from "@/app/lib/sponsors-public";
 import {
-  RegistrationFunnelSection,
-  CompetitiveSnapshotSection,
-  StatLeadersSection,
-  SeasonHistorySection,
+  AnalyticsSummaryCards,
+  EventOverviewSection,
   TabVisitsSection,
 } from "./data-section";
 import { PatreonAdminSection } from "./patreon-section";
+import { getBenefits, getTiers, getLiveTierTitles } from "./patreon-tiers-actions";
+import { PatreonTiersSection } from "./patreon-tiers-section";
 import { StorageUsageSection } from "./storage-section";
 import { RoundScheduler, type ScheduleSection, type RoundMatchInfo } from "./round-scheduler";
 import { ScheduleOverrideCard, type ScheduleOverrideCardData } from "./schedule-override-card";
@@ -70,7 +72,7 @@ async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean;
 }
 
 async function SponsorsSection({ patreonUrl }: { patreonUrl: string | null }) {
-  const sponsors = await getSponsorsWithMembers();
+  const [sponsors, themes] = await Promise.all([getSponsorsWithMembers(), getThemes()]);
   return (
     <AdminSubSection
       sectionId="sponsors"
@@ -80,16 +82,47 @@ async function SponsorsSection({ patreonUrl }: { patreonUrl: string | null }) {
       value={sponsors.length}
       description="Create a sponsor and share its invite link — any Discord account that uses it becomes a linked member of that sponsor, up to the max-uses cap. Raise the cap at any time to let more reps join."
     >
-      <SponsorsManager sponsors={sponsors} patreonUrl={patreonUrl} />
+      <SponsorsManager sponsors={sponsors} themes={themes} patreonUrl={patreonUrl} />
+    </AdminSubSection>
+  );
+}
+
+async function PatreonTiersAdminSection() {
+  const [benefits, tiers, liveTierTitles] = await Promise.all([getBenefits(), getTiers(), getLiveTierTitles()]);
+  return (
+    <AdminSubSection
+      sectionId="data"
+      tabId="patreon-tiers"
+      title="Tiers & Benefits"
+      value={tiers.length}
+      description="Design your own Patreon tiers and the benefits each one includes — a reference for directors, not pulled live from Patreon."
+    >
+      <PatreonTiersSection tiers={tiers} benefits={benefits} liveTierTitles={liveTierTitles} />
+    </AdminSubSection>
+  );
+}
+
+async function ThemeDesignerAdminSection() {
+  const themes = await getThemes();
+  return (
+    <AdminSubSection
+      sectionId="sponsors"
+      tabId="theme-designer"
+      title="Theme Designer"
+      value={themes.length}
+      description="Design and save reusable color themes, then assign one to a sponsor from the Sponsors tab."
+    >
+      <ThemeDesignerSection themes={themes} />
     </AdminSubSection>
   );
 }
 
 async function TabManagerAdminSection() {
-  const [sponsors, tabPlacement, navTabOverrides] = await Promise.all([
+  const [sponsors, tabPlacement, navTabOverrides, tabSponsors] = await Promise.all([
     getSponsorsWithMembers(),
     getTabPlacement(),
     getNavTabOverrides(),
+    getTabSponsors(),
   ]);
   return (
     <AdminSubSection
@@ -101,6 +134,7 @@ async function TabManagerAdminSection() {
       <div className="space-y-4">
         <NavTabVisibilityGrid overrides={navTabOverrides} />
         <TabManagerSection sponsors={sponsors} tabPlacement={tabPlacement} />
+        <TabSponsorGrid sponsors={sponsors} tabSponsors={tabSponsors} />
       </div>
     </AdminSubSection>
   );
@@ -855,7 +889,6 @@ export default async function AdminPage() {
       id: "overview",
       label: "Overview",
       subTabs: [
-        { id: "insights", label: "Insights" },
         { id: "notifications", label: "Notifications" },
         ...(userIsDirector ? [{ id: "team-slots", label: "Team Slots", value: (teamSlots ?? []).length }] : []),
       ],
@@ -918,12 +951,11 @@ export default async function AdminPage() {
       id: "data",
       label: "Data",
       subTabs: [
-        { id: "funnel", label: "Registration Funnel" },
-        { id: "competitive", label: "Competitive Snapshot" },
-        { id: "leaders", label: "Stat Leaders" },
-        { id: "history", label: "Season History" },
+        { id: "insights", label: "Insights" },
+        { id: "event-overview", label: "Event Overview" },
         { id: "tab-visits", label: "Tab Visits" },
         { id: "patrons", label: "Patrons" },
+        ...(userIsDirector ? [{ id: "patreon-tiers", label: "Tiers & Benefits" }] : []),
         ...(userIsDirector ? [{ id: "storage", label: "Storage & Limits" }] : []),
       ],
     },
@@ -934,6 +966,7 @@ export default async function AdminPage() {
           subTabs: [
             { id: "sponsors-list", label: "Sponsors" },
             { id: "tab-manager", label: "Tab Manager" },
+            { id: "theme-designer", label: "Theme Designer" },
           ],
         }]
       : []),
@@ -961,23 +994,12 @@ export default async function AdminPage() {
       <div className="flex-1 min-w-0 space-y-12">
 
       <AdminSection id="overview">
-      {/* ── Insights ── */}
-      <AdminSubSection
-        sectionId="overview"
-        tabId="insights"
-        title="Insights"
-        isDefaultTab
-        defaultOpen={false}
-        description="Weekly trends for site visits, registrations, and draft joins over the last year. Use it to see whether traffic actually converts into sign-ups, and whether sign-ups convert into drafted players."
-      >
-        <InsightsChart data={insightsData} />
-      </AdminSubSection>
-
       {/* ── Notifications ── */}
       <AdminSubSection
         sectionId="overview"
         tabId="notifications"
         title="Notifications"
+        isDefaultTab
         defaultOpen={false}
         description="Controls which admin push notifications you personally receive (new sub requests, escalations, pending registrations, etc). This only affects your own device — it doesn't change what players or other staff receive."
       >
@@ -1442,12 +1464,28 @@ export default async function AdminPage() {
       </AdminSection>
 
       <AdminSection id="data">
-        <RegistrationFunnelSection analyticsRows={analyticsRows ?? []} />
-        <CompetitiveSnapshotSection />
-        <StatLeadersSection />
-        <SeasonHistorySection tournaments={tournaments ?? []} seasons={seasons ?? []} />
+        {/* ── Insights ── */}
+        <AdminSubSection
+          sectionId="data"
+          tabId="insights"
+          title="Insights"
+          isDefaultTab
+          defaultOpen={false}
+          description="Weekly trends for site visits, registrations, and draft joins over the last year. Use it to see whether traffic actually converts into sign-ups, and whether sign-ups convert into drafted players."
+        >
+          <InsightsChart data={insightsData} />
+          <div className="mt-6">
+            <AnalyticsSummaryCards analyticsRows={analyticsRows ?? []} />
+          </div>
+        </AdminSubSection>
+        <EventOverviewSection
+          tournaments={(tournaments ?? []) as Tournament[]}
+          seasons={(seasons ?? []) as Season[]}
+          sponsorNameById={new Map(sponsorOptions.map((s) => [s.id, s.name]))}
+        />
         <TabVisitsSection />
         <PatreonAdminSection userIsDirector={userIsDirector} />
+        {userIsDirector && <PatreonTiersAdminSection />}
         {userIsDirector && <StorageUsageSection />}
       </AdminSection>
 
@@ -1455,6 +1493,7 @@ export default async function AdminPage() {
         <AdminSection id="sponsors">
           <SponsorsSection patreonUrl={(settings?.patreon_url as string | null) ?? null} />
           <TabManagerAdminSection />
+          <ThemeDesignerAdminSection />
         </AdminSection>
       )}
 

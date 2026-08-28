@@ -5,6 +5,7 @@ import { isCurrentlyKicked } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import type { TopStats } from "@/app/lib/game-stats";
 import { PodiumClient, type RichPlayer, type Accolade } from "./podium-client";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
 type SnapshotPlayer = { username: string; displayName: string | null };
 type Summary = {
@@ -117,6 +118,7 @@ export default async function PodiumPage() {
       players={players}
       mvpPlayerId={mvpPlayerId}
       accolades={accolades}
+      sponsoredByLine={<SponsoredByLine tabKey="podium" />}
     />
   );
 }

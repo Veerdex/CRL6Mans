@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { triggerAutoPick } from "@/app/dashboard/draft-actions";
 import { PlayerName } from "@/app/dashboard/player-name";
@@ -18,6 +18,7 @@ interface DraftLiveProps {
   pickQueue: { pick: number; teamNum: number; isCurrent: boolean }[];
   viewerTeamId: string | null;
   userIsAdmin: boolean;
+  sponsoredByLine?: ReactNode;
 }
 
 function useCountdown(deadline: string | null) {
@@ -35,7 +36,7 @@ function useCountdown(deadline: string | null) {
 
 export function DraftLive({
   numTeams, currentPick, totalPicks,
-  pickDeadline, teams, availablePlayers, pickQueue, viewerTeamId, userIsAdmin,
+  pickDeadline, teams, availablePlayers, pickQueue, viewerTeamId, userIsAdmin, sponsoredByLine,
 }: DraftLiveProps) {
   const router = useRouter();
   const secondsLeft = useCountdown(pickDeadline);
@@ -79,7 +80,10 @@ export function DraftLive({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Live Draft</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-2xl font-bold text-white">Live Draft</h1>
+            {sponsoredByLine}
+          </div>
           <p className="text-sm text-zinc-400 mt-0.5">
             Pick {currentPick + 1} of {totalPicks} · {numTeams} teams
           </p>

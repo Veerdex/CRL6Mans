@@ -4,6 +4,7 @@ import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { DraftLive } from "./draft-live";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
 function getTeamNumberForPick(pickIndex: number, numTeams: number): number {
   const pickInRound = pickIndex % numTeams;
@@ -22,7 +23,10 @@ export default async function DraftPage() {
   if (!settings?.draft_active) {
     return (
       <div className="p-4 sm:p-6 lg:p-8 max-w-2xl">
-        <h1 className="text-2xl font-bold text-white mb-2">Live Draft</h1>
+        <div className="flex items-center gap-2 flex-wrap mb-2">
+          <h1 className="text-2xl font-bold text-white">Live Draft</h1>
+          <SponsoredByLine tabKey="draft" />
+        </div>
         <p className="text-zinc-400 text-sm">No draft is currently active.</p>
       </div>
     );
@@ -89,6 +93,7 @@ export default async function DraftPage() {
       pickQueue={pickQueue}
       viewerTeamId={viewerTeamId}
       userIsAdmin={await isModeratorVerified(callerId)}
+      sponsoredByLine={<SponsoredByLine tabKey="draft" />}
     />
   );
 }

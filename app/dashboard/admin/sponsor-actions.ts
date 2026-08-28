@@ -44,11 +44,7 @@ export type Sponsor = {
   background_image_url: string | null;
   links: SponsorLink[];
   promo_code: string | null;
-  theme_name: string | null;
-  theme_accent: string | null;
-  theme_shell: string | null;
-  theme_secondary: string | null;
-  theme_mode: "light" | "dark";
+  theme_id: string | null;
   content_crop: ContentCrop;
   click_url: string | null;
   phrase: string | null;
@@ -63,7 +59,7 @@ export async function getSponsorsWithMembers(): Promise<Sponsor[]> {
 
   const { data: sponsors } = await supabaseAdmin
     .from("sponsors")
-    .select("id, name, invite_token, max_uses, status, created_at, logo_url, video_url, top_nav_image_url, side_nav_image_url, background_image_url, links, promo_code, theme_name, theme_accent, theme_shell, theme_secondary, theme_mode, content_crop, click_url, phrase, overview, promo_description")
+    .select("id, name, invite_token, max_uses, status, created_at, logo_url, video_url, top_nav_image_url, side_nav_image_url, background_image_url, links, promo_code, theme_id, content_crop, click_url, phrase, overview, promo_description")
     .order("created_at", { ascending: true });
   if (!sponsors || sponsors.length === 0) return [];
 
@@ -136,11 +132,7 @@ export async function updateSponsorDetails(
     backgroundImageUrl: string;
     links: SponsorLink[];
     promoCode: string;
-    themeName: string;
-    themeAccent: string;
-    themeShell: string;
-    themeSecondary: string;
-    themeMode: string;
+    themeId: string | null;
     clickUrl: string;
     phrase: string;
     overview: string;
@@ -165,11 +157,7 @@ export async function updateSponsorDetails(
       background_image_url: details.backgroundImageUrl.trim() || null,
       links,
       promo_code: details.promoCode.trim() || null,
-      theme_name: details.themeName.trim() || null,
-      theme_accent: details.themeAccent.trim() || null,
-      theme_shell: details.themeShell.trim() || null,
-      theme_secondary: details.themeSecondary.trim() || null,
-      theme_mode: details.themeMode === "dark" ? "dark" : "light",
+      theme_id: details.themeId || null,
       click_url: details.clickUrl.trim() || null,
       phrase: details.phrase.trim() || null,
       overview: details.overview.trim() || null,
@@ -320,6 +308,62 @@ export async function updateTabPlacement(
       side_nav_sponsor_id: sideNavSponsorId,
       settings_tab_sponsor_id: settingsTabSponsorId,
     })
+    .not("id", "is", null);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard", "layout");
+  return { ok: true };
+}
+
+export type TabSponsors = Record<string, string>;
+
+export async function getTabSponsors(): Promise<TabSponsors> {
+  const { data } = await supabaseAdmin
+    .from("league_settings")
+    .select("tab_sponsors")
+    .single();
+  return (data?.tab_sponsors as TabSponsors | null) ?? {};
+}
+
+export async function setTabSponsor(
+  key: string,
+  sponsorId: string | null
+): Promise<{ ok?: boolean; error?: string }> {
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit sponsors." };
+  if (!NAV_TAB_OPTIONS.some((t) => t.key === key)) return { error: "Invalid tab." };
+
+  const sponsors = { ...(await getTabSponsors()) };
+  if (sponsorId) sponsors[key] = sponsorId;
+  else delete sponsors[key];
+
+  const { error } = await supabaseAdmin
+    .from("league_settings")
+    .update({ tab_sponsors: sponsors })
+    .not("id", "is", null);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard", "layout");
+  return { ok: true };
+}
+
+export async function setAllTabSponsors(
+  sponsorId: string | null
+): Promise<{ ok?: boolean; error?: string }> {
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit sponsors." };
+
+  const sponsors: TabSponsors = sponsorId
+    ? Object.fromEntries(NAV_TAB_OPTIONS.map((t) => [t.key, sponsorId]))
+    : {};
+
+  const { error } = await supabaseAdmin
+    .from("league_settings")
+    .update({ tab_sponsors: sponsors })
     .not("id", "is", null);
   if (error) return { error: error.message };
 

@@ -17,6 +17,7 @@ import { getPublicSponsors } from "@/app/lib/sponsors-public";
 import { cropStyle } from "@/app/lib/media-crop";
 import { buildTimeline, buildStageStarts } from "@/app/lib/tournament-timeline";
 import { TournamentDetailView } from "./tournament-detail";
+import { SponsoredByLine } from "./sponsored-by-line";
 
 export default async function DashboardPage({
   searchParams,
@@ -176,7 +177,10 @@ export default async function DashboardPage({
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+        <h1 className="text-2xl font-bold text-white inline-flex items-center gap-2 flex-wrap">
+          Dashboard
+          <SponsoredByLine tabKey="home" />
+        </h1>
         <p className="text-sm text-zinc-400 mt-1">Welcome back, {player?.display_name ?? session.username}</p>
       </div>
 

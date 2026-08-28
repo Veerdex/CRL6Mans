@@ -8,6 +8,7 @@ import { computeMatchPredictionFromRating, type MatchPrediction } from "./predic
 import { WagersClient } from "./wagers-client";
 import { WagesLeaderboardOnly } from "./leaderboard-view";
 import type { OverviewMatch } from "./overview-grid";
+import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
 function formatStageName(stage: string): string {
   if (stage.startsWith("group_")) return "Groups";
@@ -77,6 +78,9 @@ export default async function WagersPage() {
   if (!hasActiveContent) {
     return (
       <div className="h-full overflow-y-auto">
+        <div className="px-4 pt-4">
+          <SponsoredByLine tabKey="wagers" />
+        </div>
         <WagesLeaderboardOnly
           entries={leaderboard}
           currentUsername={currentUsername}
@@ -480,6 +484,7 @@ export default async function WagersPage() {
   return (
     <div className="h-full overflow-hidden">
       <WagersClient
+        sponsoredByLine={<SponsoredByLine tabKey="wagers" />}
         eventName={eventName}
         currentStage={currentStage}
         matches={matches}
