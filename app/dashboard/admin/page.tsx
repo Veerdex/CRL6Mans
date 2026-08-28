@@ -156,7 +156,7 @@ export default async function AdminPage() {
 
   const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors] = await Promise.all([
     getAllPendingPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id").maybeSingle(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, identity_enforcement_enabled, join_gate_enabled").maybeSingle(),
     supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
@@ -171,10 +171,32 @@ export default async function AdminPage() {
   ]);
   const sponsorOptions = publicSponsors.map((s) => ({ id: s.id, name: s.name }));
 
+  // ── Insights: visits / registrations / draft joins over the last 52 weeks ──
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysSinceMonday = (todayStart.getDay() + 6) % 7;
+  const currentWeekStart = new Date(todayStart);
+  currentWeekStart.setDate(todayStart.getDate() - daysSinceMonday);
+  const firstWeekStart = new Date(currentWeekStart);
+  firstWeekStart.setDate(currentWeekStart.getDate() - 7 * 51);
+
   type RawPlayerRow = { account_id: string; team_id: string | null; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; peak_1v1: string | null; current_1v1: string | null };
   const playersByAccountId = new Map(((playerRows ?? []) as RawPlayerRow[]).map(p => [p.account_id, p]));
 
-  const [{ data: pendingPlatformClaimRows }, { data: verifiedPlatformAccountRows }, { data: allPlatformAccountRows }] = await Promise.all([
+  const scheduledTournamentIds = (tournaments ?? [])
+    .filter((t) => t.status === "scheduled")
+    .map((t) => t.id as string);
+
+  type RawTeamSignupRow = { id: string; tournament_id: string; name: string; team_signup_members: { id: string; player_id: string; status: string }[] };
+
+  const [
+    { data: pendingPlatformClaimRows },
+    { data: verifiedPlatformAccountRows },
+    { data: allPlatformAccountRows },
+    { data: entryRows },
+    { data: teamSignupRows },
+    { data: analyticsRows },
+  ] = await Promise.all([
     supabaseAdmin
       .from("player_platform_accounts")
       .select("id, player_id, platform, platform_account_id, claimed_display_name, claimed_tracker_url, claimed_verification_replay_path, admin_note, created_at")
@@ -189,6 +211,16 @@ export default async function AdminPage() {
       .from("player_platform_accounts")
       .select("id, player_id, platform, platform_account_id, verification_status")
       .order("platform"),
+    scheduledTournamentIds.length
+      ? supabaseAdmin.from("tournament_entries").select("tournament_id, player_id").in("tournament_id", scheduledTournamentIds)
+      : Promise.resolve({ data: [] as { tournament_id: string; player_id: string }[] }),
+    scheduledTournamentIds.length
+      ? supabaseAdmin.from("team_signups").select("id, tournament_id, name, team_signup_members(id, player_id, status)").in("tournament_id", scheduledTournamentIds)
+      : Promise.resolve({ data: [] as RawTeamSignupRow[] }),
+    supabaseAdmin
+      .from("analytics_events")
+      .select("type, created_at")
+      .gte("created_at", firstWeekStart.toISOString()),
   ]);
 
   const platformAccountsByPlayerId = new Map<string, PlatformAccountSummary[]>();
@@ -207,31 +239,20 @@ export default async function AdminPage() {
     ...(pendingPlatformClaimRows ?? []).map(r => r.player_id),
     ...(verifiedPlatformAccountRows ?? []).map(r => r.player_id),
   ])];
-  const { data: platformClaimPlayers } = platformClaimPlayerIds.length
-    ? await supabaseAdmin.from("players").select("id, username, display_name").in("id", platformClaimPlayerIds)
-    : { data: [] as { id: string; username: string; display_name: string | null }[] };
-  const platformClaimPlayerMap = Object.fromEntries((platformClaimPlayers ?? []).map(p => [p.id, p]));
-
-  const scheduledTournamentIds = (tournaments ?? [])
-    .filter((t) => t.status === "scheduled")
-    .map((t) => t.id as string);
-
-  type RawTeamSignupRow = { id: string; tournament_id: string; name: string; team_signup_members: { id: string; player_id: string; status: string }[] };
-
-  const [{ data: entryRows }, { data: teamSignupRows }] = scheduledTournamentIds.length
-    ? await Promise.all([
-        supabaseAdmin.from("tournament_entries").select("tournament_id, player_id").in("tournament_id", scheduledTournamentIds),
-        supabaseAdmin.from("team_signups").select("id, tournament_id, name, team_signup_members(id, player_id, status)").in("tournament_id", scheduledTournamentIds),
-      ])
-    : [{ data: [] as { tournament_id: string; player_id: string }[] }, { data: [] as RawTeamSignupRow[] }];
-
   const signupPlayerIds = [...new Set([
     ...(entryRows ?? []).map((r) => r.player_id),
     ...((teamSignupRows ?? []) as RawTeamSignupRow[]).flatMap((s) => s.team_signup_members.map((m) => m.player_id)),
   ])];
-  const { data: signupPlayerRows } = signupPlayerIds.length
-    ? await supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar").in("id", signupPlayerIds)
-    : { data: [] as { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null }[] };
+
+  const [{ data: platformClaimPlayers }, { data: signupPlayerRows }] = await Promise.all([
+    platformClaimPlayerIds.length
+      ? supabaseAdmin.from("players").select("id, username, display_name").in("id", platformClaimPlayerIds)
+      : Promise.resolve({ data: [] as { id: string; username: string; display_name: string | null }[] }),
+    signupPlayerIds.length
+      ? supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar").in("id", signupPlayerIds)
+      : Promise.resolve({ data: [] as { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null }[] }),
+  ]);
+  const platformClaimPlayerMap = Object.fromEntries((platformClaimPlayers ?? []).map(p => [p.id, p]));
   const signupPlayerMap = new Map((signupPlayerRows ?? []).map((p) => [p.id, p]));
 
   const scheduledTournamentById = new Map((tournaments ?? []).map((t) => [t.id as string, t]));
@@ -312,12 +333,8 @@ export default async function AdminPage() {
     };
   });
 
-  const { data: identitySettingsRow } = await supabaseAdmin
-    .from("league_settings")
-    .select("identity_enforcement_enabled, join_gate_enabled")
-    .maybeSingle();
-  const identityEnforcementEnabled = identitySettingsRow?.identity_enforcement_enabled ?? false;
-  const joinGateEnabled = identitySettingsRow?.join_gate_enabled ?? false;
+  const identityEnforcementEnabled = settings?.identity_enforcement_enabled ?? false;
+  const joinGateEnabled = settings?.join_gate_enabled ?? false;
 
   const { data: openDiscrepancyRows } = await supabaseAdmin
     .from("replay_identity_discrepancies")
@@ -327,22 +344,24 @@ export default async function AdminPage() {
 
   const discrepancyMatchIds = [...new Set((openDiscrepancyRows ?? []).map(r => r.match_id))];
   const matchesUnderReviewCount = discrepancyMatchIds.length;
-  const { data: discrepancyMatchRows } = discrepancyMatchIds.length
-    ? await supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round").in("id", discrepancyMatchIds)
-    : { data: [] as { id: string; home_team_id: string | null; away_team_id: string | null; stage: string | null; round: number | null }[] };
+  const discrepancyPlayerIds = [...new Set((openDiscrepancyRows ?? []).flatMap(r => [r.expected_player_id, r.conflicting_player_id]).filter((id): id is string => !!id))];
+
+  const [{ data: discrepancyMatchRows }, { data: discrepancyPlayerRows }] = await Promise.all([
+    discrepancyMatchIds.length
+      ? supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round").in("id", discrepancyMatchIds)
+      : Promise.resolve({ data: [] as { id: string; home_team_id: string | null; away_team_id: string | null; stage: string | null; round: number | null }[] }),
+    discrepancyPlayerIds.length
+      ? supabaseAdmin.from("players").select("id, username, display_name").in("id", discrepancyPlayerIds)
+      : Promise.resolve({ data: [] as { id: string; username: string; display_name: string | null }[] }),
+  ]);
   const discrepancyMatchById = Object.fromEntries((discrepancyMatchRows ?? []).map(m => [m.id, m]));
+  const discrepancyPlayerById = Object.fromEntries((discrepancyPlayerRows ?? []).map(p => [p.id, p]));
 
   const discrepancyTeamIds = [...new Set((discrepancyMatchRows ?? []).flatMap(m => [m.home_team_id, m.away_team_id]).filter((id): id is string => !!id))];
   const { data: discrepancyTeamRows } = discrepancyTeamIds.length
     ? await supabaseAdmin.from("teams").select("id, name").in("id", discrepancyTeamIds)
     : { data: [] as { id: string; name: string }[] };
   const discrepancyTeamNameById = Object.fromEntries((discrepancyTeamRows ?? []).map(t => [t.id, t.name]));
-
-  const discrepancyPlayerIds = [...new Set((openDiscrepancyRows ?? []).flatMap(r => [r.expected_player_id, r.conflicting_player_id]).filter((id): id is string => !!id))];
-  const { data: discrepancyPlayerRows } = discrepancyPlayerIds.length
-    ? await supabaseAdmin.from("players").select("id, username, display_name").in("id", discrepancyPlayerIds)
-    : { data: [] as { id: string; username: string; display_name: string | null }[] };
-  const discrepancyPlayerById = Object.fromEntries((discrepancyPlayerRows ?? []).map(p => [p.id, p]));
 
   const discrepancyPlayerLabel = (id: string | null): string | null => {
     if (!id) return null;
@@ -378,11 +397,19 @@ export default async function AdminPage() {
   // crl_coins/username/display_name live on accounts (Tier 1) now. Scoped to
   // approved accounts only — id is still players.id-compatible since
   // players.id = accounts.id for every approved player (see adjustPlayerBalance).
-  const { data: wagerBalanceAccounts } = await supabaseAdmin
-    .from("accounts")
-    .select("id, username, display_name, crl_coins")
-    .eq("status", "approved")
-    .order("crl_coins", { ascending: false });
+  const [{ data: wagerBalanceAccounts }, gameScores, { data: rawAdjustmentRows }] = await Promise.all([
+    supabaseAdmin
+      .from("accounts")
+      .select("id, username, display_name, crl_coins")
+      .eq("status", "approved")
+      .order("crl_coins", { ascending: false }),
+    getAllGameScores(),
+    supabaseAdmin
+      .from("wager_balance_adjustments")
+      .select("batch_id, scope, player_id, amount, reason, actor, created_at")
+      .order("created_at", { ascending: false })
+      .limit(500),
+  ]);
 
   const wagerBalanceRows: BalanceRow[] = (wagerBalanceAccounts ?? []).map(a => ({
     id: a.id,
@@ -393,24 +420,18 @@ export default async function AdminPage() {
 
   const globalBettingMode: BettingMode = settings?.betting_mode === "pool" ? "pool" : "fixed";
 
-  const gameScores = await getAllGameScores();
-
-  const { data: rawAdjustmentRows } = await supabaseAdmin
-    .from("wager_balance_adjustments")
-    .select("batch_id, scope, player_id, amount, reason, actor, created_at")
-    .order("created_at", { ascending: false })
-    .limit(500);
-
   const adjustmentPlayerIds = [...new Set((rawAdjustmentRows ?? []).map(r => r.player_id))];
-  const { data: adjustmentPlayerRows } = adjustmentPlayerIds.length
-    ? await supabaseAdmin.from("players").select("id, username, display_name").in("id", adjustmentPlayerIds)
-    : { data: [] as { id: string; username: string; display_name: string | null }[] };
-  const adjustmentPlayerById = Object.fromEntries((adjustmentPlayerRows ?? []).map(p => [p.id, p]));
-
   const adjustmentActorIds = [...new Set((rawAdjustmentRows ?? []).map(r => r.actor))];
-  const { data: adjustmentActorRows } = adjustmentActorIds.length
-    ? await supabaseAdmin.from("players").select("discord_id, username, display_name").in("discord_id", adjustmentActorIds)
-    : { data: [] as { discord_id: string; username: string; display_name: string | null }[] };
+
+  const [{ data: adjustmentPlayerRows }, { data: adjustmentActorRows }] = await Promise.all([
+    adjustmentPlayerIds.length
+      ? supabaseAdmin.from("players").select("id, username, display_name").in("id", adjustmentPlayerIds)
+      : Promise.resolve({ data: [] as { id: string; username: string; display_name: string | null }[] }),
+    adjustmentActorIds.length
+      ? supabaseAdmin.from("players").select("discord_id, username, display_name").in("discord_id", adjustmentActorIds)
+      : Promise.resolve({ data: [] as { discord_id: string; username: string; display_name: string | null }[] }),
+  ]);
+  const adjustmentPlayerById = Object.fromEntries((adjustmentPlayerRows ?? []).map(p => [p.id, p]));
   const adjustmentActorByDiscordId = Object.fromEntries((adjustmentActorRows ?? []).map(p => [p.discord_id, p]));
 
   type BalanceAdjustmentBatch = {
@@ -460,31 +481,31 @@ export default async function AdminPage() {
 
   // Fetch staff roles for all accounts to support hierarchy-aware kick/ban buttons
   const accountDiscordIds = (allAccounts ?? []).map((a: { discord_id: string }) => a.discord_id).filter(Boolean);
-  const { data: staffRows } = accountDiscordIds.length
-    ? await supabaseAdmin.from("staff_roles").select("discord_id, role").in("discord_id", accountDiscordIds)
-    : { data: [] };
-  const staffRoleByDiscordId = Object.fromEntries((staffRows ?? []).map((r: { discord_id: string; role: string }) => [r.discord_id, r.role]));
-
-  const actorRole = userIsCEO ? "ceo" : userIsDirector ? "director" : "moderator";
-
   // Build team name lookup for match reporter
   const matchTeamIds = [...new Set((scheduledMatches ?? []).flatMap(m => [m.home_team_id, m.away_team_id]))];
-  const { data: matchTeams } = matchTeamIds.length
-    ? await supabaseAdmin.from("teams").select("id, name").in("id", matchTeamIds)
-    : { data: [] };
-  const teamNameById = Object.fromEntries((matchTeams ?? []).map(t => [t.id, t.name]));
-
   // Eligible players per match: both team rosters + any approved subs for that match.
   // Used to scope the replay aka-name dropdown to who could actually be playing.
   type EligibleOption = { id: string; label: string };
   const matchIds = (scheduledMatches ?? []).map(m => m.id);
-  const { data: approvedSubsForMatches } = matchIds.length
-    ? await supabaseAdmin
-        .from("sub_requests")
-        .select("match_id, sub_player_id, sub_player_ids")
-        .eq("status", "approved")
-        .in("match_id", matchIds)
-    : { data: [] as { match_id: string; sub_player_id: string | null; sub_player_ids: string[] | null }[] };
+
+  const [{ data: staffRows }, { data: matchTeams }, { data: approvedSubsForMatches }] = await Promise.all([
+    accountDiscordIds.length
+      ? supabaseAdmin.from("staff_roles").select("discord_id, role").in("discord_id", accountDiscordIds)
+      : Promise.resolve({ data: [] as { discord_id: string; role: string }[] }),
+    matchTeamIds.length
+      ? supabaseAdmin.from("teams").select("id, name").in("id", matchTeamIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    matchIds.length
+      ? supabaseAdmin
+          .from("sub_requests")
+          .select("match_id, sub_player_id, sub_player_ids")
+          .eq("status", "approved")
+          .in("match_id", matchIds)
+      : Promise.resolve({ data: [] as { match_id: string; sub_player_id: string | null; sub_player_ids: string[] | null }[] }),
+  ]);
+  const staffRoleByDiscordId = Object.fromEntries((staffRows ?? []).map((r: { discord_id: string; role: string }) => [r.discord_id, r.role]));
+  const actorRole = userIsCEO ? "ceo" : userIsDirector ? "director" : "moderator";
+  const teamNameById = Object.fromEntries((matchTeams ?? []).map(t => [t.id, t.name]));
 
   const approvedRoster = (allAccounts ?? []).filter((a: { status: string }) => a.status === "approved");
   const optionById = new Map<string, EligibleOption>(
@@ -563,16 +584,27 @@ export default async function AdminPage() {
   }))];
   const subRequesterIds = [...new Set(subReqs.map(r => r.requested_by_discord_id))];
 
+  type RawEditRequest = {
+    id: string; player_id: string; username: string;
+    tracker_url: string; peak_3v3: string; current_3v3: string; peak_2v2: string; current_2v2: string;
+    peak_1v1: string | null; current_1v1: string | null;
+    created_at: string;
+  };
+  const editReqs = (pendingEditRequests ?? []) as RawEditRequest[];
+  const editPlayerIds = [...new Set(editReqs.map(r => r.player_id))];
+
   const [
     { data: subTeams },
     { data: subPlayersOut },
     { data: subPlayersIn },
     { data: subRequesters },
+    { data: editPlayers },
   ] = await Promise.all([
-    subTeamIds.length      ? supabaseAdmin.from("teams").select("id, name").in("id", subTeamIds) : { data: [] as { id: string; name: string }[] },
-    subOutIds.length       ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").in("id", subOutIds) : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] },
-    subInIds.length        ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").in("id", subInIds) : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] },
-    subRequesterIds.length ? supabaseAdmin.from("players").select("discord_id, username, display_name").in("discord_id", subRequesterIds) : { data: [] as { discord_id: string; username: string; display_name: string | null }[] },
+    subTeamIds.length      ? supabaseAdmin.from("teams").select("id, name").in("id", subTeamIds) : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    subOutIds.length       ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").in("id", subOutIds) : Promise.resolve({ data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] }),
+    subInIds.length        ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").in("id", subInIds) : Promise.resolve({ data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] }),
+    subRequesterIds.length ? supabaseAdmin.from("players").select("discord_id, username, display_name").in("discord_id", subRequesterIds) : Promise.resolve({ data: [] as { discord_id: string; username: string; display_name: string | null }[] }),
+    editPlayerIds.length   ? supabaseAdmin.from("players").select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1").in("id", editPlayerIds) : Promise.resolve({ data: [] as { id: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; peak_1v1: string | null; current_1v1: string | null }[] }),
   ]);
 
   const subTeamMap      = Object.fromEntries((subTeams      ?? []).map(t => [t.id, t.name]));
@@ -610,17 +642,6 @@ export default async function AdminPage() {
   });
 
   // Build player edit request cards (join with live player data)
-  type RawEditRequest = {
-    id: string; player_id: string; username: string;
-    tracker_url: string; peak_3v3: string; current_3v3: string; peak_2v2: string; current_2v2: string;
-    peak_1v1: string | null; current_1v1: string | null;
-    created_at: string;
-  };
-  const editReqs = (pendingEditRequests ?? []) as RawEditRequest[];
-  const editPlayerIds = [...new Set(editReqs.map(r => r.player_id))];
-  const { data: editPlayers } = editPlayerIds.length
-    ? await supabaseAdmin.from("players").select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1").in("id", editPlayerIds)
-    : { data: [] as { id: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; peak_1v1: string | null; current_1v1: string | null }[] };
   const editPlayerMap = Object.fromEntries((editPlayers ?? []).map(p => [p.id, p]));
 
   const playerEditRequestCards: PlayerEditRequestCardData[] = editReqs.map(req => {
@@ -648,11 +669,20 @@ export default async function AdminPage() {
 
   // ── Scheduling section data ────────────────────────────────────────────────
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
-  const { data: roundScheduleRows } = settings?.season_active
-    ? await (activeTournamentId
-        ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").eq("tournament_id", activeTournamentId)
-        : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").is("tournament_id", null))
-    : { data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string; range_days: number | null }[] };
+  const [{ data: roundScheduleRows }, { data: schedulerMatchRows }] = await Promise.all([
+    settings?.season_active
+      ? (activeTournamentId
+          ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").eq("tournament_id", activeTournamentId)
+          : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").is("tournament_id", null))
+      : Promise.resolve({ data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string; range_days: number | null }[] }),
+    settings?.season_active
+      ? supabaseAdmin
+          .from("matches")
+          .select("id, stage, round, match_number, home_team_id, away_team_id, scheduled_at, admin_scheduled, schedule_proposed_by_team_id, discord_channel_id")
+          .neq("status", "completed")
+          .order("stage").order("round").order("match_number")
+      : Promise.resolve({ data: [] as { id: string; stage: string; round: number; match_number: number; home_team_id: string | null; away_team_id: string | null; scheduled_at: string | null; admin_scheduled: boolean; schedule_proposed_by_team_id: string | null; discord_channel_id: string | null }[] }),
+  ]);
 
   const enteredCount = (draftPoolRows ?? []).length;
 
@@ -716,14 +746,6 @@ export default async function AdminPage() {
 
   // Per-round match rows (incl. TBD-team future rounds) for the expand/per-match
   // scheduling UI. Keyed by canonical "stage:round".
-  const { data: schedulerMatchRows } = settings?.season_active
-    ? await supabaseAdmin
-        .from("matches")
-        .select("id, stage, round, match_number, home_team_id, away_team_id, scheduled_at, admin_scheduled, schedule_proposed_by_team_id, discord_channel_id")
-        .neq("status", "completed")
-        .order("stage").order("round").order("match_number")
-    : { data: [] as { id: string; stage: string; round: number; match_number: number; home_team_id: string | null; away_team_id: string | null; scheduled_at: string | null; admin_scheduled: boolean; schedule_proposed_by_team_id: string | null; discord_channel_id: string | null }[] };
-
   const matchesByRound: Record<string, RoundMatchInfo[]> = {};
   for (const m of schedulerMatchRows ?? []) {
     const cs = canonicalStage(m.stage);
@@ -850,20 +872,6 @@ export default async function AdminPage() {
       staffRole: (staffRoleByDiscordId[a.discord_id] ?? null) as StaffRole | null,
       createdAt: a.created_at,
     }));
-
-  // ── Insights: visits / registrations / draft joins over the last 52 weeks ──
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const daysSinceMonday = (todayStart.getDay() + 6) % 7;
-  const currentWeekStart = new Date(todayStart);
-  currentWeekStart.setDate(todayStart.getDate() - daysSinceMonday);
-  const firstWeekStart = new Date(currentWeekStart);
-  firstWeekStart.setDate(currentWeekStart.getDate() - 7 * 51);
-
-  const { data: analyticsRows } = await supabaseAdmin
-    .from("analytics_events")
-    .select("type, created_at")
-    .gte("created_at", firstWeekStart.toISOString());
 
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
   const firstWeekMs = firstWeekStart.getTime();

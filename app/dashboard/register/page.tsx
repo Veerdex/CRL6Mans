@@ -20,15 +20,16 @@ export default async function RegisterPage() {
 
   if (account?.status === "approved" || account?.is_guest) redirect("/dashboard");
 
-  const { data: existing } = account
-    ? await supabaseAdmin
-        .from("pending_players")
-        .select("tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, college_image_url, sub_willing")
-        .eq("account_id", account.id)
-        .single()
-    : { data: null };
-
-  const inServer = await isGuildMember(session.userId);
+  const [{ data: existing }, inServer] = await Promise.all([
+    account
+      ? supabaseAdmin
+          .from("pending_players")
+          .select("tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, college_image_url, sub_willing")
+          .eq("account_id", account.id)
+          .single()
+      : Promise.resolve({ data: null }),
+    isGuildMember(session.userId),
+  ]);
   if (!inServer) {
     const inviteUrl = process.env.NEXT_PUBLIC_DISCORD_INVITE_URL?.trim() || process.env.DISCORD_INVITE_URL?.trim() || null;
     return (

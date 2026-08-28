@@ -18,17 +18,16 @@ export default async function SeasonPage() {
   const userIsAdmin = session?.userId ? await isDirectorVerified(session.userId) : false;
   const testingMode = userIsAdmin && cookieStore.get("testing_mode")?.value === "1";
 
-  let myTeamId: string | null = null;
-  if (session?.userId) {
-    const { data: me } = await supabaseAdmin
-      .from("players").select("team_id").eq("discord_id", session.userId).single();
-    myTeamId = (me?.team_id as string | null) ?? null;
-  }
-
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings")
-    .select("season_format, season_participants, season_active, num_teams, active_tournament_id")
-    .single();
+  const [{ data: me }, { data: settings }] = await Promise.all([
+    session?.userId
+      ? supabaseAdmin.from("players").select("team_id").eq("discord_id", session.userId).single()
+      : Promise.resolve({ data: null }),
+    supabaseAdmin
+      .from("league_settings")
+      .select("season_format, season_participants, season_active, num_teams, active_tournament_id")
+      .single(),
+  ]);
+  const myTeamId: string | null = (me?.team_id as string | null) ?? null;
 
   const format = (settings?.season_format as SeasonFormatConfig) ?? null;
   const participants = (settings?.season_participants as number) ?? 16;
@@ -67,7 +66,36 @@ export default async function SeasonPage() {
   let standingsRows: StandingsRow[] = [];
 
   if (seasonActive) {
-    const [{ data: allTeams }, { data: completedMatches }, { data: bracketTeamRefs }] = await Promise.all([
+    // Group/Swiss/Hybrid/qualifier stage checks below are all gated by mutually-independent
+    // boolean flags derived from `format` — several can be true at once for multi-stage
+    // presets (e.g. group_swiss_hybrid runs group + swiss + hybrid checks), so they all fire
+    // in this same batch instead of running one after another.
+    if (hasGroupStage && numTeams > 0) {
+      const numGroups = getNumGroups(numTeams);
+      if (isGroupSE) {
+        const totalAdv = format?.groupMaxAdvancing ?? Math.floor((numTeams * 3) / 4);
+        qualifiersPerGroup = Math.max(1, Math.round(totalAdv / numGroups));
+      } else if (isGroupSwissHybrid) {
+        qualifiersPerGroup = 5; // 1st → UB, 2nd-5th → Swiss
+      } else if (isGroupSwissHybrid8) {
+        qualifiersPerGroup = 3; // 1st → UB, 2nd-3rd → Swiss
+      } else {
+        qualifiersPerGroup = Math.floor(16 / numGroups);
+      }
+    }
+
+    const [
+      { data: allTeams },
+      { data: completedMatches },
+      { data: bracketTeamRefs },
+      { count: seCount },
+      hybridRes,
+      hybrid8Res,
+      pendingGroupRes,
+      seqRes,
+      deqRes,
+      swissRes,
+    ] = await Promise.all([
       supabaseAdmin.from("teams").select("id, name, logo_url"),
       supabaseAdmin
         .from("matches")
@@ -78,7 +106,98 @@ export default async function SeasonPage() {
         .not("home_team_id", "is", null)
         .not("away_team_id", "is", null),
       supabaseAdmin.from("matches").select("home_team_id, away_team_id"),
+      // "Exists" means a real pairing has been filled in — not merely that a placeholder
+      // row was pre-created (rows are scaffolded the moment their stage's size is known,
+      // long before real teams are assigned).
+      supabaseAdmin
+        .from("matches").select("*", { count: "exact", head: true })
+        .eq("stage", "single_elimination").not("home_team_id", "is", null),
+      isGroupSwissHybrid
+        ? (async () => {
+            const { count: hybridCount } = await supabaseAdmin
+              .from("matches").select("*", { count: "exact", head: true })
+              .in("stage", [HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF])
+              .not("home_team_id", "is", null);
+            if (!hybridCount) return { exists: false, done: false };
+            const { count: hybridPending } = await supabaseAdmin
+              .from("matches").select("*", { count: "exact", head: true })
+              .in("stage", [HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF])
+              .not("home_team_id", "is", null)
+              .neq("status", "completed");
+            return { exists: true, done: (hybridPending ?? 1) === 0 };
+          })()
+        : Promise.resolve({ exists: false, done: false }),
+      isGroupSwissHybrid8
+        ? (async () => {
+            const { count: h8Count } = await supabaseAdmin
+              .from("matches").select("*", { count: "exact", head: true })
+              .in("stage", [HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF])
+              .not("home_team_id", "is", null);
+            if (!h8Count) return { exists: false, done: false };
+            const { count: h8Pending } = await supabaseAdmin
+              .from("matches").select("*", { count: "exact", head: true })
+              .in("stage", [HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF])
+              .not("home_team_id", "is", null)
+              .neq("status", "completed");
+            return { exists: true, done: (h8Pending ?? 1) === 0 };
+          })()
+        : Promise.resolve({ exists: false, done: false }),
+      (hasGroupStage && numTeams > 0)
+        ? supabaseAdmin
+            .from("matches").select("*", { count: "exact", head: true })
+            .like("stage", "group_%").neq("status", "completed")
+        : Promise.resolve({ count: 0 }),
+      isSESwissSE
+        ? supabaseAdmin.from("matches").select("round, status").eq("stage", SE_QUALIFIER)
+        : Promise.resolve({ data: null }),
+      isDESwissSE
+        ? supabaseAdmin.from("matches").select("round, status").in("stage", [DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS])
+        : Promise.resolve({ data: null }),
+      hasSwissStage
+        ? supabaseAdmin
+            .from("matches")
+            .select("round, home_team_id, away_team_id, home_score, away_score, status")
+            .eq("stage", SWISS_STAGE)
+            .not("home_team_id", "is", null)
+        : Promise.resolve({ data: null }),
     ]);
+
+    seExists = (seCount ?? 0) > 0;
+    hybridExists = hybridRes.exists;
+    hybridDone = hybridRes.done;
+    hybrid8Exists = hybrid8Res.exists;
+    hybrid8Done = hybrid8Res.done;
+    if (hasGroupStage && numTeams > 0) {
+      groupsComplete = ((pendingGroupRes as { count: number | null }).count ?? 1) === 0;
+    }
+
+    const seqMatches = seqRes.data;
+    seqExists   = (seqMatches?.length ?? 0) > 0;
+    seqComplete = seqExists && (seqMatches?.every(m => m.status === "completed") ?? false);
+
+    const deqMatches = deqRes.data;
+    deqExists   = (deqMatches?.length ?? 0) > 0;
+    deqComplete = deqExists && (deqMatches?.every(m => m.status === "completed") ?? false);
+
+    const swissMatches = swissRes.data;
+    swissExists = (swissMatches?.length ?? 0) > 0;
+    if (swissExists && swissMatches) {
+      const currentRound = Math.max(...swissMatches.map(m => m.round));
+      swissRoundComplete = swissMatches.filter(m => m.round === currentRound && m.status !== "completed").length === 0;
+
+      const teamIds = [...new Set(swissMatches.flatMap(m =>
+        [m.home_team_id, m.away_team_id].filter(Boolean) as string[]
+      ))];
+      const swissAdvanceWins = isGroupSwissHybrid8 ? SWISS8_ADVANCE_WINS : SWISS_ADVANCE_WINS;
+      const advancedCount = teamIds.filter(id =>
+        swissMatches.filter(m => m.status === "completed" && (m.home_team_id === id || m.away_team_id === id))
+          .reduce((wins, m) => {
+            const homeWon = (m.home_score ?? 0) > (m.away_score ?? 0);
+            return wins + ((m.home_team_id === id && homeWon) || (m.away_team_id === id && !homeWon) ? 1 : 0);
+          }, 0) >= swissAdvanceWins
+      ).length;
+      swissDone = advancedCount >= (isGroupSwissHybrid8 ? 4 : 8);
+    }
 
     // Teams that were cut at season start (over the format's max) have no matches,
     // so exclude any team that isn't referenced by the bracket from standings.
@@ -117,109 +236,6 @@ export default async function SeasonPage() {
         .sort((a, b) => b.wins - a.wins || a.losses - b.losses || a.name.localeCompare(b.name));
     }
 
-    // "Exists" means a real pairing has been filled in — not merely that a placeholder
-    // row was pre-created (rows are scaffolded the moment their stage's size is known,
-    // long before real teams are assigned).
-    const { count: seCount } = await supabaseAdmin
-      .from("matches").select("*", { count: "exact", head: true })
-      .eq("stage", "single_elimination").not("home_team_id", "is", null);
-    seExists = (seCount ?? 0) > 0;
-
-    if (isGroupSwissHybrid) {
-      const { count: hybridCount } = await supabaseAdmin
-        .from("matches").select("*", { count: "exact", head: true })
-        .in("stage", [HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF])
-        .not("home_team_id", "is", null);
-      hybridExists = (hybridCount ?? 0) > 0;
-
-      if (hybridExists) {
-        const { count: hybridPending } = await supabaseAdmin
-          .from("matches").select("*", { count: "exact", head: true })
-          .in("stage", [HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF])
-          .not("home_team_id", "is", null)
-          .neq("status", "completed");
-        hybridDone = (hybridPending ?? 1) === 0;
-      }
-    }
-
-    if (isGroupSwissHybrid8) {
-      const { count: h8Count } = await supabaseAdmin
-        .from("matches").select("*", { count: "exact", head: true })
-        .in("stage", [HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF])
-        .not("home_team_id", "is", null);
-      hybrid8Exists = (h8Count ?? 0) > 0;
-
-      if (hybrid8Exists) {
-        const { count: h8Pending } = await supabaseAdmin
-          .from("matches").select("*", { count: "exact", head: true })
-          .in("stage", [HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF])
-          .not("home_team_id", "is", null)
-          .neq("status", "completed");
-        hybrid8Done = (h8Pending ?? 1) === 0;
-      }
-    }
-
-    if (hasGroupStage && numTeams > 0) {
-      const numGroups = getNumGroups(numTeams);
-      if (isGroupSE) {
-        const totalAdv = format?.groupMaxAdvancing ?? Math.floor((numTeams * 3) / 4);
-        qualifiersPerGroup = Math.max(1, Math.round(totalAdv / numGroups));
-      } else if (isGroupSwissHybrid) {
-        qualifiersPerGroup = 5; // 1st → UB, 2nd-5th → Swiss
-      } else if (isGroupSwissHybrid8) {
-        qualifiersPerGroup = 3; // 1st → UB, 2nd-3rd → Swiss
-      } else {
-        qualifiersPerGroup = Math.floor(16 / numGroups);
-      }
-      const { count: pendingGroup } = await supabaseAdmin
-        .from("matches").select("*", { count: "exact", head: true })
-        .like("stage", "group_%").neq("status", "completed");
-      groupsComplete = (pendingGroup ?? 1) === 0;
-    }
-
-    if (isSESwissSE) {
-      const { data: seqMatches } = await supabaseAdmin
-        .from("matches").select("round, status")
-        .eq("stage", SE_QUALIFIER);
-      seqExists   = (seqMatches?.length ?? 0) > 0;
-      seqComplete = seqExists && (seqMatches?.every(m => m.status === "completed") ?? false);
-    }
-
-    if (isDESwissSE) {
-      const { data: deqMatches } = await supabaseAdmin
-        .from("matches").select("round, status")
-        .in("stage", [DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS]);
-      deqExists   = (deqMatches?.length ?? 0) > 0;
-      deqComplete = deqExists && (deqMatches?.every(m => m.status === "completed") ?? false);
-    }
-
-    if (hasSwissStage) {
-      const { data: swissMatches } = await supabaseAdmin
-        .from("matches")
-        .select("round, home_team_id, away_team_id, home_score, away_score, status")
-        .eq("stage", SWISS_STAGE)
-        .not("home_team_id", "is", null);
-
-      swissExists = (swissMatches?.length ?? 0) > 0;
-
-      if (swissExists && swissMatches) {
-        const currentRound = Math.max(...swissMatches.map(m => m.round));
-        swissRoundComplete = swissMatches.filter(m => m.round === currentRound && m.status !== "completed").length === 0;
-
-        const teamIds = [...new Set(swissMatches.flatMap(m =>
-          [m.home_team_id, m.away_team_id].filter(Boolean) as string[]
-        ))];
-        const swissAdvanceWins = isGroupSwissHybrid8 ? SWISS8_ADVANCE_WINS : SWISS_ADVANCE_WINS;
-        const advancedCount = teamIds.filter(id =>
-          swissMatches.filter(m => m.status === "completed" && (m.home_team_id === id || m.away_team_id === id))
-            .reduce((wins, m) => {
-              const homeWon = (m.home_score ?? 0) > (m.away_score ?? 0);
-              return wins + ((m.home_team_id === id && homeWon) || (m.away_team_id === id && !homeWon) ? 1 : 0);
-            }, 0) >= swissAdvanceWins
-        ).length;
-        swissDone = advancedCount >= (isGroupSwissHybrid8 ? 4 : 8);
-      }
-    }
   }
 
   // Build tabs

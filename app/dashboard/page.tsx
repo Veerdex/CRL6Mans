@@ -126,25 +126,29 @@ export default async function DashboardPage({
 
   // Player-pool joins: which open tournaments I'm in + pool sizes.
   const openPlayerTs = openTournaments.filter((t) => t.join_mode === "players");
+  const openTeamTs = openTournaments.filter((t) => t.join_mode === "teams");
+
+  const [{ data: entries }, teamViewEntries] = await Promise.all([
+    openPlayerTs.length
+      ? supabaseAdmin
+          .from("tournament_entries")
+          .select("tournament_id, player_id")
+          .in("tournament_id", openPlayerTs.map((t) => t.id))
+      : Promise.resolve({ data: [] as { tournament_id: string; player_id: string }[] }),
+    isApproved && player?.id
+      ? Promise.all(openTeamTs.map(async (t) => [t.id, await getTeamSignupView(player.id, t.id, true)] as const))
+      : Promise.resolve([] as (readonly [string, TeamSignupView])[]),
+  ]);
+
   const myEntryIds = new Set<string>();
   const poolCounts: Record<string, number> = {};
-  if (openPlayerTs.length) {
-    const { data: entries } = await supabaseAdmin
-      .from("tournament_entries")
-      .select("tournament_id, player_id")
-      .in("tournament_id", openPlayerTs.map((t) => t.id));
-    for (const e of entries ?? []) {
-      poolCounts[e.tournament_id] = (poolCounts[e.tournament_id] ?? 0) + 1;
-      if (player?.id && e.player_id === player.id) myEntryIds.add(e.tournament_id);
-    }
+  for (const e of entries ?? []) {
+    poolCounts[e.tournament_id] = (poolCounts[e.tournament_id] ?? 0) + 1;
+    if (player?.id && e.player_id === player.id) myEntryIds.add(e.tournament_id);
   }
 
   // Team-signup views per open team tournament.
-  const openTeamTs = openTournaments.filter((t) => t.join_mode === "teams");
-  const teamViews: Record<string, TeamSignupView> = {};
-  if (isApproved && player?.id) {
-    for (const t of openTeamTs) teamViews[t.id] = await getTeamSignupView(player.id, t.id, true);
-  }
+  const teamViews: Record<string, TeamSignupView> = Object.fromEntries(teamViewEntries);
 
   const draftCount = draftQueue.length;
   const signupsOpen = (settings?.draft_open ?? false) && !(settings?.draft_active ?? false) && !(settings?.season_active ?? false);

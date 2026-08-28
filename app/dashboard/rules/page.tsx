@@ -8,9 +8,11 @@ import { filterRulesMarkdown, seasonRulesContext } from "./rules-filter";
 export default async function RulesPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  const canEdit = session?.userId ? await isDirectorVerified(session.userId) : false;
-  const markdown = await getRulesMarkdown();
-  const { minMmr2v2, minMmr3v3 } = await getSeasonMinMmr();
+  const [canEdit, markdown, { minMmr2v2, minMmr3v3 }] = await Promise.all([
+    session?.userId ? isDirectorVerified(session.userId) : Promise.resolve(false),
+    getRulesMarkdown(),
+    getSeasonMinMmr(),
+  ]);
   const displayMarkdown = filterRulesMarkdown(markdown, seasonRulesContext(minMmr2v2, minMmr3v3));
 
   return (

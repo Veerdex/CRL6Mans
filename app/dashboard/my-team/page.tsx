@@ -187,15 +187,36 @@ function sortDescending(a: BracketMatch, b: BracketMatch) {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
+type SubPlayerRow = {
+  id: string; username: string; display_name: string | null;
+  peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+  peak_1v1: string | null; current_1v1: string | null;
+};
+type ScheduleRow = { id: string; schedule_proposed_by_team_id: string | null; schedule_accepted: boolean; schedule_admin_required: boolean; admin_scheduled: boolean; home_checked_in: boolean; away_checked_in: boolean; checkin_deadline: string | null };
+type RoundScheduleRow = { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string; range_days: number | null };
+type RawSubReq = {
+  id: string; match_id: string | null; player_out_id: string;
+  sub_player_id: string | null; sub_player_ids: string[] | null;
+  reason: string | null; status: string; admin_note: string | null; created_at: string;
+};
+type IncomingRawRow = {
+  id: string; team_id: string; match_id: string | null; player_out_id: string; sub_player_id: string | null; reason: string | null; created_at: string;
+};
+
+function peakMmrSub(p: Parameters<typeof playerRatingFromRow>[0]) {
+  return Math.round(playerRatingFromRow(p));
+}
+
 export default async function MyTeamPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const userIsAdmin = await isModeratorVerified(session.userId);
-
-  const { data: player } = await supabaseAdmin
-    .from("players").select("team_id").eq("discord_id", session.userId).single();
+  // isModeratorVerified and the team lookup are independent — run together.
+  const [userIsAdmin, { data: player }] = await Promise.all([
+    isModeratorVerified(session.userId),
+    supabaseAdmin.from("players").select("team_id").eq("discord_id", session.userId).single(),
+  ]);
   if (!player?.team_id) redirect("/dashboard");
   const teamId: string = player.team_id;
 
@@ -223,15 +244,6 @@ export default async function MyTeamPage() {
   if (!team) redirect("/dashboard");
 
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
-  let tournamentJoinMode: "players" | "teams" | null = null;
-  if (activeTournamentId) {
-    const { data: tourney } = await supabaseAdmin
-      .from("tournaments").select("join_mode").eq("id", activeTournamentId).single();
-    tournamentJoinMode = (tourney?.join_mode as "players" | "teams" | undefined) ?? null;
-  }
-  // Team sign-up tournaments pre-form rosters — substitutions aren't offered for that format.
-  const subsAllowedForFormat = tournamentJoinMode !== "teams";
-  const subsEnabled = ((settings?.subs_enabled as boolean | null) ?? true) && subsAllowedForFormat;
   const seasonActive = settings?.season_active ?? false;
   const preset       = (settings?.season_format as { preset?: string })?.preset ?? "single_elimination";
   // isDE covers all formats that use a double-elimination bracket (full or qualifier)
@@ -239,53 +251,89 @@ export default async function MyTeamPage() {
   const isDEQualifier = preset === "de_swiss_single_elimination";
   const allTeams     = (allTeamsRaw ?? []) as TeamRow[];
   const teamMap      = Object.fromEntries(allTeams.map((t) => [t.id, t]));
-
   const hasGroupStage = preset === "group_single_elimination" || preset === "group_swiss_single_elimination";
+
+  const allSubCandidateIds = [
+    ...new Set(
+      ((subRequestsRaw ?? []) as RawSubReq[]).flatMap((r) => {
+        if (r.sub_player_ids && r.sub_player_ids.length > 0) return r.sub_player_ids;
+        if (r.sub_player_id) return [r.sub_player_id];
+        return [];
+      })
+    ),
+  ];
+
+  // Everything below only needs settings/subRequestsRaw (already in hand), so it
+  // all fires in one batch instead of four+ sequential round trips.
+  const [
+    tourneyRes,
+    seasonMatchesRes,
+    { data: subPlayersRaw },
+    { data: roundScheduleRows },
+  ] = await Promise.all([
+    activeTournamentId
+      ? supabaseAdmin.from("tournaments").select("join_mode").eq("id", activeTournamentId).single()
+      : Promise.resolve({ data: null as { join_mode: string } | null }),
+    seasonActive
+      ? Promise.all([
+          // All non-group bracket stages — covers every format (SE, DE, DE→Swiss→SE, etc.)
+          // Note: combining .or() + .in() is broken in this Supabase version — the IN clause
+          // silently returns zero rows when chained with OR. We fetch all matches and
+          // deduplicate with the group-stage query in JS instead.
+          supabaseAdmin
+            .from("matches")
+            .select("id, round, match_number, stage, home_team_id, away_team_id, home_score, away_score, status, scheduled_at, pending_home_score, pending_away_score, score_submitted_by_team_id, score_confirmed, score_submitted_at")
+            .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`),
+          // Primary bracket R1 count: deq_winners for DE qualifier formats, de_winners
+          // for full DE, single_elimination for pure SE / group formats.
+          supabaseAdmin
+            .from("matches")
+            .select("id", { count: "exact", head: true })
+            .eq("stage", isDEQualifier ? "deq_winners" : isDE ? DE_WINNERS : "single_elimination")
+            .eq("round", 1),
+          hasGroupStage
+            ? supabaseAdmin
+                .from("matches")
+                .select("id, round, match_number, stage, home_team_id, away_team_id, home_score, away_score, status, scheduled_at")
+                .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
+                .like("stage", `${GROUP_STAGE_PREFIX}%`)
+                .order("stage").order("round").order("match_number")
+            : Promise.resolve({ data: [] as BracketMatch[] }),
+          // SE R1 count separately so multi-stage formats show correct round names
+          // once the SE phase is reached (e.g. de_swiss_se, se_swiss_se, group_se).
+          supabaseAdmin
+            .from("matches")
+            .select("id", { count: "exact", head: true })
+            .eq("stage", "single_elimination")
+            .eq("round", 1),
+        ])
+      : Promise.resolve(null),
+    allSubCandidateIds.length > 0
+      ? supabaseAdmin
+          .from("players")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .in("id", allSubCandidateIds)
+      : Promise.resolve({ data: [] as SubPlayerRow[] }),
+    // Admin-set round schedules define the allowed scheduling window per round.
+    seasonActive
+      ? (activeTournamentId
+          ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").eq("tournament_id", activeTournamentId)
+          : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").is("tournament_id", null))
+      : Promise.resolve({ data: [] as RoundScheduleRow[] }),
+  ]);
+
+  const tournamentJoinMode = (tourneyRes.data?.join_mode as "players" | "teams" | undefined) ?? null;
+  // Team sign-up tournaments pre-form rosters — substitutions aren't offered for that format.
+  const subsAllowedForFormat = tournamentJoinMode !== "teams";
+  const subsEnabled = ((settings?.subs_enabled as boolean | null) ?? true) && subsAllowedForFormat;
 
   // ── Match data (season active only) ───────────────────────────────────────
   let myMatches: BracketMatch[] = [];
   let numR1WB = 0; // R1 match count for the primary bracket (WB or SE)
   let numR1SE = 0; // R1 match count specifically for single_elimination stage
 
-  if (seasonActive) {
-    // All non-group bracket stages — covers every format (SE, DE, DE→Swiss→SE, etc.)
-    // Note: combining .or() + .in() is broken in this Supabase version — the IN clause
-    // silently returns zero rows when chained with OR. We fetch all matches and
-    // deduplicate with the group-stage query in JS instead.
-    const [
-      { data: matchData },
-      { count: r1Count },
-      { data: groupMatchData },
-      { count: seR1Count },
-    ] = await Promise.all([
-      supabaseAdmin
-        .from("matches")
-        .select("id, round, match_number, stage, home_team_id, away_team_id, home_score, away_score, status, scheduled_at, pending_home_score, pending_away_score, score_submitted_by_team_id, score_confirmed, score_submitted_at")
-        .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`),
-      // Primary bracket R1 count: deq_winners for DE qualifier formats, de_winners
-      // for full DE, single_elimination for pure SE / group formats.
-      supabaseAdmin
-        .from("matches")
-        .select("id", { count: "exact", head: true })
-        .eq("stage", isDEQualifier ? "deq_winners" : isDE ? DE_WINNERS : "single_elimination")
-        .eq("round", 1),
-      hasGroupStage
-        ? supabaseAdmin
-            .from("matches")
-            .select("id, round, match_number, stage, home_team_id, away_team_id, home_score, away_score, status, scheduled_at")
-            .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
-            .like("stage", `${GROUP_STAGE_PREFIX}%`)
-            .order("stage").order("round").order("match_number")
-        : Promise.resolve({ data: [] as BracketMatch[] }),
-      // SE R1 count separately so multi-stage formats show correct round names
-      // once the SE phase is reached (e.g. de_swiss_se, se_swiss_se, group_se).
-      supabaseAdmin
-        .from("matches")
-        .select("id", { count: "exact", head: true })
-        .eq("stage", "single_elimination")
-        .eq("round", 1),
-    ]);
-
+  if (seasonMatchesRes) {
+    const [{ data: matchData }, { count: r1Count }, { data: groupMatchData }, { count: seR1Count }] = seasonMatchesRes;
     const allMatches   = (matchData ?? []) as BracketMatch[];
     const groupMatches = (groupMatchData ?? []) as BracketMatch[];
     // Deduplicate: group matches already included in allMatches for hasGroupStage formats
@@ -294,21 +342,6 @@ export default async function MyTeamPage() {
     myMatches = [...groupMatches, ...bracketMatches].sort(sortAscending);
     numR1WB   = r1Count ?? 0;
     numR1SE   = seR1Count ?? 0;
-  }
-
-  // Fetch schedule proposal state separately so a missing-column error never
-  // breaks the main match display (Next Match, Recent Results).
-  type ScheduleRow = { id: string; schedule_proposed_by_team_id: string | null; schedule_accepted: boolean; schedule_admin_required: boolean; admin_scheduled: boolean; home_checked_in: boolean; away_checked_in: boolean; checkin_deadline: string | null };
-  const scheduleMap: Record<string, ScheduleRow> = {};
-  const upcomingIds = myMatches
-    .filter(m => m.home_score === null && m.home_team_id && m.away_team_id)
-    .map(m => m.id);
-  if (upcomingIds.length > 0) {
-    const { data: scheduleRows } = await supabaseAdmin
-      .from("matches")
-      .select("id, schedule_proposed_by_team_id, schedule_accepted, schedule_admin_required, admin_scheduled, home_checked_in, away_checked_in, checkin_deadline")
-      .in("id", upcomingIds);
-    (scheduleRows ?? []).forEach((r: ScheduleRow) => { scheduleMap[r.id] = r; });
   }
 
   // SE round count — prefer the explicit SE count; fall back to the primary WB count
@@ -336,45 +369,144 @@ export default async function MyTeamPage() {
     (m) => (m.home_team_id === teamId || m.away_team_id === teamId) && m.home_score === null
   ) ?? null;
 
-  const bestOf = nextMatch ? await getBestOfForMatch(nextMatch.id) : 3;
+  // Same opponent-id computation feeds both the "opponent not ready" check and
+  // the series replay panel below — derive it once.
+  const oppId = nextMatch
+    ? (nextMatch.home_team_id === teamId ? nextMatch.away_team_id : nextMatch.home_team_id)
+    : null;
+  const opponentName = oppId ? (teamMap[oppId]?.name ?? null) : null;
 
-  // Is the opponent ready to play us, or do they still have an earlier match to finish?
-  // They're not ready if they have an unplayed match in an earlier round of this stage.
-  let opponentNotReady = false;
-  let opponentName: string | null = null;
-  if (nextMatch) {
-    const oppId = nextMatch.home_team_id === teamId ? nextMatch.away_team_id : nextMatch.home_team_id;
-    opponentName = oppId ? (teamMap[oppId]?.name ?? null) : null;
-    if (oppId) {
-      const { count: oppEarlier } = await supabaseAdmin
-        .from("matches")
-        .select("*", { count: "exact", head: true })
-        .eq("stage", nextMatch.stage)
-        .lt("round", nextMatch.round)
-        .is("home_score", null)
-        .not("home_team_id", "is", null)
-        .not("away_team_id", "is", null)
-        .or(`home_team_id.eq.${oppId},away_team_id.eq.${oppId}`);
-      opponentNotReady = (oppEarlier ?? 0) > 0;
-    }
+  const myApprovedSubs = (seasonActive && nextMatch)
+    ? ((subRequestsRaw ?? []) as RawSubReq[]).filter((r) => r.match_id === nextMatch.id && r.status === "approved")
+    : [];
+  const mySubIds = myApprovedSubs.map((r) => r.sub_player_id).filter((x): x is string => !!x);
+
+  const rosterMap = Object.fromEntries(
+    ((roster ?? []) as RosterPlayer[]).map((p) => [p.id, p])
+  );
+  const subPlayerMap = Object.fromEntries(
+    ((subPlayersRaw ?? []) as SubPlayerRow[]).map((p) => [p.id, p])
+  );
+  const adminScheduleByRound: Record<string, { type: string; playAt: string; deadlineAt: string; rangeDays: number | null }> = {};
+  for (const s of (roundScheduleRows ?? []) as RoundScheduleRow[]) {
+    adminScheduleByRound[`${s.stage}:${s.round}`] = {
+      type: s.schedule_type as string,
+      playAt: s.play_at as string,
+      deadlineAt: s.deadline_at as string,
+      rangeDays: s.range_days as number | null,
+    };
   }
+
+  const upcomingIds = myMatches
+    .filter(m => m.home_score === null && m.home_team_id && m.away_team_id)
+    .map(m => m.id);
+  const myMatchIds = myMatches.map((m) => m.id);
+  const incomingCondition = subsAllowedForFormat && myMatchIds.length > 0;
+
+  // Everything here only depends on myMatches/nextMatch (and settings-derived flags
+  // already known), so it all fires together instead of ~7 sequential round trips.
+  const [
+    { data: scheduleRows },
+    bestOf,
+    { count: oppEarlier },
+    { data: mySubPlayersRaw },
+    { data: oppRoster },
+    { data: oppApprovedSubsRaw },
+    { data: incomingRaw },
+    { data: subsRaw },
+  ] = await Promise.all([
+    upcomingIds.length > 0
+      ? supabaseAdmin
+          .from("matches")
+          .select("id, schedule_proposed_by_team_id, schedule_accepted, schedule_admin_required, admin_scheduled, home_checked_in, away_checked_in, checkin_deadline")
+          .in("id", upcomingIds)
+      : Promise.resolve({ data: [] as ScheduleRow[] }),
+    nextMatch ? getBestOfForMatch(nextMatch.id) : Promise.resolve(3),
+    // Is the opponent ready to play us, or do they still have an earlier match to
+    // finish? They're not ready if they have an unplayed match in an earlier round.
+    (nextMatch && oppId)
+      ? supabaseAdmin
+          .from("matches")
+          .select("*", { count: "exact", head: true })
+          .eq("stage", nextMatch.stage)
+          .lt("round", nextMatch.round)
+          .is("home_score", null)
+          .not("home_team_id", "is", null)
+          .not("away_team_id", "is", null)
+          .or(`home_team_id.eq.${oppId},away_team_id.eq.${oppId}`)
+      : Promise.resolve({ count: 0 }),
+    mySubIds.length > 0
+      ? supabaseAdmin
+          .from("players")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .in("id", mySubIds)
+      : Promise.resolve({ data: [] as SubPlayerRow[] }),
+    (seasonActive && nextMatch && oppId)
+      ? supabaseAdmin
+          .from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .eq("team_id", oppId).eq("status", "approved")
+      : Promise.resolve({ data: [] as SubPlayerRow[] }),
+    (seasonActive && nextMatch && oppId)
+      ? supabaseAdmin
+          .from("sub_requests")
+          .select("player_out_id, sub_player_id")
+          .eq("team_id", oppId).eq("match_id", nextMatch.id).eq("status", "approved")
+      : Promise.resolve({ data: [] as { player_out_id: string; sub_player_id: string | null }[] }),
+    incomingCondition
+      ? supabaseAdmin
+          .from("sub_requests")
+          .select("id, team_id, match_id, player_out_id, sub_player_id, reason, created_at")
+          .in("match_id", myMatchIds)
+          .neq("team_id", teamId)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as IncomingRawRow[] }),
+    subsAllowedForFormat
+      ? supabaseAdmin
+          .from("players")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, team_id, draft_entered")
+          .eq("status", "approved")
+          .eq("sub_willing", true)
+      : Promise.resolve({ data: [] as (SubPlayerRow & { team_id: string | null; draft_entered: boolean })[] }),
+  ]);
+
+  const scheduleMap: Record<string, ScheduleRow> = {};
+  (scheduleRows ?? []).forEach((r: ScheduleRow) => { scheduleMap[r.id] = r; });
+  const opponentNotReady = (oppEarlier ?? 0) > 0;
+
+  const oppApprovedSubs = (oppApprovedSubsRaw ?? []) as { player_out_id: string; sub_player_id: string | null }[];
+  const oppSubIds = oppApprovedSubs.map((r) => r.sub_player_id).filter((x): x is string => !!x);
+  const incomingIds = [
+    ...new Set(
+      ((incomingRaw ?? []) as { player_out_id: string; sub_player_id: string | null }[])
+        .flatMap((r) => [r.player_out_id, r.sub_player_id].filter((x): x is string => !!x)),
+    ),
+  ];
+
+  // Both depend on results from the previous batch (oppSubIds / incomingIds).
+  const [
+    { data: oppSubPlayersRaw },
+    { data: incPlayers },
+  ] = await Promise.all([
+    oppSubIds.length > 0
+      ? supabaseAdmin
+          .from("players")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .in("id", oppSubIds)
+      : Promise.resolve({ data: [] as SubPlayerRow[] }),
+    incomingIds.length > 0
+      ? supabaseAdmin
+          .from("players")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .in("id", incomingIds)
+      : Promise.resolve({ data: [] as SubPlayerRow[] }),
+  ]);
 
   // ── Series replay panel data ───────────────────────────────────────────────
   let seriesHomeTeam: SeriesTeamInfo | null = null;
   let seriesAwayTeam: SeriesTeamInfo | null = null;
 
   if (seasonActive) {
-    const myApprovedSubs = nextMatch
-      ? ((subRequestsRaw ?? []) as { match_id: string | null; player_out_id: string; sub_player_id: string | null; status: string }[])
-          .filter((r) => r.match_id === nextMatch.id && r.status === "approved")
-      : [];
-    const mySubIds = myApprovedSubs.map((r) => r.sub_player_id).filter((x): x is string => !!x);
-    const { data: mySubPlayersRaw } = mySubIds.length
-      ? await supabaseAdmin
-          .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
-          .in("id", mySubIds)
-      : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] };
     const mySubDetails = Object.fromEntries(
       (mySubPlayersRaw ?? []).map((p) => [p.id, { name: p.display_name ?? p.username, rv: peakMmrSub(p) }])
     );
@@ -387,30 +519,14 @@ export default async function MyTeamPage() {
       players: myPlayingList,
     };
     if (nextMatch) {
-      const opponentId = nextMatch.home_team_id === teamId ? nextMatch.away_team_id : nextMatch.home_team_id;
       let opponentSeriesTeam: SeriesTeamInfo | null = null;
-      if (opponentId) {
-        const oppTeamData = teamMap[opponentId] ?? null;
-        const { data: oppRoster } = await supabaseAdmin
-          .from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
-          .eq("team_id", opponentId).eq("status", "approved");
-        const oppPlayers = (oppRoster ?? []) as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[];
+      if (oppId) {
+        const oppTeamData = teamMap[oppId] ?? null;
+        const oppPlayers = (oppRoster ?? []) as SubPlayerRow[];
         const oppAvgMmr = oppPlayers.length
           ? Math.round(oppPlayers.reduce((s, p) => s + peakMmrSub(p), 0) / oppPlayers.length)
           : 0;
 
-        const { data: oppApprovedSubsRaw } = await supabaseAdmin
-          .from("sub_requests")
-          .select("player_out_id, sub_player_id")
-          .eq("team_id", opponentId).eq("match_id", nextMatch.id).eq("status", "approved");
-        const oppApprovedSubs = (oppApprovedSubsRaw ?? []) as { player_out_id: string; sub_player_id: string | null }[];
-        const oppSubIds = oppApprovedSubs.map((r) => r.sub_player_id).filter((x): x is string => !!x);
-        const { data: oppSubPlayersRaw } = oppSubIds.length
-          ? await supabaseAdmin
-              .from("players")
-              .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
-              .in("id", oppSubIds)
-          : { data: [] as typeof oppPlayers };
         const oppSubDetails = Object.fromEntries(
           (oppSubPlayersRaw ?? []).map((p) => [p.id, { name: p.display_name ?? p.username, rv: peakMmrSub(p) }])
         );
@@ -465,59 +581,6 @@ export default async function MyTeamPage() {
       return mine > theirs ? "W" : "L";
     })
     .filter(Boolean) as ("W" | "L")[];
-
-  // ── Sub request data ────────────────────────────────────────────────────────
-
-  const rosterMap = Object.fromEntries(
-    ((roster ?? []) as RosterPlayer[]).map((p) => [p.id, p])
-  );
-
-  type RawSubReq = {
-    id: string; match_id: string | null; player_out_id: string;
-    sub_player_id: string | null; sub_player_ids: string[] | null;
-    reason: string | null; status: string; admin_note: string | null; created_at: string;
-  };
-
-  const allSubCandidateIds = [
-    ...new Set(
-      ((subRequestsRaw ?? []) as RawSubReq[]).flatMap((r) => {
-        if (r.sub_player_ids && r.sub_player_ids.length > 0) return r.sub_player_ids;
-        if (r.sub_player_id) return [r.sub_player_id];
-        return [];
-      })
-    ),
-  ];
-
-  const { data: subPlayersRaw } = allSubCandidateIds.length > 0
-    ? await supabaseAdmin
-        .from("players")
-        .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
-        .in("id", allSubCandidateIds)
-    : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] };
-
-  const subPlayerMap = Object.fromEntries(
-    (subPlayersRaw ?? []).map((p) => [p.id, p])
-  );
-
-  function peakMmrSub(p: Parameters<typeof playerRatingFromRow>[0]) {
-    return Math.round(playerRatingFromRow(p));
-  }
-
-  // Admin-set round schedules define the allowed scheduling window per round.
-  const { data: roundScheduleRows } = seasonActive
-    ? await (activeTournamentId
-        ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").eq("tournament_id", activeTournamentId)
-        : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").is("tournament_id", null))
-    : { data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string; range_days: number | null }[] };
-  const adminScheduleByRound: Record<string, { type: string; playAt: string; deadlineAt: string; rangeDays: number | null }> = {};
-  for (const s of roundScheduleRows ?? []) {
-    adminScheduleByRound[`${s.stage}:${s.round}`] = {
-      type: s.schedule_type as string,
-      playAt: s.play_at as string,
-      deadlineAt: s.deadline_at as string,
-      rangeDays: s.range_days as number | null,
-    };
-  }
 
   const schedulableMatches: SchedulableMatch[] = seasonActive
     ? myMatches
@@ -601,78 +664,38 @@ export default async function MyTeamPage() {
   });
 
   // Incoming sub requests: pending requests from our upcoming opponent (we accept/reject).
-  const myMatchIds = myMatches.map((m) => m.id);
-  let incomingSubRequests: IncomingSubRequest[] = [];
-  if (subsAllowedForFormat && myMatchIds.length > 0) {
-    const { data: incomingRaw } = await supabaseAdmin
-      .from("sub_requests")
-      .select("id, team_id, match_id, player_out_id, sub_player_id, reason, created_at")
-      .in("match_id", myMatchIds)
-      .neq("team_id", teamId)
-      .eq("status", "pending")
-      .order("created_at", { ascending: false });
-
-    const ids = [
-      ...new Set(
-        ((incomingRaw ?? []) as { player_out_id: string; sub_player_id: string | null }[])
-          .flatMap((r) => [r.player_out_id, r.sub_player_id].filter((x): x is string => !!x)),
-      ),
-    ];
-    const { data: incPlayers } = ids.length
-      ? await supabaseAdmin
-          .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
-          .in("id", ids)
-      : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] };
-    const incPlayerMap = Object.fromEntries((incPlayers ?? []).map((p) => [p.id, p]));
-
-    incomingSubRequests = ((incomingRaw ?? []) as {
-      id: string; team_id: string; match_id: string | null; player_out_id: string; sub_player_id: string | null; reason: string | null; created_at: string;
-    }[]).map((r) => {
-      const out = incPlayerMap[r.player_out_id];
-      const sub = r.sub_player_id ? incPlayerMap[r.sub_player_id] : null;
-      return {
-        id: r.id,
-        requestingTeamName: teamMap[r.team_id]?.name ?? "A team",
-        playerOutName: out?.username ?? "Unknown",
-        playerOutDisplay: out?.display_name ?? null,
-        playerOutMmr: out ? peakMmrSub(out) : 0,
-        subName: sub?.username ?? null,
-        subDisplay: sub?.display_name ?? null,
-        subMmr: sub ? peakMmrSub(sub) : null,
-        reason: r.reason,
-        createdAt: r.created_at,
-      };
-    });
-  }
+  const incPlayerMap = Object.fromEntries((incPlayers ?? []).map((p) => [p.id, p]));
+  const incomingSubRequests: IncomingSubRequest[] = ((incomingRaw ?? []) as IncomingRawRow[]).map((r) => {
+    const out = incPlayerMap[r.player_out_id];
+    const sub = r.sub_player_id ? incPlayerMap[r.sub_player_id] : null;
+    return {
+      id: r.id,
+      requestingTeamName: teamMap[r.team_id]?.name ?? "A team",
+      playerOutName: out?.username ?? "Unknown",
+      playerOutDisplay: out?.display_name ?? null,
+      playerOutMmr: out ? peakMmrSub(out) : 0,
+      subName: sub?.username ?? null,
+      subDisplay: sub?.display_name ?? null,
+      subMmr: sub ? peakMmrSub(sub) : null,
+      reason: r.reason,
+      createdAt: r.created_at,
+    };
+  });
 
   const nextMatchOpponentId  = nextMatch
     ? (nextMatch.home_team_id === teamId ? nextMatch.away_team_id : nextMatch.home_team_id)
     : null;
 
-  let availableSubs: AvailableSub[] = [];
-  if (subsAllowedForFormat) {
-    const { data: subsRaw } = await supabaseAdmin
-      .from("players")
-      .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, team_id, draft_entered")
-      .eq("status", "approved")
-      .eq("sub_willing", true);
-
-    // Must have entered the draft OR be on a team this season.
-    availableSubs = (
-      (subsRaw ?? []) as {
-        id: string; username: string; display_name: string | null;
-        peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
-        peak_1v1: string | null; current_1v1: string | null; team_id: string | null; draft_entered: boolean;
-      }[]
-    )
-      .filter((p) => {
-        if (p.team_id === teamId) return false;
-        if (nextMatchOpponentId && p.team_id === nextMatchOpponentId) return false;
-        return p.draft_entered || p.team_id !== null;
-      })
-      .map(({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1 }) => ({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1 }));
-  }
+  // Must have entered the draft OR be on a team this season.
+  const availableSubs: AvailableSub[] = (
+    (subsRaw ?? []) as (SubPlayerRow & { team_id: string | null; draft_entered: boolean })[]
+  )
+    .filter((p) => {
+      if (p.team_id === teamId) return false;
+      if (nextMatchOpponentId && p.team_id === nextMatchOpponentId) return false;
+      return p.draft_entered || p.team_id !== null;
+    })
+    .map(({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1 }) => ({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1 }));
 
   const subRoster: SubRosterPlayer[] = ((roster ?? []) as RosterPlayer[]).map((p) => ({
     id: p.id, username: p.username, display_name: p.display_name ?? null,

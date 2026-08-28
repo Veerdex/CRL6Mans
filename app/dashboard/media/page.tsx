@@ -9,47 +9,35 @@ import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 export default async function MediaPage() {
   const session = await decrypt((await cookies()).get("session")?.value);
 
-  let currentPlayerId: string | null = null;
-  let moderator = false;
-  if (session?.userId) {
-    moderator = await isModerator(session.userId);
-    const { data: player } = await supabaseAdmin
-      .from("players")
-      .select("id, status")
-      .eq("discord_id", session.userId)
-      .single();
-    if (player?.status === "approved") currentPlayerId = player.id;
-  }
-
-  const { data: clips } = await supabaseAdmin
-    .from("clips")
-    .select("id, title, url, embed_url, thumbnail_url, platform, likes_count, created_at")
-    .is("archived_at", null)
-    .order("created_at", { ascending: true });
-
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings")
-    .select("clip_of_week_id")
-    .single();
-
-  let clipOfWeek: Clip | null = null;
-  if (settings?.clip_of_week_id) {
-    const { data } = await supabaseAdmin
+  const [moderator, { data: player }, { data: clips }, { data: settings }] = await Promise.all([
+    session?.userId ? isModerator(session.userId) : Promise.resolve(false),
+    session?.userId
+      ? supabaseAdmin.from("players").select("id, status").eq("discord_id", session.userId).single()
+      : Promise.resolve({ data: null as { id: string; status: string } | null }),
+    supabaseAdmin
       .from("clips")
       .select("id, title, url, embed_url, thumbnail_url, platform, likes_count, created_at")
-      .eq("id", settings.clip_of_week_id)
-      .single();
-    clipOfWeek = data as Clip | null;
-  }
+      .is("archived_at", null)
+      .order("created_at", { ascending: true }),
+    supabaseAdmin.from("league_settings").select("clip_of_week_id").single(),
+  ]);
 
-  let likedClipIds: string[] = [];
-  if (currentPlayerId) {
-    const { data: likes } = await supabaseAdmin
-      .from("clip_likes")
-      .select("clip_id")
-      .eq("player_id", currentPlayerId);
-    likedClipIds = (likes ?? []).map((l) => l.clip_id as string);
-  }
+  const currentPlayerId: string | null = player?.status === "approved" ? player.id : null;
+
+  const [{ data: clipOfWeekRow }, { data: likes }] = await Promise.all([
+    settings?.clip_of_week_id
+      ? supabaseAdmin
+          .from("clips")
+          .select("id, title, url, embed_url, thumbnail_url, platform, likes_count, created_at")
+          .eq("id", settings.clip_of_week_id)
+          .single()
+      : Promise.resolve({ data: null as Clip | null }),
+    currentPlayerId
+      ? supabaseAdmin.from("clip_likes").select("clip_id").eq("player_id", currentPlayerId)
+      : Promise.resolve({ data: [] as { clip_id: string }[] }),
+  ]);
+  const clipOfWeek = clipOfWeekRow as Clip | null;
+  const likedClipIds: string[] = (likes ?? []).map((l) => l.clip_id as string);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">

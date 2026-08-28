@@ -90,26 +90,38 @@ export default async function WagersPage() {
     );
   }
 
-  // Event name
-  let eventName = "Season";
-  if (activeTournamentId) {
-    const { data: t } = await supabaseAdmin
-      .from("tournaments")
-      .select("name")
-      .eq("id", activeTournamentId)
-      .single();
-    eventName = t?.name ?? "Tournament";
-  }
-
-  // Fetch all matches to correctly compute maxRoundByStage for bestOf
-  const { data: allMatches } = await supabaseAdmin
-    .from("matches")
-    .select(
-      "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, predicted_home_win_prob, predicted_away_win_prob, betting_mode, home_score, away_score",
-    )
-    .order("stage")
-    .order("round")
-    .order("match_number");
+  // Event name, all-matches, and the three "my data"/ticker queries below are all
+  // independent of each other and of anything computed so far — batched together
+  // instead of five round trips fired one after another.
+  const [{ data: t }, { data: allMatches }, { data: myWagersData }, { data: myParlaysData }, { data: tickerRaw }] =
+    await Promise.all([
+      activeTournamentId
+        ? supabaseAdmin.from("tournaments").select("name").eq("id", activeTournamentId).single()
+        : Promise.resolve({ data: null as { name: string } | null }),
+      supabaseAdmin
+        .from("matches")
+        .select(
+          "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, predicted_home_win_prob, predicted_away_win_prob, betting_mode, home_score, away_score",
+        )
+        .order("stage")
+        .order("round")
+        .order("match_number"),
+      supabaseAdmin
+        .from("wagers")
+        .select("match_id, bet_type, amount, odds_multiplier, status, payout_amount")
+        .eq("player_id", session.userId),
+      supabaseAdmin
+        .from("parlays")
+        .select("id, amount, combined_multiplier, status")
+        .eq("player_id", session.userId),
+      supabaseAdmin
+        .from("wagers")
+        .select("id, player_id, match_id, bet_type, amount, placed_at")
+        .eq("status", "pending")
+        .order("placed_at", { ascending: false })
+        .limit(100),
+    ]);
+  const eventName = activeTournamentId ? (t?.name ?? "Tournament") : "Season";
 
   const maxRoundByStage: Record<string, number> = {};
   for (const m of allMatches ?? []) {
@@ -167,23 +179,7 @@ export default async function WagersPage() {
     bettingMode: (m.betting_mode as "fixed" | "pool" | null) ?? globalBettingMode,
   }));
 
-  // Pool-mode odds are the live ratio of stake on each side, per independent slot
-  // (moneyline, or each O/U line) — unlike fixed-mode's precomputed multiplier,
-  // this has to be read fresh from pending wagers on every page load.
   const bettableMatchIds = matches.map((m) => m.id);
-  const { data: poolWagersRaw } = bettableMatchIds.length
-    ? await supabaseAdmin
-        .from("wagers")
-        .select("match_id, bet_type, amount")
-        .eq("status", "pending")
-        .in("match_id", bettableMatchIds)
-    : { data: [] as { match_id: string; bet_type: string; amount: number }[] };
-
-  const betTypeTotals: Record<string, Record<string, number>> = {};
-  for (const w of poolWagersRaw ?? []) {
-    const t = (betTypeTotals[w.match_id] ??= {});
-    t[w.bet_type] = (t[w.bet_type] ?? 0) + w.amount;
-  }
 
   // Grid: only matches actually bettable right now (mirrors the `bettable` filter
   // above) plus already-completed ones. A group stage schedules every round's
@@ -224,16 +220,100 @@ export default async function WagersPage() {
     ]),
   ];
 
-  const [{ data: teamsData }, { data: rosterPlayers }] = await (teamIds.length
+  // Grid predictions are frozen by the tournament-scheduler cron shortly after a
+  // match gets both teams assigned (see freezeUnfrozenMatchPredictions), so this
+  // never recomputes from current ratings — only reads the stored snapshot. A
+  // match briefly has no snapshot in the window between creation and the next
+  // cron tick; it's simply omitted from the grid until then.
+  const gridMatches: OverviewMatch[] = gridMatchesRaw
+    .filter((m) => m.predicted_home_win_prob != null && m.predicted_away_win_prob != null)
+    .map((m) => ({
+      id: m.id,
+      stage: m.stage ?? "",
+      round: m.round,
+      match_number: m.match_number,
+      status: m.status,
+      home_team_id: m.home_team_id as string,
+      away_team_id: m.away_team_id as string,
+      homeWinProb: Number(m.predicted_home_win_prob),
+      awayWinProb: Number(m.predicted_away_win_prob),
+    }));
+  const gridMatchIds = gridMatches.map((m) => m.id);
+  const myParlayIds = (myParlaysData ?? []).map((p) => p.id);
+  // wagers.player_id is a raw discord_id (guests can place wagers without a
+  // players row), so the ticker's display info is looked up on accounts.
+  const tickerPlayerIds = [...new Set((tickerRaw ?? []).map((w) => w.player_id))];
+
+  // Grid wager totals draw from two independent queries; typed and named up
+  // front so the outer Promise.all below doesn't collapse this pair's distinct
+  // row shapes into a single unioned array type across both positions.
+  const gridWagerQueriesPromise: Promise<
+    [{ data: { match_id: string; bet_type: string; amount: number }[] | null }, { data: { match_id: string; bet_type: string; parlay_id: string }[] | null }]
+  > = gridMatchIds.length
     ? Promise.all([
-        supabaseAdmin.from("teams").select("id, name, logo_url, season_rating").in("id", teamIds),
-        supabaseAdmin
-          .from("players")
-          .select("id, username, display_name, team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
-          .in("team_id", teamIds)
-          .eq("status", "approved"),
+        supabaseAdmin.from("wagers").select("match_id, bet_type, amount").in("match_id", gridMatchIds),
+        supabaseAdmin.from("parlay_legs").select("match_id, bet_type, parlay_id").in("match_id", gridMatchIds),
       ])
-    : Promise.resolve([{ data: [] }, { data: [] }]));
+    : Promise.resolve([
+        { data: [] as { match_id: string; bet_type: string; amount: number }[] },
+        { data: [] as { match_id: string; bet_type: string; parlay_id: string }[] },
+      ]);
+
+  // Pool-mode odds, team/roster data, approved subs, grid wager totals, my-parlay
+  // legs, and ticker display names are all independent of each other — batched
+  // into one round trip instead of six sequential ones.
+  const [
+    { data: poolWagersRaw },
+    [{ data: teamsData }, { data: rosterPlayers }],
+    { data: approvedSubsRaw },
+    [{ data: gridWagersRaw }, { data: gridParlayLegsRaw }],
+    { data: myParlayLegsData },
+    { data: tickerPlayersData },
+  ] = await Promise.all([
+    bettableMatchIds.length
+      ? supabaseAdmin
+          .from("wagers")
+          .select("match_id, bet_type, amount")
+          .eq("status", "pending")
+          .in("match_id", bettableMatchIds)
+      : Promise.resolve({ data: [] as { match_id: string; bet_type: string; amount: number }[] }),
+    teamIds.length
+      ? Promise.all([
+          supabaseAdmin.from("teams").select("id, name, logo_url, season_rating").in("id", teamIds),
+          supabaseAdmin
+            .from("players")
+            .select("id, username, display_name, team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+            .in("team_id", teamIds)
+            .eq("status", "approved"),
+        ])
+      : Promise.resolve([{ data: [] }, { data: [] }]),
+    bettableMatchIds.length
+      ? supabaseAdmin
+          .from("sub_requests")
+          .select("match_id, team_id, player_out_id, sub_player_id, sub_player_ids")
+          .eq("status", "approved")
+          .in("match_id", bettableMatchIds)
+      : Promise.resolve({ data: [] as { match_id: string | null; team_id: string; player_out_id: string; sub_player_id: string | null; sub_player_ids: string[] | null }[] }),
+    gridWagerQueriesPromise,
+    myParlayIds.length
+      ? supabaseAdmin
+          .from("parlay_legs")
+          .select("parlay_id, match_id, bet_type, odds_multiplier, status")
+          .in("parlay_id", myParlayIds)
+      : Promise.resolve({ data: [] as { parlay_id: string; match_id: string; bet_type: string; odds_multiplier: number; status: string }[] }),
+    tickerPlayerIds.length
+      ? supabaseAdmin
+          .from("accounts")
+          .select("discord_id, username, display_name")
+          .in("discord_id", tickerPlayerIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const betTypeTotals: Record<string, Record<string, number>> = {};
+  for (const w of poolWagersRaw ?? []) {
+    const t = (betTypeTotals[w.match_id] ??= {});
+    t[w.bet_type] = (t[w.bet_type] ?? 0) + w.amount;
+  }
 
   const teams: Record<string, { id: string; name: string; logo_url: string | null }> = {};
   const seasonRatings: Record<string, number | null> = {};
@@ -283,19 +363,6 @@ export default async function WagersPage() {
     .sort((a, b) => b.wins - a.wins || a.losses - b.losses || b.rating - a.rating || a.name.localeCompare(b.name))
     .forEach((t, i) => { teamStandings[t.id] = i + 1; });
 
-  // Per-match starting lineup, accounting for approved subs — scoped to the
-  // specific match_id + team_id so a sub approved for one match never bleeds
-  // into that team's other matches. Mirrors mergeWithSubs in my-team/page.tsx,
-  // generalized across every bettable match instead of just "my next match",
-  // and tagged with isSub since the wagers UI needs to render "(sub)".
-  const { data: approvedSubsRaw } = bettableMatchIds.length
-    ? await supabaseAdmin
-        .from("sub_requests")
-        .select("match_id, team_id, player_out_id, sub_player_id, sub_player_ids")
-        .eq("status", "approved")
-        .in("match_id", bettableMatchIds)
-    : { data: [] as { match_id: string | null; team_id: string; player_out_id: string; sub_player_id: string | null; sub_player_ids: string[] | null }[] };
-
   // Multi-sub requests store their incoming players in the plural array column
   // and leave the singular one null — mirrors the fallback in my-team/page.tsx.
   function subInIdsFor(r: { sub_player_id: string | null; sub_player_ids: string[] | null }): string[] {
@@ -307,12 +374,23 @@ export default async function WagersPage() {
   const subInIds = [
     ...new Set((approvedSubsRaw ?? []).flatMap(subInIdsFor)),
   ];
-  const { data: subInPlayersRaw } = subInIds.length
-    ? await supabaseAdmin
-        .from("players")
-        .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
-        .in("id", subInIds)
-    : { data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null; peak_1v1: string | null; current_1v1: string | null }[] };
+  const parlayIdsForGrid = [...new Set((gridParlayLegsRaw ?? []).map((l) => l.parlay_id))];
+
+  // Sub-player details and grid parlay stake amounts are independent of each
+  // other — the only two remaining queries that depend on the batch above.
+  const [{ data: subInPlayersRaw }, { data: gridParlaysRaw }] = await Promise.all([
+    subInIds.length
+      ? supabaseAdmin
+          .from("players")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .in("id", subInIds)
+      : Promise.resolve({
+          data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null; peak_1v1: string | null; current_1v1: string | null }[],
+        }),
+    parlayIdsForGrid.length
+      ? supabaseAdmin.from("parlays").select("id, amount").in("id", parlayIdsForGrid)
+      : Promise.resolve({ data: [] as { id: string; amount: number }[] }),
+  ]);
 
   const playersById: Record<string, { name: string; rating: number }> = {};
   for (const p of rosterPlayers ?? []) {
@@ -351,40 +429,9 @@ export default async function WagersPage() {
     matchPredictions[m.id] = computeMatchPredictionFromRating(hRating, aRating, m.bestOf);
   }
 
-  // Grid predictions are frozen by the tournament-scheduler cron shortly after a
-  // match gets both teams assigned (see freezeUnfrozenMatchPredictions), so this
-  // never recomputes from current ratings — only reads the stored snapshot. A
-  // match briefly has no snapshot in the window between creation and the next
-  // cron tick; it's simply omitted from the grid until then.
-  const gridMatches: OverviewMatch[] = gridMatchesRaw
-    .filter((m) => m.predicted_home_win_prob != null && m.predicted_away_win_prob != null)
-    .map((m) => ({
-      id: m.id,
-      stage: m.stage ?? "",
-      round: m.round,
-      match_number: m.match_number,
-      status: m.status,
-      home_team_id: m.home_team_id as string,
-      away_team_id: m.away_team_id as string,
-      homeWinProb: Number(m.predicted_home_win_prob),
-      awayWinProb: Number(m.predicted_away_win_prob),
-    }));
-
   // Per-team coin totals wagered on the grid, combining straight moneyline wagers
   // with parlay legs (each leg contributes its parent parlay's full stake, not a
   // split share), across all statuses so settled bets still count.
-  const gridMatchIds = gridMatches.map((m) => m.id);
-  const [{ data: gridWagersRaw }, { data: gridParlayLegsRaw }] = gridMatchIds.length
-    ? await Promise.all([
-        supabaseAdmin.from("wagers").select("match_id, bet_type, amount").in("match_id", gridMatchIds),
-        supabaseAdmin.from("parlay_legs").select("match_id, bet_type, parlay_id").in("match_id", gridMatchIds),
-      ])
-    : [{ data: [] as { match_id: string; bet_type: string; amount: number }[] }, { data: [] as { match_id: string; bet_type: string; parlay_id: string }[] }];
-
-  const parlayIdsForGrid = [...new Set((gridParlayLegsRaw ?? []).map((l) => l.parlay_id))];
-  const { data: gridParlaysRaw } = parlayIdsForGrid.length
-    ? await supabaseAdmin.from("parlays").select("id, amount").in("id", parlayIdsForGrid)
-    : { data: [] as { id: string; amount: number }[] };
   const parlayAmountById = Object.fromEntries((gridParlaysRaw ?? []).map((p) => [p.id, p.amount]));
 
   const gridWagerTotals: Record<string, { home: number; away: number }> = {};
@@ -420,26 +467,6 @@ export default async function WagersPage() {
     return thisDiff < bestDiff ? m.id : picked;
   }, matches[0]?.id ?? "");
 
-  // My wagers
-  const { data: myWagersData } = await supabaseAdmin
-    .from("wagers")
-    .select("match_id, bet_type, amount, odds_multiplier, status, payout_amount")
-    .eq("player_id", session.userId);
-
-  // My parlays (+ legs) for the "My Bets" panel
-  const { data: myParlaysData } = await supabaseAdmin
-    .from("parlays")
-    .select("id, amount, combined_multiplier, status")
-    .eq("player_id", session.userId);
-
-  const myParlayIds = (myParlaysData ?? []).map((p) => p.id);
-  const { data: myParlayLegsData } = myParlayIds.length
-    ? await supabaseAdmin
-        .from("parlay_legs")
-        .select("parlay_id, match_id, bet_type, odds_multiplier, status")
-        .in("parlay_id", myParlayIds)
-    : { data: [] as { parlay_id: string; match_id: string; bet_type: string; odds_multiplier: number; status: string }[] };
-
   const legsByParlay: Record<string, { matchId: string; betType: string; oddsMultiplier: number; status: string }[]> = {};
   for (const l of myParlayLegsData ?? []) {
     (legsByParlay[l.parlay_id] ??= []).push({
@@ -457,24 +484,6 @@ export default async function WagersPage() {
     status: p.status,
     legs: legsByParlay[p.id] ?? [],
   }));
-
-  // Ticker: all pending wagers across all players
-  const { data: tickerRaw } = await supabaseAdmin
-    .from("wagers")
-    .select("id, player_id, match_id, bet_type, amount, placed_at")
-    .eq("status", "pending")
-    .order("placed_at", { ascending: false })
-    .limit(100);
-
-  // wagers.player_id is a raw discord_id (guests can place wagers without a
-  // players row), so the ticker's display info is looked up on accounts.
-  const tickerPlayerIds = [...new Set((tickerRaw ?? []).map((w) => w.player_id))];
-  const { data: tickerPlayersData } = tickerPlayerIds.length
-    ? await supabaseAdmin
-        .from("accounts")
-        .select("discord_id, username, display_name")
-        .in("discord_id", tickerPlayerIds)
-    : { data: [] };
 
   const tickerPlayers: Record<string, { username: string; display_name: string | null }> = {};
   for (const p of tickerPlayersData ?? []) {

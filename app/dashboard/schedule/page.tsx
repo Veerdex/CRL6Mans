@@ -22,9 +22,17 @@ export default async function SchedulePage() {
   // Rounds with an admin-set *specific* time — only those auto-confirm. Weekly/daily are
   // windows where teams still pick a time, so they must not be treated as locked-in.
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
-  const { data: roundScheduleRows } = activeTournamentId
-    ? await supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, range_days").eq("tournament_id", activeTournamentId).order("stage").order("round")
-    : await supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, range_days").is("tournament_id", null).order("stage").order("round");
+  const [{ data: roundScheduleRows }, { data: pinnedMatchRows }] = await Promise.all([
+    activeTournamentId
+      ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, range_days").eq("tournament_id", activeTournamentId).order("stage").order("round")
+      : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, range_days").is("tournament_id", null).order("stage").order("round"),
+    supabaseAdmin
+      .from("matches")
+      .select("id, stage, round, match_number, scheduled_at")
+      .eq("admin_scheduled", true)
+      .not("scheduled_at", "is", null)
+      .neq("status", "completed"),
+  ]);
   const adminFixedRounds = new Set(
     (roundScheduleRows ?? []).filter((s) => s.schedule_type === "specific").map((s) => `${s.stage}:${s.round}`),
   );
@@ -39,12 +47,6 @@ export default async function SchedulePage() {
   }));
 
   // Admin-pinned individual matches → fixed-time calendar entries.
-  const { data: pinnedMatchRows } = await supabaseAdmin
-    .from("matches")
-    .select("id, stage, round, match_number, scheduled_at")
-    .eq("admin_scheduled", true)
-    .not("scheduled_at", "is", null)
-    .neq("status", "completed");
   const pinnedMatches: PinnedMatch[] = (pinnedMatchRows ?? []).map((m) => ({
     id: m.id as string,
     stage: m.stage as string,
