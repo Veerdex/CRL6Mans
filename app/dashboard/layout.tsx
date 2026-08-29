@@ -10,7 +10,7 @@ import { TopNav, type TopNavEntry } from "./top-nav";
 import { SidebarNavGroup } from "./sidebar-nav-group";
 import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
 import { applyNavTabOverrides, type NavTabOverrides } from "@/app/lib/nav-tabs";
-import { APP_NAME } from "@/app/lib/constants";
+import { AppTitle } from "./app-title";
 import MobileNav from "./mobile-nav";
 import { ServiceWorkerRegistrar } from "./sw-register";
 import { TabVisitTracker } from "./tab-visit-tracker";
@@ -455,7 +455,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <div className="absolute inset-0 bg-black/55" />
             </div>
           )}
-          <span className="text-lg font-bold tracking-tight shrink-0">{APP_NAME}</span>
+          <span className="text-lg font-bold tracking-tight shrink-0"><AppTitle /></span>
           <TopNav items={groupedMainNav} />
           <div className="flex items-center gap-3 shrink-0">
             {navSponsors.topNav && (
@@ -536,7 +536,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         )}
         <div className="px-4 py-5 border-b border-zinc-800">
-          <span className="text-lg font-bold tracking-tight">{APP_NAME}</span>
+          <span className="text-lg font-bold tracking-tight"><AppTitle /></span>
         </div>
 
         <nav className="flex-1 p-3 space-y-1">
