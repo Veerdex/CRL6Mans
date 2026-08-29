@@ -216,7 +216,7 @@ export default async function DashboardPage({
       {(activeTournament || seasonActive) && (
         <div
           className={`relative aspect-video overflow-hidden border border-indigo-800/40 rounded-xl ${
-            activeEventBackgroundUrl ? "" : "bg-gradient-to-br from-indigo-950/40 to-zinc-900"
+            activeEventBackgroundUrl ? "" : "bg-gradient-to-tr from-[#744512] to-[#1c1b56]"
           }`}
         >
           {activeEventBackgroundUrl && (

@@ -70,7 +70,7 @@ export function TeamSignupPanel({
     <div
       onClick={linkHref ? () => router.push(linkHref) : undefined}
       className={`relative aspect-video overflow-hidden border rounded-xl transition-all duration-200 ${
-        backgroundUrl ? "border-indigo-800/40" : "bg-gradient-to-br from-indigo-950/40 to-zinc-900 border-indigo-800/40"
+        backgroundUrl ? "border-indigo-800/40" : "bg-gradient-to-tr from-[#744512] to-[#1c1b56] border-indigo-800/40"
       } ${
         linkHref ? "cursor-pointer hover:-translate-y-1 hover:border-amber-500/50 hover:shadow-[0_10px_28px_-8px_rgba(232,138,36,0.4)]" : ""
       }`}

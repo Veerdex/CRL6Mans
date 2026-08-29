@@ -189,7 +189,7 @@ export async function TournamentDetailView({
       {tab === "overview" && (
         <div className="space-y-4">
           {isCurrentActive && (
-            <div className="bg-gradient-to-br from-indigo-950/40 to-zinc-900 border border-indigo-800/40 rounded-xl p-5 space-y-2">
+            <div className="bg-gradient-to-tr from-[#744512] to-[#1c1b56] border border-indigo-800/40 rounded-xl p-5 space-y-2">
               <div className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 <p className="text-[13.75px] font-semibold text-emerald-400 uppercase tracking-wider">
@@ -358,7 +358,7 @@ export async function TournamentDetailView({
       {tab === "format" && (
         <div className="space-y-4">
           {isCurrentActive && (
-            <div className="bg-gradient-to-br from-indigo-950/40 to-zinc-900 border border-indigo-800/40 rounded-xl p-5 space-y-2">
+            <div className="bg-gradient-to-tr from-[#744512] to-[#1c1b56] border border-indigo-800/40 rounded-xl p-5 space-y-2">
               <p className="text-sm text-zinc-300">This tournament is live — follow the bracket and standings here.</p>
               <div className="flex flex-wrap gap-2 pt-1">
                 {settings?.draft_active && (
