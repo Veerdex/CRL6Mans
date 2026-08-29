@@ -149,30 +149,39 @@ const ALL_NAV: Record<string, NavItem> = {
 // Each group icon is its own freshly-created element, not a reference into
 // ALL_NAV — React's key-collision check flags the exact same element object
 // rendered in two list slots (the group header AND a leaf item's own icon).
-const NAV_GROUPS: { label: string; icon: React.ReactNode; keys: string[] }[] = [
-  {
-    label: "Play",
-    icon: <svg key="play-group-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4z"/><path d="M5 4H3v2a3 3 0 0 0 3 3M19 4h2v2a3 3 0 0 1-3 3"/></svg>,
-    keys: ["draft", "season", "schedule"],
-  },
-  {
-    label: "League",
-    icon: <svg key="league-group-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>,
-    keys: ["myteam", "teams", "players", "stats", "podium"],
-  },
-  {
-    label: "Community",
-    icon: <svg key="community-group-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v3.5M12 10.5L6.3 17M12 10.5l5.7 6.5"/></svg>,
-    keys: ["wagers", "media", "game"],
-  },
-];
+// The Community group (Wagers/Media/Game) only collapses into a dropdown
+// while an event is live and competing for top-level nav space (Draft/
+// Season/Schedule etc. via the Play group). With no active season or
+// tournament, there's room for them to stand on their own as full tabs
+// instead of being buried in a dropdown.
+function getNavGroups(hasActiveContent: boolean): { label: string; icon: React.ReactNode; keys: string[] }[] {
+  return [
+    {
+      label: "Play",
+      icon: <svg key="play-group-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4z"/><path d="M5 4H3v2a3 3 0 0 0 3 3M19 4h2v2a3 3 0 0 1-3 3"/></svg>,
+      keys: ["draft", "season", "schedule"],
+    },
+    {
+      label: "League",
+      icon: <svg key="league-group-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>,
+      keys: ["myteam", "teams", "players", "stats", "podium"],
+    },
+    ...(hasActiveContent
+      ? [{
+          label: "Community",
+          icon: <svg key="community-group-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v3.5M12 10.5L6.3 17M12 10.5l5.7 6.5"/></svg>,
+          keys: ["wagers", "media", "game"],
+        }]
+      : []),
+  ];
+}
 
-function groupNavKeys(keys: string[], navMap: Record<string, NavItem>): TopNavEntry[] {
+function groupNavKeys(keys: string[], navMap: Record<string, NavItem>, navGroups: { label: string; icon: React.ReactNode; keys: string[] }[]): TopNavEntry[] {
   const consumed = new Set<string>();
   const result: TopNavEntry[] = [];
   for (const key of keys) {
     if (consumed.has(key)) continue;
-    const group = NAV_GROUPS.find((g) => g.keys.includes(key));
+    const group = navGroups.find((g) => g.keys.includes(key));
     if (!group) {
       consumed.add(key);
       result.push(navMap[key]);
@@ -424,7 +433,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const navItems = [...mainNavItems, ...bottomNavItems];
   // Grouped view for desktop only — mobile keeps the flat list above since it
   // already has its own bottom-tab + "More" sheet pattern.
-  const groupedMainNav = groupNavKeys(mainNavKeys, navMap);
+  const groupedMainNav = groupNavKeys(mainNavKeys, navMap, getNavGroups(hasActiveContent));
 
   const avatarUrl = session?.avatar
     ? `https://cdn.discordapp.com/avatars/${session.userId}/${session.avatar}.png`
