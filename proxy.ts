@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { decrypt } from "@/app/lib/session";
+import { getBaseUrl } from "@/app/lib/base-url";
 
 const protectedRoutes = ["/dashboard"];
 
@@ -43,6 +44,27 @@ function buildCsp(nonce: string): string {
 
 export async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname;
+
+  // Force every request onto the one canonical host first. Session and
+  // oauth_state cookies are host-scoped (no `domain` attribute), so landing on
+  // a different hostname than the one DISCORD_REDIRECT_URI/NEXT_PUBLIC_BASE_URL
+  // is pinned to makes the site look logged out and breaks the OAuth state
+  // check (cookie set on the old host never reaches the callback on the
+  // canonical one). Gated to the Production environment so preview
+  // deployments (which share NEXT_PUBLIC_BASE_URL but run on their own
+  // *.vercel.app host) aren't bounced to production.
+  if (process.env.VERCEL_ENV === "production") {
+    const canonicalHost = new URL(getBaseUrl(`https://${req.nextUrl.host}`)).host;
+    if (req.nextUrl.host !== canonicalHost) {
+      const url = req.nextUrl.clone();
+      url.host = canonicalHost;
+      url.protocol = "https:";
+      return NextResponse.redirect(url, 308);
+    }
+  }
+
+  if (path.startsWith("/api")) return NextResponse.next();
+
   const isProtected = protectedRoutes.some((r) => path.startsWith(r));
 
   const session = await decrypt(req.cookies.get("session")?.value);
@@ -83,5 +105,10 @@ export const config = {
         { type: "header", key: "purpose", value: "prefetch" },
       ],
     },
+    // Also run (host-canonicalization only, see the early return above) on the
+    // two Discord OAuth routes, since those are exactly where a host mismatch
+    // breaks the state-cookie check.
+    "/api/auth/discord",
+    "/api/auth/discord/callback",
   ],
 };
