@@ -6,7 +6,7 @@ import { joinTournament, leaveTournament } from "./tournament-join-actions";
 import { LocalTime } from "./local-time";
 import { TrackerConfirmModal } from "./tracker-confirm-modal";
 import { CountdownLabel } from "./countdown-label";
-import { cropStyle } from "@/app/lib/media-crop";
+import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import type { PublicSponsor } from "@/app/lib/sponsors-public";
 import { formatPromoDescription } from "@/app/lib/sponsor-promo";
 
@@ -25,6 +25,8 @@ export function TournamentJoinCard({
   minMmr3v3,
   linkHref = null,
   sponsor = null,
+  fallbackBackgroundUrl = null,
+  fallbackBackgroundCrop,
 }: {
   id: string;
   name: string;
@@ -40,10 +42,12 @@ export function TournamentJoinCard({
   minMmr3v3?: number | null;
   linkHref?: string | null;
   sponsor?: PublicSponsor | null;
+  fallbackBackgroundUrl?: string | null;
+  fallbackBackgroundCrop?: MediaCrop;
 }) {
   const router = useRouter();
   const totalPrizePool = (prize1st ?? 0) + (prize2nd ?? 0) + (prize3rd4th ?? 0) * 2;
-  const backgroundUrl = sponsor?.background_image_url ?? null;
+  const backgroundUrl = sponsor?.background_image_url ?? fallbackBackgroundUrl ?? null;
   const [joined, setJoined] = useState(initialJoined);
   const [count, setCount] = useState(poolCount);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +98,7 @@ export function TournamentJoinCard({
             src={backgroundUrl}
             alt=""
             className="absolute inset-0 w-full h-full"
-            style={cropStyle(sponsor?.content_crop?.background)}
+            style={cropStyle(sponsor?.content_crop?.background ?? fallbackBackgroundCrop)}
           />
           <div className="absolute inset-0 bg-black/70" />
         </>

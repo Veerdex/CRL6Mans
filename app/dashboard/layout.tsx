@@ -2,7 +2,7 @@
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { getPlayerInfo, getStaffRole, hasMfaEnabled } from "@/app/lib/players";
-import { getNavSponsors } from "@/app/lib/sponsors-public";
+import { getNavVisuals } from "@/app/lib/sponsors-public";
 import { cropStyle } from "@/app/lib/media-crop";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import NavLink from "./nav-link";
@@ -211,7 +211,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // so they resolve concurrently with that chain instead of waiting for it.
   const settingsPromise = supabaseAdmin.from("league_settings").select("draft_active, season_active, active_tournament_id, nav_tab_overrides").single();
   const playersCountPromise = supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true);
-  const navSponsorsPromise = getNavSponsors();
+  const navSponsorsPromise = getNavVisuals();
   // Fresh, uncached lookups on every request: staff role from staff_roles, and
   // Discord 2FA status from players.mfa_enabled (synced on each OAuth login).
   // A staff member without 2FA is treated as non-admin everywhere on the site —
@@ -458,7 +458,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <span className="text-lg font-bold tracking-tight shrink-0"><AppTitle /></span>
           <TopNav items={groupedMainNav} />
           <div className="flex items-center gap-3 shrink-0">
-            {navSponsors.topNav && (
+            {navSponsors.topNav?.type === "sponsor" && (
               <a
                 href={navSponsors.topNav.clickUrl || "/dashboard/sponsors"}
                 target={navSponsors.topNav.clickUrl ? "_blank" : undefined}
@@ -557,7 +557,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         )}
 
-        {navSponsors.sideNav && (
+        {navSponsors.sideNav?.type === "sponsor" && (
           <a
             href={navSponsors.sideNav.clickUrl || "/dashboard/sponsors"}
             target={navSponsors.sideNav.clickUrl ? "_blank" : undefined}

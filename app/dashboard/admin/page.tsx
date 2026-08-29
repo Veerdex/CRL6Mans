@@ -32,9 +32,12 @@ import { getStaffList } from "./staff-actions";
 import { StaffManager } from "./staff-section";
 import { getSponsorsWithMembers, getTabPlacement, getNavTabOverrides, getTabSponsors } from "./sponsor-actions";
 import { SponsorsManager, TabManagerSection, SeasonSponsorPicker, NavTabVisibilityGrid, TabSponsorGrid } from "./sponsors-section";
+import { getDesigns } from "./design-actions";
+import { DesignsSection } from "./designs-section";
 import { getThemes } from "./theme-actions";
 import { ThemeDesignerSection } from "./theme-designer-section";
 import { getPublicSponsors } from "@/app/lib/sponsors-public";
+import { getPublicDesigns } from "@/app/lib/designs-public";
 import {
   AnalyticsSummaryCards,
   EventOverviewSection,
@@ -103,6 +106,21 @@ async function PatreonTiersAdminSection() {
   );
 }
 
+async function DesignsAdminSection() {
+  const designs = await getDesigns();
+  return (
+    <AdminSubSection
+      sectionId="sponsors"
+      tabId="designs"
+      title="Designs"
+      value={designs.length}
+      description="Reusable background/nav visuals with no sponsor branding — assign to a tournament, the season, or a Tab Manager nav slot."
+    >
+      <DesignsSection designs={designs} />
+    </AdminSubSection>
+  );
+}
+
 async function ThemeDesignerAdminSection() {
   const themes = await getThemes();
   return (
@@ -119,8 +137,9 @@ async function ThemeDesignerAdminSection() {
 }
 
 async function TabManagerAdminSection() {
-  const [sponsors, tabPlacement, navTabOverrides, tabSponsors] = await Promise.all([
+  const [sponsors, designs, tabPlacement, navTabOverrides, tabSponsors] = await Promise.all([
     getSponsorsWithMembers(),
+    getDesigns(),
     getTabPlacement(),
     getNavTabOverrides(),
     getTabSponsors(),
@@ -134,7 +153,7 @@ async function TabManagerAdminSection() {
     >
       <div className="space-y-4">
         <NavTabVisibilityGrid overrides={navTabOverrides} />
-        <TabManagerSection sponsors={sponsors} tabPlacement={tabPlacement} />
+        <TabManagerSection sponsors={sponsors} designs={designs} tabPlacement={tabPlacement} />
         <TabSponsorGrid sponsors={sponsors} tabSponsors={tabSponsors} />
       </div>
     </AdminSubSection>
@@ -154,9 +173,9 @@ export default async function AdminPage() {
   const testingMode           = userIsDirector && cookieStore.get("testing_mode")?.value === "1";
   const notificationsEnabled  = cookieStore.get("notifications_disabled")?.value !== "1";
 
-  const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors] = await Promise.all([
+  const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors, publicDesigns] = await Promise.all([
     getAllPendingPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, identity_enforcement_enabled, join_gate_enabled").maybeSingle(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, season_design_id, identity_enforcement_enabled, join_gate_enabled").maybeSingle(),
     supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
@@ -168,8 +187,10 @@ export default async function AdminPage() {
     supabaseAdmin.from("matches").select("stage, round, discord_channel_id"),
     supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1"),
     getPublicSponsors(),
+    getPublicDesigns(),
   ]);
   const sponsorOptions = publicSponsors.map((s) => ({ id: s.id, name: s.name }));
+  const designOptions = publicDesigns.map((d) => ({ id: d.id, name: d.name }));
 
   // ── Insights: visits / registrations / draft joins over the last 52 weeks ──
   const now = new Date();
@@ -1331,6 +1352,7 @@ export default async function AdminPage() {
             hasActive={!!settings?.active_tournament_id}
             testingMode={testingMode}
             sponsors={sponsorOptions}
+            designs={designOptions}
           />
         </AdminSubSection>
       )}
@@ -1363,7 +1385,9 @@ export default async function AdminPage() {
             <h3 className="text-sm font-medium text-zinc-400 mb-3">Sponsor</h3>
             <SeasonSponsorPicker
               sponsors={sponsorOptions}
+              designs={designOptions}
               initialSponsorId={(settings?.season_sponsor_id as string | null) ?? null}
+              initialDesignId={(settings?.season_design_id as string | null) ?? null}
             />
           </div>
         </div>
@@ -1501,6 +1525,7 @@ export default async function AdminPage() {
       {userIsDirector && (
         <AdminSection id="sponsors">
           <SponsorsSection patreonUrl={(settings?.patreon_url as string | null) ?? null} />
+          <DesignsAdminSection />
           <TabManagerAdminSection />
           <ThemeDesignerAdminSection />
         </AdminSection>

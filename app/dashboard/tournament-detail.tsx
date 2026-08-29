@@ -9,8 +9,9 @@ import { RulesContent } from "./rules/rules-content";
 import { tournamentRulesContext } from "./rules/rules-filter";
 import { PresetEmblemRow } from "./preset-emblem-row";
 import { getPublicSponsors, type PublicSponsor } from "@/app/lib/sponsors-public";
+import { getPublicDesigns, type PublicDesign } from "@/app/lib/designs-public";
 import { SponsorCard } from "@/app/lib/sponsor-display";
-import { cropStyle } from "@/app/lib/media-crop";
+import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import { buildTimeline, buildStageStarts } from "@/app/lib/tournament-timeline";
 import { stageEmblem } from "@/app/lib/format-emblems";
 import { playerRatingFromRow, initialTeamRating } from "@/app/lib/rating";
@@ -65,17 +66,18 @@ export async function TournamentDetailView({
 }) {
   const tab: TabId = TABS.some((tb) => tb.id === rawTab) ? (rawTab as TabId) : "overview";
 
-  const [{ data: t }, { data: settings }, { data: player }, publicSponsors, canEditRules] = await Promise.all([
+  const [{ data: t }, { data: settings }, { data: player }, publicSponsors, publicDesigns, canEditRules] = await Promise.all([
     supabaseAdmin
       .from("tournaments")
       .select(
-        "id, name, status, join_mode, team_assignment, signups_open, draft_open_at, draft_close_at, draft_start_at, season_start_at, season_format, stage_starts, sponsor_id, prize_1st, prize_2nd, prize_3rd4th, min_mmr_2v2, min_mmr_3v3, summary"
+        "id, name, status, join_mode, team_assignment, signups_open, draft_open_at, draft_close_at, draft_start_at, season_start_at, season_format, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, min_mmr_2v2, min_mmr_3v3, summary"
       )
       .eq("id", tournamentId)
       .maybeSingle(),
     supabaseAdmin.from("league_settings").select("active_tournament_id, draft_active, season_active").single(),
     supabaseAdmin.from("players").select("id, status").eq("discord_id", discordId).maybeSingle(),
     getPublicSponsors(),
+    getPublicDesigns(),
     isDirectorVerified(discordId),
   ]);
 
@@ -106,7 +108,9 @@ export async function TournamentDetailView({
   );
   const stageStartsRaw = (t.stage_starts as Record<string, string> | null) ?? {};
   const sponsor = t.sponsor_id ? (publicSponsors.find((s) => s.id === t.sponsor_id) ?? null) : null;
-  const backgroundUrl = sponsor?.background_image_url ?? null;
+  const design: PublicDesign | null = !sponsor && t.design_id ? (publicDesigns.find((d) => d.id === t.design_id) ?? null) : null;
+  const backgroundUrl = sponsor?.background_image_url ?? design?.background_image_url ?? null;
+  const backgroundCrop = sponsor?.content_crop?.background ?? design?.content_crop?.background;
 
   const now = Date.now();
   const withinDraftWindow =
@@ -133,7 +137,7 @@ export async function TournamentDetailView({
               src={backgroundUrl}
               alt=""
               className="absolute inset-0 w-full h-full"
-              style={cropStyle(sponsor?.content_crop?.background)}
+              style={cropStyle(backgroundCrop)}
             />
             <div className="absolute inset-0 bg-black/70" />
           </>
@@ -220,6 +224,8 @@ export async function TournamentDetailView({
                 prize2nd={t.prize_2nd}
                 prize3rd4th={t.prize_3rd4th}
                 sponsor={sponsor}
+                fallbackBackgroundUrl={design?.background_image_url ?? null}
+                fallbackBackgroundCrop={design?.content_crop?.background}
               />
             ) : (
               <PlayersRegistration
@@ -237,6 +243,8 @@ export async function TournamentDetailView({
                 minMmr3v3={t.min_mmr_3v3}
                 name={t.name}
                 sponsor={sponsor}
+                fallbackBackgroundUrl={design?.background_image_url ?? null}
+                fallbackBackgroundCrop={design?.content_crop?.background}
               />
             ))}
 
@@ -475,6 +483,8 @@ async function PlayersRegistration({
   minMmr3v3,
   name,
   sponsor = null,
+  fallbackBackgroundUrl = null,
+  fallbackBackgroundCrop,
 }: {
   tournamentId: string;
   teamAssignment: "snake_draft" | "auto_balance" | null;
@@ -490,6 +500,8 @@ async function PlayersRegistration({
   minMmr3v3: number | null;
   name: string;
   sponsor?: PublicSponsor | null;
+  fallbackBackgroundUrl?: string | null;
+  fallbackBackgroundCrop?: MediaCrop;
 }) {
   const { data: entryRows } = await supabaseAdmin
     .from("tournament_entries")
@@ -513,6 +525,8 @@ async function PlayersRegistration({
       minMmr2v2={minMmr2v2}
       minMmr3v3={minMmr3v3}
       sponsor={sponsor}
+      fallbackBackgroundUrl={fallbackBackgroundUrl}
+      fallbackBackgroundCrop={fallbackBackgroundCrop}
     />
   ) : (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
@@ -575,6 +589,8 @@ async function TeamsRegistration({
   prize2nd,
   prize3rd4th,
   sponsor = null,
+  fallbackBackgroundUrl = null,
+  fallbackBackgroundCrop,
 }: {
   tournamentId: string;
   tournamentName: string;
@@ -586,6 +602,8 @@ async function TeamsRegistration({
   prize2nd: number | null;
   prize3rd4th: number | null;
   sponsor?: PublicSponsor | null;
+  fallbackBackgroundUrl?: string | null;
+  fallbackBackgroundCrop?: MediaCrop;
 }) {
   const view = playerId ? await getTeamSignupView(playerId, tournamentId, registrationOpen) : null;
 
@@ -600,6 +618,8 @@ async function TeamsRegistration({
       prize2nd={prize2nd}
       prize3rd4th={prize3rd4th}
       sponsor={sponsor}
+      fallbackBackgroundUrl={fallbackBackgroundUrl}
+      fallbackBackgroundCrop={fallbackBackgroundCrop}
     />
   ) : (
     <p className="text-[17.5px] text-zinc-500">Sign in and get approved to register a team.</p>

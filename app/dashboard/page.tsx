@@ -14,6 +14,7 @@ import { TrackerUpdateBanner } from "./tracker-update-banner";
 import { AnnouncementBanner } from "./announcement-banner";
 import { CountdownLabel } from "./countdown-label";
 import { getPublicSponsors } from "@/app/lib/sponsors-public";
+import { getPublicDesigns } from "@/app/lib/designs-public";
 import { cropStyle } from "@/app/lib/media-crop";
 import { buildTimeline, buildStageStarts } from "@/app/lib/tournament-timeline";
 import { TournamentDetailView } from "./tournament-detail";
@@ -33,7 +34,7 @@ export default async function DashboardPage({
     return <TournamentDetailView tournamentId={tournamentId} tab={tab} discordId={session.userId} />;
   }
 
-  const [playerRes, settingsRes, draftQueueRes, tournamentsRes, seasonsRes, matchStagesRes, publicSponsors] = await Promise.all([
+  const [playerRes, settingsRes, draftQueueRes, tournamentsRes, seasonsRes, matchStagesRes, publicSponsors, publicDesigns] = await Promise.all([
     supabaseAdmin
       .from("players")
       .select("id, status, draft_entered, display_name, must_update_tracker")
@@ -48,7 +49,7 @@ export default async function DashboardPage({
       .order("draft_entered_at", { ascending: true, nullsFirst: false }),
     supabaseAdmin
       .from("tournaments")
-      .select("id, name, status, signups_open, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, sponsor_id, prize_1st, prize_2nd, prize_3rd4th")
+      .select("id, name, status, signups_open, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th")
       .in("status", ["scheduled", "active", "completed"])
       .order("created_at", { ascending: false }),
     supabaseAdmin
@@ -59,6 +60,7 @@ export default async function DashboardPage({
       .from("matches")
       .select("stage, round, status"),
     getPublicSponsors(),
+    getPublicDesigns(),
   ]);
 
   const player = playerRes.data;
@@ -66,6 +68,7 @@ export default async function DashboardPage({
   const draftQueue = draftQueueRes.data ?? [];
   const tournaments = tournamentsRes.data ?? [];
   const sponsorById = new Map(publicSponsors.map((s) => [s.id, s]));
+  const designById = new Map(publicDesigns.map((d) => [d.id, d]));
   const activeTournament = tournaments.find((t) => t.status === "active") ?? null;
   const pastTournaments = tournaments.filter((t) => t.status === "completed" && !t.hidden_from_home);
   const seasons = (seasonsRes.data ?? []).filter((s) => !s.hidden_from_home);
@@ -172,11 +175,14 @@ export default async function DashboardPage({
   const activeEventTeamCount = settings?.num_teams ?? 0;
   const activeEventSponsorId = (activeTournament as { sponsor_id?: string | null } | null)?.sponsor_id ?? null;
   const activeEventSponsor = activeEventSponsorId ? sponsorById.get(activeEventSponsorId) ?? null : null;
+  const activeEventDesignId = (activeTournament as { design_id?: string | null } | null)?.design_id ?? null;
+  const activeEventDesign = !activeEventSponsor && activeEventDesignId ? designById.get(activeEventDesignId) ?? null : null;
   const activeEventPrize1st = (activeTournament as { prize_1st?: number | null } | null)?.prize_1st ?? null;
   const activeEventPrize2nd = (activeTournament as { prize_2nd?: number | null } | null)?.prize_2nd ?? null;
   const activeEventPrize3rd4th = (activeTournament as { prize_3rd4th?: number | null } | null)?.prize_3rd4th ?? null;
   const activeEventTotalPrize = (activeEventPrize1st ?? 0) + (activeEventPrize2nd ?? 0) + (activeEventPrize3rd4th ?? 0) * 2;
-  const activeEventBackgroundUrl = activeEventSponsor?.background_image_url ?? null;
+  const activeEventBackgroundUrl = activeEventSponsor?.background_image_url ?? activeEventDesign?.background_image_url ?? null;
+  const activeEventBackgroundCrop = activeEventSponsor?.content_crop?.background ?? activeEventDesign?.content_crop?.background;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto space-y-8">
@@ -220,7 +226,7 @@ export default async function DashboardPage({
                 src={activeEventBackgroundUrl}
                 alt=""
                 className="absolute inset-0 w-full h-full"
-                style={cropStyle(activeEventSponsor?.content_crop?.background)}
+                style={cropStyle(activeEventBackgroundCrop)}
               />
               <div className="absolute inset-0 bg-black/70" />
             </>
@@ -296,6 +302,8 @@ export default async function DashboardPage({
             const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
+            const designId = (t as { design_id?: string | null }).design_id ?? null;
+            const design = !sponsor && designId ? designById.get(designId) ?? null : null;
             return (
               <TournamentJoinCard
                 key={t.id}
@@ -313,6 +321,8 @@ export default async function DashboardPage({
                 minMmr3v3={(t as { min_mmr_3v3?: number | null }).min_mmr_3v3 ?? null}
                 linkHref={`/dashboard?tournament=${t.id}`}
                 sponsor={sponsor}
+                fallbackBackgroundUrl={design?.background_image_url ?? null}
+                fallbackBackgroundCrop={design?.content_crop?.background}
               />
             );
           })}
@@ -322,6 +332,8 @@ export default async function DashboardPage({
             const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
+            const designId = (t as { design_id?: string | null }).design_id ?? null;
+            const design = !sponsor && designId ? designById.get(designId) ?? null : null;
             return (
               <TeamSignupPanel
                 key={t.id}
@@ -335,6 +347,8 @@ export default async function DashboardPage({
                 prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
                 linkHref={`/dashboard?tournament=${t.id}`}
                 sponsor={sponsor}
+                fallbackBackgroundUrl={design?.background_image_url ?? null}
+                fallbackBackgroundCrop={design?.content_crop?.background}
               />
             );
           })}
@@ -355,11 +369,14 @@ export default async function DashboardPage({
             );
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
+            const designId = (t as { design_id?: string | null }).design_id ?? null;
+            const design = !sponsor && designId ? designById.get(designId) ?? null : null;
             const prize1st = (t as { prize_1st?: number | null }).prize_1st ?? null;
             const prize2nd = (t as { prize_2nd?: number | null }).prize_2nd ?? null;
             const prize3rd4th = (t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null;
             const totalPrizePool = (prize1st ?? 0) + (prize2nd ?? 0) + (prize3rd4th ?? 0) * 2;
-            const backgroundUrl = sponsor?.background_image_url ?? null;
+            const backgroundUrl = sponsor?.background_image_url ?? design?.background_image_url ?? null;
+            const backgroundCrop = sponsor?.content_crop?.background ?? design?.content_crop?.background;
             return (
               <Link
                 key={t.id}
@@ -373,7 +390,7 @@ export default async function DashboardPage({
                       src={backgroundUrl}
                       alt=""
                       className="absolute inset-0 w-full h-full"
-                      style={cropStyle(sponsor?.content_crop?.background)}
+                      style={cropStyle(backgroundCrop)}
                     />
                     <div className="absolute inset-0 bg-black/70" />
                   </>

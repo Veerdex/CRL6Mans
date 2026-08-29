@@ -36,6 +36,7 @@ export type TournamentInput = {
   min_mmr_3v3: number | null;
   is_test?: boolean;
   sponsor_id: string | null;
+  design_id: string | null;
   prize_1st: number | null;
   prize_2nd: number | null;
   prize_3rd4th: number | null;
@@ -173,6 +174,7 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
       min_mmr_3v3: min3v3 || null,
       is_test: input.is_test ?? false,
       sponsor_id: input.sponsor_id?.trim() || null,
+      design_id: input.design_id?.trim() || null,
       prize_1st: prize1st || null,
       prize_2nd: prize2nd || null,
       prize_3rd4th: prize3rd4th || null,

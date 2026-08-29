@@ -307,6 +307,7 @@ type FormState = {
   previewTeams: string;
   isTest: boolean;
   sponsorId: string;
+  designId: string;
   prize1st: string;
   prize2nd: string;
   prize3rd4th: string;
@@ -333,6 +334,7 @@ const EMPTY_FORM: FormState = {
   previewTeams: "",
   isTest: false,
   sponsorId: "",
+  designId: "",
   prize1st: "",
   prize2nd: "",
   prize3rd4th: "",
@@ -350,12 +352,14 @@ export function TournamentManager({
   hasActive,
   testingMode = false,
   sponsors = [],
+  designs = [],
 }: {
   tournaments: Tournament[];
   seasons: Season[];
   hasActive: boolean;
   testingMode?: boolean;
   sponsors?: { id: string; name: string }[];
+  designs?: { id: string; name: string }[];
 }) {
   const [isPending, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -441,6 +445,7 @@ export function TournamentManager({
       min_mmr_3v3: form.minMmr3v3 ? parseInt(form.minMmr3v3) || null : null,
       is_test: form.isTest,
       sponsor_id: form.sponsorId || null,
+      design_id: form.designId || null,
       prize_1st: form.prize1st ? parseInt(form.prize1st) || null : null,
       prize_2nd: form.prize2nd ? parseInt(form.prize2nd) || null : null,
       prize_3rd4th: form.prize3rd4th ? parseInt(form.prize3rd4th) || null : null,
@@ -550,6 +555,7 @@ export function TournamentManager({
       minMmr3v3: t.min_mmr_3v3 ? String(t.min_mmr_3v3) : "",
       isTest: t.is_test ?? false,
       sponsorId: t.sponsor_id ?? "",
+      designId: t.design_id ?? "",
       prize1st: t.prize_1st ? String(t.prize_1st) : "",
       prize2nd: t.prize_2nd ? String(t.prize_2nd) : "",
       prize3rd4th: t.prize_3rd4th ? String(t.prize_3rd4th) : "",
@@ -733,16 +739,34 @@ export function TournamentManager({
           </div>
 
           <div>
-            <label className={labelCls}>Sponsor (optional)</label>
+            <label className={labelCls}>Sponsor / Design (optional)</label>
             <select
               className={inputCls}
-              value={form.sponsorId}
-              onChange={(e) => setForm({ ...form, sponsorId: e.target.value })}
+              value={form.sponsorId ? `sponsor:${form.sponsorId}` : form.designId ? `design:${form.designId}` : ""}
+              onChange={(e) => {
+                const [type, id] = e.target.value.split(":");
+                setForm({
+                  ...form,
+                  sponsorId: type === "sponsor" ? id : "",
+                  designId: type === "design" ? id : "",
+                });
+              }}
             >
               <option value="">None</option>
-              {sponsors.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
+              {sponsors.length > 0 && (
+                <optgroup label="Sponsors">
+                  {sponsors.map((s) => (
+                    <option key={s.id} value={`sponsor:${s.id}`}>{s.name}</option>
+                  ))}
+                </optgroup>
+              )}
+              {designs.length > 0 && (
+                <optgroup label="Designs">
+                  {designs.map((d) => (
+                    <option key={d.id} value={`design:${d.id}`}>{d.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
 

@@ -14,7 +14,7 @@ import type { TeamSignupView } from "./team-signup-data";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { LocalTime } from "./local-time";
 import { CountdownLabel } from "./countdown-label";
-import { cropStyle } from "@/app/lib/media-crop";
+import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import type { PublicSponsor } from "@/app/lib/sponsors-public";
 import { formatPromoDescription } from "@/app/lib/sponsor-promo";
 
@@ -29,6 +29,8 @@ export function TeamSignupPanel({
   prize3rd4th = null,
   linkHref = null,
   sponsor = null,
+  fallbackBackgroundUrl = null,
+  fallbackBackgroundCrop,
 }: {
   view: TeamSignupView;
   tournamentId: string;
@@ -40,10 +42,12 @@ export function TeamSignupPanel({
   prize3rd4th?: number | null;
   linkHref?: string | null;
   sponsor?: PublicSponsor | null;
+  fallbackBackgroundUrl?: string | null;
+  fallbackBackgroundCrop?: MediaCrop;
 }) {
   const router = useRouter();
   const totalPrizePool = (prize1st ?? 0) + (prize2nd ?? 0) + (prize3rd4th ?? 0) * 2;
-  const backgroundUrl = sponsor?.background_image_url ?? null;
+  const backgroundUrl = sponsor?.background_image_url ?? fallbackBackgroundUrl ?? null;
   const { myTeam, incomingInvites, invitable, registrationOpen } = view;
   const [isPending, startTransition] = useTransition();
   const [name, setName] = useState("");
@@ -78,7 +82,7 @@ export function TeamSignupPanel({
             src={backgroundUrl}
             alt=""
             className="absolute inset-0 w-full h-full"
-            style={cropStyle(sponsor?.content_crop?.background)}
+            style={cropStyle(sponsor?.content_crop?.background ?? fallbackBackgroundCrop)}
           />
           <div className="absolute inset-0 bg-black/70" />
         </>

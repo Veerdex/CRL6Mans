@@ -263,28 +263,35 @@ export type TabPlacement = {
   topNavSponsorId: string | null;
   sideNavSponsorId: string | null;
   settingsTabSponsorId: string | null;
+  topNavDesignId: string | null;
+  sideNavDesignId: string | null;
 };
 
 export async function getTabPlacement(): Promise<TabPlacement> {
   const { data } = await supabaseAdmin
     .from("league_settings")
-    .select("top_nav_sponsor_id, side_nav_sponsor_id, settings_tab_sponsor_id")
+    .select("top_nav_sponsor_id, side_nav_sponsor_id, settings_tab_sponsor_id, top_nav_design_id, side_nav_design_id")
     .single();
   return {
     topNavSponsorId: (data?.top_nav_sponsor_id as string | null) ?? null,
     sideNavSponsorId: (data?.side_nav_sponsor_id as string | null) ?? null,
     settingsTabSponsorId: (data?.settings_tab_sponsor_id as string | null) ?? null,
+    topNavDesignId: (data?.top_nav_design_id as string | null) ?? null,
+    sideNavDesignId: (data?.side_nav_design_id as string | null) ?? null,
   };
 }
 
-export async function updateSeasonSponsor(sponsorId: string | null): Promise<{ ok?: boolean; error?: string }> {
+export async function updateSeasonSponsor(
+  sponsorId: string | null,
+  designId: string | null = null
+): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
   if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit sponsors." };
 
   const { error } = await supabaseAdmin
     .from("league_settings")
-    .update({ season_sponsor_id: sponsorId })
+    .update({ season_sponsor_id: sponsorId, season_design_id: designId })
     .not("id", "is", null);
   if (error) return { error: error.message };
 
@@ -295,7 +302,9 @@ export async function updateSeasonSponsor(sponsorId: string | null): Promise<{ o
 export async function updateTabPlacement(
   topNavSponsorId: string | null,
   sideNavSponsorId: string | null,
-  settingsTabSponsorId: string | null
+  settingsTabSponsorId: string | null,
+  topNavDesignId: string | null = null,
+  sideNavDesignId: string | null = null
 ): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
@@ -307,6 +316,8 @@ export async function updateTabPlacement(
       top_nav_sponsor_id: topNavSponsorId,
       side_nav_sponsor_id: sideNavSponsorId,
       settings_tab_sponsor_id: settingsTabSponsorId,
+      top_nav_design_id: topNavDesignId,
+      side_nav_design_id: sideNavDesignId,
     })
     .not("id", "is", null);
   if (error) return { error: error.message };

@@ -33,49 +33,88 @@ export async function getPublicSponsors(): Promise<PublicSponsor[]> {
   return (data ?? []) as PublicSponsor[];
 }
 
-export type NavSponsors = {
-  topNav: { name: string; imageUrl: string; crop: ContentCrop["topNav"]; clickUrl: string | null } | null;
-  sideNav: { name: string; imageUrl: string; crop: ContentCrop["sideNav"]; clickUrl: string | null } | null;
+export type NavVisual = {
+  type: "sponsor" | "design";
+  name: string;
+  imageUrl: string;
+  crop: ContentCrop["topNav"];
+  clickUrl: string | null;
+} | null;
+
+export type NavVisuals = {
+  topNav: NavVisual;
+  sideNav: NavVisual;
 };
 
-export async function getNavSponsors(): Promise<NavSponsors> {
+export async function getNavVisuals(): Promise<NavVisuals> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("top_nav_sponsor_id, side_nav_sponsor_id")
+    .select("top_nav_sponsor_id, side_nav_sponsor_id, top_nav_design_id, side_nav_design_id")
     .single();
 
   const topNavSponsorId = (settings?.top_nav_sponsor_id as string | null) ?? null;
   const sideNavSponsorId = (settings?.side_nav_sponsor_id as string | null) ?? null;
-  if (!topNavSponsorId && !sideNavSponsorId) return { topNav: null, sideNav: null };
+  const topNavDesignId = (settings?.top_nav_design_id as string | null) ?? null;
+  const sideNavDesignId = (settings?.side_nav_design_id as string | null) ?? null;
+  if (!topNavSponsorId && !sideNavSponsorId && !topNavDesignId && !sideNavDesignId) {
+    return { topNav: null, sideNav: null };
+  }
 
-  const ids = [topNavSponsorId, sideNavSponsorId].filter((id): id is string => !!id);
-  const { data: sponsors } = await supabaseAdmin
-    .from("sponsors")
-    .select("id, name, top_nav_image_url, side_nav_image_url, content_crop, click_url")
-    .in("id", ids)
-    .eq("status", "active");
+  const sponsorIds = [topNavSponsorId, sideNavSponsorId].filter((id): id is string => !!id);
+  const designIds = [topNavDesignId, sideNavDesignId].filter((id): id is string => !!id);
 
-  const byId = new Map((sponsors ?? []).map((s) => [s.id, s]));
-  const top = topNavSponsorId ? byId.get(topNavSponsorId) : null;
-  const side = sideNavSponsorId ? byId.get(sideNavSponsorId) : null;
+  const [{ data: sponsors }, { data: designs }] = await Promise.all([
+    sponsorIds.length
+      ? supabaseAdmin
+          .from("sponsors")
+          .select("id, name, top_nav_image_url, side_nav_image_url, content_crop, click_url")
+          .in("id", sponsorIds)
+          .eq("status", "active")
+      : Promise.resolve({ data: [] }),
+    designIds.length
+      ? supabaseAdmin
+          .from("designs")
+          .select("id, name, top_nav_image_url, side_nav_image_url, content_crop")
+          .in("id", designIds)
+          .eq("status", "active")
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const sponsorById = new Map((sponsors ?? []).map((s) => [s.id, s]));
+  const designById = new Map((designs ?? []).map((d) => [d.id, d]));
+
+  function resolve(
+    sponsorId: string | null,
+    designId: string | null,
+    imageField: "top_nav_image_url" | "side_nav_image_url",
+    cropKind: "topNav" | "sideNav"
+  ): NavVisual {
+    const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
+    if (sponsor?.[imageField]) {
+      return {
+        type: "sponsor",
+        name: sponsor.name,
+        imageUrl: sponsor[imageField] as string,
+        crop: (sponsor.content_crop as ContentCrop | null)?.[cropKind],
+        clickUrl: (sponsor.click_url as string | null) ?? null,
+      };
+    }
+    const design = designId ? designById.get(designId) : null;
+    if (design?.[imageField]) {
+      return {
+        type: "design",
+        name: design.name,
+        imageUrl: design[imageField] as string,
+        crop: (design.content_crop as ContentCrop | null)?.[cropKind],
+        clickUrl: null,
+      };
+    }
+    return null;
+  }
 
   return {
-    topNav: top?.top_nav_image_url
-      ? {
-          name: top.name,
-          imageUrl: top.top_nav_image_url as string,
-          crop: (top.content_crop as ContentCrop | null)?.topNav,
-          clickUrl: (top.click_url as string | null) ?? null,
-        }
-      : null,
-    sideNav: side?.side_nav_image_url
-      ? {
-          name: side.name,
-          imageUrl: side.side_nav_image_url as string,
-          crop: (side.content_crop as ContentCrop | null)?.sideNav,
-          clickUrl: (side.click_url as string | null) ?? null,
-        }
-      : null,
+    topNav: resolve(topNavSponsorId, topNavDesignId, "top_nav_image_url", "topNav"),
+    sideNav: resolve(sideNavSponsorId, sideNavDesignId, "side_nav_image_url", "sideNav"),
   };
 }
 

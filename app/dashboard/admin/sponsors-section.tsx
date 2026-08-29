@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import type { Sponsor, SponsorLink, TabPlacement, TabSponsors } from "./sponsor-actions";
+import type { Design } from "./design-actions";
 import {
   createSponsor,
   updateSponsorMaxUses,
@@ -743,65 +744,108 @@ export function NavTabVisibilityGrid({ overrides }: { overrides: NavTabOverrides
   );
 }
 
-// Each configurable placement is a "tab" an admin can assign a sponsor to.
-// A sponsor only appears as an option for a placement once it actually has
-// that content filled in, so picking one always has something to show.
-const TAB_PLACEMENTS = [
-  { key: "topNavSponsorId", label: "Top nav", noContent: "image", hasContent: (s: Sponsor) => !!s.top_nav_image_url },
-  { key: "sideNavSponsorId", label: "Side nav", noContent: "image", hasContent: (s: Sponsor) => !!s.side_nav_image_url },
-  { key: "settingsTabSponsorId", label: "Settings theme", noContent: "theme", hasContent: (s: Sponsor) => !!s.theme_id },
+// Each configurable placement is a "tab" an admin can assign a sponsor (or,
+// for the nav placements, a design) to. An entity only appears as an option
+// for a placement once it actually has that content filled in, so picking
+// one always has something to show.
+const NAV_PLACEMENTS = [
+  { key: "topNav", label: "Top nav", noContent: "image", hasSponsorContent: (s: Sponsor) => !!s.top_nav_image_url, hasDesignContent: (d: Design) => !!d.top_nav_image_url },
+  { key: "sideNav", label: "Side nav", noContent: "image", hasSponsorContent: (s: Sponsor) => !!s.side_nav_image_url, hasDesignContent: (d: Design) => !!d.side_nav_image_url },
 ] as const;
 
-export function TabManagerSection({ sponsors, tabPlacement }: { sponsors: Sponsor[]; tabPlacement: TabPlacement }) {
+function encodeVisual(type: "sponsor" | "design", id: string): string {
+  return `${type}:${id}`;
+}
+function decodeVisual(value: string): { type: "sponsor" | "design"; id: string } | null {
+  if (!value) return null;
+  const [type, id] = value.split(":");
+  return type === "sponsor" || type === "design" ? { type, id } : null;
+}
+
+export function TabManagerSection({
+  sponsors,
+  designs,
+  tabPlacement,
+}: {
+  sponsors: Sponsor[];
+  designs: Design[];
+  tabPlacement: TabPlacement;
+}) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [topNavSponsorId, setTopNavSponsorId] = useState(tabPlacement.topNavSponsorId ?? "");
-  const [sideNavSponsorId, setSideNavSponsorId] = useState(tabPlacement.sideNavSponsorId ?? "");
+  const [topNav, setTopNav] = useState(
+    tabPlacement.topNavSponsorId ? encodeVisual("sponsor", tabPlacement.topNavSponsorId)
+    : tabPlacement.topNavDesignId ? encodeVisual("design", tabPlacement.topNavDesignId)
+    : ""
+  );
+  const [sideNav, setSideNav] = useState(
+    tabPlacement.sideNavSponsorId ? encodeVisual("sponsor", tabPlacement.sideNavSponsorId)
+    : tabPlacement.sideNavDesignId ? encodeVisual("design", tabPlacement.sideNavDesignId)
+    : ""
+  );
   const [settingsTabSponsorId, setSettingsTabSponsorId] = useState(tabPlacement.settingsTabSponsorId ?? "");
 
-  const selected: Record<(typeof TAB_PLACEMENTS)[number]["key"], string> = {
-    topNavSponsorId,
-    sideNavSponsorId,
-    settingsTabSponsorId,
-  };
-  const setters: Record<(typeof TAB_PLACEMENTS)[number]["key"], (v: string) => void> = {
-    topNavSponsorId: setTopNavSponsorId,
-    sideNavSponsorId: setSideNavSponsorId,
-    settingsTabSponsorId: setSettingsTabSponsorId,
+  const navSelected: Record<(typeof NAV_PLACEMENTS)[number]["key"], string> = { topNav, sideNav };
+  const navSetters: Record<(typeof NAV_PLACEMENTS)[number]["key"], (v: string) => void> = {
+    topNav: setTopNav,
+    sideNav: setSideNav,
   };
 
   const activeSponsors = sponsors.filter((s) => s.status === "active");
+  const activeDesigns = designs.filter((d) => d.status === "active");
 
-  const eligibleByKey: Record<(typeof TAB_PLACEMENTS)[number]["key"], Sponsor[]> = {
-    topNavSponsorId: activeSponsors.filter(TAB_PLACEMENTS[0].hasContent),
-    sideNavSponsorId: activeSponsors.filter(TAB_PLACEMENTS[1].hasContent),
-    settingsTabSponsorId: activeSponsors.filter(TAB_PLACEMENTS[2].hasContent),
+  const eligibleByKey: Record<(typeof NAV_PLACEMENTS)[number]["key"], { sponsors: Sponsor[]; designs: Design[] }> = {
+    topNav: { sponsors: activeSponsors.filter(NAV_PLACEMENTS[0].hasSponsorContent), designs: activeDesigns.filter(NAV_PLACEMENTS[0].hasDesignContent) },
+    sideNav: { sponsors: activeSponsors.filter(NAV_PLACEMENTS[1].hasSponsorContent), designs: activeDesigns.filter(NAV_PLACEMENTS[1].hasDesignContent) },
   };
 
-  // A previously-picked sponsor can lose eligibility (e.g. its theme/image was
+  const settingsEligible = activeSponsors.filter((s) => !!s.theme_id);
+
+  // A previously-picked entity can lose eligibility (e.g. its image/theme was
   // cleared) without the stored placement ID being cleared along with it. Treat
   // that as "None" everywhere — display, dirty-check, and save — so the admin
   // can actually see and clear the stale pointer instead of Save staying disabled.
-  const effectiveSelected: Record<(typeof TAB_PLACEMENTS)[number]["key"], string> = {
-    topNavSponsorId: eligibleByKey.topNavSponsorId.some((s) => s.id === topNavSponsorId) ? topNavSponsorId : "",
-    sideNavSponsorId: eligibleByKey.sideNavSponsorId.some((s) => s.id === sideNavSponsorId) ? sideNavSponsorId : "",
-    settingsTabSponsorId: eligibleByKey.settingsTabSponsorId.some((s) => s.id === settingsTabSponsorId)
-      ? settingsTabSponsorId
-      : "",
-  };
+  function effectiveNav(key: (typeof NAV_PLACEMENTS)[number]["key"]): string {
+    const decoded = decodeVisual(navSelected[key]);
+    if (!decoded) return "";
+    const eligible = eligibleByKey[key];
+    const stillEligible =
+      decoded.type === "sponsor"
+        ? eligible.sponsors.some((s) => s.id === decoded.id)
+        : eligible.designs.some((d) => d.id === decoded.id);
+    return stillEligible ? navSelected[key] : "";
+  }
+  const effectiveTopNav = effectiveNav("topNav");
+  const effectiveSideNav = effectiveNav("sideNav");
+  const effectiveSettingsTabSponsorId = settingsEligible.some((s) => s.id === settingsTabSponsorId) ? settingsTabSponsorId : "";
+
+  const storedTopNav = tabPlacement.topNavSponsorId
+    ? encodeVisual("sponsor", tabPlacement.topNavSponsorId)
+    : tabPlacement.topNavDesignId
+    ? encodeVisual("design", tabPlacement.topNavDesignId)
+    : "";
+  const storedSideNav = tabPlacement.sideNavSponsorId
+    ? encodeVisual("sponsor", tabPlacement.sideNavSponsorId)
+    : tabPlacement.sideNavDesignId
+    ? encodeVisual("design", tabPlacement.sideNavDesignId)
+    : "";
 
   const hasChanges =
-    effectiveSelected.topNavSponsorId !== (tabPlacement.topNavSponsorId ?? "") ||
-    effectiveSelected.sideNavSponsorId !== (tabPlacement.sideNavSponsorId ?? "") ||
-    effectiveSelected.settingsTabSponsorId !== (tabPlacement.settingsTabSponsorId ?? "");
+    effectiveTopNav !== storedTopNav ||
+    effectiveSideNav !== storedSideNav ||
+    effectiveSettingsTabSponsorId !== (tabPlacement.settingsTabSponsorId ?? "");
 
   function handleSave() {
     setError(null);
+    const decodedTopNav = decodeVisual(effectiveTopNav);
+    const decodedSideNav = decodeVisual(effectiveSideNav);
     startTransition(async () => {
       const res = await updateTabPlacement(
-        effectiveSelected.topNavSponsorId || null,
-        effectiveSelected.sideNavSponsorId || null,
-        effectiveSelected.settingsTabSponsorId || null
+        decodedTopNav?.type === "sponsor" ? decodedTopNav.id : null,
+        decodedSideNav?.type === "sponsor" ? decodedSideNav.id : null,
+        effectiveSettingsTabSponsorId || null,
+        decodedTopNav?.type === "design" ? decodedTopNav.id : null,
+        decodedSideNav?.type === "design" ? decodedSideNav.id : null
       );
       if (res.error) setError(res.error);
     });
@@ -810,33 +854,64 @@ export function TabManagerSection({ sponsors, tabPlacement }: { sponsors: Sponso
   return (
     <div className="border border-zinc-800 rounded-xl p-4 space-y-3">
       <p className="text-xs text-zinc-500">
-        More tabs will get their own sponsor placement here over time.
+        More tabs will get their own placement here over time.
       </p>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex flex-wrap gap-3">
-        {TAB_PLACEMENTS.map((placement) => {
+        {NAV_PLACEMENTS.map((placement) => {
           const eligible = eligibleByKey[placement.key];
           return (
             <div key={placement.key} className="flex-1 min-w-[160px] space-y-1">
-              <span className="text-xs text-zinc-500">{placement.label} sponsor</span>
+              <span className="text-xs text-zinc-500">{placement.label}</span>
               <select
-                value={effectiveSelected[placement.key]}
-                onChange={(e) => setters[placement.key](e.target.value)}
+                value={placement.key === "topNav" ? effectiveTopNav : effectiveSideNav}
+                onChange={(e) => navSetters[placement.key](e.target.value)}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
               >
                 <option value="">None</option>
-                {eligible.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
+                {eligible.sponsors.length > 0 && (
+                  <optgroup label="Sponsors">
+                    {eligible.sponsors.map((s) => (
+                      <option key={s.id} value={encodeVisual("sponsor", s.id)}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {eligible.designs.length > 0 && (
+                  <optgroup label="Designs">
+                    {eligible.designs.map((d) => (
+                      <option key={d.id} value={encodeVisual("design", d.id)}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
-              {eligible.length === 0 && (
-                <p className="text-[11px] text-zinc-600">No active sponsor has a {placement.label.toLowerCase()} {placement.noContent} set yet.</p>
+              {eligible.sponsors.length === 0 && eligible.designs.length === 0 && (
+                <p className="text-[11px] text-zinc-600">No active sponsor or design has a {placement.label.toLowerCase()} {placement.noContent} set yet.</p>
               )}
             </div>
           );
         })}
+        <div className="flex-1 min-w-[160px] space-y-1">
+          <span className="text-xs text-zinc-500">Settings theme sponsor</span>
+          <select
+            value={effectiveSettingsTabSponsorId}
+            onChange={(e) => setSettingsTabSponsorId(e.target.value)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
+          >
+            <option value="">None</option>
+            {settingsEligible.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          {settingsEligible.length === 0 && (
+            <p className="text-[11px] text-zinc-600">No active sponsor has a theme set yet.</p>
+          )}
+        </div>
       </div>
       <button
         onClick={handleSave}
@@ -948,40 +1023,62 @@ export function TabSponsorGrid({ sponsors, tabSponsors }: { sponsors: Sponsor[];
 
 export function SeasonSponsorPicker({
   sponsors,
+  designs,
   initialSponsorId,
+  initialDesignId,
 }: {
   sponsors: { id: string; name: string }[];
+  designs: { id: string; name: string }[];
   initialSponsorId: string | null;
+  initialDesignId: string | null;
 }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [sponsorId, setSponsorId] = useState(initialSponsorId ?? "");
+  const initialValue = initialSponsorId ? encodeVisual("sponsor", initialSponsorId) : initialDesignId ? encodeVisual("design", initialDesignId) : "";
+  const [value, setValue] = useState(initialValue);
 
-  const hasChanges = sponsorId !== (initialSponsorId ?? "");
+  const hasChanges = value !== initialValue;
 
   function handleSave() {
     setError(null);
+    const decoded = decodeVisual(value);
     startTransition(async () => {
-      const res = await updateSeasonSponsor(sponsorId || null);
+      const res = await updateSeasonSponsor(
+        decoded?.type === "sponsor" ? decoded.id : null,
+        decoded?.type === "design" ? decoded.id : null
+      );
       if (res.error) setError(res.error);
     });
   }
 
   return (
     <div className="space-y-1.5">
-      <span className="text-xs text-zinc-500">Season sponsor</span>
+      <span className="text-xs text-zinc-500">Season visual</span>
       <div className="flex flex-wrap items-center gap-2">
         <select
-          value={sponsorId}
-          onChange={(e) => setSponsorId(e.target.value)}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
           className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white"
         >
           <option value="">None</option>
-          {sponsors.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
+          {sponsors.length > 0 && (
+            <optgroup label="Sponsors">
+              {sponsors.map((s) => (
+                <option key={s.id} value={encodeVisual("sponsor", s.id)}>
+                  {s.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {designs.length > 0 && (
+            <optgroup label="Designs">
+              {designs.map((d) => (
+                <option key={d.id} value={encodeVisual("design", d.id)}>
+                  {d.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
         <button
           onClick={handleSave}
