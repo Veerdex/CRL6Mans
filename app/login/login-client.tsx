@@ -116,6 +116,13 @@ export function LoginClient({ error }: { error?: string }) {
       {/* Darkening overlay */}
       <div className="fixed inset-0 bg-black/55 z-[1]" aria-hidden="true" />
 
+      {/* Montage credit */}
+      <div className="fixed bottom-4 left-0 right-0 z-[1] flex justify-center pointer-events-none">
+        <p className="text-sm text-on-accent bg-black/40 px-3 py-1 rounded-full">
+          Montage by Thankful! ツ
+        </p>
+      </div>
+
       {/* Login card */}
       <div
         style={{
