@@ -21,6 +21,8 @@ export type PlayerMatchInfo = {
   assists: number;
   saves: number;
   shots: number;
+  demos: number;
+  demoed: number;
   discordUsername: string | null;
   teamId: string | null;
   teamName: string | null;
@@ -41,6 +43,7 @@ export type ReplayAnalysis = {
   players: PlayerMatchInfo[];
   badReplay: boolean;
   unmatchedNames: string[];
+  warnings: string[];
   directory: TrackerDirectoryEntry[];
   _rawProps?: Record<string, unknown>;
 };
@@ -136,6 +139,8 @@ export async function analyzeReplayFile(
       assists: p.assists,
       saves: p.saves,
       shots: p.shots,
+      demos: p.demos,
+      demoed: p.demoed,
       discordUsername: match?.username ?? null,
       teamId: match?.teamId ?? null,
       teamName: match?.teamId ? (teamNameById[match.teamId] ?? null) : null,
@@ -176,6 +181,7 @@ export async function analyzeReplayFile(
       players,
       badReplay: unmatchedNames.length > 0,
       unmatchedNames,
+      warnings: replayData.warnings,
       directory: directory.sort((a, b) => a.username.localeCompare(b.username)),
       _rawProps: replayData._rawProps,
     },

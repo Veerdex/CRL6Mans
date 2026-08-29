@@ -171,12 +171,17 @@ export function ReplayTester() {
             </div>
           </div>
 
+          {result.warnings.length > 0 && (
+            <div className="bg-amber-900/20 border border-amber-700/50 rounded-xl px-5 py-4 space-y-1">
+              <p className="text-sm font-semibold text-amber-400">Parser warnings</p>
+              {result.warnings.map((w, i) => (
+                <p key={i} className="text-xs text-amber-300 font-mono">{w}</p>
+              ))}
+            </div>
+          )}
+
           <TeamTable label="Blue Team (team0)" players={team0} color="blue" />
           <TeamTable label="Orange Team (team1)" players={team1} color="orange" />
-
-          <p className="text-xs text-zinc-600 text-center">
-            Demo counts require full network-frame parsing and are not shown here.
-          </p>
 
           <TrackerDirectory entries={result.directory} />
 
@@ -277,12 +282,14 @@ function TeamTable({
             <th className="text-right  px-3 py-2">Assists</th>
             <th className="text-right  px-3 py-2">Saves</th>
             <th className="text-right  px-3 py-2">Shots</th>
+            <th className="text-right  px-3 py-2">Demos</th>
+            <th className="text-right  px-3 py-2">Demoed</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-800/60">
           {players.length === 0 ? (
             <tr>
-              <td colSpan={7} className="px-4 py-4 text-center text-zinc-500 text-xs">
+              <td colSpan={9} className="px-4 py-4 text-center text-zinc-500 text-xs">
                 No players found
               </td>
             </tr>
@@ -316,6 +323,8 @@ function TeamTable({
                 <td className="px-3 py-2.5 text-right tabular-nums text-zinc-200">{p.assists}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums text-zinc-200">{p.saves}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums text-zinc-200">{p.shots}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-zinc-200">{p.demos}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-zinc-200">{p.demoed}</td>
               </tr>
             ))
           )}
