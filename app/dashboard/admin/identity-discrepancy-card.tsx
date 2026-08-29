@@ -19,6 +19,7 @@ export type IdentityDiscrepancyCardData = {
   expectedPlayerLabel: string | null;
   conflictingPlayerLabel: string | null;
   reason: string;
+  replayDownloadUrl: string | null;
 };
 
 const RESOLUTION_LABELS: Record<DiscrepancyResolution, string> = {
@@ -88,6 +89,14 @@ export function IdentityDiscrepancyCard({ discrepancy }: { discrepancy: Identity
             {discrepancy.resolutionType && ` · ${TYPE_LABELS[discrepancy.resolutionType] ?? discrepancy.resolutionType}`}
           </p>
         </div>
+        {discrepancy.replayDownloadUrl && (
+          <a
+            href={discrepancy.replayDownloadUrl}
+            className="shrink-0 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white text-xs font-medium rounded-lg transition-colors"
+          >
+            Download replay
+          </a>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

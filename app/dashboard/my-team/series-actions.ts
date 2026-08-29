@@ -248,9 +248,10 @@ export async function uploadGameReplay(
     return { error: "File too large (max 5 MB)" };
 
   let replayData;
+  let replayBytes: Buffer;
   try {
-    const buf = Buffer.from(await file.arrayBuffer());
-    replayData = parseReplay(buf);
+    replayBytes = Buffer.from(await file.arrayBuffer());
+    replayData = parseReplay(replayBytes);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Failed to parse replay" };
   }
@@ -463,7 +464,7 @@ export async function uploadGameReplay(
   // Identity resolution + certification persistence (Steps 6 + 7). Never
   // blocks this analyze-time call — the hard block, when enabled, happens at
   // series submission via resolveSubmittedGames.
-  await evaluateAndPersistGameCertification({
+  const certResult = await evaluateAndPersistGameCertification({
     matchId,
     gameNumber,
     replayId: replayData.replayId,
@@ -471,6 +472,23 @@ export async function uploadGameReplay(
     stats,
     homeTeamWon,
   });
+
+  // Only keep the raw file for games that failed certification, so an admin
+  // can inspect the original replay on the discrepancy card — certified games
+  // are the common case and storing all of them would burn through the
+  // Supabase Storage free-tier cap for no admin-facing benefit.
+  if (!certResult.certified && replayData.replayId) {
+    const filePath = `${matchId}/${replayData.replayId}.replay`;
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from("match-replays")
+      .upload(filePath, replayBytes, { contentType: "application/octet-stream", upsert: true });
+    if (!uploadError) {
+      await supabaseAdmin
+        .from("replay_identity_certifications")
+        .update({ replay_file_path: filePath })
+        .eq("replay_id", replayData.replayId);
+    }
+  }
 
   return { homeTeamWon, replayId: replayData.replayId, stats };
 }

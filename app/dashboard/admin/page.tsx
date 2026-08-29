@@ -359,9 +359,25 @@ export default async function AdminPage() {
 
   const { data: openDiscrepancyRows } = await supabaseAdmin
     .from("replay_identity_discrepancies")
-    .select("id, match_id, game_number, replay_player_name, replay_team, replay_platform, replay_platform_account_id, identity_source, expected_player_id, conflicting_player_id, reason, evidence_json, created_at")
+    .select("id, match_id, replay_id, game_number, replay_player_name, replay_team, replay_platform, replay_platform_account_id, identity_source, expected_player_id, conflicting_player_id, reason, evidence_json, created_at")
     .eq("status", "open")
     .order("created_at", { ascending: true });
+
+  const discrepancyReplayIds = [...new Set((openDiscrepancyRows ?? []).map(r => r.replay_id).filter((id): id is string => !!id))];
+  const { data: discrepancyCertRows } = discrepancyReplayIds.length
+    ? await supabaseAdmin.from("replay_identity_certifications").select("replay_id, replay_file_path").in("replay_id", discrepancyReplayIds)
+    : { data: [] as { replay_id: string; replay_file_path: string | null }[] };
+  const replayFilePathByReplayId = Object.fromEntries((discrepancyCertRows ?? []).map(r => [r.replay_id, r.replay_file_path]));
+
+  const replayDownloadUrlByReplayId: Record<string, string> = {};
+  await Promise.all(
+    Object.entries(replayFilePathByReplayId)
+      .filter((entry): entry is [string, string] => !!entry[1])
+      .map(async ([replayId, path]) => {
+        const { data } = await supabaseAdmin.storage.from("match-replays").createSignedUrl(path, 3600);
+        if (data?.signedUrl) replayDownloadUrlByReplayId[replayId] = data.signedUrl;
+      }),
+  );
 
   const discrepancyMatchIds = [...new Set((openDiscrepancyRows ?? []).map(r => r.match_id))];
   const matchesUnderReviewCount = discrepancyMatchIds.length;
@@ -412,6 +428,7 @@ export default async function AdminPage() {
       expectedPlayerLabel: discrepancyPlayerLabel(row.expected_player_id),
       conflictingPlayerLabel: discrepancyPlayerLabel(row.conflicting_player_id),
       reason: row.reason,
+      replayDownloadUrl: row.replay_id ? (replayDownloadUrlByReplayId[row.replay_id] ?? null) : null,
     };
   });
 
