@@ -64,7 +64,7 @@ export async function GET(request: Request) {
     .from("clips")
     .select("id, title, url, likes_count")
     .is("archived_at", null)
-    .in("platform", ["youtube", "medal", "streamable"])
+    .in("platform", ["youtube", "medal", "streamable", "twitch"])
     .order("likes_count", { ascending: false })
     .order("created_at", { ascending: true })
     .limit(1)

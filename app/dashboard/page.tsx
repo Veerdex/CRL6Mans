@@ -2,7 +2,10 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { decrypt } from "@/app/lib/session";
+import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { ClipOfWeek } from "@/app/dashboard/media/clip-of-week";
+import type { Clip } from "@/app/dashboard/media/media-feed";
 import DraftCard from "./draft-card";
 import { TeamSignupPanel } from "./team-signup-panel";
 import { TournamentJoinCard } from "./tournament-join-card";
@@ -34,13 +37,13 @@ export default async function DashboardPage({
     return <TournamentDetailView tournamentId={tournamentId} tab={tab} discordId={session.userId} />;
   }
 
-  const [playerRes, settingsRes, draftQueueRes, tournamentsRes, seasonsRes, matchStagesRes, publicSponsors, publicDesigns] = await Promise.all([
+  const [playerRes, settingsRes, draftQueueRes, tournamentsRes, seasonsRes, matchStagesRes, publicSponsors, publicDesigns, moderator] = await Promise.all([
     supabaseAdmin
       .from("players")
       .select("id, status, draft_entered, display_name, must_update_tracker")
       .eq("discord_id", session.userId)
       .single(),
-    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, num_teams, season_format, announcement_text, announcement_destination").single(),
+    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, num_teams, season_format, announcement_text, announcement_destination, clip_of_week_id").single(),
     supabaseAdmin
       .from("players")
       .select("id")
@@ -61,10 +64,44 @@ export default async function DashboardPage({
       .select("stage, round, status"),
     getPublicSponsors(),
     getPublicDesigns(),
+    isModerator(session.userId),
   ]);
 
   const player = playerRes.data;
   const settings = settingsRes.data;
+  type RawClipOfWeekRow = {
+    id: string;
+    title: string;
+    url: string;
+    embed_url: string;
+    thumbnail_url: string | null;
+    platform: Clip["platform"];
+    likes_count: number;
+    created_at: string;
+    players: { username: string; display_name: string | null } | null;
+  };
+  const { data: clipOfWeekRow } = settings?.clip_of_week_id
+    ? await supabaseAdmin
+        .from("clips")
+        .select("id, title, url, embed_url, thumbnail_url, platform, likes_count, created_at, players!clips_player_id_fkey(username, display_name)")
+        .eq("id", settings.clip_of_week_id)
+        .single()
+    : { data: null as RawClipOfWeekRow | null };
+  const rawClipOfWeek = clipOfWeekRow as unknown as RawClipOfWeekRow | null;
+  const clipOfWeek: Clip | null = rawClipOfWeek
+    ? {
+        id: rawClipOfWeek.id,
+        title: rawClipOfWeek.title,
+        url: rawClipOfWeek.url,
+        embed_url: rawClipOfWeek.embed_url,
+        thumbnail_url: rawClipOfWeek.thumbnail_url,
+        platform: rawClipOfWeek.platform,
+        likes_count: rawClipOfWeek.likes_count,
+        created_at: rawClipOfWeek.created_at,
+        submitted_by_username: rawClipOfWeek.players?.username ?? null,
+        submitted_by_display_name: rawClipOfWeek.players?.display_name ?? null,
+      }
+    : null;
   const draftQueue = draftQueueRes.data ?? [];
   const tournaments = tournamentsRes.data ?? [];
   const sponsorById = new Map(publicSponsors.map((s) => [s.id, s]));
@@ -209,6 +246,8 @@ export default async function DashboardPage({
         <span className="text-sm font-semibold text-white">6 Mans Queue Leaderboard</span>
         <span className="text-zinc-500">↗</span>
       </a>
+
+      <ClipOfWeek clip={clipOfWeek} isModerator={moderator} />
 
       {/* Active-event card — covers both a tournament-driven active event and a legacy
           manually-run active season (the two are mutually exclusive states of the same

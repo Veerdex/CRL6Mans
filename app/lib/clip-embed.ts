@@ -1,4 +1,4 @@
-export type ClipPlatform = "youtube" | "medal" | "streamable" | "tiktok" | "twitter" | "instagram";
+export type ClipPlatform = "youtube" | "medal" | "streamable" | "twitch" | "tiktok" | "twitter" | "instagram";
 
 // tiktok/twitter/instagram have no plain iframe-embeddable player (their
 // official embeds either need a third-party <script> widget or, for
@@ -19,6 +19,7 @@ export const ALLOWED_CLIP_HOSTS = [
   "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be",
   "medal.tv", "www.medal.tv",
   "streamable.com",
+  "twitch.tv", "www.twitch.tv", "m.twitch.tv", "clips.twitch.tv",
   "tiktok.com", "www.tiktok.com", "vm.tiktok.com",
   "twitter.com", "www.twitter.com", "x.com", "www.x.com",
   "instagram.com", "www.instagram.com",
@@ -27,6 +28,10 @@ export const ALLOWED_CLIP_HOSTS = [
 const YOUTUBE_ID_PATTERN = /(?:youtube\.com\/watch\?v=|youtube\.com\/embed\/|youtube\.com\/shorts\/|youtu\.be\/)([\w-]{11})/;
 const MEDAL_ID_PATTERN = /medal\.tv\/(?:games\/[\w-]+\/)?clips\/([\w-]+)/;
 const STREAMABLE_ID_PATTERN = /streamable\.com\/([\w-]+)/;
+// Matches both the standalone clips.twitch.tv/<slug> share link and the
+// twitch.tv/<channel>/clip/<slug> permalink shape (what the "Copy Link"
+// button on a clip page actually gives you).
+const TWITCH_ID_PATTERN = /(?:clips\.twitch\.tv\/(?:embed\?clip=)?|twitch\.tv\/\w+\/clip\/)([\w-]+)/;
 
 const TIKTOK_HOSTS = new Set(["tiktok.com", "www.tiktok.com", "vm.tiktok.com"]);
 const TWITTER_HOSTS = new Set(["twitter.com", "www.twitter.com", "x.com", "www.x.com"]);
@@ -84,6 +89,20 @@ export function classifyClipUrl(rawUrl: string): ClassifiedClip | null {
     };
   }
 
+  const twitchMatch = href.match(TWITCH_ID_PATTERN);
+  if (twitchMatch) {
+    const id = twitchMatch[1];
+    return {
+      platform: "twitch",
+      normalizedUrl: `https://clips.twitch.tv/${id}`,
+      // Twitch requires a `parent=<embedding hostname>` param that it
+      // validates server-side, and that hostname differs between local dev
+      // and production — so it can't be baked in here. resolveClipEmbedUrl
+      // appends it at render time instead.
+      embedUrl: `https://clips.twitch.tv/embed?clip=${id}`,
+    };
+  }
+
   // Link-only platforms (no iframe-embeddable player) — normalize to a bare
   // origin + path (drop query/fragment, e.g. tracking params) so the same
   // post can't be resubmitted this week under a slightly different URL.
@@ -103,4 +122,18 @@ export function classifyClipUrl(rawUrl: string): ClassifiedClip | null {
   }
 
   return null;
+}
+
+// Twitch's embed API rejects a clip iframe unless its `parent` query param
+// matches the actual embedding page's hostname, so unlike the other
+// platforms' embed_url this can't be precomputed once at submission time.
+// Takes the hostname as an explicit argument (rather than reading
+// `window.location` itself) so it renders identically on the server and on
+// the client's first paint — callers add the real hostname client-side only
+// after mount (see useResolvedEmbedUrl below), which avoids a hydration
+// mismatch. Called from both clip-of-week.tsx and media-feed.tsx so the two
+// stay consistent.
+export function resolveClipEmbedUrl(clip: { platform: ClipPlatform; embed_url: string }, host: string | null = null): string {
+  if (clip.platform !== "twitch") return clip.embed_url;
+  return host ? `${clip.embed_url}&parent=${host}` : clip.embed_url;
 }

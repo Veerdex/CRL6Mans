@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
-import { submitClip, toggleClipLike, deleteClip } from "@/app/dashboard/media/actions";
+import { submitClip, toggleClipLike, deleteClip, setClipOfWeek, toggleClipConfirmations } from "@/app/dashboard/media/actions";
 import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
-import { isLinkOnlyPlatform, type ClipPlatform } from "@/app/lib/clip-embed";
+import { PlayerName } from "@/app/dashboard/player-name";
+import { isLinkOnlyPlatform, resolveClipEmbedUrl, type ClipPlatform } from "@/app/lib/clip-embed";
 
 const INITIAL_BATCH = 20;
 const BATCH_SIZE = 10;
@@ -17,6 +18,8 @@ export type Clip = {
   platform: ClipPlatform;
   likes_count: number;
   created_at: string;
+  submitted_by_username: string | null;
+  submitted_by_display_name: string | null;
 };
 
 const LINK_ONLY_LABELS: Record<string, string> = {
@@ -41,7 +44,15 @@ function ClipCard({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [likeError, setLikeError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [cowError, setCowError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  // Twitch embeds need the page's real hostname, but reading it during the
+  // initial render would differ between server and client and cause a
+  // hydration mismatch — so it starts null (matching the server) and is
+  // filled in after mount.
+  const [host, setHost] = useState<string | null>(null);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of window.location, not an ongoing sync
+  useEffect(() => setHost(window.location.hostname), []);
 
   // Reflects the toggle instantly instead of waiting on the server action +
   // revalidatePath round trip. Automatically reverts to the real liked/
@@ -76,6 +87,14 @@ function ClipCard({
     });
   }
 
+  function handleSetClipOfWeek() {
+    setCowError(null);
+    startTransition(async () => {
+      const result = await setClipOfWeek(clip.id);
+      if (result?.error) setCowError(result.error);
+    });
+  }
+
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
       {isLinkOnlyPlatform(clip.platform) ? (
@@ -106,10 +125,18 @@ function ClipCard({
         </a>
       ) : (
         <div className="aspect-video w-full overflow-hidden rounded-lg border border-zinc-800 bg-black">
-          <iframe src={clip.embed_url} className="w-full h-full" allowFullScreen />
+          <iframe src={resolveClipEmbedUrl(clip, host)} className="w-full h-full" allowFullScreen />
         </div>
       )}
       <p className="text-white font-medium">{clip.title}</p>
+      <p className="text-xs text-zinc-500">
+        Posted by{" "}
+        {clip.submitted_by_username ? (
+          <PlayerName displayName={clip.submitted_by_display_name} username={clip.submitted_by_username} className="text-zinc-400" />
+        ) : (
+          "a deleted player"
+        )}
+      </p>
       <div className="flex items-center justify-between">
         <button
           onClick={handleLike}
@@ -124,19 +151,31 @@ function ClipCard({
           {optimisticLike.likes_count}
         </button>
         {isModerator && (
-          <button
-            onClick={() => setConfirmOpen(true)}
-            className="text-zinc-500 hover:text-red-400 transition-colors"
-            aria-label="Delete clip"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-3">
+            {!isLinkOnlyPlatform(clip.platform) && (
+              <button
+                onClick={handleSetClipOfWeek}
+                disabled={isPending}
+                className="text-xs font-medium text-zinc-500 hover:text-amber-400 transition-colors disabled:opacity-40"
+              >
+                Set as Clip of the Week
+              </button>
+            )}
+            <button
+              onClick={() => setConfirmOpen(true)}
+              className="text-zinc-500 hover:text-red-400 transition-colors"
+              aria-label="Delete clip"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              </svg>
+            </button>
+          </div>
         )}
       </div>
       {likeError && <p className="text-xs text-red-400">{likeError}</p>}
+      {cowError && <p className="text-xs text-red-400">{cowError}</p>}
 
       <ClipConfirmModal
         open={confirmOpen}
@@ -155,19 +194,33 @@ export function MediaFeed({
   likedClipIds,
   canParticipate,
   isModerator,
+  confirmationsEnabled,
 }: {
   clips: Clip[];
   likedClipIds: string[];
   canParticipate: boolean;
   isModerator: boolean;
+  confirmationsEnabled: boolean;
 }) {
   const [sortMode, setSortMode] = useState<SortMode>("chronological");
   const [search, setSearch] = useState("");
   const [onlyLiked, setOnlyLiked] = useState(false);
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
+  const [durationConfirmed, setDurationConfirmed] = useState(false);
+  const [appropriateConfirmed, setAppropriateConfirmed] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isToggling, startToggleTransition] = useTransition();
+
+  function handleToggleConfirmations() {
+    setToggleError(null);
+    startToggleTransition(async () => {
+      const result = await toggleClipConfirmations();
+      if (result?.error) setToggleError(result.error);
+    });
+  }
 
   const likedSet = useMemo(() => new Set(likedClipIds), [likedClipIds]);
 
@@ -219,13 +272,15 @@ export function MediaFeed({
     e.preventDefault();
     setSubmitError(null);
     startTransition(async () => {
-      const result = await submitClip(title, url);
+      const result = await submitClip(title, url, durationConfirmed, appropriateConfirmed);
       if (result?.error) {
         setSubmitError(result.error);
         return;
       }
       setTitle("");
       setUrl("");
+      setDurationConfirmed(false);
+      setAppropriateConfirmed(false);
     });
   }
 
@@ -249,10 +304,47 @@ export function MediaFeed({
             placeholder="https://youtube.com/watch?v=..."
             className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
           />
+          {confirmationsEnabled && (
+            <>
+              <label className="flex items-center gap-2 text-sm text-zinc-300 select-none">
+                <input
+                  type="checkbox"
+                  checked={durationConfirmed}
+                  onChange={(e) => setDurationConfirmed(e.target.checked)}
+                  required
+                  className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+                I confirm this clip is 60 seconds or shorter
+              </label>
+              <label className="flex items-center gap-2 text-sm text-zinc-300 select-none">
+                <input
+                  type="checkbox"
+                  checked={appropriateConfirmed}
+                  onChange={(e) => setAppropriateConfirmed(e.target.checked)}
+                  required
+                  className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+                I confirm this clip is appropriate for the league community
+              </label>
+            </>
+          )}
+          {isModerator && (
+            <div>
+              <button
+                type="button"
+                onClick={handleToggleConfirmations}
+                disabled={isToggling}
+                className="text-xs font-medium text-zinc-500 hover:text-amber-400 transition-colors disabled:opacity-40"
+              >
+                {confirmationsEnabled ? "Disable" : "Enable"} confirmation checkboxes
+              </button>
+              {toggleError && <p className="text-xs text-red-400">{toggleError}</p>}
+            </div>
+          )}
           {submitError && <p className="text-sm text-red-400">{submitError}</p>}
           <button
             type="submit"
-            disabled={isPending || !title.trim() || !url.trim()}
+            disabled={isPending || !title.trim() || !url.trim() || (confirmationsEnabled && (!durationConfirmed || !appropriateConfirmed))}
             className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
           >
             {isPending ? "Submitting…" : "Submit clip"}
