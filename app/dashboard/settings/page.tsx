@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -122,6 +123,13 @@ export default async function SettingsPage({
           ? "MMR and tracker changes require admin approval. Substitute availability is applied instantly."
           : "Notifications, nickname, platform account claims, and MMR/tracker edits unlock once your registration is approved."}
       </p>
+      <Link
+        href="/dashboard/help"
+        className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 mb-4 hover:border-zinc-700 transition-colors"
+      >
+        <span className="text-sm font-semibold text-white">Help &amp; FAQ</span>
+        <span className="text-zinc-500">↗</span>
+      </Link>
       <div className="mb-4">
         <ThemeToggle
           initial={
