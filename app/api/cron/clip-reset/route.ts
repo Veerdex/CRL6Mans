@@ -40,7 +40,20 @@ export async function GET(request: Request) {
     .single();
   const lastResetAt = settings?.last_clip_reset_at ? new Date(settings.last_clip_reset_at as string) : null;
 
-  if (lastResetAt && lastResetAt >= boundary) {
+  // First-ever run (or a fresh setup): seed the baseline to the boundary that
+  // already passed instead of treating it as immediately due. Without this, a
+  // null last_clip_reset_at would crown on the very next cron tick regardless
+  // of how recently clips were submitted, rather than waiting for the next
+  // real Sunday.
+  if (!lastResetAt) {
+    await supabaseAdmin
+      .from("league_settings")
+      .update({ last_clip_reset_at: boundary.toISOString() })
+      .not("id", "is", null);
+    return NextResponse.json({ ok: true, fired });
+  }
+
+  if (lastResetAt >= boundary) {
     return NextResponse.json({ ok: true, fired });
   }
 
