@@ -259,6 +259,35 @@ export async function removeSponsorMember(memberId: string): Promise<{ ok?: bool
   return { ok: true };
 }
 
+// `confirmedMemberCount` must match the sponsor's current member count at delete time —
+// guards against deleting members the admin never saw confirmed (e.g. someone joined via
+// the invite link between page load and the delete click). `sponsor_members` cascades on
+// delete, so this is the only chance to catch a stale count before those rows are gone.
+export async function deleteSponsor(
+  sponsorId: string,
+  confirmedMemberCount: number
+): Promise<{ ok?: boolean; error?: string }> {
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit sponsors." };
+
+  const { count } = await supabaseAdmin
+    .from("sponsor_members")
+    .select("id", { count: "exact", head: true })
+    .eq("sponsor_id", sponsorId);
+  if ((count ?? 0) !== confirmedMemberCount) {
+    return { error: "Member count changed — refresh and try again." };
+  }
+
+  const { error } = await supabaseAdmin.from("sponsors").delete().eq("id", sponsorId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/sponsors");
+  revalidatePath("/dashboard", "layout");
+  return { ok: true };
+}
+
 export type TabPlacement = {
   topNavSponsorId: string | null;
   sideNavSponsorId: string | null;

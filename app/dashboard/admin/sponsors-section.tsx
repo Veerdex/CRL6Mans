@@ -10,6 +10,7 @@ import {
   updateSponsorDetails,
   updateContentCrop,
   toggleSponsorStatus,
+  deleteSponsor,
   removeSponsorMember,
   updateTabPlacement,
   updateSeasonSponsor,
@@ -184,6 +185,7 @@ function SponsorCard({ sponsor, themes }: { sponsor: Sponsor; themes: Theme[] })
   const [promoCopied, setPromoCopied] = useState(false);
   const [maxUsesInput, setMaxUsesInput] = useState(String(sponsor.max_uses));
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const [logoUrl, setLogoUrl] = useState(sponsor.logo_url ?? "");
   const [contentItems, setContentItems] = useState<ContentItem[]>(() => {
@@ -377,6 +379,14 @@ function SponsorCard({ sponsor, themes }: { sponsor: Sponsor; themes: Theme[] })
     });
   }
 
+  function handleDelete() {
+    setError(null);
+    startTransition(async () => {
+      const res = await deleteSponsor(sponsor.id, sponsor.members.length);
+      if (res.error) setError(res.error);
+    });
+  }
+
   return (
     <div className="border border-zinc-800 rounded-xl p-4 space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -392,6 +402,28 @@ function SponsorCard({ sponsor, themes }: { sponsor: Sponsor; themes: Theme[] })
         >
           {sponsor.status === "active" ? "Disable" : "Enable"}
         </button>
+        {confirmDelete ? (
+          <>
+            <span className="text-xs text-red-400">
+              {sponsor.members.length > 0
+                ? `Delete sponsor and remove ${sponsor.members.length} member${sponsor.members.length === 1 ? "" : "s"}?`
+                : "Delete this sponsor?"}
+            </span>
+            <button onClick={handleDelete} disabled={isPending} className="text-xs text-red-400 underline">
+              Confirm delete
+            </button>
+            <button onClick={() => setConfirmDelete(false)} className="text-xs text-zinc-500 underline">
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="text-xs text-red-500 hover:text-red-400 transition-colors"
+          >
+            Delete
+          </button>
+        )}
       </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}

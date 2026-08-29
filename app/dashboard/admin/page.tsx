@@ -995,6 +995,7 @@ export default async function AdminPage() {
           label: "Sponsors",
           subTabs: [
             { id: "sponsors-list", label: "Sponsors" },
+            { id: "designs", label: "Designs" },
             { id: "tab-manager", label: "Tab Manager" },
             { id: "theme-designer", label: "Theme Designer" },
           ],
