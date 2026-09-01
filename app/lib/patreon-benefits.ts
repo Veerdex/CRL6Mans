@@ -10,4 +10,25 @@ export type PatreonBenefit = {
   description: string;
 };
 
-export const PATREON_BENEFITS: PatreonBenefit[] = [];
+export const PATREON_BENEFITS: PatreonBenefit[] = [
+  {
+    id: "colored-username",
+    title: "Colored username",
+    description: "Custom name color shown on leaderboards, rosters, and stats pages.",
+  },
+  {
+    id: "supporter-badge",
+    title: "Supporter badge",
+    description: "A small badge/icon next to the player's name marking them as a supporter.",
+  },
+  {
+    id: "discord-role",
+    title: "Discord role",
+    description: "A custom Discord role (and color) granted via the bot.",
+  },
+  {
+    id: "featured-on-support-page",
+    title: "Featured on Support page",
+    description: "Listed/highlighted in the \"Our Patrons\" section of /dashboard/support.",
+  },
+];
