@@ -1,13 +1,20 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { setTierBenefits } from "./patreon-tiers-actions";
+import { setTierBenefits, type LiveTier } from "./patreon-tiers-actions";
 import type { PatreonBenefit } from "@/app/lib/patreon-benefits";
 
-function TierCard({ tierTitle, benefits, assignedIds }: { tierTitle: string; benefits: PatreonBenefit[]; assignedIds: string[] }) {
+function formatTierPrice(amountCents: number | null): string | null {
+  if (amountCents === null) return null;
+  const dollars = amountCents / 100;
+  return `$${dollars % 1 === 0 ? dollars.toFixed(0) : dollars.toFixed(2)}`;
+}
+
+function TierCard({ tier, benefits, assignedIds }: { tier: LiveTier; benefits: PatreonBenefit[]; assignedIds: string[] }) {
   const [selected, setSelected] = useState<string[]>(assignedIds);
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
+  const price = formatTierPrice(tier.amountCents);
 
   function toggle(id: string) {
     setSelected((prev) => (prev.includes(id) ? prev.filter((b) => b !== id) : [...prev, id]));
@@ -16,7 +23,7 @@ function TierCard({ tierTitle, benefits, assignedIds }: { tierTitle: string; ben
   function handleSave() {
     setFeedback(null);
     startTransition(async () => {
-      const res = await setTierBenefits(tierTitle, selected);
+      const res = await setTierBenefits(tier.title, selected);
       if (res.error) setFeedback({ msg: res.error, ok: false });
       else setFeedback({ msg: "Saved!", ok: true });
       setTimeout(() => setFeedback(null), 3000);
@@ -25,7 +32,10 @@ function TierCard({ tierTitle, benefits, assignedIds }: { tierTitle: string; ben
 
   return (
     <div className="border border-zinc-800 rounded-xl p-4 space-y-3">
-      <p className="text-sm font-semibold text-white">{tierTitle}</p>
+      <p className="text-sm font-semibold text-white">
+        {tier.title}
+        {price && <span className="text-zinc-500 font-normal"> ({price})</span>}
+      </p>
       <div className="space-y-1.5">
         {benefits.map((b) => (
           <label
@@ -55,11 +65,11 @@ function TierCard({ tierTitle, benefits, assignedIds }: { tierTitle: string; ben
 }
 
 export function PatreonTiersSection({
-  tierTitles,
+  tiers,
   benefits,
   tierBenefitMap,
 }: {
-  tierTitles: string[];
+  tiers: LiveTier[];
   benefits: PatreonBenefit[];
   tierBenefitMap: Record<string, string[]>;
 }) {
@@ -75,12 +85,12 @@ export function PatreonTiersSection({
           No benefits defined yet — add them in <code className="text-zinc-500">app/lib/patreon-benefits.ts</code>, then come
           back here to assign them to tiers.
         </p>
-      ) : tierTitles.length === 0 ? (
+      ) : tiers.length === 0 ? (
         <p className="text-xs text-zinc-600">No tiers found on Patreon yet.</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {tierTitles.map((title) => (
-            <TierCard key={title} tierTitle={title} benefits={benefits} assignedIds={tierBenefitMap[title] ?? []} />
+          {tiers.map((tier) => (
+            <TierCard key={tier.title} tier={tier} benefits={benefits} assignedIds={tierBenefitMap[tier.title] ?? []} />
           ))}
         </div>
       )}

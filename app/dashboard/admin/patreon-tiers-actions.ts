@@ -15,6 +15,15 @@ async function getSession() {
   return decrypt(cookieStore.get("session")?.value);
 }
 
+export type LiveTier = { title: string; amountCents: number | null };
+
+// Highest price first, so the admin sees the most valuable tier at the top;
+// ties (or unknown prices, e.g. from the self-linked-accounts fallback) break
+// alphabetically for a stable order.
+function sortTiersByPriceDesc(tiers: LiveTier[]): LiveTier[] {
+  return tiers.sort((a, b) => (b.amountCents ?? -1) - (a.amountCents ?? -1) || a.title.localeCompare(b.title));
+}
+
 // The tiers themselves aren't stored here — they're whatever titles the
 // campaign actually has configured on Patreon. Prefer the campaign's own tier
 // list (every tier that exists, even brand-new ones with zero subscribers yet
@@ -22,7 +31,7 @@ async function getSession() {
 // back to the member list (tiers with at least one patron) if that fetch
 // fails, then to self-linked accounts only if the campaign isn't connected at
 // all. Mirrors the fallback in patreon-section.tsx's PatreonAdminSection.
-export async function getLiveTierTitles(): Promise<string[]> {
+export async function getLiveTiers(): Promise<LiveTier[]> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
     .select("patreon_campaign_id, patreon_campaign_refresh_token")
@@ -32,17 +41,24 @@ export async function getLiveTierTitles(): Promise<string[]> {
     const fresh = await getFreshCampaignAccessToken();
     if (fresh) {
       const tiers = await fetchCampaignTiers(fresh.accessToken, fresh.campaignId);
-      const tierTitles = new Set((tiers ?? []).map((t) => t.title).filter((t): t is string => !!t));
-      if (tierTitles.size > 0) return Array.from(tierTitles).sort();
+      const byTitle = new Map<string, number | null>();
+      for (const t of tiers ?? []) if (t.title) byTitle.set(t.title, t.amountCents);
+      if (byTitle.size > 0) {
+        return sortTiersByPriceDesc(Array.from(byTitle, ([title, amountCents]) => ({ title, amountCents })));
+      }
 
       const { members } = await fetchCampaignMembers(fresh.accessToken, fresh.campaignId);
-      const memberTitles = new Set(members.map((m) => m.tierTitle).filter((t): t is string => !!t));
-      if (memberTitles.size > 0) return Array.from(memberTitles).sort();
+      const byMemberTitle = new Map<string, number | null>();
+      for (const m of members) if (m.tierTitle) byMemberTitle.set(m.tierTitle, m.tierAmountCents);
+      if (byMemberTitle.size > 0) {
+        return sortTiersByPriceDesc(Array.from(byMemberTitle, ([title, amountCents]) => ({ title, amountCents })));
+      }
     }
   }
 
   const { data } = await supabaseAdmin.from("accounts").select("patreon_tier_title").not("patreon_tier_title", "is", null);
-  return Array.from(new Set((data ?? []).map((r) => r.patreon_tier_title as string))).sort();
+  const titles = Array.from(new Set((data ?? []).map((r) => r.patreon_tier_title as string)));
+  return sortTiersByPriceDesc(titles.map((title) => ({ title, amountCents: null })));
 }
 
 // tier title -> assigned benefit ids

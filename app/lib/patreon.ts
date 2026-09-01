@@ -121,7 +121,7 @@ export type PatreonSupporterStatus = {
   lifetimeCents: number | null;
 };
 
-function pickHighestTier(memberRes: JsonApiResource, included: JsonApiResource[]): string | null {
+function pickHighestTier(memberRes: JsonApiResource, included: JsonApiResource[]): { title: string | null; amountCents: number | null } | null {
   const tierRel = memberRes.relationships?.currently_entitled_tiers?.data;
   const tierRefs = Array.isArray(tierRel) ? tierRel : tierRel ? [tierRel] : [];
   const tiers = tierRefs
@@ -131,7 +131,10 @@ function pickHighestTier(memberRes: JsonApiResource, included: JsonApiResource[]
   const best = tiers.reduce((a, b) =>
     ((b.attributes?.amount_cents as number) ?? 0) > ((a.attributes?.amount_cents as number) ?? 0) ? b : a
   );
-  return (best.attributes?.title as string | undefined) ?? null;
+  return {
+    title: (best.attributes?.title as string | undefined) ?? null,
+    amountCents: (best.attributes?.amount_cents as number | undefined) ?? null,
+  };
 }
 
 // Fetches the connected supporter's own identity + (if PATREON_SUPPORTER_SCOPE
@@ -165,7 +168,7 @@ export async function fetchPatreonIdentity(accessToken: string): Promise<Patreon
     patreonUserId,
     memberId: member.id,
     status: (member.attributes?.patron_status as PatreonMemberStatus | undefined) ?? null,
-    tierTitle: pickHighestTier(member, included),
+    tierTitle: pickHighestTier(member, included)?.title ?? null,
     entitledCents: (member.attributes?.currently_entitled_amount_cents as number | undefined) ?? null,
     lifetimeCents: (member.attributes?.campaign_lifetime_support_cents as number | undefined) ?? null,
   };
@@ -186,6 +189,7 @@ export type PatreonCampaignMember = {
   fullName: string | null;
   status: PatreonMemberStatus | null;
   tierTitle: string | null;
+  tierAmountCents: number | null;
   entitledCents: number | null;
   lifetimeCents: number | null;
 };
@@ -248,12 +252,14 @@ export async function fetchCampaignMembers(accessToken: string, campaignId: stri
     for (const m of doc.data) {
       const userRel = m.relationships?.user?.data;
       const userId = !Array.isArray(userRel) ? (userRel?.id ?? null) : null;
+      const highestTier = pickHighestTier(m, included);
       members.push({
         memberId: m.id,
         patreonUserId: userId,
         fullName: (m.attributes?.full_name as string | undefined) ?? null,
         status: (m.attributes?.patron_status as PatreonMemberStatus | undefined) ?? null,
-        tierTitle: pickHighestTier(m, included),
+        tierTitle: highestTier?.title ?? null,
+        tierAmountCents: highestTier?.amountCents ?? null,
         entitledCents: (m.attributes?.currently_entitled_amount_cents as number | undefined) ?? null,
         lifetimeCents: (m.attributes?.campaign_lifetime_support_cents as number | undefined) ?? null,
       });

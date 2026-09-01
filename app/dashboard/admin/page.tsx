@@ -44,7 +44,7 @@ import {
   TabVisitsSection,
 } from "./data-section";
 import { PatreonAdminSection } from "./patreon-section";
-import { getLiveTierTitles, getTierBenefitMap } from "./patreon-tiers-actions";
+import { getLiveTiers, getTierBenefitMap } from "./patreon-tiers-actions";
 import { PatreonTiersSection } from "./patreon-tiers-section";
 import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
 import { StorageUsageSection } from "./storage-section";
@@ -92,16 +92,16 @@ async function SponsorsSection({ patreonUrl }: { patreonUrl: string | null }) {
 }
 
 async function PatreonTiersAdminSection() {
-  const [tierTitles, tierBenefitMap] = await Promise.all([getLiveTierTitles(), getTierBenefitMap()]);
+  const [tiers, tierBenefitMap] = await Promise.all([getLiveTiers(), getTierBenefitMap()]);
   return (
     <AdminSubSection
       sectionId="data"
       tabId="patreon-tiers"
       title="Tiers & Benefits"
-      value={tierTitles.length}
+      value={tiers.length}
       description="Tiers are pulled live from the Patreon campaign. Benefits are a hardcoded catalog — pick which ones each tier includes."
     >
-      <PatreonTiersSection tierTitles={tierTitles} benefits={PATREON_BENEFITS} tierBenefitMap={tierBenefitMap} />
+      <PatreonTiersSection tiers={tiers} benefits={PATREON_BENEFITS} tierBenefitMap={tierBenefitMap} />
     </AdminSubSection>
   );
 }
