@@ -199,6 +199,32 @@ export type PatreonCampaignMembersResult = {
   complete: boolean;
 };
 
+export type PatreonCampaignTier = {
+  id: string;
+  title: string | null;
+  amountCents: number | null;
+};
+
+// All tiers configured on the campaign, regardless of whether anyone has
+// subscribed to them yet — unlike fetchCampaignMembers, which can only see a
+// tier once a real patron is entitled to it. This is what lets admins assign
+// benefits to a brand-new tier before it has any subscribers.
+export async function fetchCampaignTiers(accessToken: string, campaignId: string): Promise<PatreonCampaignTier[] | null> {
+  const fields = new URLSearchParams({
+    include: "tiers",
+    "fields[tier]": "title,amount_cents",
+  });
+  const doc = await patreonGet(`/campaigns/${campaignId}?${fields}`, accessToken);
+  if (!doc) return null;
+  return (doc.included ?? [])
+    .filter((r) => r.type === "tier")
+    .map((t) => ({
+      id: t.id,
+      title: (t.attributes?.title as string | undefined) ?? null,
+      amountCents: (t.attributes?.amount_cents as number | undefined) ?? null,
+    }));
+}
+
 // Full campaign-wide member list, for the admin-only view — this is the only
 // call site that needs creator-level scope, and it never attributes a member
 // to a CRL account by name/email; that link only ever comes from the

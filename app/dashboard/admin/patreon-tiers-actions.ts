@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { fetchCampaignMembers } from "@/app/lib/patreon";
+import { fetchCampaignMembers, fetchCampaignTiers } from "@/app/lib/patreon";
 import { getFreshCampaignAccessToken } from "@/app/lib/patreon-sync";
 import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
 
@@ -16,10 +16,12 @@ async function getSession() {
 }
 
 // The tiers themselves aren't stored here — they're whatever titles the
-// campaign actually has configured on Patreon. Prefer the full campaign
-// member list (every tier, even ones with zero linked CRL accounts); fall
-// back to self-linked accounts only if the campaign isn't connected or the
-// fetch fails. Mirrors the fallback in patreon-section.tsx's PatreonAdminSection.
+// campaign actually has configured on Patreon. Prefer the campaign's own tier
+// list (every tier that exists, even brand-new ones with zero subscribers yet
+// — this is what lets admins assign benefits before anyone has joined); fall
+// back to the member list (tiers with at least one patron) if that fetch
+// fails, then to self-linked accounts only if the campaign isn't connected at
+// all. Mirrors the fallback in patreon-section.tsx's PatreonAdminSection.
 export async function getLiveTierTitles(): Promise<string[]> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
@@ -29,9 +31,13 @@ export async function getLiveTierTitles(): Promise<string[]> {
   if (settings?.patreon_campaign_id && settings?.patreon_campaign_refresh_token) {
     const fresh = await getFreshCampaignAccessToken();
     if (fresh) {
+      const tiers = await fetchCampaignTiers(fresh.accessToken, fresh.campaignId);
+      const tierTitles = new Set((tiers ?? []).map((t) => t.title).filter((t): t is string => !!t));
+      if (tierTitles.size > 0) return Array.from(tierTitles).sort();
+
       const { members } = await fetchCampaignMembers(fresh.accessToken, fresh.campaignId);
-      const titles = new Set(members.map((m) => m.tierTitle).filter((t): t is string => !!t));
-      if (titles.size > 0) return Array.from(titles).sort();
+      const memberTitles = new Set(members.map((m) => m.tierTitle).filter((t): t is string => !!t));
+      if (memberTitles.size > 0) return Array.from(memberTitles).sort();
     }
   }
 
