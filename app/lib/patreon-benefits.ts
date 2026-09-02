@@ -13,13 +13,13 @@ export type PatreonBenefit = {
 export const PATREON_BENEFITS: PatreonBenefit[] = [
   {
     id: "colored-username",
-    title: "Colored username",
+    title: "Colored Name",
     description: "Custom name color shown on leaderboards, rosters, and stats pages.",
   },
   {
     id: "supporter-badge",
-    title: "Supporter badge",
-    description: "A small badge/icon next to the player's name marking them as a supporter.",
+    title: "Supporter Title",
+    description: "A text title displayed next to the player's name (e.g. \"Supporter\").",
   },
   {
     id: "discord-role",
@@ -28,7 +28,7 @@ export const PATREON_BENEFITS: PatreonBenefit[] = [
   },
   {
     id: "featured-on-support-page",
-    title: "Featured on Support page",
-    description: "Listed/highlighted in the \"Our Patrons\" section of /dashboard/support.",
+    title: "Name listed on Support Us tab",
+    description: "Player's name shown in the \"Our Patrons\" list on /dashboard/support — size (small/medium/large) varies by tier.",
   },
 ];
