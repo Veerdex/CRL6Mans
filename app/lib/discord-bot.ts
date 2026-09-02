@@ -129,6 +129,23 @@ async function setRegisteredRoleId(userId: string, roleId: string) {
   );
 }
 
+// Stores the role granted to Patreon supporters (the "Discord role" tier benefit).
+// This command only identifies which Discord role to use — it doesn't grant/revoke
+// it from anyone yet; that sync is separate follow-up work.
+async function setSupporterRoleId(userId: string, roleId: string) {
+  const denied = await directorGuard(userId);
+  if (denied) return denied;
+  if (!roleId) return ephemeralReply("❌ You must specify a role.");
+  const { error } = await supabaseAdmin.from("league_settings")
+    .update({ supporter_role_id: roleId, updated_at: new Date().toISOString() })
+    .not("id", "is", null);
+  if (error) return ephemeralReply(`❌ Failed to save: ${error.message}`);
+  return ephemeralReply(
+    `✅ Supporter role set to <@&${roleId}>.\n` +
+    `Make sure the bot's own role is **above** it in the server's role list, or Discord will reject the assignment.`
+  );
+}
+
 // Returns a Unix timestamp (seconds) for the next occurrence of targetDay at hour:minute PT.
 // Approximates PT as UTC-7 (PDT). Off by 1h during PST but acceptable for scheduling.
 function nextWeekdayTimestamp(targetDay: number, hourPT: number, minutePT: number): number {
@@ -1673,7 +1690,7 @@ async function adminChecklist(userId: string) {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("rules_channel_id, announcement_channel_id, draft_channel_id, moderator_role_id, director_role_id, ceo_role_id, registered_role_id")
+    .select("rules_channel_id, announcement_channel_id, draft_channel_id, moderator_role_id, director_role_id, ceo_role_id, registered_role_id, supporter_role_id")
     .single();
 
   const { count: teamCount } = await supabaseAdmin
@@ -1688,6 +1705,7 @@ async function adminChecklist(userId: string) {
   if (!settings?.director_role_id) missing.push("Director role — run `/admin setdirectorid`");
   if (!settings?.ceo_role_id) missing.push("CEO role — run `/admin setceoid`");
   if (!settings?.registered_role_id) missing.push("Registered role — run `/admin setregisteredrole`");
+  if (!settings?.supporter_role_id) missing.push("Supporter role — run `/admin setsupporterrole`");
   if (!teamCount) missing.push("No team slots exist yet — add them from the dashboard admin panel");
 
   if (!missing.length) return ephemeralReply("✅ Nothing missing — the server looks fully configured.");
@@ -1710,6 +1728,7 @@ async function adminDisconnect(userId: string, confirm: string) {
       rules_channel_id: null, announcement_channel_id: null, match_category_anchor_id: null,
       match_category_id: null, draft_channel_id: null, moderator_role_id: null,
       director_role_id: null, ceo_role_id: null, registered_role_id: null,
+      supporter_role_id: null,
       updated_at: new Date().toISOString(),
     }).not("id", "is", null),
     supabaseAdmin.from("teams").delete().not("id", "is", null),
@@ -3327,6 +3346,7 @@ export async function handleCommand(interaction: Interaction) {
       case "setdirectorid":     return setStaffRoleId(userId, String(sOpt("role")), "director");
       case "setceoid":          return setStaffRoleId(userId, String(sOpt("role")), "ceo");
       case "setregisteredrole": return setRegisteredRoleId(userId, String(sOpt("role")));
+      case "setsupporterrole":  return setSupporterRoleId(userId, String(sOpt("role")));
       case "assignrole":        return assignRole(userId, String(sOpt("user")), String(sOpt("role")));
       case "removerole":        return removeRoleCmd(userId, String(sOpt("user")), String(sOpt("role")));
       case "setruleschannel":   return setRulesChannel(userId, interaction.channel_id ?? "");

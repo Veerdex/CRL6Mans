@@ -107,6 +107,12 @@ const commands = [
       },
       {
         type: SUB_COMMAND,
+        name: "setsupporterrole",
+        description: "Set the Discord role granted to Patreon supporters",
+        options: [{ name: "role", description: "The Supporter role", type: ROLE, required: true }],
+      },
+      {
+        type: SUB_COMMAND,
         name: "checklist",
         description: "List what's still missing to make the server functional for the website (Director+)",
       },

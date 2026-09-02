@@ -108,6 +108,13 @@ Stores the **Discord role ID** granted to players when their registration is app
 |--------|-------------|
 | `role` | The Discord role to grant on registration approval |
 
+#### `/setsupporterrole <role>`
+Stores the **Discord role ID** granted to Patreon supporters (the "Discord role" tier benefit). This command only identifies which role to use — it does not itself grant or remove the role from anyone.
+
+| Option | Description |
+|--------|-------------|
+| `role` | The Discord role to use for Patreon supporters |
+
 ---
 
 ## Discord Bot — What It Does, Permissions & Setup
@@ -170,6 +177,7 @@ No **privileged gateway intents** are required — interactions arrive as signed
 - [ ] Set the registration status role: `/setregisteredrole` (create a Discord role for `Registered` first, then link it), then run `/syncroles`.
 - [ ] Run `/syncroles`, then `/setdraftchannel` and `/setruleschannel` inside their target channels.
 - [ ] **Set up team roles:** create a Discord role for each team and paste its role ID into the team's slot under **Admin → Team Slots** (slots show "⚠ no role ID set" until linked). Make sure each team role sits **below** the bot's role. (Status roles like `Captain`/`Drafted` are auto-created — only team roles need linking.)
+- [ ] If using the Patreon "Discord role" tier benefit: create a Discord role for supporters, then link it with `/admin setsupporterrole`.
 
 ---
 

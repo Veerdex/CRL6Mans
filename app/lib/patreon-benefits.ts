@@ -18,8 +18,8 @@ export const PATREON_BENEFITS: PatreonBenefit[] = [
   },
   {
     id: "supporter-badge",
-    title: "Supporter Title",
-    description: "A text title displayed next to the player's name (e.g. \"Supporter\").",
+    title: "Supporter Badge",
+    description: "A small badge/icon next to the player's name marking them as a supporter.",
   },
   {
     id: "discord-role",
