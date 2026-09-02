@@ -25,8 +25,6 @@ export function RegistrationCard({ player }: Props) {
   const [curr3v3, setCurr3v3]       = useState(player.current_3v3);
   const [peak2v2, setPeak2v2]       = useState(player.peak_2v2);
   const [curr2v2, setCurr2v2]       = useState(player.current_2v2);
-  const [peak1v1, setPeak1v1]       = useState(player.peak_1v1 ?? "");
-  const [curr1v1, setCurr1v1]       = useState(player.current_1v1 ?? "");
   const [note, setNote]             = useState("");
   const [cooldown, setCooldown]     = useState<"none" | "5m" | "1d" | "forever">("none");
 
@@ -37,7 +35,6 @@ export function RegistrationCard({ player }: Props) {
         username, tracker_url: trackerUrl,
         peak_3v3: peak3v3, current_3v3: curr3v3,
         peak_2v2: peak2v2, current_2v2: curr2v2,
-        peak_1v1: peak1v1, current_1v1: curr1v1,
       });
       if (res?.error) setError(res.error);
     });
@@ -78,8 +75,6 @@ export function RegistrationCard({ player }: Props) {
         <Field label="Season Peak 2v2"   value={curr2v2} onChange={setCurr2v2} type="number" />
         <Field label="All Time Peak 3v3" value={peak3v3} onChange={setPeak3v3} type="number" />
         <Field label="Season Peak 3v3"   value={curr3v3} onChange={setCurr3v3} type="number" />
-        <Field label="All Time Peak 1v1" value={peak1v1} onChange={setPeak1v1} type="number" />
-        <Field label="Season Peak 1v1"   value={curr1v1} onChange={setCurr1v1} type="number" />
       </div>
 
       {/* Links */}

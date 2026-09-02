@@ -14,8 +14,6 @@ export type PlayerEditFields = {
   current_3v3: string;
   peak_2v2: string;
   current_2v2: string;
-  peak_1v1: string;
-  current_1v1: string;
   tracker_url: string;
 };
 
@@ -34,38 +32,22 @@ function pickEditableFields(fields: PlayerEditFields): PlayerEditFields {
     current_3v3: fields.current_3v3,
     peak_2v2:    fields.peak_2v2,
     current_2v2: fields.current_2v2,
-    peak_1v1:    fields.peak_1v1,
-    current_1v1: fields.current_1v1,
     tracker_url: fields.tracker_url,
   };
 }
 
-// 1v1 fields are validated only when present — a blank 1v1 field means the
-// player hasn't submitted that data yet (stored as null, not "0"), which is
-// what blocks them from entering the draft until they submit a profile-edit
-// request. 2v2/3v3 remain required since every registrant already provides them.
 function validateMmrFields(fields: PlayerEditFields): string | null {
-  const requiredMmrKeys: Array<keyof PlayerEditFields> = ["peak_3v3", "current_3v3", "peak_2v2", "current_2v2"];
-  for (const key of requiredMmrKeys) {
+  const mmrKeys: Array<keyof PlayerEditFields> = ["peak_3v3", "current_3v3", "peak_2v2", "current_2v2"];
+  for (const key of mmrKeys) {
     const raw = fields[key];
     const n = Number(raw);
     if (raw === "" || !Number.isFinite(n) || !Number.isInteger(n) || n < 0)
-      return `${key.replace(/_/g, " ")} must be a non-negative integer.`;
-  }
-  const optionalMmrKeys: Array<keyof PlayerEditFields> = ["peak_1v1", "current_1v1"];
-  for (const key of optionalMmrKeys) {
-    const raw = fields[key];
-    if (raw === "") continue;
-    const n = Number(raw);
-    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0)
       return `${key.replace(/_/g, " ")} must be a non-negative integer.`;
   }
   if (Number(fields.current_3v3) > Number(fields.peak_3v3))
     return "Current 3v3 MMR cannot exceed Peak 3v3.";
   if (Number(fields.current_2v2) > Number(fields.peak_2v2))
     return "Current 2v2 MMR cannot exceed Peak 2v2.";
-  if (fields.peak_1v1 !== "" && fields.current_1v1 !== "" && Number(fields.current_1v1) > Number(fields.peak_1v1))
-    return "Current 1v1 MMR cannot exceed Peak 1v1.";
   return null;
 }
 
@@ -81,7 +63,7 @@ export async function approvePlayerWithEdits(
 
   const { data: account } = await supabaseAdmin
     .from("accounts")
-    .select("discord_id")
+    .select("discord_id, display_name")
     .eq("id", id)
     .single();
   if (!account?.discord_id) return { error: "Account not found." };
@@ -96,8 +78,6 @@ export async function approvePlayerWithEdits(
       current_3v3: editable.current_3v3,
       peak_2v2: editable.peak_2v2,
       current_2v2: editable.current_2v2,
-      peak_1v1: editable.peak_1v1 || null,
-      current_1v1: editable.current_1v1 || null,
       tracker_url: editable.tracker_url,
       updated_at: now,
     })
@@ -115,13 +95,12 @@ export async function approvePlayerWithEdits(
       account_id: id,
       discord_id: account.discord_id,
       username: editable.username,
+      display_name: account.display_name ?? null,
       status: "approved",
       peak_3v3: editable.peak_3v3,
       current_3v3: editable.current_3v3,
       peak_2v2: editable.peak_2v2,
       current_2v2: editable.current_2v2,
-      peak_1v1: editable.peak_1v1 || null,
-      current_1v1: editable.current_1v1 || null,
       tracker_url: editable.tracker_url,
       college_image_url: pending?.college_image_url ?? "",
       sub_willing: pending?.sub_willing ?? false,
@@ -188,8 +167,6 @@ export async function updatePlayerData(
       current_3v3: editable.current_3v3,
       peak_2v2: editable.peak_2v2,
       current_2v2: editable.current_2v2,
-      peak_1v1: editable.peak_1v1 || null,
-      current_1v1: editable.current_1v1 || null,
       tracker_url: editable.tracker_url,
       updated_at: now,
     })
@@ -199,7 +176,7 @@ export async function updatePlayerData(
   // Mirrored onto `players` too — see approvePlayerWithEdits for why.
   const { error } = await supabaseAdmin
     .from("players")
-    .update({ ...editable, peak_1v1: editable.peak_1v1 || null, current_1v1: editable.current_1v1 || null, updated_at: now })
+    .update({ ...editable, updated_at: now })
     .eq("id", id);
   if (error) return { error: error.message };
 

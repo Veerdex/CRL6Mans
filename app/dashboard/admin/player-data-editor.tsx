@@ -48,8 +48,6 @@ function PlayerRow({ player }: { player: Player }) {
   const [curr3v3, setCurr3v3]       = useState(player.current_3v3);
   const [peak2v2, setPeak2v2]       = useState(player.peak_2v2);
   const [curr2v2, setCurr2v2]       = useState(player.current_2v2);
-  const [peak1v1, setPeak1v1]       = useState(player.peak_1v1 ?? "");
-  const [curr1v1, setCurr1v1]       = useState(player.current_1v1 ?? "");
 
   function handleSave() {
     setError(null);
@@ -59,7 +57,6 @@ function PlayerRow({ player }: { player: Player }) {
         username, tracker_url: trackerUrl,
         peak_3v3: peak3v3, current_3v3: curr3v3,
         peak_2v2: peak2v2, current_2v2: curr2v2,
-        peak_1v1: peak1v1, current_1v1: curr1v1,
       });
       if (res?.error) {
         setError(res.error);
@@ -78,8 +75,6 @@ function PlayerRow({ player }: { player: Player }) {
     setCurr3v3(player.current_3v3);
     setPeak2v2(player.peak_2v2);
     setCurr2v2(player.current_2v2);
-    setPeak1v1(player.peak_1v1 ?? "");
-    setCurr1v1(player.current_1v1 ?? "");
     setOpen(false);
     setError(null);
   }
@@ -120,8 +115,6 @@ function PlayerRow({ player }: { player: Player }) {
             <Field label="Current 3v3" value={curr3v3}    onChange={setCurr3v3} type="number" />
             <Field label="Peak 2v2"    value={peak2v2}    onChange={setPeak2v2} type="number" />
             <Field label="Current 2v2" value={curr2v2}    onChange={setCurr2v2} type="number" />
-            <Field label="Peak 1v1"    value={peak1v1}    onChange={setPeak1v1} type="number" />
-            <Field label="Current 1v1" value={curr1v1}    onChange={setCurr1v1} type="number" />
           </div>
           <div className="flex items-center gap-3">
             <button

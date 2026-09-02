@@ -144,7 +144,7 @@ unregistered → (submits register form) → pending → (admin approves) → ap
 
 RV is a player's rating under the `crl-final-rating-v1` model. **`app/lib/rating.ts` is the single source of truth** for the formula — do not restate it here; read that file instead. It's a pure, side-effect-free module shared by the season updater (`app/lib/discord-bot.ts`) and the wager predictor (`app/dashboard/wagers/prediction.ts`), so both interpret ratings identically.
 
-Every call site should go through `playerRatingFromRow()` (player rating from a DB row), `initialTeamRating()` (roster → team rating), and `resolveTeamRating()` (stored `season_rating` if present, else `initialTeamRating`) — never hand-roll the field mapping or the fallback logic locally. 1v1 MMR is **not** part of the rating model; only 2v2/3v3 peak and season MMR feed it. 1v1 fields still exist in the schema/UI for other purposes (registration, profile edits) but are ignored by the rating math.
+Every call site should go through `playerRatingFromRow()` (player rating from a DB row), `initialTeamRating()` (roster → team rating), and `resolveTeamRating()` (stored `season_rating` if present, else `initialTeamRating`) — never hand-roll the field mapping or the fallback logic locally. 1v1 MMR is **not** part of the rating model; only 2v2/3v3 peak and season MMR feed it. 1v1 fields still exist in the schema and in the admin player editors (for legacy stored values) but are no longer collected at registration or in profile edits, and are ignored by the rating math.
 
 `teams.season_rating` is the live rating that moves with match results; `teams.initial_rating` is the fixed anchor a team started at, used by `applyFormRetention()` to pull `season_rating` back toward it before each match's update. Both are lazy-initialised together on a team's first rated match, and `applySeasonRatingUpdate` in `discord-bot.ts` is the only place either gets written from a match result — `applyPlayerRVChangeToTeamRating` (roster/MMR edits) shifts both by the same delta so an edit isn't mistaken for match-driven form.
 
@@ -206,11 +206,38 @@ Three themes: `crl6mans` (default), `dark`, `light`.
 
 ---
 
+## Tiered account model
+
+Three tiers, added by `scripts/tiered-accounts-migration.sql`:
+
+| Tier | Table | Exists for | Owns |
+|---|---|---|---|
+| 1 | `accounts` | every Discord login | `status`, `username`, `display_name`, `avatar`, `theme`, `nav_layout`, `crl_coins`, `ban_reason`, `kick_reason`/`kicked_until`, `mfa_enabled`, `session_version`, Patreon fields |
+| 2 | `pending_players` | anyone who has registered | tracker URL, MMR, enrollment proof, `sub_willing` (PK `account_id`) |
+| 3 | `players` | approved/banned players | roster + draft state: `team_id`, `is_captain`, `draft_entered` (`id` = `account_id`) |
+
+**Account-level state is written to `accounts` and only mirrored onto `players`.**
+Tier 3 keeps legacy copies of `username`/`display_name`/`status`/MMR because plenty
+of not-yet-migrated call sites read them straight off `players`, but a write that
+lands only on the mirror is invisible to every migrated surface — that's the bug
+class behind stale nicknames, lost theme choices, and test users the admin page
+couldn't see. When adding a feature, read Tier 1 for who someone *is* and Tier 3
+for what team they're on.
+
+A row-creating flow must create all the tiers it needs: `approvePlayerWithEdits`
+(Tier 3 on approval) and `createTestAccounts` in `admin/league-actions.ts` are the
+two worked examples. `players.account_id` references `accounts(id)` with no cascade,
+so deletes go Tier 3 → Tier 1 (which then cascades Tier 2).
+
+---
+
 ## Key database tables (inferred from queries)
 
 | Table | Purpose |
 |---|---|
-| `players` | One row per Discord user; holds status, MMR, theme, draft_entered, is_captain, team_id |
+| `accounts` | Tier 1 — one row per Discord login; source of truth for status, display name, theme, coins, moderation state |
+| `pending_players` | Tier 2 — registration data (tracker/MMR/enrollment proof), keyed by `account_id` |
+| `players` | Tier 3 — roster/draft state for approved players; also carries legacy mirrors of username/display_name/status/MMR |
 | `teams` | Draft-formed or pre-formed teams |
 | `league_settings` | Single-row global config (draft_open, draft_active, season_active, num_teams) |
 | `tournaments` | Tournament records with status, join_mode, format, dates |

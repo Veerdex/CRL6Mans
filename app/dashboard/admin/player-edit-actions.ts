@@ -21,7 +21,7 @@ export async function approvePlayerEditRequest(
 
   const { data: req } = await supabaseAdmin
     .from("player_edit_requests")
-    .select("player_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1")
+    .select("player_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2")
     .eq("id", requestId)
     .eq("status", "pending")
     .single();
@@ -46,8 +46,6 @@ export async function approvePlayerEditRequest(
       current_3v3: req.current_3v3,
       peak_2v2:    req.peak_2v2,
       current_2v2: req.current_2v2,
-      peak_1v1:    req.peak_1v1 || null,
-      current_1v1: req.current_1v1 || null,
       updated_at:  now,
     })
     .eq("account_id", req.player_id);
@@ -62,8 +60,6 @@ export async function approvePlayerEditRequest(
       current_3v3: req.current_3v3,
       peak_2v2:    req.peak_2v2,
       current_2v2: req.current_2v2,
-      peak_1v1:    req.peak_1v1 || null,
-      current_1v1: req.current_1v1 || null,
       tracker_confirmed_at: now,
       must_update_tracker: false,
       updated_at:  now,
@@ -89,8 +85,8 @@ export async function approvePlayerEditRequest(
         current_2v2: req.current_2v2,
         peak_3v3:    req.peak_3v3,
         current_3v3: req.current_3v3,
-        peak_1v1:    req.peak_1v1,
-        current_1v1: req.current_1v1,
+        peak_1v1:    player.peak_1v1,
+        current_1v1: player.current_1v1,
       },
     ).catch(() => {});
   }

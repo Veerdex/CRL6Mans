@@ -10,7 +10,7 @@ export default async function GamePage() {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const leaderboard = await getLeaderboard();
+  const leaderboard = await getLeaderboard(session.userId);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">

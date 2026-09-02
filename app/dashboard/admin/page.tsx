@@ -176,16 +176,16 @@ export default async function AdminPage() {
   const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors, publicDesigns] = await Promise.all([
     getAllPendingPlayers(),
     supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, season_design_id, identity_enforcement_enabled, join_gate_enabled").maybeSingle(),
-    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
+    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
     supabaseAdmin.from("sub_requests").select("id, team_id, player_out_id, sub_player_id, sub_player_ids, reason, admin_note, requested_by_discord_id, created_at").eq("status", "escalated").order("created_at", { ascending: true }),
-    supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, created_at").eq("status", "pending").order("created_at", { ascending: true }),
+    supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at").eq("status", "pending").order("created_at", { ascending: true }),
     supabaseAdmin.from("tournaments").select("*").order("created_at", { ascending: false }),
     supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
     supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar, status, ban_reason, kick_reason, kicked_until, created_at, is_guest").order("username"),
     supabaseAdmin.from("matches").select("stage, round, discord_channel_id"),
-    supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1"),
+    supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2"),
     getPublicSponsors(),
     getPublicDesigns(),
   ]);
@@ -201,7 +201,7 @@ export default async function AdminPage() {
   const firstWeekStart = new Date(currentWeekStart);
   firstWeekStart.setDate(currentWeekStart.getDate() - 7 * 51);
 
-  type RawPlayerRow = { account_id: string; team_id: string | null; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; peak_1v1: string | null; current_1v1: string | null };
+  type RawPlayerRow = { account_id: string; team_id: string | null; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null };
   const playersByAccountId = new Map(((playerRows ?? []) as RawPlayerRow[]).map(p => [p.account_id, p]));
 
   const scheduledTournamentIds = (tournaments ?? [])
@@ -625,7 +625,7 @@ export default async function AdminPage() {
   type RawEditRequest = {
     id: string; player_id: string; username: string;
     tracker_url: string; peak_3v3: string; current_3v3: string; peak_2v2: string; current_2v2: string;
-    peak_1v1: string | null; current_1v1: string | null;
+   
     created_at: string;
   };
   const editReqs = (pendingEditRequests ?? []) as RawEditRequest[];
@@ -639,10 +639,10 @@ export default async function AdminPage() {
     { data: editPlayers },
   ] = await Promise.all([
     subTeamIds.length      ? supabaseAdmin.from("teams").select("id, name").in("id", subTeamIds) : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-    subOutIds.length       ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").in("id", subOutIds) : Promise.resolve({ data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] }),
-    subInIds.length        ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").in("id", subInIds) : Promise.resolve({ data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null }[] }),
+    subOutIds.length       ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3").in("id", subOutIds) : Promise.resolve({ data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] }),
+    subInIds.length        ? supabaseAdmin.from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3").in("id", subInIds) : Promise.resolve({ data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] }),
     subRequesterIds.length ? supabaseAdmin.from("players").select("discord_id, username, display_name").in("discord_id", subRequesterIds) : Promise.resolve({ data: [] as { discord_id: string; username: string; display_name: string | null }[] }),
-    editPlayerIds.length   ? supabaseAdmin.from("players").select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1").in("id", editPlayerIds) : Promise.resolve({ data: [] as { id: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null; peak_1v1: string | null; current_1v1: string | null }[] }),
+    editPlayerIds.length   ? supabaseAdmin.from("players").select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2").in("id", editPlayerIds) : Promise.resolve({ data: [] as { id: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null }[] }),
   ]);
 
   const subTeamMap      = Object.fromEntries((subTeams      ?? []).map(t => [t.id, t.name]));
@@ -692,15 +692,11 @@ export default async function AdminPage() {
       current3v3:      req.current_3v3,
       peak2v2:         req.peak_2v2,
       current2v2:      req.current_2v2,
-      peak1v1:         req.peak_1v1 ?? "",
-      current1v1:      req.current_1v1 ?? "",
       liveTrackerUrl:  live?.tracker_url  ?? "",
       livePeak3v3:     live?.peak_3v3     ?? "",
       liveCurrent3v3:  live?.current_3v3  ?? "",
       livePeak2v2:     live?.peak_2v2     ?? "",
       liveCurrent2v2:  live?.current_2v2  ?? "",
-      livePeak1v1:     live?.peak_1v1     ?? "",
-      liveCurrent1v1:  live?.current_1v1  ?? "",
       createdAt:       req.created_at,
     };
   });
@@ -875,8 +871,6 @@ export default async function AdminPage() {
         current_3v3: pr.current_3v3 ?? "0",
         peak_2v2: pr.peak_2v2 ?? "0",
         current_2v2: pr.current_2v2 ?? "0",
-        peak_1v1: pr.peak_1v1 ?? null,
-        current_1v1: pr.current_1v1 ?? null,
         banReason: a.ban_reason ?? null,
         kickReason: a.kick_reason ?? null,
         kickedUntil: a.kicked_until ?? null,

@@ -12,6 +12,11 @@
 -- A `'0'` default would make every backfilled/existing player indistinguishable
 -- from someone who legitimately entered 0.
 --
+-- SUPERSEDED (2026-09): 1v1 is no longer collected at registration or in
+-- profile edits, and the enterDraft gate described above no longer exists.
+-- The columns stay nullable and are retained only for legacy stored values
+-- shown in the admin player editors. The rating model never used 1v1.
+--
 -- Safe to run against a live DB with existing rows — no NOT NULL is added,
 -- so no backfill value is required for this migration to succeed.
 -- ─────────────────────────────────────────────────────────────

@@ -39,7 +39,9 @@ export default async function WagersPage() {
 
   // crl_coins/status/username all live on accounts (Tier 1) now, so unregistered
   // and pending guests show up here too — only rejected accounts are excluded,
-  // matching the wagers server actions' eligibility gate.
+  // matching the wagers server actions' eligibility gate. Seeded test accounts
+  // start on the default coin balance and would otherwise outrank real players,
+  // so they're filtered out of the standings.
   const [{ data: ls }, { data: accountRow }, { data: leaderboardData }] = await Promise.all([
     supabaseAdmin
       .from("league_settings")
@@ -54,6 +56,7 @@ export default async function WagersPage() {
       .from("accounts")
       .select("username, display_name, crl_coins")
       .in("status", ["unregistered", "pending", "approved"])
+      .not("discord_id", "like", "test_%")
       .order("crl_coins", { ascending: false }),
   ]);
 

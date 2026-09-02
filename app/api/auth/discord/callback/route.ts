@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
 
     // Mirror the account's saved theme + nav layout into cookies for no-flash SSR.
     const saved = account?.theme;
-    const theme = saved === "dark" || saved === "light" || saved === "crl6mans" ? saved : "crl6mans";
+    const theme = saved === "dark" || saved === "light" || saved === "crl6mans" || saved === "sponsor" ? saved : "crl6mans";
     const isProduction = process.env.NODE_ENV === "production";
     cookieStore.set("theme", theme, {
       path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax",

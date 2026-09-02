@@ -7,29 +7,49 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 
-export async function getLeaderboard(): Promise<{ username: string; display_name: string | null; score: number }[]> {
+export type LeaderboardRow = { username: string; display_name: string | null; score: number; rank: number };
+export type Leaderboard = { top: LeaderboardRow[]; self: LeaderboardRow | null };
+
+const TOP_SCORES = 10;
+
+// Display names come from accounts (Tier 1), which exists for every Discord
+// login — reading them off `players` left anyone without a roster row (guests,
+// unapproved players) showing their raw username.
+async function displayNamesFor(discordIds: string[]): Promise<Map<string, string | null>> {
+  const { data } = await supabaseAdmin
+    .from("accounts")
+    .select("discord_id, display_name")
+    .in("discord_id", discordIds);
+  return new Map((data ?? []).map((a: { discord_id: string; display_name: string | null }) => [a.discord_id, a.display_name]));
+}
+
+export async function getLeaderboard(viewerDiscordId?: string): Promise<Leaderboard> {
   const { data } = await supabaseAdmin
     .from("game_scores")
     .select("discord_id, username, score")
-    .order("score", { ascending: false })
-    .limit(10);
-  if (!data?.length) return [];
-  const discordIds = data.map((r: { discord_id: string }) => r.discord_id);
-  const { data: players } = await supabaseAdmin
-    .from("players")
-    .select("discord_id, display_name")
-    .in("discord_id", discordIds);
-  const displayNameById = new Map((players ?? []).map((p: { discord_id: string; display_name: string | null }) => [p.discord_id, p.display_name]));
-  return data.map((r: { discord_id: string; username: string; score: number }) => ({
+    .order("score", { ascending: false });
+  if (!data?.length) return { top: [], self: null };
+
+  const displayNameById = await displayNamesFor(data.map((r: { discord_id: string }) => r.discord_id));
+  const ranked = data.map((r: { discord_id: string; username: string; score: number }, i: number) => ({
     username: r.username,
     display_name: displayNameById.get(r.discord_id) ?? null,
     score: r.score,
+    rank: i + 1,
   }));
+
+  // Someone outside the top 10 still needs to see their own best, or a score
+  // that saved fine reads as one that was never recorded.
+  const selfIndex = viewerDiscordId ? data.findIndex((r: { discord_id: string }) => r.discord_id === viewerDiscordId) : -1;
+  return {
+    top: ranked.slice(0, TOP_SCORES),
+    self: selfIndex >= TOP_SCORES ? ranked[selfIndex] : null,
+  };
 }
 
 export async function submitScore(
   score: number
-): Promise<{ error?: string; newBest?: boolean; leaderboard?: { username: string; display_name: string | null; score: number }[] }> {
+): Promise<{ error?: string; newBest?: boolean; leaderboard?: Leaderboard }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
@@ -62,7 +82,7 @@ export async function submitScore(
     if (error) return { error: error.message };
   }
 
-  const leaderboard = await getLeaderboard();
+  const leaderboard = await getLeaderboard(session.userId);
   return { leaderboard, newBest: isNewBest };
 }
 
@@ -74,12 +94,7 @@ export async function getAllGameScores(): Promise<GameScoreRow[]> {
     .select("discord_id, username, score, updated_at")
     .order("score", { ascending: false });
   if (!data?.length) return [];
-  const discordIds = data.map((r: { discord_id: string }) => r.discord_id);
-  const { data: players } = await supabaseAdmin
-    .from("players")
-    .select("discord_id, display_name")
-    .in("discord_id", discordIds);
-  const displayNameById = new Map((players ?? []).map((p: { discord_id: string; display_name: string | null }) => [p.discord_id, p.display_name]));
+  const displayNameById = await displayNamesFor(data.map((r: { discord_id: string }) => r.discord_id));
   return data.map((r: { discord_id: string; username: string; score: number; updated_at: string }) => ({
     discord_id: r.discord_id,
     username: r.username,

@@ -23,72 +23,104 @@ function rand(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// A test user is a real account in all three tiers, not just a Tier 3 row:
+// admin/players/wagers surfaces are built from `accounts` now, so a players-only
+// insert produces someone the app can't see. `players.id` is set to the account
+// id to match the 1:1 relationship the tiered-accounts migration established.
+async function createTestAccounts(
+  count: number,
+  opts: { draftEntered: boolean; subWilling?: boolean }
+): Promise<{ ids: string[]; usernames: string[]; error?: string }> {
+  const now = Date.now();
+  const specs = Array.from({ length: count }, (_, i) => {
+    const name = NAMES_A[rand(0, NAMES_A.length - 1)] + NAMES_B[rand(0, NAMES_B.length - 1)];
+    const suffix = Math.random().toString(36).slice(2, 6);
+    const peak3v3 = rand(800, 1500);
+    const peak2v2 = rand(800, 1500);
+    return {
+      discord_id: `test_${now}_${i}_${suffix}`,
+      username: `${name}_${suffix}`,
+      peak_3v3: String(peak3v3),
+      current_3v3: String(peak3v3 - rand(0, 150)),
+      peak_2v2: String(peak2v2),
+      current_2v2: String(peak2v2 - rand(0, 150)),
+    };
+  });
+  const timestamp = new Date().toISOString();
+
+  const { data: accounts, error: accountError } = await supabaseAdmin
+    .from("accounts")
+    .insert(specs.map(s => ({
+      discord_id: s.discord_id,
+      username: s.username,
+      avatar: null,
+      status: "approved",
+      updated_at: timestamp,
+    })))
+    .select("id, discord_id");
+  if (accountError || !accounts) return { ids: [], usernames: [], error: accountError?.message ?? "Failed to create accounts." };
+
+  const accountIdByDiscordId = new Map(accounts.map((a: { id: string; discord_id: string }) => [a.discord_id, a.id]));
+
+  const { error: pendingError } = await supabaseAdmin.from("pending_players").insert(
+    specs.map(s => ({
+      account_id: accountIdByDiscordId.get(s.discord_id)!,
+      tracker_url: "https://rocketleague.tracker.network",
+      peak_3v3: s.peak_3v3,
+      current_3v3: s.current_3v3,
+      peak_2v2: s.peak_2v2,
+      current_2v2: s.current_2v2,
+      college_image_url: "",
+      sub_willing: opts.subWilling ?? false,
+      updated_at: timestamp,
+    }))
+  );
+  if (pendingError) return { ids: [], usernames: [], error: pendingError.message };
+
+  const { data: players, error: playerError } = await supabaseAdmin
+    .from("players")
+    .insert(specs.map(s => {
+      const accountId = accountIdByDiscordId.get(s.discord_id)!;
+      return {
+        id: accountId,
+        account_id: accountId,
+        discord_id: s.discord_id,
+        username: s.username,
+        avatar: null,
+        status: "approved",
+        draft_entered: opts.draftEntered,
+        sub_willing: opts.subWilling ?? false,
+        tracker_url: "https://rocketleague.tracker.network",
+        peak_3v3: s.peak_3v3,
+        current_3v3: s.current_3v3,
+        peak_2v2: s.peak_2v2,
+        current_2v2: s.current_2v2,
+        college_image_url: "",
+        updated_at: timestamp,
+      };
+    }))
+    .select("id");
+  if (playerError || !players) return { ids: [], usernames: [], error: playerError?.message ?? "Failed to create players." };
+
+  return { ids: players.map((p: { id: string }) => p.id), usernames: specs.map(s => s.username) };
+}
+
 export async function addTestUser() {
   await verifyAdmin();
 
-  const name = NAMES_A[rand(0, NAMES_A.length - 1)] + NAMES_B[rand(0, NAMES_B.length - 1)];
-  const suffix = Math.random().toString(36).slice(2, 6);
-  const username = `${name}_${suffix}`;
-  const discordId = `test_${Date.now()}_${suffix}`;
+  const { usernames, error } = await createTestAccounts(1, { draftEntered: true, subWilling: true });
+  if (error) return { error: `Failed: ${error}` };
 
-  const peak3v3 = rand(800, 1500);
-  const peak2v2 = rand(800, 1500);
-  const peak1v1 = rand(800, 1500);
-
-  const { error } = await supabaseAdmin.from("players").insert({
-    discord_id: discordId,
-    username,
-    avatar: null,
-    status: "approved",
-    draft_entered: true,
-    sub_willing: true,
-    tracker_url: "https://rocketleague.tracker.network",
-    peak_3v3: String(peak3v3),
-    current_3v3: String(peak3v3 - rand(0, 150)),
-    peak_2v2: String(peak2v2),
-    current_2v2: String(peak2v2 - rand(0, 150)),
-    peak_1v1: String(peak1v1),
-    current_1v1: String(peak1v1 - rand(0, 150)),
-    college_image_url: "",
-    updated_at: new Date().toISOString(),
-  });
-
-  if (error) return { error: `Failed: ${error.message}` };
   revalidatePath("/dashboard/players");
-  return { ok: true, message: `Added test player: ${username} (3v3 peak: ${peak3v3}, 2v2 peak: ${peak2v2})` };
+  return { ok: true, message: `Added test player: ${usernames[0]}` };
 }
 
 export async function addBulkTestUsers(count = 32) {
   await verifyAdmin();
 
-  const now = Date.now();
-  const rows = Array.from({ length: count }, (_, i) => {
-    const name = NAMES_A[rand(0, NAMES_A.length - 1)] + NAMES_B[rand(0, NAMES_B.length - 1)];
-    const suffix = Math.random().toString(36).slice(2, 6);
-    const peak3v3 = rand(800, 1500);
-    const peak2v2 = rand(800, 1500);
-    const peak1v1 = rand(800, 1500);
-    return {
-      discord_id: `test_${now}_${i}_${suffix}`,
-      username: `${name}_${suffix}`,
-      avatar: null,
-      status: "approved",
-      draft_entered: true,
-      sub_willing: true,
-      tracker_url: "https://rocketleague.tracker.network",
-      peak_3v3: String(peak3v3),
-      current_3v3: String(peak3v3 - rand(0, 150)),
-      peak_2v2: String(peak2v2),
-      current_2v2: String(peak2v2 - rand(0, 150)),
-      peak_1v1: String(peak1v1),
-      current_1v1: String(peak1v1 - rand(0, 150)),
-      college_image_url: "",
-      updated_at: new Date().toISOString(),
-    };
-  });
+  const { error } = await createTestAccounts(count, { draftEntered: true, subWilling: true });
+  if (error) return { error: `Failed: ${error}` };
 
-  const { error } = await supabaseAdmin.from("players").insert(rows);
-  if (error) return { error: `Failed: ${error.message}` };
   revalidatePath("/dashboard/players");
   return { ok: true, message: `Added ${count} test players.` };
 }
@@ -279,37 +311,12 @@ export async function addBulkTournamentTestUsers(tournamentId: string, count = 3
   if (!t) return { error: "Tournament not found." };
   if (t.join_mode !== "players") return { error: "Only player-signup tournaments support test users." };
 
-  const now = Date.now();
-  const rows = Array.from({ length: count }, (_, i) => {
-    const name = NAMES_A[rand(0, NAMES_A.length - 1)] + NAMES_B[rand(0, NAMES_B.length - 1)];
-    const suffix = Math.random().toString(36).slice(2, 6);
-    const peak3v3 = rand(800, 1500);
-    const peak2v2 = rand(800, 1500);
-    const peak1v1 = rand(800, 1500);
-    return {
-      discord_id: `test_${now}_${i}_${suffix}`,
-      username: `${name}_${suffix}`,
-      avatar: null,
-      status: "approved",
-      draft_entered: false,
-      tracker_url: "https://rocketleague.tracker.network",
-      peak_3v3: String(peak3v3),
-      current_3v3: String(peak3v3 - rand(0, 150)),
-      peak_2v2: String(peak2v2),
-      current_2v2: String(peak2v2 - rand(0, 150)),
-      peak_1v1: String(peak1v1),
-      current_1v1: String(peak1v1 - rand(0, 150)),
-      college_image_url: "",
-      updated_at: new Date().toISOString(),
-    };
-  });
+  const { ids, error } = await createTestAccounts(count, { draftEntered: false });
+  if (error) return { error };
 
-  const { data: inserted, error } = await supabaseAdmin.from("players").insert(rows).select("id");
-  if (error || !inserted) return { error: error?.message ?? "Failed to create players." };
-
-  const entries = inserted.map((p: { id: string }) => ({
+  const entries = ids.map((id: string) => ({
     tournament_id: tournamentId,
-    player_id: p.id,
+    player_id: id,
   }));
   const { error: entryError } = await supabaseAdmin.from("tournament_entries").insert(entries);
   if (entryError) return { error: entryError.message };
@@ -321,14 +328,27 @@ export async function addBulkTournamentTestUsers(tournamentId: string, count = 3
 export async function removeTestUsers() {
   await verifyAdmin();
 
-  const { data, error } = await supabaseAdmin
+  // Tier 3 first: players.account_id references accounts(id) with no cascade,
+  // so the accounts delete would be rejected while a players row still points
+  // at it. Deleting the account then cascades pending_players. The two deletes
+  // are matched on discord_id independently so accounts orphaned by the old
+  // players-only cleanup get swept up too.
+  const { error: playerError } = await supabaseAdmin
     .from("players")
+    .delete()
+    .like("discord_id", "test_%");
+  if (playerError) return { error: "Failed to remove test users." };
+
+  const { data, error } = await supabaseAdmin
+    .from("accounts")
     .delete()
     .like("discord_id", "test_%")
     .select("id");
 
   if (error) return { error: "Failed to remove test users." };
   revalidatePath("/dashboard/players");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/wagers");
   return { ok: true, message: `Removed ${data?.length ?? 0} test user(s).` };
 }
 

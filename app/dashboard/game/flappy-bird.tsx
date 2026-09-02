@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { submitScore } from "./actions";
+import { submitScore, type Leaderboard, type LeaderboardRow } from "./actions";
 import { PlayerName } from "@/app/dashboard/player-name";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -212,14 +212,12 @@ function playScore1000() {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-interface LeaderboardRow { username: string; display_name?: string | null; score: number }
-
 export default function FlappyBird({
   username,
   initialLeaderboard,
 }: {
   username: string;
-  initialLeaderboard: LeaderboardRow[];
+  initialLeaderboard: Leaderboard;
 }) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -308,7 +306,7 @@ export default function FlappyBird({
   const newBestRef    = useRef(false);
 
   // Only the leaderboard needs React state (DOM table)
-  const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>(initialLeaderboard);
+  const [leaderboard, setLeaderboard] = useState<Leaderboard>(initialLeaderboard);
 
   const flap = useCallback(() => {
     const s = statusRef.current;
@@ -719,38 +717,19 @@ export default function FlappyBird({
       <div>
         <h2 className="text-white font-semibold text-lg mb-3">Top Scores</h2>
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-          {leaderboard.length === 0 ? (
+          {leaderboard.top.length === 0 ? (
             <p className="text-zinc-500 text-sm text-center py-8">
               No scores yet — be the first!
             </p>
           ) : (
             <table className="w-full text-sm">
               <tbody>
-                {leaderboard.map((row, i) => (
-                  <tr
-                    key={row.username + String(i)}
-                    className={`border-b border-zinc-800 last:border-0 ${
-                      row.username === username ? "bg-indigo-950/30" : ""
-                    }`}
-                  >
-                    <td
-                      className={`py-3 pl-4 w-10 font-mono text-xs ${
-                        i === 0 ? "text-yellow-400"
-                        : i === 1 ? "text-zinc-300"
-                        : i === 2 ? "text-amber-700"
-                        : "text-zinc-600"
-                      }`}
-                    >
-                      #{i + 1}
-                    </td>
-                    <td className="py-3 text-zinc-200 font-medium">
-                      <PlayerName displayName={row.display_name ?? null} username={row.username} />
-                    </td>
-                    <td className="py-3 pr-4 text-right text-white font-mono font-bold">
-                      {row.score}
-                    </td>
-                  </tr>
+                {leaderboard.top.map(row => (
+                  <ScoreRow key={row.username + String(row.rank)} row={row} username={username} />
                 ))}
+                {leaderboard.self && (
+                  <ScoreRow row={leaderboard.self} username={username} detached />
+                )}
               </tbody>
             </table>
           )}
@@ -758,5 +737,34 @@ export default function FlappyBird({
         <p className="text-xs text-zinc-600 mt-3">Only your personal best is saved.</p>
       </div>
     </div>
+  );
+}
+
+// The viewer's own row is rendered detached below the top 10 when they didn't
+// make the cut, so a saved score is always visible somewhere on the board.
+function ScoreRow({ row, username, detached = false }: { row: LeaderboardRow; username: string; detached?: boolean }) {
+  return (
+    <tr
+      className={`border-b border-zinc-800 last:border-0 ${row.username === username ? "bg-indigo-950/30" : ""} ${
+        detached ? "border-t-2 border-t-zinc-700" : ""
+      }`}
+    >
+      <td
+        className={`py-3 pl-4 w-10 font-mono text-xs ${
+          row.rank === 1 ? "text-yellow-400"
+          : row.rank === 2 ? "text-zinc-300"
+          : row.rank === 3 ? "text-amber-700"
+          : "text-zinc-600"
+        }`}
+      >
+        #{row.rank}
+      </td>
+      <td className="py-3 text-zinc-200 font-medium">
+        <PlayerName displayName={row.display_name ?? null} username={row.username} />
+      </td>
+      <td className="py-3 pr-4 text-right text-white font-mono font-bold">
+        {row.score}
+      </td>
+    </tr>
   );
 }

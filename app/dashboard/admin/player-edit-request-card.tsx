@@ -13,16 +13,12 @@ export type PlayerEditRequestCardData = {
   current3v3: string;
   peak2v2: string;
   current2v2: string;
-  peak1v1: string;
-  current1v1: string;
   // current live values
   liveTrackerUrl: string;
   livePeak3v3: string;
   liveCurrent3v3: string;
   livePeak2v2: string;
   liveCurrent2v2: string;
-  livePeak1v1: string;
-  liveCurrent1v1: string;
   createdAt: string;
 };
 
@@ -129,8 +125,6 @@ export function PlayerEditRequestCard({ request }: { request: PlayerEditRequestC
             <DiffRow label="Current 3v3" from={request.liveCurrent3v3} to={request.current3v3} />
             <DiffRow label="Peak 2v2"    from={request.livePeak2v2}    to={request.peak2v2} />
             <DiffRow label="Current 2v2" from={request.liveCurrent2v2} to={request.current2v2} />
-            <DiffRow label="Peak 1v1"    from={request.livePeak1v1}    to={request.peak1v1} />
-            <DiffRow label="Current 1v1" from={request.liveCurrent1v1} to={request.current1v1} />
           </tbody>
         </table>
       </div>

@@ -24,16 +24,19 @@ export default async function SettingsPage({
 
   const { patreon: patreonBanner } = await searchParams;
 
+  // status/theme/nav_layout/display_name are account-level (Tier 1) and exist
+  // for every login; tracker/MMR/notification prefs only exist once someone has
+  // a roster row, so those still come off `players`.
   const [{ data: player }, sponsorTheme, { data: account }] = await Promise.all([
     supabaseAdmin
       .from("players")
-      .select("id, status, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, sub_willing, theme, nav_layout, display_name, notification_prefs")
+      .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, sub_willing, notification_prefs")
       .eq("discord_id", session.userId)
       .single(),
     getSettingsTabTheme(),
     supabaseAdmin
       .from("accounts")
-      .select("patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_connected_at")
+      .select("status, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_connected_at")
       .eq("discord_id", session.userId)
       .single(),
   ]);
@@ -50,7 +53,7 @@ export default async function SettingsPage({
   // Non-approved players (unregistered/pending/rejected) get a reduced settings
   // view — account preferences only. Platform account claims and MMR/tracker
   // edit requests require an approved roster spot.
-  const isApproved = player?.status === "approved";
+  const isApproved = account?.status === "approved";
 
   let pending: PendingRequest | null = null;
   let rejected: RejectedRequest | null = null;
@@ -66,7 +69,7 @@ export default async function SettingsPage({
     const [{ data: pendingRow }, { data: rejectedRow }, { data: platformAccountRows }] = await Promise.all([
       supabaseAdmin
         .from("player_edit_requests")
-        .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, created_at")
+        .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at")
         .eq("player_id", player.id)
         .eq("status", "pending")
         .maybeSingle(),
@@ -93,8 +96,6 @@ export default async function SettingsPage({
           current_3v3: pendingRow.current_3v3,
           peak_2v2:    pendingRow.peak_2v2,
           current_2v2: pendingRow.current_2v2,
-          peak_1v1:    pendingRow.peak_1v1 ?? "",
-          current_1v1: pendingRow.current_1v1 ?? "",
           created_at:  pendingRow.created_at,
         }
       : null;
@@ -133,15 +134,15 @@ export default async function SettingsPage({
       <div className="mb-4">
         <ThemeToggle
           initial={
-            player?.theme === "dark" || player?.theme === "light" || (player?.theme === "sponsor" && sponsorTheme)
-              ? player.theme
+            account?.theme === "dark" || account?.theme === "light" || (account?.theme === "sponsor" && sponsorTheme)
+              ? account.theme
               : "crl6mans"
           }
           sponsorTheme={sponsorTheme}
         />
       </div>
       <div className="mb-4">
-        <NavLayoutToggle initial={player?.nav_layout === "topbar" ? "topbar" : "sidebar"} />
+        <NavLayoutToggle initial={account?.nav_layout === "topbar" ? "topbar" : "sidebar"} />
       </div>
       <div className="mb-4">
         <PatreonConnectCard info={patreonInfo} banner={patreonBanner} />
@@ -162,7 +163,7 @@ export default async function SettingsPage({
       <div className="mb-6">
         {isApproved ? (
           <DisplayNameForm
-            current={(player?.display_name as string | null) ?? null}
+            current={(account?.display_name as string | null) ?? null}
             discordUsername={session.username ?? ""}
           />
         ) : (
@@ -183,8 +184,6 @@ export default async function SettingsPage({
               current_3v3: player.current_3v3  ?? "",
               peak_2v2:    player.peak_2v2     ?? "",
               current_2v2: player.current_2v2  ?? "",
-              peak_1v1:    player.peak_1v1     ?? "",
-              current_1v1: player.current_1v1  ?? "",
               sub_willing: player.sub_willing  ?? false,
             }}
             pending={pending}

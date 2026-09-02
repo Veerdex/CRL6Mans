@@ -9,8 +9,6 @@ export type PlayerSettings = {
   current_3v3: string;
   peak_2v2: string;
   current_2v2: string;
-  peak_1v1: string;
-  current_1v1: string;
   sub_willing: boolean;
 };
 
@@ -21,8 +19,6 @@ export type PendingRequest = {
   current_3v3: string;
   peak_2v2: string;
   current_2v2: string;
-  peak_1v1: string;
-  current_1v1: string;
   created_at: string;
 };
 
@@ -106,8 +102,6 @@ export function SettingsForm({
           <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={fill.peak_3v3}    current={current.peak_3v3}    isPending={!!pending} />
           <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={fill.current_3v3} current={current.current_3v3} isPending={!!pending} />
         </div>
-        <input type="hidden" name="peak_1v1" defaultValue={fill.peak_1v1} />
-        <input type="hidden" name="current_1v1" defaultValue={fill.current_1v1} />
 
         <div className="flex items-center justify-between p-4 bg-zinc-800 border border-zinc-700 rounded-lg">
           <div>

@@ -23,8 +23,6 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
   const current3v3  = formData.get("current_3v3")  as string;
   const peak2v2     = formData.get("peak_2v2")     as string;
   const current2v2  = formData.get("current_2v2")  as string;
-  const peak1v1     = formData.get("peak_1v1")     as string;
-  const current1v1  = formData.get("current_1v1")  as string;
   const subWilling  = formData.get("sub_willing") === "on";
   const file        = formData.get("college_image") as File;
 
@@ -38,7 +36,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     };
   }
 
-  if (!trackerUrl || !peak3v3 || !current3v3 || !peak2v2 || !current2v2 || !peak1v1 || !current1v1) {
+  if (!trackerUrl || !peak3v3 || !current3v3 || !peak2v2 || !current2v2) {
     return { error: "All fields are required." };
   }
 
@@ -55,8 +53,6 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     ["Current 3v3", current3v3],
     ["Peak 2v2", peak2v2],
     ["Current 2v2", current2v2],
-    ["Peak 1v1", peak1v1],
-    ["Current 1v1", current1v1],
   ] as [string, string][]) {
     const n = Number(val);
     if (!Number.isInteger(n) || n < 0) {
@@ -137,8 +133,6 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     current_3v3:       current3v3,
     peak_2v2:          peak2v2,
     current_2v2:       current2v2,
-    peak_1v1:          peak1v1,
-    current_1v1:       current1v1,
     college_image_url: collegeImageUrl,
     sub_willing:       subWilling,
     tracker_confirmed_at: new Date().toISOString(),
