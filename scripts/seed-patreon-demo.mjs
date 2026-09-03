@@ -64,6 +64,12 @@ const PLACEHOLDER_TIERS = [
 ];
 const SIZES = ["large", "medium", "small"];
 
+// Flat red, so demo avatars are unmistakably not real profile pictures. The
+// support page passes a data-URI avatar straight through instead of building a
+// Discord CDN path from it.
+const DEMO_AVATAR =
+  "data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%201%201'%3E%3Crect%20width%3D'1'%20height%3D'1'%20fill%3D'%23ff0000'%2F%3E%3C%2Fsvg%3E";
+
 async function seed(perTier) {
   const live = await liveTiers();
   const tiers = live ?? PLACEHOLDER_TIERS;
@@ -98,7 +104,7 @@ async function seed(perTier) {
         // Obviously-fake names: if a real member loads the page mid-review it
         // reads as staging data, not as a fabricated list of real supporters.
         display_name: `Test Patron ${i + 1}-${String(n).padStart(2, "0")}`,
-        avatar: null,
+        avatar: DEMO_AVATAR,
         status: "approved",
         patreon_status: "active_patron",
         patreon_tier_title: t.title,

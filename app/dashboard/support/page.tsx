@@ -25,6 +25,8 @@ const TIER_LAYOUT = [
     columns: "grid-cols-1 sm:grid-cols-2",
     gap: "gap-x-3 gap-y-3",
     titleRem: 2,
+    chipEm: 3.45,
+    avatars: true,
     border: "#3736ac",
     fill: "rgba(55, 54, 172, 0.20)",
     glint: "rgba(232, 138, 36, 0.45)",
@@ -35,6 +37,8 @@ const TIER_LAYOUT = [
     columns: "grid-cols-2 sm:grid-cols-3",
     gap: "gap-x-2 gap-y-1.5",
     titleRem: 1.75,
+    chipEm: 2.76,
+    avatars: true,
     border: "#a855f7",
     fill: "rgba(168, 85, 247, 0.14)",
     glint: null,
@@ -45,6 +49,8 @@ const TIER_LAYOUT = [
     columns: "grid-cols-2 sm:grid-cols-3",
     gap: "gap-x-2 gap-y-1.5",
     titleRem: 1.5,
+    chipEm: 2.3,
+    avatars: false,
     border: "#ffffff",
     fill: "rgba(255, 255, 255, 0.07)",
     glint: null,
@@ -52,10 +58,20 @@ const TIER_LAYOUT = [
   },
 ];
 
-// Chip padding is in em so one font-size per section scales the whole chip.
+// Chip padding, height, and avatar are all in em so one font-size per section
+// scales the whole chip.
 const BASE_FONT_REM = 0.875;
 
-type TierSection = { tier: string; rank: number; names: string[] };
+// A stored avatar is normally a Discord hash. The demo seeder writes a data URI
+// instead, so the layout can be judged before any real patron has opted in.
+function avatarSrc(discordId: string, avatar: string): string {
+  return avatar.startsWith("data:") || avatar.startsWith("http")
+    ? avatar
+    : `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png`;
+}
+
+type Patron = { name: string; discordId: string; avatar: string | null };
+type TierSection = { tier: string; rank: number; patrons: Patron[] };
 
 export default async function SupportPage() {
   const prices = await getTierPrices();
@@ -63,7 +79,7 @@ export default async function SupportPage() {
     getPatreonUrl(),
     supabaseAdmin
       .from("accounts")
-      .select("display_name, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public")
+      .select("discord_id, avatar, display_name, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public")
       .neq("status", "banned")
       .or("patreon_status.eq.active_patron,patreon_tier_override.not.is.null"),
     getBenefitsByTier(prices),
@@ -88,13 +104,17 @@ export default async function SupportPage() {
     if (rank === undefined) continue;
     if (!benefitsForTier(byTier, status, title, override).has("featured-on-support-page")) continue;
 
-    const section = byTierTitle.get(tier) ?? { tier, rank, names: [] };
-    section.names.push((account.display_name as string | null) || (account.username as string));
+    const section = byTierTitle.get(tier) ?? { tier, rank, patrons: [] };
+    section.patrons.push({
+      name: (account.display_name as string | null) || (account.username as string),
+      discordId: account.discord_id as string,
+      avatar: (account.avatar as string | null) ?? null,
+    });
     byTierTitle.set(tier, section);
   }
 
   const sections = Array.from(byTierTitle.values()).sort((a, b) => a.rank - b.rank);
-  for (const section of sections) section.names.sort((a, b) => a.localeCompare(b));
+  for (const section of sections) section.patrons.sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -147,7 +167,7 @@ export default async function SupportPage() {
           <div className="space-y-8 pt-4">
             <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Our Patrons</p>
 
-            {sections.map(({ tier, rank, names }) => {
+            {sections.map(({ tier, rank, patrons }) => {
               const layout = TIER_LAYOUT[Math.min(rank, TIER_LAYOUT.length) - 1];
               const panelStyle = {
                 backgroundColor: layout.fill,
@@ -184,13 +204,26 @@ export default async function SupportPage() {
                       className={`grid ${layout.columns} ${layout.gap}`}
                       style={{ fontSize: `${(layout.scale * BASE_FONT_REM).toFixed(4)}rem` }}
                     >
-                      {names.map((name) => (
+                      {patrons.map(({ name, discordId, avatar }) => (
                         <span
-                          key={name}
-                          className="flex items-center justify-center text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-zinc-700 rounded-lg text-zinc-200"
-                          style={{ backgroundColor: "rgba(0, 0, 0, 0.55)", borderWidth: "1.5px" }}
+                          key={discordId}
+                          className="flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-zinc-700 rounded-lg text-zinc-200"
+                          style={{
+                            backgroundColor: "rgba(0, 0, 0, 0.55)",
+                            borderWidth: "1.5px",
+                            minHeight: `${layout.chipEm}em`,
+                          }}
                         >
-                          {name}
+                          {layout.avatars && avatar && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={avatarSrc(discordId, avatar)}
+                              alt=""
+                              className="rounded-full shrink-0"
+                              style={{ width: "1.7em", height: "1.7em" }}
+                            />
+                          )}
+                          <span className="min-w-0 break-words">{name}</span>
                         </span>
                       ))}
                     </div>
