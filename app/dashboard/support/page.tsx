@@ -3,7 +3,7 @@ import { APP_NAME } from "@/app/lib/constants";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 import { benefitsForTier, effectiveTier, getBenefitsByTier, getTierPrices, tierRanks } from "@/app/lib/patreon-entitlements";
-import { TierGlow, type GlowSpec } from "./tier-glow";
+import { TierGlow, type FieldSpec, type GlowSpec } from "./tier-glow";
 
 const REASONS = [
   "Tournament prize pools that make competing worth it",
@@ -19,9 +19,10 @@ const REASONS = [
 // Each panel's fill is its border color at low alpha, so the two always agree.
 // Motion is the other axis of hierarchy: Tier 1 glows hardest and adds a slow
 // orange glint sweeping the panel, Tier 2 gets the same glow dialled down,
-// Tier 3 none. Glow intensity is driven by fbm noise rather than keyframes, so
-// it wanders instead of repeating on a period (see tier-glow.tsx). Each tier
-// gets its own seed so the panels never breathe in lockstep.
+// Tier 3 none. Both the border glow and the field of light drifting across the
+// panel are driven by Perlin noise rather than keyframes, so they wander
+// instead of repeating on a period (see tier-glow.tsx). Each tier gets its own
+// seed so the panels never breathe in lockstep.
 const TIER_LAYOUT = [
   {
     scale: 1.2,
@@ -44,6 +45,14 @@ const TIER_LAYOUT = [
       speed: 0.22,
       seed: 0,
     } as GlowSpec,
+    field: {
+      rgb: [232, 138, 36],
+      scale: 2.6,
+      speed: 0.09,
+      maxAlpha: 0.5,
+      white: 0.65,
+      seed: 0,
+    } as FieldSpec,
   },
   {
     scale: 1.1,
@@ -66,6 +75,14 @@ const TIER_LAYOUT = [
       speed: 0.17,
       seed: 137.4,
     } as GlowSpec,
+    field: {
+      rgb: [186, 120, 250],
+      scale: 3.1,
+      speed: 0.07,
+      maxAlpha: 0.28,
+      white: 0.4,
+      seed: 41.3,
+    } as FieldSpec,
   },
   {
     scale: 1,
@@ -78,6 +95,7 @@ const TIER_LAYOUT = [
     fill: "rgba(255, 255, 255, 0.07)",
     glint: null,
     glow: null,
+    field: null,
   },
 ];
 
@@ -196,6 +214,7 @@ export default async function SupportPage() {
                 <TierGlow
                   key={tier}
                   glow={layout.glow}
+                  field={layout.field}
                   className="relative overflow-hidden rounded-2xl border p-5 sm:p-6"
                   style={{ backgroundColor: layout.fill, borderColor: layout.border }}
                 >
