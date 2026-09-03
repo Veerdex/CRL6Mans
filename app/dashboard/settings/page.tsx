@@ -36,19 +36,27 @@ export default async function SettingsPage({
     getSettingsTabTheme(),
     supabaseAdmin
       .from("accounts")
-      .select("status, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_connected_at")
+      .select("status, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_connected_at, patreon_tier_override")
       .eq("discord_id", session.userId)
       .single(),
   ]);
 
-  const patreonInfo: PatreonInfo = account?.patreon_connected_at
-    ? {
-        status: account.patreon_status as "active_patron" | "declined_patron" | "former_patron" | null,
-        tierTitle: account.patreon_tier_title as string | null,
-        entitledCents: account.patreon_entitled_cents as number | null,
-        isPublic: !!account.patreon_public,
-      }
-    : null;
+  // An override-pinned account gets the card too, otherwise the "show me
+  // publicly" toggle — the only consent path onto the Support Us list — would
+  // be unreachable for exactly the accounts a director pins in order to test.
+  const patreonOverride = (account?.patreon_tier_override as string | null) ?? null;
+  const patreonLinked = !!account?.patreon_connected_at;
+  const patreonInfo: PatreonInfo =
+    patreonLinked || patreonOverride
+      ? {
+          status: account?.patreon_status as "active_patron" | "declined_patron" | "former_patron" | null,
+          tierTitle: account?.patreon_tier_title as string | null,
+          entitledCents: account?.patreon_entitled_cents as number | null,
+          isPublic: !!account?.patreon_public,
+          linked: patreonLinked,
+          overrideTier: patreonOverride,
+        }
+      : null;
 
   // Non-approved players (unregistered/pending/rejected) get a reduced settings
   // view — account preferences only. Platform account claims and MMR/tracker

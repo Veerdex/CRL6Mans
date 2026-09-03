@@ -15,14 +15,23 @@ export type ResolvedBenefits = Map<string, string | null>;
 // Resolving every tier at once (rather than one account at a time) is what
 // keeps list pages cheap: two queries total, then any number of accounts map
 // their tier title through the result with no further I/O.
-export async function getBenefitsByTier(): Promise<Map<string, ResolvedBenefits>> {
-  const [{ data: prices }, { data: rows }] = await Promise.all([
-    supabaseAdmin.from("patreon_tier_prices").select("tier_title, amount_cents"),
+export type TierPrice = { title: string; cents: number };
+
+export async function getTierPrices(): Promise<TierPrice[]> {
+  const { data } = await supabaseAdmin.from("patreon_tier_prices").select("tier_title, amount_cents");
+  return (data ?? []).map((r) => ({ title: r.tier_title as string, cents: (r.amount_cents as number | null) ?? 0 }));
+}
+
+// Callers that also need tier ranks fetch the prices once and hand them in,
+// so a page reading both still makes one round-trip to patreon_tier_prices.
+export async function getBenefitsByTier(prices?: TierPrice[]): Promise<Map<string, ResolvedBenefits>> {
+  const [resolvedPrices, { data: rows }] = await Promise.all([
+    prices ? Promise.resolve(prices) : getTierPrices(),
     supabaseAdmin.from("patreon_tier_benefits").select("tier_title, benefit_id, value"),
   ]);
 
   const centsByTitle = new Map<string, number>();
-  for (const p of prices ?? []) centsByTitle.set(p.tier_title as string, (p.amount_cents as number | null) ?? 0);
+  for (const p of resolvedPrices) centsByTitle.set(p.title, p.cents);
 
   const byTier = new Map<string, ResolvedBenefits>();
   for (const [title, cents] of centsByTitle) {
@@ -50,18 +59,40 @@ export async function getBenefitsByTier(): Promise<Map<string, ResolvedBenefits>
 // from the real Patreon fields.
 //
 // Without an override: a patron on a custom pledge is active_patron with no
-// tier attached, so there's nothing to inherit from; likewise a tier whose
-// price we've never cached (no director has opened the admin section since it
-// was created).
+// tier attached, so there's nothing to inherit from.
+export function effectiveTier(
+  patreonStatus: string | null,
+  tierTitle: string | null,
+  tierOverride: string | null = null,
+): string | null {
+  return tierOverride ?? (patreonStatus === "active_patron" ? tierTitle : null);
+}
+
+// A tier whose price we've never cached (no director has opened the admin
+// section since it was created) resolves to no benefits, since inheritance is
+// keyed on price.
 export function benefitsForTier(
   byTier: Map<string, ResolvedBenefits>,
   patreonStatus: string | null,
   tierTitle: string | null,
   tierOverride: string | null = null,
 ): ResolvedBenefits {
-  const effective = tierOverride ?? (patreonStatus === "active_patron" ? tierTitle : null);
+  const effective = effectiveTier(patreonStatus, tierTitle, tierOverride);
   if (!effective) return new Map();
   return byTier.get(effective) ?? new Map();
+}
+
+// Tier numbering runs opposite to price — the most expensive tier is "Tier 1" —
+// so a tier's number is its position in the price-descending list rather than
+// anything stored. Ties break alphabetically so the numbering stays stable
+// across renders (same ordering as sortTiersByPriceDesc in
+// patreon-tiers-actions.ts).
+// Two tiers priced the same get adjacent ranks even though inheritance treats
+// them as equivalent, so they render as separate sections holding identical
+// benefits. That is a pricing choice to fix on Patreon, not here.
+export function tierRanks(prices: TierPrice[]): Map<string, number> {
+  const sorted = [...prices].sort((a, b) => b.cents - a.cents || a.title.localeCompare(b.title));
+  return new Map(sorted.map((t, i) => [t.title, i + 1]));
 }
 
 // A ban revokes supporter status outright (see banPlayer), which already

@@ -9,6 +9,8 @@ export type PatreonInfo = {
   tierTitle: string | null;
   entitledCents: number | null;
   isPublic: boolean;
+  linked: boolean;
+  overrideTier: string | null;
 } | null;
 
 const STATUS_LABELS: Record<string, string> = {
@@ -48,7 +50,11 @@ export function PatreonConnectCard({ info, banner }: { info: PatreonInfo; banner
       <div>
         <p className="text-sm font-medium text-zinc-300">Patreon</p>
         <p className="text-xs text-zinc-500 mt-0.5">
-          {info ? "Your Patreon support is linked to this account." : "Link your Patreon account to support the league."}
+          {!info
+            ? "Link your Patreon account to support the league."
+            : info.linked
+              ? "Your Patreon support is linked to this account."
+              : "A director has pinned this account to a tier for testing."}
         </p>
       </div>
 
@@ -59,21 +65,29 @@ export function PatreonConnectCard({ info, banner }: { info: PatreonInfo; banner
       {info ? (
         <div className="space-y-2 text-xs">
           <p className="text-zinc-300">
-            {STATUS_LABELS[info.status ?? ""] ?? "Linked"}
-            {info.tierTitle ? ` — ${info.tierTitle}` : ""}
-            {formatCents(info.entitledCents) ? ` (${formatCents(info.entitledCents)})` : ""}
+            {info.linked ? (
+              <>
+                {STATUS_LABELS[info.status ?? ""] ?? "Linked"}
+                {info.tierTitle ? ` — ${info.tierTitle}` : ""}
+                {formatCents(info.entitledCents) ? ` (${formatCents(info.entitledCents)})` : ""}
+              </>
+            ) : (
+              `Tier override — ${info.overrideTier}`
+            )}
           </p>
           <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
             <input type="checkbox" checked={isPublic} onChange={togglePublic} className="accent-indigo-500" />
             Show me publicly on the Support Us page
           </label>
-          <button
-            onClick={handleDisconnect}
-            disabled={disconnecting}
-            className="text-zinc-500 hover:text-red-400 underline transition-colors disabled:opacity-50"
-          >
-            {disconnecting ? "Disconnecting…" : "Disconnect"}
-          </button>
+          {info.linked && (
+            <button
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+              className="text-zinc-500 hover:text-red-400 underline transition-colors disabled:opacity-50"
+            >
+              {disconnecting ? "Disconnecting…" : "Disconnect"}
+            </button>
+          )}
         </div>
       ) : (
         <a
