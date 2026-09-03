@@ -11,6 +11,8 @@ import {
   type BenefitAccountRow,
 } from "@/app/lib/patreon-entitlements";
 import { NAME_COLOR_BENEFIT, nameColorStyle } from "@/app/lib/name-color";
+import { patreonSimEnabled, topPaidTier } from "@/app/lib/patreon-sim";
+import { simulatePatreonPurchase } from "./sim-actions";
 import { TierGlow, type FieldSpec, type GlowSpec } from "./tier-glow";
 
 const REASONS = [
@@ -139,6 +141,7 @@ type TierSection = { tier: string; rank: number; patrons: Patron[] };
 
 export default async function SupportPage() {
   const prices = await getTierPrices();
+  const simTier = patreonSimEnabled() ? ((await topPaidTier())?.title ?? null) : null;
   const [patreonUrl, { data: accounts }, byTier] = await Promise.all([
     getPatreonUrl(),
     supabaseAdmin
@@ -219,7 +222,16 @@ export default async function SupportPage() {
           ))}
         </ul>
 
-        {patreonUrl ? (
+        {simTier ? (
+          <form action={simulatePatreonPurchase}>
+            <button
+              type="submit"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
+            >
+              Become a Patron ({simTier} — simulated)
+            </button>
+          </form>
+        ) : patreonUrl ? (
           <a
             href={patreonUrl}
             target="_blank"
