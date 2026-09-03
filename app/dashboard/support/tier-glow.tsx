@@ -250,7 +250,13 @@ export function TierGlow({
 
   return (
     <div ref={ref} className={className} style={{ ...style, ...(initial ?? {}) }}>
-      {field && <NoiseField field={field} />}
+      {field && (
+        // Clipped here rather than on the panel, which has to let the hover
+        // glint paint outside its padding box and onto its own border.
+        <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]">
+          <NoiseField field={field} />
+        </div>
+      )}
       {children}
     </div>
   );

@@ -775,3 +775,9 @@ input[type="datetime-local"]::-webkit-date-and-time-value {
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
 }
+@keyframes patron-border-glint {
+  0%   { opacity: 0; background-position: 100% 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { opacity: 0; background-position: 0 0; }
+}
