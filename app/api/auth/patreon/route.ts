@@ -3,8 +3,6 @@ import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { patreonAuthorizeUrl, PATREON_SUPPORTER_SCOPE } from "@/app/lib/patreon";
 import { getBaseUrl } from "@/app/lib/base-url";
-import { supabaseAdmin } from "@/app/lib/supabase";
-import { readSimTier, topPaidTier } from "@/app/lib/patreon-sim";
 
 // Linking an existing account, not logging in — require a session first.
 export async function GET(request: NextRequest) {
@@ -13,37 +11,6 @@ export async function GET(request: NextRequest) {
   if (!session?.userId) {
     const base = getBaseUrl(new URL(request.url).origin);
     return NextResponse.redirect(`${base}/login`);
-  }
-
-  // A simulated purchase stands in for the whole Patreon round trip: the
-  // account gets the same field set the real callback writes, minus the tokens.
-  // Leaving those null is deliberate — syncSupporterLinks only walks rows with a
-  // refresh token, so the simulated link survives the cron instead of being
-  // cleared as an unrefreshable one.
-  const simTier = await readSimTier();
-  if (simTier) {
-    const tier = await topPaidTier();
-    const now = new Date().toISOString();
-    await supabaseAdmin
-      .from("accounts")
-      .update({
-        patreon_user_id: `sim-${session.userId}`,
-        patreon_member_id: `sim-${session.userId}`,
-        patreon_status: "active_patron",
-        patreon_tier_title: tier?.title ?? simTier,
-        patreon_entitled_cents: tier?.cents ?? null,
-        patreon_lifetime_cents: tier?.cents ?? null,
-        patreon_access_token: null,
-        patreon_refresh_token: null,
-        patreon_token_expires_at: null,
-        patreon_connected_at: now,
-        patreon_last_synced_at: now,
-        updated_at: now,
-      })
-      .eq("discord_id", session.userId);
-
-    const base = getBaseUrl(new URL(request.url).origin);
-    return NextResponse.redirect(`${base}/dashboard/settings?patreon=connected`);
   }
 
   const { PATREON_CLIENT_ID, PATREON_REDIRECT_URI } = process.env;

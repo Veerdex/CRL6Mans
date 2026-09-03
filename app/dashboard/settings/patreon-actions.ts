@@ -7,7 +7,6 @@ import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
 import { benefitPrefTarget } from "@/app/lib/patreon-entitlements";
 import { DISCORD_ROLE_BENEFIT, syncDiscordSupporterRole } from "@/app/lib/patreon-discord-role";
 import { normalizeNameColor } from "@/app/lib/name-color";
-import { PATREON_SIM_COOKIE } from "@/app/lib/patreon-sim";
 
 // Per-benefit opt-in — the only writer of a patron's benefit switches, which
 // is why featured-on-support-page's legacy patreon_public column is reached
@@ -117,10 +116,6 @@ export async function disconnectPatreon() {
     .eq("discord_id", session.userId);
 
   await syncDiscordSupporterRole(session.userId);
-
-  // Cancels a simulated subscription along with the link, so disconnecting
-  // leaves the real Connect Patreon path in place rather than re-simulating.
-  cookieStore.delete(PATREON_SIM_COOKIE);
 
   return { ok: true };
 }
