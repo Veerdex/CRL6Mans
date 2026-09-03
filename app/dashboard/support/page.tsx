@@ -45,7 +45,9 @@ const TIER_LAYOUT = [
       seed: 0,
     } as GlowSpec,
     field: {
-      rgb: [232, 138, 36],
+      // The lit blue from the glow, not the border blue: #3736ac is dark enough
+      // that a field built on it reads as haze rather than light.
+      rgb: [96, 94, 240],
       scale: 2.6,
       speed: 0.09,
       maxAlpha: 0.6,
