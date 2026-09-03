@@ -33,7 +33,7 @@ const TIER_LAYOUT = [
     avatars: true,
     border: "#3736ac",
     fill: "rgba(55, 54, 172, 0.20)",
-    borderPx: 2,
+    chipBorderPx: 3,
     // The animation shorthand has to be a literal for Tailwind's scanner to
     // emit the utility, so it lives here rather than being built from the
     // numbers above.
@@ -69,7 +69,7 @@ const TIER_LAYOUT = [
     avatars: false,
     border: "#a855f7",
     fill: "rgba(168, 85, 247, 0.14)",
-    borderPx: 1,
+    chipBorderPx: 1.5,
     hoverGlint: { core: 0.6, className: "group-hover:animate-[patron-border-glint_1.15s_linear]" },
     glow: {
       rgb: [168, 85, 247],
@@ -100,7 +100,7 @@ const TIER_LAYOUT = [
     avatars: false,
     border: "#ffffff",
     fill: "rgba(255, 255, 255, 0.07)",
-    borderPx: 1,
+    chipBorderPx: 1.5,
     hoverGlint: null as { core: number; className: string } | null,
     glow: null,
     field: null,
@@ -223,41 +223,9 @@ export default async function SupportPage() {
                   key={tier}
                   glow={layout.glow}
                   field={layout.field}
-                  className="group relative rounded-2xl border p-5 sm:p-6"
-                  style={{
-                    backgroundColor: layout.fill,
-                    borderColor: layout.border,
-                    borderWidth: `${layout.borderPx}px`,
-                  }}
+                  className="relative overflow-hidden rounded-2xl border p-5 sm:p-6"
+                  style={{ backgroundColor: layout.fill, borderColor: layout.border }}
                 >
-                  {layout.hoverGlint && (
-                    <span
-                      aria-hidden
-                      className={`pointer-events-none absolute rounded-2xl opacity-0 ${layout.hoverGlint.className}`}
-                      style={{
-                        // Pulled out to the border box and masked to a ring of
-                        // exactly the border's thickness, so the sweep lights
-                        // the border and nothing inside it.
-                        inset: `-${layout.borderPx}px`,
-                        padding: `${layout.borderPx}px`,
-                        background: [
-                          "linear-gradient(100deg",
-                          "transparent 42%",
-                          `rgba(255, 255, 255, ${(layout.hoverGlint.core * 0.2).toFixed(2)}) 47%`,
-                          `rgba(255, 255, 255, ${layout.hoverGlint.core}) 50%`,
-                          `rgba(255, 255, 255, ${(layout.hoverGlint.core * 0.2).toFixed(2)}) 53%`,
-                          "transparent 58%)",
-                        ].join(", "),
-                        backgroundSize: "250% 100%",
-                        backgroundPosition: "100% 0",
-                        WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
-                        WebkitMaskComposite: "xor",
-                        mask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
-                        maskComposite: "exclude",
-                        mixBlendMode: "screen",
-                      }}
-                    />
-                  )}
                   <div className={`relative ${rank === 1 ? "space-y-4" : "space-y-3"}`}>
                     <h2 className="flex items-baseline justify-center" style={{ fontSize: `${layout.titleRem}rem` }}>
                       {/* The rank is mirrored invisibly on the left so the tier
@@ -278,13 +246,41 @@ export default async function SupportPage() {
                       {patrons.map(({ name, discordId, avatar }) => (
                         <span
                           key={discordId}
-                          className="flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-zinc-700 rounded-lg text-zinc-200"
+                          className="group relative flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-zinc-700 rounded-lg text-zinc-200"
                           style={{
                             backgroundColor: "rgba(0, 0, 0, 0.55)",
-                            borderWidth: "1.5px",
+                            borderWidth: `${layout.chipBorderPx}px`,
                             minHeight: `${layout.chipEm}em`,
                           }}
                         >
+                          {layout.hoverGlint && (
+                            <span
+                              aria-hidden
+                              className={`pointer-events-none absolute rounded-lg opacity-0 ${layout.hoverGlint.className}`}
+                              style={{
+                                // Pulled out to the chip's border box and masked
+                                // to a ring exactly the border's thickness, so
+                                // the sweep lights the border and nothing inside.
+                                inset: `-${layout.chipBorderPx}px`,
+                                padding: `${layout.chipBorderPx}px`,
+                                background: [
+                                  "linear-gradient(100deg",
+                                  "transparent 42%",
+                                  `rgba(255, 255, 255, ${(layout.hoverGlint.core * 0.2).toFixed(2)}) 47%`,
+                                  `rgba(255, 255, 255, ${layout.hoverGlint.core}) 50%`,
+                                  `rgba(255, 255, 255, ${(layout.hoverGlint.core * 0.2).toFixed(2)}) 53%`,
+                                  "transparent 58%)",
+                                ].join(", "),
+                                backgroundSize: "250% 100%",
+                                backgroundPosition: "100% 0",
+                                WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
+                                WebkitMaskComposite: "xor",
+                                mask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
+                                maskComposite: "exclude",
+                                mixBlendMode: "screen",
+                              }}
+                            />
+                          )}
                           {layout.avatars && avatar && (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
