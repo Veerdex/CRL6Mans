@@ -10,7 +10,9 @@ import { NotificationButton } from "@/app/dashboard/notification-button";
 import { NotificationPrefsForm } from "./notification-prefs-form";
 import { DisplayNameForm } from "./display-name-form";
 import { PlatformAccountsSection, type ClaimablePlatform, type PlatformAccountRecord } from "./platform-accounts-form";
-import { PatreonConnectCard, type PatreonInfo } from "./patreon-connect-card";
+import { PatreonConnectCard, type PatreonInfo, type PatreonBenefitRow } from "./patreon-connect-card";
+import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
+import { benefitEnabled, benefitsForTier, getBenefitsByTier, type BenefitPrefRow } from "@/app/lib/patreon-entitlements";
 import { getSettingsTabTheme } from "@/app/lib/sponsors-public";
 
 export default async function SettingsPage({
@@ -36,14 +38,14 @@ export default async function SettingsPage({
     getSettingsTabTheme(),
     supabaseAdmin
       .from("accounts")
-      .select("status, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_connected_at, patreon_tier_override")
+      .select("status, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_benefit_prefs, patreon_connected_at, patreon_tier_override")
       .eq("discord_id", session.userId)
       .single(),
   ]);
 
-  // An override-pinned account gets the card too, otherwise the "show me
-  // publicly" toggle — the only consent path onto the Support Us list — would
-  // be unreachable for exactly the accounts a director pins in order to test.
+  // An override-pinned account gets the card too, otherwise the per-benefit
+  // switches — the only way any benefit turns on at all — would be unreachable
+  // for exactly the accounts a director pins in order to test them.
   const patreonOverride = (account?.patreon_tier_override as string | null) ?? null;
   const patreonLinked = !!account?.patreon_connected_at;
   const patreonInfo: PatreonInfo =
@@ -52,11 +54,28 @@ export default async function SettingsPage({
           status: account?.patreon_status as "active_patron" | "declined_patron" | "former_patron" | null,
           tierTitle: account?.patreon_tier_title as string | null,
           entitledCents: account?.patreon_entitled_cents as number | null,
-          isPublic: !!account?.patreon_public,
           linked: patreonLinked,
           overrideTier: patreonOverride,
         }
       : null;
+
+  // Entitlement is decided here, server-side; the card only renders switches
+  // for benefits the tier already grants and never sees the rest.
+  let patreonBenefits: PatreonBenefitRow[] = [];
+  if (patreonInfo) {
+    const entitled = benefitsForTier(
+      await getBenefitsByTier(),
+      patreonInfo.status,
+      patreonInfo.tierTitle,
+      patreonOverride,
+    );
+    patreonBenefits = PATREON_BENEFITS.filter((b) => entitled.has(b.id)).map((b) => ({
+      id: b.id,
+      title: b.title,
+      description: b.description,
+      enabled: benefitEnabled(account as BenefitPrefRow, b.id),
+    }));
+  }
 
   // Non-approved players (unregistered/pending/rejected) get a reduced settings
   // view — account preferences only. Platform account claims and MMR/tracker
@@ -153,7 +172,7 @@ export default async function SettingsPage({
         <NavLayoutToggle initial={account?.nav_layout === "topbar" ? "topbar" : "sidebar"} />
       </div>
       <div className="mb-4">
-        <PatreonConnectCard info={patreonInfo} banner={patreonBanner} />
+        <PatreonConnectCard info={patreonInfo} benefits={patreonBenefits} banner={patreonBanner} />
       </div>
       <div className="mb-6 space-y-3">
         <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Notifications</p>

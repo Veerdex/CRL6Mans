@@ -82,6 +82,52 @@ export function benefitsForTier(
   return byTier.get(effective) ?? new Map();
 }
 
+// featured-on-support-page predates the per-benefit switches and already had
+// its own consent column, so it reads and writes accounts.patreon_public
+// rather than the prefs map. This constant and benefitPrefTarget are the only
+// place that exception lives — the read path below and setBenefitEnabled in
+// the settings actions both go through them, so the two cannot drift.
+export const PUBLIC_COLUMN_BENEFIT = "featured-on-support-page";
+
+export type BenefitPrefRow = {
+  patreon_public?: boolean | null;
+  patreon_benefit_prefs?: Record<string, boolean> | null;
+};
+
+export function benefitPrefTarget(benefitId: string): "public_column" | "prefs_map" {
+  return benefitId === PUBLIC_COLUMN_BENEFIT ? "public_column" : "prefs_map";
+}
+
+// Entitlement is only half of it — a patron also has to switch the benefit on.
+// Absent from the map means off, which is what makes everything default off
+// with no backfill. See scripts/patreon-benefit-prefs-migration.sql.
+export function benefitEnabled(row: BenefitPrefRow, benefitId: string): boolean {
+  if (benefitPrefTarget(benefitId) === "public_column") return !!row.patreon_public;
+  return (row.patreon_benefit_prefs ?? {})[benefitId] === true;
+}
+
+// Entitled benefits minus the ones left switched off. Enforcement sites want
+// this, not benefitsForTier — that one answers "may they have it", not "do
+// they want it".
+export type BenefitAccountRow = BenefitPrefRow & {
+  patreon_status?: string | null;
+  patreon_tier_title?: string | null;
+  patreon_tier_override?: string | null;
+};
+
+export function enabledBenefitsForAccount(
+  byTier: Map<string, ResolvedBenefits>,
+  row: BenefitAccountRow,
+): ResolvedBenefits {
+  const entitled = benefitsForTier(
+    byTier,
+    row.patreon_status ?? null,
+    row.patreon_tier_title ?? null,
+    row.patreon_tier_override ?? null,
+  );
+  return new Map([...entitled].filter(([id]) => benefitEnabled(row, id)));
+}
+
 // Tier numbering runs opposite to price — the most expensive tier is "Tier 1" —
 // so a tier's number is its position in the price-descending list rather than
 // anything stored. Ties break alphabetically so the numbering stays stable
@@ -102,23 +148,18 @@ export function tierRanks(prices: TierPrice[]): Map<string, number> {
 export async function getAccountBenefits(discordId: string): Promise<ResolvedBenefits> {
   const { data: account } = await supabaseAdmin
     .from("accounts")
-    .select("status, patreon_status, patreon_tier_title, patreon_tier_override")
+    .select("status, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs")
     .eq("discord_id", discordId)
     .maybeSingle();
 
   if (!account) return new Map();
   if (account.status === "banned") return new Map();
 
-  return benefitsForTier(
-    await getBenefitsByTier(),
-    account.patreon_status as string | null,
-    account.patreon_tier_title as string | null,
-    (account.patreon_tier_override as string | null) ?? null,
-  );
+  return enabledBenefitsForAccount(await getBenefitsByTier(), account as BenefitAccountRow);
 }
 
-// Lowercased usernames of everyone whose resolved benefits include
-// `benefitId` — active patrons, plus anyone a director has pinned to a tier
+// Lowercased usernames of everyone who is entitled to `benefitId` and has
+// switched it on — active patrons, plus anyone a director has pinned to a tier
 // for testing. Keyed on username because PlayerName — the component every
 // roster, leaderboard and stats table renders names through — only ever
 // receives a display name and a username; threading an account id would mean
@@ -132,21 +173,14 @@ export async function getAccountBenefits(discordId: string): Promise<ResolvedBen
 export async function getUsernamesWithBenefit(benefitId: string): Promise<Set<string>> {
   const { data: patrons } = await supabaseAdmin
     .from("accounts")
-    .select("discord_id, username, patreon_status, patreon_tier_title, patreon_tier_override")
+    .select("discord_id, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs")
     .neq("status", "banned")
     .or("patreon_status.eq.active_patron,patreon_tier_override.not.is.null");
 
   if (!patrons?.length) return new Set();
 
   const byTier = await getBenefitsByTier();
-  const entitled = patrons.filter((p) =>
-    benefitsForTier(
-      byTier,
-      p.patreon_status as string | null,
-      p.patreon_tier_title as string | null,
-      (p.patreon_tier_override as string | null) ?? null,
-    ).has(benefitId),
-  );
+  const entitled = patrons.filter((p) => enabledBenefitsForAccount(byTier, p as BenefitAccountRow).has(benefitId));
   if (entitled.length === 0) return new Set();
 
   const usernames = new Set<string>();
