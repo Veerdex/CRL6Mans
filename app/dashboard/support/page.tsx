@@ -18,7 +18,7 @@ const REASONS = [
 //
 // Each panel's fill is its border color at low alpha, so the two always agree.
 // Motion is the other axis of hierarchy: Tier 1 glows hardest and adds a slow
-// orange glint sweeping the panel, Tier 2 gets the same glow dialled down,
+// white shine raking across the panel, Tier 2 gets the same glow dialled down,
 // Tier 3 none. Both the border glow and the field of light drifting across the
 // panel are driven by Perlin noise rather than keyframes, so they wander
 // instead of repeating on a period (see tier-glow.tsx). Each tier gets its own
@@ -33,7 +33,7 @@ const TIER_LAYOUT = [
     avatars: true,
     border: "#3736ac",
     fill: "rgba(55, 54, 172, 0.20)",
-    glint: "rgba(232, 138, 36, 0.45)",
+    glint: 0.62,
     glow: {
       rgb: [96, 94, 240],
       borderRgb: [55, 54, 172],
@@ -221,9 +221,23 @@ export default async function SupportPage() {
                   {layout.glint && (
                     <span
                       aria-hidden
-                      className="pointer-events-none absolute inset-y-[-60%] left-0 w-1/3"
+                      className="pointer-events-none absolute inset-y-[-60%] left-0 w-1/4"
                       style={{
-                        background: `linear-gradient(90deg, transparent, ${layout.glint}, transparent)`,
+                        // A narrow bright core inside a wide faint halo, rather
+                        // than one soft ramp — that contrast is what reads as
+                        // light glancing off a surface instead of a passing
+                        // colored band.
+                        background: [
+                          "linear-gradient(90deg",
+                          "transparent 0%",
+                          `rgba(255, 255, 255, ${(layout.glint * 0.1).toFixed(3)}) 32%`,
+                          `rgba(255, 255, 255, ${layout.glint}) 50%`,
+                          `rgba(255, 255, 255, ${(layout.glint * 0.1).toFixed(3)}) 68%`,
+                          "transparent 100%)",
+                        ].join(", "),
+                        // Screen so the shine adds light to whatever it crosses
+                        // instead of veiling it.
+                        mixBlendMode: "screen",
                         // Linear, not eased: easing parks the band off-panel at
                         // both ends and rushes the visible middle, which reads
                         // as an occasional flash rather than a slow sweep.
