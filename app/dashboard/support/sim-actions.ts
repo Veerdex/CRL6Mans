@@ -1,7 +1,6 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { PATREON_SIM_COOKIE, patreonSimEnabled, topPaidTier } from "@/app/lib/patreon-sim";
 
 // The purchase half of the simulation. It only records intent in a cookie —
@@ -22,6 +21,4 @@ export async function simulatePatreonPurchase() {
     path: "/",
     maxAge: 60 * 60 * 24,
   });
-
-  redirect("/dashboard/settings");
 }
