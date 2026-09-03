@@ -44,7 +44,8 @@ import {
   TabVisitsSection,
 } from "./data-section";
 import { PatreonAdminSection } from "./patreon-section";
-import { getLiveTiers, getTierBenefitMap } from "./patreon-tiers-actions";
+import { getLiveTiers, getOverridableTiers, getOverrideCandidates, getTierBenefitMap, getTierOverrides } from "./patreon-tiers-actions";
+import { PatreonOverrideSection } from "./patreon-override-section";
 import { PatreonTiersSection } from "./patreon-tiers-section";
 import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
 import { StorageUsageSection } from "./storage-section";
@@ -102,6 +103,25 @@ async function PatreonTiersAdminSection() {
       description="Tiers are pulled live from the Patreon campaign. Benefits are a hardcoded catalog — pick which ones each tier includes."
     >
       <PatreonTiersSection tiers={tiers} benefits={PATREON_BENEFITS} tierBenefitMap={tierBenefitMap} />
+    </AdminSubSection>
+  );
+}
+
+async function PatreonOverrideAdminSection() {
+  const [tiers, candidates, overrides] = await Promise.all([
+    getOverridableTiers(),
+    getOverrideCandidates(),
+    getTierOverrides(),
+  ]);
+  return (
+    <AdminSubSection
+      sectionId="data"
+      tabId="patreon-overrides"
+      title="Tier Overrides"
+      value={overrides.length}
+      description="Pin a player to a Patreon tier so their benefits can be tested without a real pledge. Entitlements only — patron counts, MRR and the public patron list are untouched."
+    >
+      <PatreonOverrideSection tiers={tiers} candidates={candidates} overrides={overrides} />
     </AdminSubSection>
   );
 }
@@ -997,6 +1017,7 @@ export default async function AdminPage() {
         { id: "tab-visits", label: "Tab Visits" },
         { id: "patrons", label: "Patrons" },
         ...(userIsDirector ? [{ id: "patreon-tiers", label: "Tiers & Benefits" }] : []),
+        ...(userIsDirector ? [{ id: "patreon-overrides", label: "Tier Overrides" }] : []),
         ...(userIsDirector ? [{ id: "storage", label: "Storage & Limits" }] : []),
       ],
     },
@@ -1531,6 +1552,7 @@ export default async function AdminPage() {
         <TabVisitsSection />
         <PatreonAdminSection userIsDirector={userIsDirector} />
         {userIsDirector && <PatreonTiersAdminSection />}
+        {userIsDirector && <PatreonOverrideAdminSection />}
         {userIsDirector && <StorageUsageSection />}
       </AdminSection>
 

@@ -43,36 +43,47 @@ export async function getBenefitsByTier(): Promise<Map<string, ResolvedBenefits>
   return byTier;
 }
 
-// A patron on a custom pledge is active_patron with no tier attached, so
-// there's nothing to inherit from; likewise a tier whose price we've never
-// cached (no director has opened the admin section since it was created).
+// The one place a tier is decided. A director-set override wins outright and
+// does not require a pledge — that is the whole point of it, since benefits are
+// otherwise unobservable until someone actually subscribes. See
+// scripts/patreon-tier-override-migration.sql for why it is a separate column
+// from the real Patreon fields.
+//
+// Without an override: a patron on a custom pledge is active_patron with no
+// tier attached, so there's nothing to inherit from; likewise a tier whose
+// price we've never cached (no director has opened the admin section since it
+// was created).
 export function benefitsForTier(
   byTier: Map<string, ResolvedBenefits>,
   patreonStatus: string | null,
   tierTitle: string | null,
+  tierOverride: string | null = null,
 ): ResolvedBenefits {
-  if (patreonStatus !== "active_patron" || !tierTitle) return new Map();
-  return byTier.get(tierTitle) ?? new Map();
+  const effective = tierOverride ?? (patreonStatus === "active_patron" ? tierTitle : null);
+  if (!effective) return new Map();
+  return byTier.get(effective) ?? new Map();
 }
 
 export async function getAccountBenefits(discordId: string): Promise<ResolvedBenefits> {
   const { data: account } = await supabaseAdmin
     .from("accounts")
-    .select("patreon_status, patreon_tier_title")
+    .select("patreon_status, patreon_tier_title, patreon_tier_override")
     .eq("discord_id", discordId)
     .maybeSingle();
 
-  if (account?.patreon_status !== "active_patron") return new Map();
+  if (!account) return new Map();
 
   return benefitsForTier(
     await getBenefitsByTier(),
-    account.patreon_status as string,
+    account.patreon_status as string | null,
     account.patreon_tier_title as string | null,
+    (account.patreon_tier_override as string | null) ?? null,
   );
 }
 
-// Lowercased usernames of every active patron whose resolved benefits include
-// `benefitId`. Keyed on username because PlayerName — the component every
+// Lowercased usernames of everyone whose resolved benefits include
+// `benefitId` — active patrons, plus anyone a director has pinned to a tier
+// for testing. Keyed on username because PlayerName — the component every
 // roster, leaderboard and stats table renders names through — only ever
 // receives a display name and a username; threading an account id would mean
 // reshaping the query behind all ~27 call sites. Usernames are unique per
@@ -85,14 +96,19 @@ export async function getAccountBenefits(discordId: string): Promise<ResolvedBen
 export async function getUsernamesWithBenefit(benefitId: string): Promise<Set<string>> {
   const { data: patrons } = await supabaseAdmin
     .from("accounts")
-    .select("discord_id, username, patreon_tier_title")
-    .eq("patreon_status", "active_patron");
+    .select("discord_id, username, patreon_status, patreon_tier_title, patreon_tier_override")
+    .or("patreon_status.eq.active_patron,patreon_tier_override.not.is.null");
 
   if (!patrons?.length) return new Set();
 
   const byTier = await getBenefitsByTier();
   const entitled = patrons.filter((p) =>
-    benefitsForTier(byTier, "active_patron", p.patreon_tier_title as string | null).has(benefitId),
+    benefitsForTier(
+      byTier,
+      p.patreon_status as string | null,
+      p.patreon_tier_title as string | null,
+      (p.patreon_tier_override as string | null) ?? null,
+    ).has(benefitId),
   );
   if (entitled.length === 0) return new Set();
 

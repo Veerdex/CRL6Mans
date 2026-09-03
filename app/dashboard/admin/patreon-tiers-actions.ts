@@ -124,3 +124,89 @@ export async function setTierBenefits(
   revalidatePath("/dashboard/admin");
   return { ok: true };
 }
+
+export type TierOverride = {
+  discordId: string;
+  name: string;
+  username: string;
+  tierTitle: string;
+  setAt: string | null;
+};
+
+// Tier titles that actually resolve to something. Overrides are matched
+// against patreon_tier_prices, not the live campaign, because that cache is
+// what patreon-entitlements.ts keys on — offering a tier with no cached price
+// would be a dropdown entry that silently grants nothing.
+export async function getOverridableTiers(): Promise<LiveTier[]> {
+  const { data } = await supabaseAdmin.from("patreon_tier_prices").select("tier_title, amount_cents");
+  return sortTiersByPriceDesc(
+    (data ?? []).map((r) => ({ title: r.tier_title as string, amountCents: (r.amount_cents as number | null) ?? null })),
+  );
+}
+
+export type OverrideCandidate = { discordId: string; name: string; username: string };
+
+export async function getOverrideCandidates(): Promise<OverrideCandidate[]> {
+  const { data } = await supabaseAdmin
+    .from("accounts")
+    .select("discord_id, username, display_name")
+    .eq("status", "approved");
+
+  return (data ?? [])
+    .map((a) => ({
+      discordId: a.discord_id as string,
+      name: ((a.display_name as string | null) || (a.username as string | null)) ?? "",
+      username: (a.username as string | null) ?? "",
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function getTierOverrides(): Promise<TierOverride[]> {
+  const { data } = await supabaseAdmin
+    .from("accounts")
+    .select("discord_id, username, display_name, patreon_tier_override, patreon_tier_override_set_at")
+    .not("patreon_tier_override", "is", null)
+    .order("patreon_tier_override_set_at", { ascending: false });
+
+  return (data ?? []).map((a) => ({
+    discordId: a.discord_id as string,
+    name: ((a.display_name as string | null) || (a.username as string | null)) ?? "",
+    username: (a.username as string | null) ?? "",
+    tierTitle: a.patreon_tier_override as string,
+    setAt: (a.patreon_tier_override_set_at as string | null) ?? null,
+  }));
+}
+
+// Pass null to clear. The tier is validated against the price cache so an
+// override can never point at a title that resolves to no benefits.
+export async function setTierOverride(
+  discordId: string,
+  tierTitle: string | null,
+): Promise<{ ok?: boolean; error?: string }> {
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
+  if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can override tiers." };
+
+  if (tierTitle !== null) {
+    const { data: known } = await supabaseAdmin
+      .from("patreon_tier_prices")
+      .select("tier_title")
+      .eq("tier_title", tierTitle)
+      .maybeSingle();
+    if (!known) return { error: "Unknown tier." };
+  }
+
+  const { error } = await supabaseAdmin
+    .from("accounts")
+    .update({
+      patreon_tier_override: tierTitle,
+      patreon_tier_override_set_by: tierTitle === null ? null : session.userId,
+      patreon_tier_override_set_at: tierTitle === null ? null : new Date().toISOString(),
+    })
+    .eq("discord_id", discordId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
