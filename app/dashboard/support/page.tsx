@@ -247,7 +247,7 @@ export default async function SupportPage() {
                       {patrons.map(({ name, discordId, avatar }) => (
                         <span
                           key={discordId}
-                          className={`flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-white rounded-lg text-zinc-200 ${layout.hoverRise ?? ""}`}
+                          className={`flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-white rounded-lg text-zinc-200 cursor-default select-none ${layout.hoverRise ?? ""}`}
                           style={{
                             backgroundColor: "rgba(0, 0, 0, 0.55)",
                             borderWidth: `${layout.chipBorderPx}px`,
