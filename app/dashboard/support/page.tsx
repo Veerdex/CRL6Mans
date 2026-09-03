@@ -3,6 +3,7 @@ import { APP_NAME } from "@/app/lib/constants";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 import { benefitsForTier, effectiveTier, getBenefitsByTier, getTierPrices, tierRanks } from "@/app/lib/patreon-entitlements";
+import { TierGlow, type GlowSpec } from "./tier-glow";
 
 const REASONS = [
   "Tournament prize pools that make competing worth it",
@@ -18,7 +19,9 @@ const REASONS = [
 // Each panel's fill is its border color at low alpha, so the two always agree.
 // Motion is the other axis of hierarchy: Tier 1 glows hardest and adds a slow
 // orange glint sweeping the panel, Tier 2 gets the same glow dialled down,
-// Tier 3 none.
+// Tier 3 none. Glow intensity is driven by fbm noise rather than keyframes, so
+// it wanders instead of repeating on a period (see tier-glow.tsx). Each tier
+// gets its own seed so the panels never breathe in lockstep.
 const TIER_LAYOUT = [
   {
     scale: 1.2,
@@ -30,7 +33,17 @@ const TIER_LAYOUT = [
     border: "#3736ac",
     fill: "rgba(55, 54, 172, 0.20)",
     glint: "rgba(232, 138, 36, 0.45)",
-    glow: { color: "rgba(74, 72, 224, 0.75)", min: "14px", max: "34px", seconds: 5 },
+    glow: {
+      rgb: [96, 94, 240],
+      borderRgb: [55, 54, 172],
+      minBlur: 8,
+      maxBlur: 40,
+      minAlpha: 0.25,
+      maxAlpha: 0.95,
+      white: 0.8,
+      speed: 0.22,
+      seed: 0,
+    } as GlowSpec,
   },
   {
     scale: 1.1,
@@ -42,7 +55,17 @@ const TIER_LAYOUT = [
     border: "#a855f7",
     fill: "rgba(168, 85, 247, 0.14)",
     glint: null,
-    glow: { color: "rgba(168, 85, 247, 0.35)", min: "6px", max: "15px", seconds: 5 },
+    glow: {
+      rgb: [168, 85, 247],
+      borderRgb: [168, 85, 247],
+      minBlur: 4,
+      maxBlur: 18,
+      minAlpha: 0.15,
+      maxAlpha: 0.5,
+      white: 0.45,
+      speed: 0.17,
+      seed: 137.4,
+    } as GlowSpec,
   },
   {
     scale: 1,
@@ -169,20 +192,13 @@ export default async function SupportPage() {
 
             {sections.map(({ tier, rank, patrons }) => {
               const layout = TIER_LAYOUT[Math.min(rank, TIER_LAYOUT.length) - 1];
-              const panelStyle = {
-                backgroundColor: layout.fill,
-                borderColor: layout.border,
-                ...(layout.glow
-                  ? {
-                      "--tier-glow": layout.glow.color,
-                      "--tier-glow-min": layout.glow.min,
-                      "--tier-glow-max": layout.glow.max,
-                      animation: `patron-tier-glow ${layout.glow.seconds}s ease-in-out infinite`,
-                    }
-                  : {}),
-              } as React.CSSProperties;
               return (
-                <div key={tier} className="relative overflow-hidden rounded-2xl border p-5 sm:p-6" style={panelStyle}>
+                <TierGlow
+                  key={tier}
+                  glow={layout.glow}
+                  className="relative overflow-hidden rounded-2xl border p-5 sm:p-6"
+                  style={{ backgroundColor: layout.fill, borderColor: layout.border }}
+                >
                   {layout.glint && (
                     <span
                       aria-hidden
@@ -228,7 +244,7 @@ export default async function SupportPage() {
                       ))}
                     </div>
                   </div>
-                </div>
+                </TierGlow>
               );
             })}
           </div>
