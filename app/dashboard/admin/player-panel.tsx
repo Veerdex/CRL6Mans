@@ -172,7 +172,17 @@ function canActOn(actorRole: StaffRole | null, targetRole: StaffRole | null): bo
   return false;
 }
 
-function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: StaffRole | null }) {
+function PlayerRow({
+  player,
+  actorRole,
+  revokedPatron,
+  onRevokedPatronChange,
+}: {
+  player: CombinedPlayer;
+  actorRole: StaffRole | null;
+  revokedPatron: RevokedPatron | null;
+  onRevokedPatronChange: (patron: RevokedPatron | null) => void;
+}) {
   const router = useRouter();
   const [editOpen, setEditOpen]     = useState(false);
   const [modeAction, setModeAction] = useState<ModeAction>(null);
@@ -181,7 +191,6 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
   const [isPending, startTx]        = useTransition();
   const [saved, setSaved]           = useState(false);
   const [error, setError]           = useState<string | null>(null);
-  const [revokedPatron, setRevokedPatron] = useState<RevokedPatron | null>(null);
 
   const [username, setUsername]     = useState(player.username);
   const [trackerUrl, setTrackerUrl] = useState(player.tracker_url);
@@ -230,7 +239,7 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
       } else {
         const res = await banPlayer(player.id, reason);
         if (res.error) { setError(res.error); return; }
-        setRevokedPatron(res.revokedPatron ?? null);
+        onRevokedPatronChange(res.revokedPatron ?? null);
       }
       setModeAction(null);
       setReason("");
@@ -403,7 +412,7 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
       {/* Kick/ban confirmation */}
       {revokedPatron && (
         <div className="px-4 pb-3">
-          <PatreonBlockNotice patron={revokedPatron} onDismiss={() => setRevokedPatron(null)} />
+          <PatreonBlockNotice patron={revokedPatron} onDismiss={() => onRevokedPatronChange(null)} />
         </div>
       )}
 
@@ -457,6 +466,17 @@ type StatusFilter = "all" | "active" | "kicked" | "banned";
 export function PlayerPanel({ players, actorRole }: { players: CombinedPlayer[]; actorRole: StaffRole | null }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [revoked, setRevoked] = useState<{ playerId: string; patron: RevokedPatron } | null>(null);
+
+  const renderRow = (p: CombinedPlayer) => (
+    <PlayerRow
+      key={p.id}
+      player={p}
+      actorRole={actorRole}
+      revokedPatron={revoked?.playerId === p.id ? revoked.patron : null}
+      onRevokedPatronChange={patron => setRevoked(patron ? { playerId: p.id, patron } : null)}
+    />
+  );
 
   const searched = players.filter(p =>
     p.username.toLowerCase().includes(search.toLowerCase()) ||
@@ -516,7 +536,7 @@ export function PlayerPanel({ players, actorRole }: { players: CombinedPlayer[];
 
       {active.length > 0 && (
         <div className="space-y-2">
-          {active.map(p => <PlayerRow key={p.id} player={p} actorRole={actorRole} />)}
+          {active.map(renderRow)}
         </div>
       )}
 
@@ -525,7 +545,7 @@ export function PlayerPanel({ players, actorRole }: { players: CombinedPlayer[];
           {statusFilter === "all" && (
             <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider pt-2">Banned</p>
           )}
-          {banned.map(p => <PlayerRow key={p.id} player={p} actorRole={actorRole} />)}
+          {banned.map(renderRow)}
         </div>
       )}
     </div>
