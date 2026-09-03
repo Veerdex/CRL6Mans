@@ -34,10 +34,9 @@ const TIER_LAYOUT = [
     border: "#3736ac",
     fill: "rgba(55, 54, 172, 0.20)",
     chipBorderPx: 3,
-    // The animation shorthand has to be a literal for Tailwind's scanner to
-    // emit the utility, so it lives here rather than being built from the
-    // numbers above.
-    hoverGlint: { core: 1, className: "group-hover:animate-[patron-border-glint_0.75s_linear]" },
+    // Tailwind only emits utilities it can see spelled out, so the hover
+    // classes are literals here rather than assembled from a distance.
+    hoverRise: "transition-transform duration-200 ease-out hover:-translate-y-1.5",
     glow: {
       rgb: [96, 94, 240],
       borderRgb: [55, 54, 172],
@@ -46,6 +45,7 @@ const TIER_LAYOUT = [
       minAlpha: 0.25,
       maxAlpha: 0.95,
       white: 0.8,
+      borderPulse: false,
       speed: 0.22,
       seed: 0,
     } as GlowSpec,
@@ -70,7 +70,7 @@ const TIER_LAYOUT = [
     border: "#a855f7",
     fill: "rgba(168, 85, 247, 0.14)",
     chipBorderPx: 1.5,
-    hoverGlint: { core: 0.6, className: "group-hover:animate-[patron-border-glint_1.15s_linear]" },
+    hoverRise: "transition-transform duration-200 ease-out hover:-translate-y-1",
     glow: {
       rgb: [168, 85, 247],
       borderRgb: [168, 85, 247],
@@ -79,6 +79,7 @@ const TIER_LAYOUT = [
       minAlpha: 0.15,
       maxAlpha: 0.5,
       white: 0.45,
+      borderPulse: true,
       speed: 0.17,
       seed: 137.4,
     } as GlowSpec,
@@ -101,7 +102,7 @@ const TIER_LAYOUT = [
     border: "#ffffff",
     fill: "rgba(255, 255, 255, 0.07)",
     chipBorderPx: 1.5,
-    hoverGlint: null as { core: number; className: string } | null,
+    hoverRise: null as string | null,
     glow: null,
     field: null,
   },
@@ -246,41 +247,13 @@ export default async function SupportPage() {
                       {patrons.map(({ name, discordId, avatar }) => (
                         <span
                           key={discordId}
-                          className="group relative flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-zinc-700 rounded-lg text-zinc-200"
+                          className={`flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-white rounded-lg text-zinc-200 ${layout.hoverRise ?? ""}`}
                           style={{
                             backgroundColor: "rgba(0, 0, 0, 0.55)",
                             borderWidth: `${layout.chipBorderPx}px`,
                             minHeight: `${layout.chipEm}em`,
                           }}
                         >
-                          {layout.hoverGlint && (
-                            <span
-                              aria-hidden
-                              className={`pointer-events-none absolute rounded-lg opacity-0 ${layout.hoverGlint.className}`}
-                              style={{
-                                // Pulled out to the chip's border box and masked
-                                // to a ring exactly the border's thickness, so
-                                // the sweep lights the border and nothing inside.
-                                inset: `-${layout.chipBorderPx}px`,
-                                padding: `${layout.chipBorderPx}px`,
-                                background: [
-                                  "linear-gradient(100deg",
-                                  "transparent 42%",
-                                  `rgba(255, 255, 255, ${(layout.hoverGlint.core * 0.2).toFixed(2)}) 47%`,
-                                  `rgba(255, 255, 255, ${layout.hoverGlint.core}) 50%`,
-                                  `rgba(255, 255, 255, ${(layout.hoverGlint.core * 0.2).toFixed(2)}) 53%`,
-                                  "transparent 58%)",
-                                ].join(", "),
-                                backgroundSize: "250% 100%",
-                                backgroundPosition: "100% 0",
-                                WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
-                                WebkitMaskComposite: "xor",
-                                mask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
-                                maskComposite: "exclude",
-                                mixBlendMode: "screen",
-                              }}
-                            />
-                          )}
                           {layout.avatars && avatar && (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img

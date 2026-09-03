@@ -14,6 +14,8 @@ export type GlowSpec = {
   // How far toward white the glow drifts at full intensity. Light reads as
   // white at its brightest, so the colored halo alone never looks lit.
   white: number;
+  // Whether the border rides the pulse too, or only the halo around it.
+  borderPulse: boolean;
   // Cycles per second through the noise field. Low enough that the panel
   // breathes rather than flickers.
   speed: number;
@@ -51,7 +53,9 @@ function shadowAt(glow: GlowSpec, t: number): { boxShadow: string; borderColor: 
     boxShadow: `0 0 ${blur.toFixed(1)}px ${(t * 2.5).toFixed(1)}px rgba(${mix(r, toWhite)}, ${mix(g, toWhite)}, ${mix(b, toWhite)}, ${alpha.toFixed(3)})`,
     // The border whitens at half the rate so the edge itself looks lit rather
     // than just the air around it, without losing the tier's color.
-    borderColor: `rgb(${mix(br, toWhite / 2)}, ${mix(bg, toWhite / 2)}, ${mix(bb, toWhite / 2)})`,
+    borderColor: glow.borderPulse
+      ? `rgb(${mix(br, toWhite / 2)}, ${mix(bg, toWhite / 2)}, ${mix(bb, toWhite / 2)})`
+      : `rgb(${br}, ${bg}, ${bb})`,
   };
 }
 
