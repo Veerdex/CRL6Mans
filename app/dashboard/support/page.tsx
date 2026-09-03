@@ -2,7 +2,15 @@ import { getPatreonUrl } from "@/app/lib/patreon-public";
 import { APP_NAME } from "@/app/lib/constants";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
-import { benefitsForTier, effectiveTier, getBenefitsByTier, getTierPrices, tierRanks } from "@/app/lib/patreon-entitlements";
+import {
+  effectiveTier,
+  enabledBenefitsForAccount,
+  getBenefitsByTier,
+  getTierPrices,
+  tierRanks,
+  type BenefitAccountRow,
+} from "@/app/lib/patreon-entitlements";
+import { NAME_COLOR_BENEFIT, nameColorStyle } from "@/app/lib/name-color";
 import { TierGlow, type FieldSpec, type GlowSpec } from "./tier-glow";
 
 const REASONS = [
@@ -120,7 +128,13 @@ function avatarSrc(discordId: string, avatar: string): string {
     : `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png`;
 }
 
-type Patron = { name: string; discordId: string; avatar: string | null };
+type Patron = {
+  name: string;
+  discordId: string;
+  avatar: string | null;
+  color: string | null;
+  outline: boolean;
+};
 type TierSection = { tier: string; rank: number; patrons: Patron[] };
 
 export default async function SupportPage() {
@@ -129,7 +143,9 @@ export default async function SupportPage() {
     getPatreonUrl(),
     supabaseAdmin
       .from("accounts")
-      .select("discord_id, avatar, display_name, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public")
+      .select(
+        "discord_id, avatar, display_name, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline",
+      )
       .neq("status", "banned")
       .or("patreon_status.eq.active_patron,patreon_tier_override.not.is.null"),
     getBenefitsByTier(prices),
@@ -152,13 +168,16 @@ export default async function SupportPage() {
     if (!tier) continue;
     const rank = ranks.get(tier);
     if (rank === undefined) continue;
-    if (!benefitsForTier(byTier, status, title, override).has("featured-on-support-page")) continue;
+    const on = enabledBenefitsForAccount(byTier, account as BenefitAccountRow);
+    if (!on.has("featured-on-support-page")) continue;
 
     const section = byTierTitle.get(tier) ?? { tier, rank, patrons: [] };
     section.patrons.push({
       name: (account.display_name as string | null) || (account.username as string),
       discordId: account.discord_id as string,
       avatar: (account.avatar as string | null) ?? null,
+      color: on.has(NAME_COLOR_BENEFIT) ? ((account.patreon_name_color as string | null) ?? null) : null,
+      outline: account.patreon_name_outline === true,
     });
     byTierTitle.set(tier, section);
   }
@@ -244,7 +263,7 @@ export default async function SupportPage() {
                       className={`grid ${layout.columns} ${layout.gap}`}
                       style={{ fontSize: `${(layout.scale * BASE_FONT_REM).toFixed(4)}rem` }}
                     >
-                      {patrons.map(({ name, discordId, avatar }) => (
+                      {patrons.map(({ name, discordId, avatar, color, outline }) => (
                         <span
                           key={discordId}
                           className={`flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-white rounded-lg text-zinc-200 cursor-default select-none ${layout.hoverRise ?? ""}`}
@@ -263,7 +282,9 @@ export default async function SupportPage() {
                               style={{ width: "1.7em", height: "1.7em" }}
                             />
                           )}
-                          <span className="min-w-0 break-words">{name}</span>
+                          <span className="min-w-0 break-words" style={nameColorStyle(color, outline)}>
+                            {name}
+                          </span>
                         </span>
                       ))}
                     </div>

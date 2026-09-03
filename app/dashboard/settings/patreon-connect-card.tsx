@@ -1,8 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setBenefitEnabled, disconnectPatreon } from "./patreon-actions";
+import { setBenefitEnabled, setNameColor, disconnectPatreon } from "./patreon-actions";
+import {
+  DEFAULT_NAME_COLOR,
+  NAME_COLOR_BENEFIT,
+  nameColorStyle,
+  outlineColorFor,
+} from "@/app/lib/name-color";
 
 export type PatreonInfo = {
   status: "active_patron" | "declined_patron" | "former_patron" | null;
@@ -36,16 +42,24 @@ export function PatreonConnectCard({
   info,
   benefits,
   banner,
+  nameColor,
+  nameOutline,
+  previewName,
 }: {
   info: PatreonInfo;
   benefits: PatreonBenefitRow[];
   banner?: string | null;
+  nameColor: string | null;
+  nameOutline: boolean;
+  previewName: string;
 }) {
   const router = useRouter();
   const [enabled, setEnabled] = useState<Record<string, boolean>>(
     Object.fromEntries(benefits.map((b) => [b.id, b.enabled])),
   );
   const [openInfo, setOpenInfo] = useState<string | null>(null);
+  const [color, setColor] = useState(nameColor ?? DEFAULT_NAME_COLOR);
+  const [outline, setOutline] = useState(nameOutline);
   const [pending, startToggle] = useTransition();
   const [disconnecting, startDisconnect] = useTransition();
 
@@ -61,6 +75,25 @@ export function PatreonConnectCard({
       await setBenefitEnabled(id, next);
       router.refresh();
     });
+  }
+
+  // A colour input fires continuously while the swatch is dragged, so the
+  // write trails the preview by a beat rather than issuing one request per
+  // pixel. Both fields are sent together because the action writes them as a
+  // pair.
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (commitTimer.current) clearTimeout(commitTimer.current); }, []);
+
+  function commitNameColor(nextColor: string, nextOutline: boolean) {
+    setColor(nextColor);
+    setOutline(nextOutline);
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    commitTimer.current = setTimeout(() => {
+      startToggle(async () => {
+        await setNameColor(nextColor, nextOutline);
+        router.refresh();
+      });
+    }, 400);
   }
 
   function handleDisconnect() {
@@ -151,6 +184,36 @@ export function PatreonConnectCard({
                       </label>
                     </div>
                     {openInfo === b.id && <p className="text-zinc-500 mt-2">{b.description}</p>}
+                    {b.id === NAME_COLOR_BENEFIT && enabled[b.id] && (
+                      <div className="mt-3 space-y-2.5">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <input
+                            type="color"
+                            value={color}
+                            onChange={(e) => commitNameColor(e.target.value, outline)}
+                            aria-label="Name colour"
+                            className="w-10 h-8 p-0 bg-transparent border border-zinc-600 rounded cursor-pointer"
+                          />
+                          <span className="text-base font-semibold" style={nameColorStyle(color, outline)}>
+                            {previewName}
+                          </span>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer text-zinc-400">
+                          <input
+                            type="checkbox"
+                            checked={outline}
+                            onChange={(e) => commitNameColor(color, e.target.checked)}
+                            className="accent-indigo-600"
+                          />
+                          <span>
+                            Add a border{" "}
+                            <span className="text-zinc-500">
+                              ({outlineColorFor(color) === "#ffffff" ? "white" : "black"} — set by your colour)
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                    )}
                   </div>
                 ))}
               </>

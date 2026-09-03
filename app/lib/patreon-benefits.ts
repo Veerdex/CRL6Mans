@@ -41,7 +41,8 @@ export const PATREON_BENEFITS: PatreonBenefit[] = [
   {
     id: "colored-username",
     title: "Colored Name",
-    description: "Custom name color shown on leaderboards, rosters, and stats pages.",
+    description:
+      "Pick your name color in Settings and it follows you everywhere your name shows — leaderboards, rosters, stats pages. You can add a border too; its color is set for you from the color you pick.",
   },
   {
     id: "avatar-border",

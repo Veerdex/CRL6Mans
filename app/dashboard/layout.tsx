@@ -5,7 +5,7 @@ import { getPlayerInfo, getStaffRole, hasMfaEnabled } from "@/app/lib/players";
 import { getNavVisuals } from "@/app/lib/sponsors-public";
 import { cropStyle } from "@/app/lib/media-crop";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { getUsernamesWithBenefit } from "@/app/lib/patreon-entitlements";
+import { getNameDecorations } from "@/app/lib/patreon-entitlements";
 import NavLink from "./nav-link";
 import { TopNav, type TopNavEntry } from "./top-nav";
 import { SidebarNavGroup } from "./sidebar-nav-group";
@@ -17,7 +17,7 @@ import { ServiceWorkerRegistrar } from "./sw-register";
 import { TabVisitTracker } from "./tab-visit-tracker";
 import { NotificationButton } from "./notification-button";
 import { PullToRefresh } from "./pull-to-refresh";
-import { SupporterBadgeProvider } from "./supporter-badge";
+import { NameDecorationProvider } from "./name-decoration";
 import { PwaDesktopHint } from "./pwa-desktop-hint";
 import { CoinGrantToast } from "./coin-grant-toast";
 import { TeamCutToast } from "./team-cut-toast";
@@ -438,12 +438,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const groupedMainNav = groupNavKeys(mainNavKeys, navMap, getNavGroups(hasActiveContent));
 
   // Built once here so both nav layouts share it — a branch that forgot the
-  // provider would silently drop every supporter badge with no error.
-  const supporterUsernames = Array.from(await getUsernamesWithBenefit("supporter-badge"));
+  // provider would silently drop every supporter badge and name colour with no
+  // error.
+  const nameDecorations = Array.from(await getNameDecorations());
   const content = (
-    <SupporterBadgeProvider usernames={supporterUsernames}>
+    <NameDecorationProvider decorations={nameDecorations}>
       <PullToRefresh>{children}</PullToRefresh>
-    </SupporterBadgeProvider>
+    </NameDecorationProvider>
   );
 
   const avatarUrl = session?.avatar

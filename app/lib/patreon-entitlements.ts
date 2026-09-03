@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { NAME_COLOR_BENEFIT, SUPPORTER_BADGE_BENEFIT, normalizeNameColor } from "@/app/lib/name-color";
 
 // benefit id -> the per-tier `value` configured for it, or null when the
 // benefit is simply on/off. Callers check membership (`has`) for on/off
@@ -158,39 +159,64 @@ export async function getAccountBenefits(discordId: string): Promise<ResolvedBen
   return enabledBenefitsForAccount(await getBenefitsByTier(), account as BenefitAccountRow);
 }
 
-// Lowercased usernames of everyone who is entitled to `benefitId` and has
-// switched it on — active patrons, plus anyone a director has pinned to a tier
-// for testing. Keyed on username because PlayerName — the component every
-// roster, leaderboard and stats table renders names through — only ever
-// receives a display name and a username; threading an account id would mean
-// reshaping the query behind all ~27 call sites. Usernames are unique per
-// account, and lowercasing matches Discord's own case-insensitive uniqueness.
+// Everything PlayerName needs to decorate a name, resolved for every patron in
+// two queries and handed to the dashboard layout as one map. Badge and colour
+// share the fetch because they share the entitlement query and both render on
+// every dashboard page; splitting them would double the per-render I/O.
 //
-// players.username is a Tier 3 mirror that lags the Tier 1 row after a Discord
-// rename, and several surfaces (archived rosters, stats snapshots) still read
-// off it, so both spellings go in the set rather than leaving a renamed patron
-// unbadged on exactly those pages.
-export async function getUsernamesWithBenefit(benefitId: string): Promise<Set<string>> {
+// Keyed on lowercased username because PlayerName only ever receives a display
+// name and a username. Both spellings are indexed — accounts.username and the
+// players.username mirror — since the mirror lags a Discord rename and archived
+// rosters and stats snapshots still read off it.
+export type NameDecoration = {
+  badge: boolean;
+  color: string | null;
+  outline: boolean;
+};
+
+export async function getNameDecorations(): Promise<Map<string, NameDecoration>> {
   const { data: patrons } = await supabaseAdmin
     .from("accounts")
-    .select("discord_id, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs")
+    .select(
+      "discord_id, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline",
+    )
     .neq("status", "banned")
     .or("patreon_status.eq.active_patron,patreon_tier_override.not.is.null");
 
-  if (!patrons?.length) return new Set();
+  if (!patrons?.length) return new Map();
 
   const byTier = await getBenefitsByTier();
-  const entitled = patrons.filter((p) => enabledBenefitsForAccount(byTier, p as BenefitAccountRow).has(benefitId));
-  if (entitled.length === 0) return new Set();
 
-  const usernames = new Set<string>();
-  for (const p of entitled) if (p.username) usernames.add((p.username as string).toLowerCase());
+  const byDiscordId = new Map<string, NameDecoration>();
+  for (const p of patrons) {
+    const on = enabledBenefitsForAccount(byTier, p as BenefitAccountRow);
+    const color = on.has(NAME_COLOR_BENEFIT)
+      ? normalizeNameColor(p.patreon_name_color as string | null)
+      : null;
+    const badge = on.has(SUPPORTER_BADGE_BENEFIT);
+    if (!badge && !color) continue;
+    byDiscordId.set(p.discord_id as string, {
+      badge,
+      color,
+      outline: color !== null && p.patreon_name_outline === true,
+    });
+  }
+  if (byDiscordId.size === 0) return new Map();
+
+  const byUsername = new Map<string, NameDecoration>();
+  for (const p of patrons) {
+    const decoration = byDiscordId.get(p.discord_id as string);
+    if (decoration && p.username) byUsername.set((p.username as string).toLowerCase(), decoration);
+  }
 
   const { data: mirrors } = await supabaseAdmin
     .from("players")
-    .select("username")
-    .in("discord_id", entitled.map((p) => p.discord_id as string));
-  for (const m of mirrors ?? []) if (m.username) usernames.add((m.username as string).toLowerCase());
+    .select("discord_id, username")
+    .in("discord_id", Array.from(byDiscordId.keys()));
+  for (const m of mirrors ?? []) {
+    const decoration = byDiscordId.get(m.discord_id as string);
+    if (decoration && m.username) byUsername.set((m.username as string).toLowerCase(), decoration);
+  }
 
-  return usernames;
+  return byUsername;
 }

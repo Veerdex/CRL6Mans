@@ -6,6 +6,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
 import { benefitPrefTarget } from "@/app/lib/patreon-entitlements";
 import { DISCORD_ROLE_BENEFIT, syncDiscordSupporterRole } from "@/app/lib/patreon-discord-role";
+import { normalizeNameColor } from "@/app/lib/name-color";
 
 // Per-benefit opt-in — the only writer of a patron's benefit switches, which
 // is why featured-on-support-page's legacy patreon_public column is reached
@@ -59,6 +60,31 @@ export async function setBenefitEnabled(benefitId: string, enabled: boolean) {
   return { ok: true };
 }
 
+// The Colored Name benefit's per-patron value. Entitlement is not re-checked
+// here for the same reason setBenefitEnabled does not: the read path ANDs the
+// stored colour with the entitlement, so a colour left behind by a lapsed tier
+// renders nothing. Normalising is what keeps arbitrary strings out of the
+// column that later goes straight into an inline style.
+export async function setNameColor(color: string, outline: boolean) {
+  const cookieStore = await cookies();
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId) return { error: "Not signed in." };
+
+  const hex = normalizeNameColor(color);
+  if (!hex) return { error: "Pick a valid colour." };
+
+  await supabaseAdmin
+    .from("accounts")
+    .update({
+      patreon_name_color: hex,
+      patreon_name_outline: outline,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("discord_id", session.userId);
+
+  return { ok: true };
+}
+
 // No documented Patreon revoke-on-our-end endpoint — this just clears the
 // local link. The cron will also clear it on its own if Patreon reports the
 // refresh token as invalid (e.g. the user revoked from Patreon's side).
@@ -78,6 +104,8 @@ export async function disconnectPatreon() {
       patreon_lifetime_cents: null,
       patreon_public: false,
       patreon_benefit_prefs: {},
+      patreon_name_color: null,
+      patreon_name_outline: false,
       patreon_access_token: null,
       patreon_refresh_token: null,
       patreon_token_expires_at: null,

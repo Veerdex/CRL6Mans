@@ -38,7 +38,7 @@ export default async function SettingsPage({
     getSettingsTabTheme(),
     supabaseAdmin
       .from("accounts")
-      .select("status, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_benefit_prefs, patreon_connected_at, patreon_tier_override")
+      .select("status, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_connected_at, patreon_tier_override")
       .eq("discord_id", session.userId)
       .single(),
   ]);
@@ -172,7 +172,14 @@ export default async function SettingsPage({
         <NavLayoutToggle initial={account?.nav_layout === "topbar" ? "topbar" : "sidebar"} />
       </div>
       <div className="mb-4">
-        <PatreonConnectCard info={patreonInfo} benefits={patreonBenefits} banner={patreonBanner} />
+        <PatreonConnectCard
+          info={patreonInfo}
+          benefits={patreonBenefits}
+          banner={patreonBanner}
+          nameColor={(account?.patreon_name_color as string | null) ?? null}
+          nameOutline={account?.patreon_name_outline === true}
+          previewName={(account?.display_name as string | null) || session.username || ""}
+        />
       </div>
       <div className="mb-6 space-y-3">
         <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Notifications</p>
