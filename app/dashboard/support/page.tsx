@@ -61,7 +61,7 @@ const TIER_LAYOUT = [
     gap: "gap-x-2 gap-y-1.5",
     titleRem: 1.75,
     chipEm: 2.76,
-    avatars: true,
+    avatars: false,
     border: "#a855f7",
     fill: "rgba(168, 85, 247, 0.14)",
     glow: {
