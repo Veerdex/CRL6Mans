@@ -177,7 +177,7 @@ export default async function SupportPage() {
       discordId: account.discord_id as string,
       avatar: (account.avatar as string | null) ?? null,
       color: on.has(NAME_COLOR_BENEFIT) ? ((account.patreon_name_color as string | null) ?? null) : null,
-      outline: account.patreon_name_outline === true,
+      outline: on.has(NAME_COLOR_BENEFIT) && account.patreon_name_outline === true,
     });
     byTierTitle.set(tier, section);
   }
