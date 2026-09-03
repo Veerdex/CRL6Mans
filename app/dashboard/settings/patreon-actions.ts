@@ -5,6 +5,7 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
 import { benefitPrefTarget } from "@/app/lib/patreon-entitlements";
+import { DISCORD_ROLE_BENEFIT, syncDiscordSupporterRole } from "@/app/lib/patreon-discord-role";
 
 // Per-benefit opt-in — the only writer of a patron's benefit switches, which
 // is why featured-on-support-page's legacy patreon_public column is reached
@@ -50,6 +51,11 @@ export async function setBenefitEnabled(benefitId: string, enabled: boolean) {
     .update({ patreon_benefit_prefs: prefs, updated_at: updatedAt })
     .eq("discord_id", session.userId);
 
+  // The one benefit whose state lives outside our database. Reconciled inline
+  // rather than in after() so the router.refresh() the card fires next cannot
+  // render a switch Discord has not caught up to yet.
+  if (benefitId === DISCORD_ROLE_BENEFIT) await syncDiscordSupporterRole(session.userId);
+
   return { ok: true };
 }
 
@@ -80,6 +86,8 @@ export async function disconnectPatreon() {
       updated_at: new Date().toISOString(),
     })
     .eq("discord_id", session.userId);
+
+  await syncDiscordSupporterRole(session.userId);
 
   return { ok: true };
 }

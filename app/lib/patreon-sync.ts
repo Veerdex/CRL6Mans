@@ -1,9 +1,11 @@
 import "server-only";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { fetchPatreonIdentity, refreshPatreonToken, type PatreonTokens } from "@/app/lib/patreon";
+import { syncDiscordSupporterRole } from "@/app/lib/patreon-discord-role";
 
 type SupporterRow = {
   id: string;
+  discord_id: string | null;
   patreon_access_token: string | null;
   patreon_refresh_token: string | null;
   patreon_token_expires_at: string | null;
@@ -67,7 +69,7 @@ export function revokedPatronFields() {
 export async function syncSupporterLinks(): Promise<{ synced: number; cleared: number }> {
   const { data: rows } = await supabaseAdmin
     .from("accounts")
-    .select("id, patreon_access_token, patreon_refresh_token, patreon_token_expires_at")
+    .select("id, discord_id, patreon_access_token, patreon_refresh_token, patreon_token_expires_at")
     .not("patreon_refresh_token", "is", null);
 
   let synced = 0;
@@ -87,6 +89,7 @@ export async function syncSupporterLinks(): Promise<{ synced: number; cleared: n
         if (!result.ok) {
           if (result.revoked) {
             await supabaseAdmin.from("accounts").update(clearedLinkFields()).eq("id", row.id);
+            if (row.discord_id) await syncDiscordSupporterRole(row.discord_id);
             cleared++;
           }
           // transient failure — leave the link intact for the next run
@@ -102,6 +105,7 @@ export async function syncSupporterLinks(): Promise<{ synced: number; cleared: n
         if (!result.ok) {
           if (result.revoked) {
             await supabaseAdmin.from("accounts").update(clearedLinkFields()).eq("id", row.id);
+            if (row.discord_id) await syncDiscordSupporterRole(row.discord_id);
             cleared++;
           }
           continue;
@@ -133,6 +137,10 @@ export async function syncSupporterLinks(): Promise<{ synced: number; cleared: n
           updated_at: new Date().toISOString(),
         })
         .eq("id", row.id);
+
+      // A pledge that lapsed or moved tiers between runs changes which supporter
+      // role they qualify for, and this cron is the only thing that notices.
+      if (row.discord_id) await syncDiscordSupporterRole(row.discord_id);
       synced++;
     } catch {
       // transient failure (network blip, etc.) — leave this account for the

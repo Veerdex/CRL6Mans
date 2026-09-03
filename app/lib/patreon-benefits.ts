@@ -28,7 +28,9 @@ export const PATREON_BENEFITS: PatreonBenefit[] = [
   {
     id: "discord-role",
     title: "Discord role",
-    description: "A custom Discord role (and color) granted via the bot.",
+    description:
+      "A supporter-only Discord role in the league server, granted and removed automatically as this switch is flipped.",
+    valueLabel: "Discord role name",
   },
   {
     id: "featured-on-support-page",

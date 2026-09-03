@@ -9,6 +9,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { fetchCampaignMembers, fetchCampaignTiers } from "@/app/lib/patreon";
 import { getFreshCampaignAccessToken } from "@/app/lib/patreon-sync";
 import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
+import { syncDiscordSupporterRole } from "@/app/lib/patreon-discord-role";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -205,6 +206,9 @@ export async function setTierOverride(
     })
     .eq("discord_id", discordId);
   if (error) return { error: error.message };
+
+  // Changing the tier changes which supporter role they qualify for.
+  await syncDiscordSupporterRole(discordId);
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");

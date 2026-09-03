@@ -7,6 +7,7 @@ import { decrypt, invalidatePlayerSessions } from "@/app/lib/session";
 import { getStaffRole, hasMfaEnabled, removeRegisteredRole, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { revokedPatronFields } from "@/app/lib/patreon-sync";
+import { syncDiscordSupporterRole } from "@/app/lib/patreon-discord-role";
 import { addRole, removeRole, removeRoleById, timeoutMember, banMember, unbanMember } from "@/app/lib/discord-api";
 
 async function getActorRole(): Promise<StaffRole> {
@@ -182,6 +183,10 @@ export async function banPlayer(
       removeRegisteredRole(discordId),
       removeRole(discordId, "Captain"),
       removeRole(discordId, "Kicked"),
+      // banMember below removes them from the guild outright, which takes the
+      // supporter role with it — this is the belt for the case where the ban
+      // call fails and they stay in the server.
+      syncDiscordSupporterRole(discordId),
     ];
     if (teamId) {
       const { data: team } = await supabaseAdmin.from("teams").select("discord_role_id").eq("id", teamId).single();
