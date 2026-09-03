@@ -33,7 +33,7 @@ const TIER_LAYOUT = [
     avatars: true,
     border: "#3736ac",
     fill: "rgba(55, 54, 172, 0.20)",
-    chipBorderPx: 3,
+    chipBorderPx: 1.5,
     // Tailwind only emits utilities it can see spelled out, so the hover
     // classes are literals here rather than assembled from a distance.
     hoverRise: "transition-transform duration-200 ease-out hover:-translate-y-1.5",
@@ -69,7 +69,7 @@ const TIER_LAYOUT = [
     avatars: false,
     border: "#a855f7",
     fill: "rgba(168, 85, 247, 0.14)",
-    chipBorderPx: 1.5,
+    chipBorderPx: 0.75,
     hoverRise: "transition-transform duration-200 ease-out hover:-translate-y-1",
     glow: {
       rgb: [168, 85, 247],
@@ -101,7 +101,7 @@ const TIER_LAYOUT = [
     avatars: false,
     border: "#ffffff",
     fill: "rgba(255, 255, 255, 0.07)",
-    chipBorderPx: 1.5,
+    chipBorderPx: 0.75,
     hoverRise: null as string | null,
     glow: null,
     field: null,
