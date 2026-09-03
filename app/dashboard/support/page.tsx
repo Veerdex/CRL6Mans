@@ -218,8 +218,17 @@ export default async function SupportPage() {
                   style={{ backgroundColor: layout.fill, borderColor: layout.border }}
                 >
                   <div className={`relative ${rank === 1 ? "space-y-4" : "space-y-3"}`}>
-                    <h2 className="font-semibold text-zinc-100" style={{ fontSize: `${layout.titleRem}rem` }}>
-                      {tier} <span className="font-normal text-[0.5em] text-zinc-400">(Tier {rank})</span>
+                    <h2 className="flex items-baseline justify-center" style={{ fontSize: `${layout.titleRem}rem` }}>
+                      {/* The rank is mirrored invisibly on the left so the tier
+                          name lands dead center, rather than the name and rank
+                          together being centered as one line. Kept in flow
+                          instead of absolutely positioned because the panel
+                          clips overflow. */}
+                      <span aria-hidden className="invisible font-normal text-[0.5em] text-zinc-400 whitespace-nowrap pr-[0.7em]">
+                        (Tier {rank})
+                      </span>
+                      <span className="font-semibold text-zinc-100">{tier}</span>
+                      <span className="font-normal text-[0.5em] text-zinc-400 whitespace-nowrap pl-[0.7em]">(Tier {rank})</span>
                     </h2>
                     <div
                       className={`grid ${layout.columns} ${layout.gap}`}
