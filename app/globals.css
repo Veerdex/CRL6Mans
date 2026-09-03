@@ -780,6 +780,6 @@ input[type="datetime-local"]::-webkit-date-and-time-value {
   100% { transform: translateX(420%) skewX(-18deg); }
 }
 @keyframes patron-tier-glow {
-  0%, 100% { box-shadow: 0 0 9px 0 var(--tier-glow); }
-  50%      { box-shadow: 0 0 20px 2px var(--tier-glow); }
+  0%, 100% { box-shadow: 0 0 var(--tier-glow-min, 9px) 0 var(--tier-glow); }
+  50%      { box-shadow: 0 0 var(--tier-glow-max, 20px) 2px var(--tier-glow); }
 }

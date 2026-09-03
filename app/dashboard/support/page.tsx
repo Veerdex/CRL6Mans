@@ -16,8 +16,9 @@ const REASONS = [
 // past the third reuse the smallest treatment rather than shrinking forever.
 //
 // Each panel's fill is its border color at low alpha, so the two always agree.
-// Motion is the other axis of hierarchy: Tier 1 gets a slow orange glint
-// sweeping the panel, Tier 2 a quieter pulsing glow, Tier 3 nothing.
+// Motion is the other axis of hierarchy: Tier 1 glows hardest and adds a slow
+// orange glint sweeping the panel, Tier 2 gets the same glow dialled down,
+// Tier 3 none.
 const TIER_LAYOUT = [
   {
     scale: 1.2,
@@ -26,8 +27,8 @@ const TIER_LAYOUT = [
     titleRem: 2,
     border: "#3736ac",
     fill: "rgba(55, 54, 172, 0.20)",
-    glint: "rgba(232, 138, 36, 0.32)",
-    glow: null,
+    glint: "rgba(232, 138, 36, 0.45)",
+    glow: { color: "rgba(74, 72, 224, 0.75)", min: "14px", max: "34px", seconds: 5 },
   },
   {
     scale: 1.1,
@@ -37,7 +38,7 @@ const TIER_LAYOUT = [
     border: "#a855f7",
     fill: "rgba(168, 85, 247, 0.14)",
     glint: null,
-    glow: "rgba(168, 85, 247, 0.38)",
+    glow: { color: "rgba(168, 85, 247, 0.35)", min: "6px", max: "15px", seconds: 5 },
   },
   {
     scale: 1,
@@ -152,7 +153,12 @@ export default async function SupportPage() {
                 backgroundColor: layout.fill,
                 borderColor: layout.border,
                 ...(layout.glow
-                  ? { "--tier-glow": layout.glow, animation: "patron-tier-glow 4.5s ease-in-out infinite" }
+                  ? {
+                      "--tier-glow": layout.glow.color,
+                      "--tier-glow-min": layout.glow.min,
+                      "--tier-glow-max": layout.glow.max,
+                      animation: `patron-tier-glow ${layout.glow.seconds}s ease-in-out infinite`,
+                    }
                   : {}),
               } as React.CSSProperties;
               return (
@@ -160,10 +166,13 @@ export default async function SupportPage() {
                   {layout.glint && (
                     <span
                       aria-hidden
-                      className="pointer-events-none absolute inset-y-[-60%] left-0 w-1/4"
+                      className="pointer-events-none absolute inset-y-[-60%] left-0 w-1/3"
                       style={{
                         background: `linear-gradient(90deg, transparent, ${layout.glint}, transparent)`,
-                        animation: "patron-glint 7s ease-in-out infinite",
+                        // Linear, not eased: easing parks the band off-panel at
+                        // both ends and rushes the visible middle, which reads
+                        // as an occasional flash rather than a slow sweep.
+                        animation: "patron-glint 9s linear infinite",
                       }}
                     />
                   )}
