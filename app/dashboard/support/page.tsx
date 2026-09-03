@@ -3,7 +3,6 @@ import { APP_NAME } from "@/app/lib/constants";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 import { benefitsForTier, effectiveTier, getBenefitsByTier, getTierPrices, tierRanks } from "@/app/lib/patreon-entitlements";
-import { SupporterBadgeIcon } from "../supporter-badge";
 import { TierGlow, type FieldSpec, type GlowSpec } from "./tier-glow";
 
 const REASONS = [
@@ -265,7 +264,6 @@ export default async function SupportPage() {
                             />
                           )}
                           <span className="min-w-0 break-words">{name}</span>
-                          <SupporterBadgeIcon />
                         </span>
                       ))}
                     </div>
