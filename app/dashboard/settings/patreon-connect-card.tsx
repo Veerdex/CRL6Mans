@@ -85,7 +85,9 @@ export function PatreonConnectCard({
 
       {banner === "connected" && (
         <p className="text-xs text-emerald-400">
-          Patreon connected. Your benefits start switched off — turn on the ones you want below.
+          Patreon connected.
+          {benefits.length > 0 &&
+            " Your benefits start switched off — turn on the ones you want below."}
         </p>
       )}
       {banner === "cancelled" && <p className="text-xs text-zinc-500">Patreon connection cancelled.</p>}
