@@ -175,13 +175,11 @@ function canActOn(actorRole: StaffRole | null, targetRole: StaffRole | null): bo
 function PlayerRow({
   player,
   actorRole,
-  revokedPatron,
-  onRevokedPatronChange,
+  onPatronRevoked,
 }: {
   player: CombinedPlayer;
   actorRole: StaffRole | null;
-  revokedPatron: RevokedPatron | null;
-  onRevokedPatronChange: (patron: RevokedPatron | null) => void;
+  onPatronRevoked: (patron: RevokedPatron) => void;
 }) {
   const router = useRouter();
   const [editOpen, setEditOpen]     = useState(false);
@@ -239,7 +237,7 @@ function PlayerRow({
       } else {
         const res = await banPlayer(player.id, reason);
         if (res.error) { setError(res.error); return; }
-        onRevokedPatronChange(res.revokedPatron ?? null);
+        if (res.revokedPatron) onPatronRevoked(res.revokedPatron);
       }
       setModeAction(null);
       setReason("");
@@ -410,12 +408,6 @@ function PlayerRow({
       )}
 
       {/* Kick/ban confirmation */}
-      {revokedPatron && (
-        <div className="px-4 pb-3">
-          <PatreonBlockNotice patron={revokedPatron} onDismiss={() => onRevokedPatronChange(null)} />
-        </div>
-      )}
-
       {modeAction !== null && (
         <div className="border-t border-zinc-800 px-4 py-3 space-y-2">
           <input
@@ -466,15 +458,17 @@ type StatusFilter = "all" | "active" | "kicked" | "banned";
 export function PlayerPanel({ players, actorRole }: { players: CombinedPlayer[]; actorRole: StaffRole | null }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [revoked, setRevoked] = useState<{ playerId: string; patron: RevokedPatron } | null>(null);
+  // Panel-level rather than row-level: the banned row moves to the other list
+  // (and drops out entirely under the Active filter) on the refresh that
+  // follows a ban, so anything rendered inside it disappears with it.
+  const [revoked, setRevoked] = useState<{ name: string; patron: RevokedPatron } | null>(null);
 
   const renderRow = (p: CombinedPlayer) => (
     <PlayerRow
       key={p.id}
       player={p}
       actorRole={actorRole}
-      revokedPatron={revoked?.playerId === p.id ? revoked.patron : null}
-      onRevokedPatronChange={patron => setRevoked(patron ? { playerId: p.id, patron } : null)}
+      onPatronRevoked={patron => setRevoked({ name: p.display_name || p.username, patron })}
     />
   );
 
@@ -529,6 +523,10 @@ export function PlayerPanel({ players, actorRole }: { players: CombinedPlayer[];
           </button>
         ))}
       </div>
+
+      {revoked && (
+        <PatreonBlockNotice patron={revoked.patron} subjectName={revoked.name} onDismiss={() => setRevoked(null)} />
+      )}
 
       {active.length === 0 && banned.length === 0 && (
         <p className="text-zinc-500 text-sm">No players found.</p>

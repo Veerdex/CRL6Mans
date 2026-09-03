@@ -48,14 +48,21 @@ function canActOn(actorRole: StaffRole | null, targetRole: StaffRole | null): bo
   return false;
 }
 
-function GuestRow({ account, actorRole }: { account: GuestAccount; actorRole: StaffRole | null }) {
+function GuestRow({
+  account,
+  actorRole,
+  onPatronRevoked,
+}: {
+  account: GuestAccount;
+  actorRole: StaffRole | null;
+  onPatronRevoked: (patron: RevokedPatron) => void;
+}) {
   const router = useRouter();
   const [modeAction, setModeAction] = useState<ModeAction>(null);
   const [reason, setReason]         = useState("");
   const [timeoutMs, setTimeoutMs]   = useState(TIMEOUT_OPTIONS[4].ms); // default 7 days
   const [isPending, startTx]        = useTransition();
   const [error, setError]           = useState<string | null>(null);
-  const [revokedPatron, setRevokedPatron] = useState<RevokedPatron | null>(null);
 
   const isBanned = account.status === "banned";
   const canModerate = canActOn(actorRole, account.staffRole);
@@ -69,7 +76,7 @@ function GuestRow({ account, actorRole }: { account: GuestAccount; actorRole: St
       } else {
         const res = await banPlayer(account.id, reason);
         if (res.error) { setError(res.error); return; }
-        setRevokedPatron(res.revokedPatron ?? null);
+        if (res.revokedPatron) onPatronRevoked(res.revokedPatron);
       }
       setModeAction(null);
       setReason("");
@@ -176,12 +183,6 @@ function GuestRow({ account, actorRole }: { account: GuestAccount; actorRole: St
         </p>
       )}
 
-      {revokedPatron && (
-        <div className="px-4 pb-3">
-          <PatreonBlockNotice patron={revokedPatron} onDismiss={() => setRevokedPatron(null)} />
-        </div>
-      )}
-
       {modeAction !== null && (
         <div className="border-t border-zinc-800 px-4 py-3 space-y-2">
           <input
@@ -232,6 +233,9 @@ type StatusFilter = "all" | "unregistered" | "pending" | "rejected" | "kicked" |
 export function GuestAccountPanel({ accounts, actorRole }: { accounts: GuestAccount[]; actorRole: StaffRole | null }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  // See PlayerPanel: the banned row can leave the filtered list on the
+  // post-ban refresh, taking a row-rendered notice with it.
+  const [revoked, setRevoked] = useState<{ name: string; patron: RevokedPatron } | null>(null);
 
   const searched = accounts.filter(a =>
     a.username.toLowerCase().includes(search.toLowerCase()) ||
@@ -287,13 +291,24 @@ export function GuestAccountPanel({ accounts, actorRole }: { accounts: GuestAcco
         ))}
       </div>
 
+      {revoked && (
+        <PatreonBlockNotice patron={revoked.patron} subjectName={revoked.name} onDismiss={() => setRevoked(null)} />
+      )}
+
       {filtered.length === 0 && (
         <p className="text-zinc-500 text-sm">No accounts found.</p>
       )}
 
       {filtered.length > 0 && (
         <div className="space-y-2">
-          {filtered.map(a => <GuestRow key={a.id} account={a} actorRole={actorRole} />)}
+          {filtered.map(a => (
+            <GuestRow
+              key={a.id}
+              account={a}
+              actorRole={actorRole}
+              onPatronRevoked={patron => setRevoked({ name: a.display_name || a.username, patron })}
+            />
+          ))}
         </div>
       )}
     </div>

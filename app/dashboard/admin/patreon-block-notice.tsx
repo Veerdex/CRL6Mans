@@ -18,15 +18,18 @@ function formatPledge(patron: RevokedPatron): string {
 // knowing that and assuming the ban handled it.
 export function PatreonBlockNotice({
   patron,
+  subjectName,
   onDismiss,
 }: {
   patron: RevokedPatron;
+  subjectName?: string | null;
   onDismiss: () => void;
 }) {
   return (
     <div className="bg-amber-950/30 border border-amber-800/50 rounded-lg p-3 space-y-2">
       <p className="text-xs text-amber-200">
-        Supporter status revoked ({formatPledge(patron)}). They keep being charged until you block them on Patreon —
+        Supporter status revoked{subjectName ? ` for ${subjectName}` : ""} ({formatPledge(patron)}). They keep being
+        charged until you block them on Patreon —
         that also cancels their membership and stops them rejoining.
       </p>
       <div className="flex items-center gap-3">
