@@ -70,3 +70,40 @@ export async function getAccountBenefits(discordId: string): Promise<ResolvedBen
     account.patreon_tier_title as string | null,
   );
 }
+
+// Lowercased usernames of every active patron whose resolved benefits include
+// `benefitId`. Keyed on username because PlayerName — the component every
+// roster, leaderboard and stats table renders names through — only ever
+// receives a display name and a username; threading an account id would mean
+// reshaping the query behind all ~27 call sites. Usernames are unique per
+// account, and lowercasing matches Discord's own case-insensitive uniqueness.
+//
+// players.username is a Tier 3 mirror that lags the Tier 1 row after a Discord
+// rename, and several surfaces (archived rosters, stats snapshots) still read
+// off it, so both spellings go in the set rather than leaving a renamed patron
+// unbadged on exactly those pages.
+export async function getUsernamesWithBenefit(benefitId: string): Promise<Set<string>> {
+  const { data: patrons } = await supabaseAdmin
+    .from("accounts")
+    .select("discord_id, username, patreon_tier_title")
+    .eq("patreon_status", "active_patron");
+
+  if (!patrons?.length) return new Set();
+
+  const byTier = await getBenefitsByTier();
+  const entitled = patrons.filter((p) =>
+    benefitsForTier(byTier, "active_patron", p.patreon_tier_title as string | null).has(benefitId),
+  );
+  if (entitled.length === 0) return new Set();
+
+  const usernames = new Set<string>();
+  for (const p of entitled) if (p.username) usernames.add((p.username as string).toLowerCase());
+
+  const { data: mirrors } = await supabaseAdmin
+    .from("players")
+    .select("username")
+    .in("discord_id", entitled.map((p) => p.discord_id as string));
+  for (const m of mirrors ?? []) if (m.username) usernames.add((m.username as string).toLowerCase());
+
+  return usernames;
+}

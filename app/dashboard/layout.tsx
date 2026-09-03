@@ -5,6 +5,7 @@ import { getPlayerInfo, getStaffRole, hasMfaEnabled } from "@/app/lib/players";
 import { getNavVisuals } from "@/app/lib/sponsors-public";
 import { cropStyle } from "@/app/lib/media-crop";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { getUsernamesWithBenefit } from "@/app/lib/patreon-entitlements";
 import NavLink from "./nav-link";
 import { TopNav, type TopNavEntry } from "./top-nav";
 import { SidebarNavGroup } from "./sidebar-nav-group";
@@ -16,6 +17,7 @@ import { ServiceWorkerRegistrar } from "./sw-register";
 import { TabVisitTracker } from "./tab-visit-tracker";
 import { NotificationButton } from "./notification-button";
 import { PullToRefresh } from "./pull-to-refresh";
+import { SupporterBadgeProvider } from "./supporter-badge";
 import { PwaDesktopHint } from "./pwa-desktop-hint";
 import { CoinGrantToast } from "./coin-grant-toast";
 import { TeamCutToast } from "./team-cut-toast";
@@ -435,6 +437,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // already has its own bottom-tab + "More" sheet pattern.
   const groupedMainNav = groupNavKeys(mainNavKeys, navMap, getNavGroups(hasActiveContent));
 
+  // Built once here so both nav layouts share it — a branch that forgot the
+  // provider would silently drop every supporter badge with no error.
+  const supporterUsernames = Array.from(await getUsernamesWithBenefit("supporter-badge"));
+  const content = (
+    <SupporterBadgeProvider usernames={supporterUsernames}>
+      <PullToRefresh>{children}</PullToRefresh>
+    </SupporterBadgeProvider>
+  );
+
   const avatarUrl = session?.avatar
     ? `https://cdn.discordapp.com/avatars/${session.userId}/${session.avatar}.png`
     : `https://cdn.discordapp.com/embed/avatars/0.png`;
@@ -491,7 +502,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <main className="isolate flex-1 overflow-hidden flex flex-col">
           {needsMfa && <MfaBanner />}
           <div className="flex-1 overflow-hidden">
-            <PullToRefresh>{children}</PullToRefresh>
+            {content}
           </div>
         </main>
         <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
@@ -622,7 +633,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <main className="isolate flex-1 overflow-hidden flex flex-col">
         {needsMfa && <MfaBanner />}
         <div className="flex-1 overflow-hidden">
-          <PullToRefresh>{children}</PullToRefresh>
+          {content}
         </div>
       </main>
       <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
