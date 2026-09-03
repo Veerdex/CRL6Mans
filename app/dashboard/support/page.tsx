@@ -14,10 +14,41 @@ const REASONS = [
 // to two columns to give the scaled-up names room to breathe. Three columns is
 // the ceiling everywhere else because the page is only max-w-2xl wide. Ranks
 // past the third reuse the smallest treatment rather than shrinking forever.
+//
+// Each panel's fill is its border color at low alpha, so the two always agree.
+// Motion is the other axis of hierarchy: Tier 1 gets a slow orange glint
+// sweeping the panel, Tier 2 a quieter pulsing glow, Tier 3 nothing.
 const TIER_LAYOUT = [
-  { scale: 1.2, columns: "grid-cols-1 sm:grid-cols-2", gap: "gap-x-3 gap-y-3" },
-  { scale: 1.1, columns: "grid-cols-2 sm:grid-cols-3", gap: "gap-x-2 gap-y-1.5" },
-  { scale: 1, columns: "grid-cols-2 sm:grid-cols-3", gap: "gap-x-2 gap-y-1.5" },
+  {
+    scale: 1.2,
+    columns: "grid-cols-1 sm:grid-cols-2",
+    gap: "gap-x-3 gap-y-3",
+    titleRem: 2,
+    border: "#3736ac",
+    fill: "rgba(55, 54, 172, 0.20)",
+    glint: "rgba(232, 138, 36, 0.32)",
+    glow: null,
+  },
+  {
+    scale: 1.1,
+    columns: "grid-cols-2 sm:grid-cols-3",
+    gap: "gap-x-2 gap-y-1.5",
+    titleRem: 1.75,
+    border: "#a855f7",
+    fill: "rgba(168, 85, 247, 0.14)",
+    glint: null,
+    glow: "rgba(168, 85, 247, 0.38)",
+  },
+  {
+    scale: 1,
+    columns: "grid-cols-2 sm:grid-cols-3",
+    gap: "gap-x-2 gap-y-1.5",
+    titleRem: 1.5,
+    border: "#ffffff",
+    fill: "rgba(255, 255, 255, 0.07)",
+    glint: null,
+    glow: null,
+  },
 ];
 
 // Chip padding is in em so one font-size per section scales the whole chip.
@@ -117,23 +148,43 @@ export default async function SupportPage() {
 
             {sections.map(({ tier, rank, names }) => {
               const layout = TIER_LAYOUT[Math.min(rank, TIER_LAYOUT.length) - 1];
+              const panelStyle = {
+                backgroundColor: layout.fill,
+                borderColor: layout.border,
+                ...(layout.glow
+                  ? { "--tier-glow": layout.glow, animation: "patron-tier-glow 4.5s ease-in-out infinite" }
+                  : {}),
+              } as React.CSSProperties;
               return (
-                <div key={tier} className={rank === 1 ? "space-y-3" : "space-y-2"}>
-                  <h2 className="text-base font-semibold text-zinc-300">
-                    {tier} <span className="font-normal text-zinc-500">(Tier {rank})</span>
-                  </h2>
-                  <div
-                    className={`grid ${layout.columns} ${layout.gap}`}
-                    style={{ fontSize: `${(layout.scale * BASE_FONT_REM).toFixed(4)}rem` }}
-                  >
-                    {names.map((name) => (
-                      <span
-                        key={name}
-                        className="flex items-center justify-center text-center break-words min-w-0 px-[0.85em] py-[0.4em] bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300"
-                      >
-                        {name}
-                      </span>
-                    ))}
+                <div key={tier} className="relative overflow-hidden rounded-2xl border p-5 sm:p-6" style={panelStyle}>
+                  {layout.glint && (
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute inset-y-[-60%] left-0 w-1/4"
+                      style={{
+                        background: `linear-gradient(90deg, transparent, ${layout.glint}, transparent)`,
+                        animation: "patron-glint 7s ease-in-out infinite",
+                      }}
+                    />
+                  )}
+                  <div className={`relative ${rank === 1 ? "space-y-4" : "space-y-3"}`}>
+                    <h2 className="font-semibold text-zinc-100" style={{ fontSize: `${layout.titleRem}rem` }}>
+                      {tier} <span className="font-normal text-[0.5em] text-zinc-400">(Tier {rank})</span>
+                    </h2>
+                    <div
+                      className={`grid ${layout.columns} ${layout.gap}`}
+                      style={{ fontSize: `${(layout.scale * BASE_FONT_REM).toFixed(4)}rem` }}
+                    >
+                      {names.map((name) => (
+                        <span
+                          key={name}
+                          className="flex items-center justify-center text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-zinc-700 rounded-lg text-zinc-200"
+                          style={{ backgroundColor: "rgba(0, 0, 0, 0.55)", borderWidth: "1.5px" }}
+                        >
+                          {name}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
               );
