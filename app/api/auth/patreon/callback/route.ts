@@ -27,6 +27,19 @@ export async function GET(request: NextRequest) {
     return safeRedirect(request, "/login");
   }
 
+  // A ban revokes patron status; without this a banned user holding a live
+  // session cookie could re-run the OAuth flow and write it straight back. The
+  // dashboard redirects them at the layout, but this is a bare route handler.
+  const { data: actor } = await supabaseAdmin
+    .from("accounts")
+    .select("status")
+    .eq("discord_id", session.userId)
+    .maybeSingle();
+  if (actor?.status === "banned") {
+    clearState();
+    return safeRedirect(request, "/login");
+  }
+
   if (patreonError || !code) {
     clearState();
     return safeRedirect(request, "/dashboard/settings?patreon=cancelled");

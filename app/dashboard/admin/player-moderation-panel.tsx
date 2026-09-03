@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { kickPlayer, banPlayer, unbanPlayer } from "./player-moderation-actions";
+import { kickPlayer, banPlayer, unbanPlayer, type RevokedPatron } from "./player-moderation-actions";
+import { PatreonBlockNotice } from "./patreon-block-notice";
 import type { StaffRole } from "@/app/lib/players";
 
 export type ModerationPlayer = {
@@ -41,6 +42,7 @@ function PlayerRow({ player, actorRole }: { player: ModerationPlayer; actorRole:
   const [reason, setReason] = useState("");
   const [timeoutMs, setTimeoutMs] = useState(TIMEOUT_OPTIONS[4].ms); // default 7 days
   const [error, setError] = useState<string | null>(null);
+  const [revokedPatron, setRevokedPatron] = useState<RevokedPatron | null>(null);
 
   const isBanned = player.status === "banned";
   const canModerate = canActOn(actorRole, player.staffRole);
@@ -54,10 +56,14 @@ function PlayerRow({ player, actorRole }: { player: ModerationPlayer; actorRole:
   function confirm() {
     setError(null);
     startTransition(async () => {
-      const res = action === "kick"
-        ? await kickPlayer(player.id, reason, timeoutMs)
-        : await banPlayer(player.id, reason);
-      if (res.error) { setError(res.error); return; }
+      if (action === "kick") {
+        const res = await kickPlayer(player.id, reason, timeoutMs);
+        if (res.error) { setError(res.error); return; }
+      } else {
+        const res = await banPlayer(player.id, reason);
+        if (res.error) { setError(res.error); return; }
+        setRevokedPatron(res.revokedPatron ?? null);
+      }
       cancel();
       router.refresh();
     });
@@ -126,6 +132,8 @@ function PlayerRow({ player, actorRole }: { player: ModerationPlayer; actorRole:
       {!isBanned && player.kickReason && (
         <p className="text-xs text-amber-400/80 pl-1">Last kick reason: {player.kickReason}</p>
       )}
+
+      {revokedPatron && <PatreonBlockNotice patron={revokedPatron} onDismiss={() => setRevokedPatron(null)} />}
 
       {action !== null && (
         <div className="pt-1 space-y-2">

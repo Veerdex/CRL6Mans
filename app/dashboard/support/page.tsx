@@ -17,6 +17,7 @@ export default async function SupportPage() {
       .select("display_name, username, patreon_tier_title, patreon_entitled_cents")
       .eq("patreon_status", "active_patron")
       .eq("patreon_public", true)
+      .neq("status", "banned")
       .order("patreon_entitled_cents", { ascending: false }),
   ]);
 

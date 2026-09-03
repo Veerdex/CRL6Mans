@@ -33,6 +33,30 @@ function clearedLinkFields() {
   };
 }
 
+// What a ban strips. Deliberately not clearedLinkFields(): that one means
+// "Patreon rejected the token, the link is gone", while this means "we revoked
+// them league-side". The identity fields (patreon_user_id, patreon_member_id,
+// patreon_lifetime_cents) survive on purpose — they are what maps a row in the
+// admin Patreon section back to a CRL name, and an admin who just banned
+// someone still paying needs exactly that mapping to go block them on Patreon.
+// Clearing the tokens is what makes the revocation stick: syncSupporterLinks
+// only iterates accounts with a non-null refresh token, so it can never write
+// their patron status back.
+export function revokedPatronFields() {
+  return {
+    patreon_status: null,
+    patreon_tier_title: null,
+    patreon_entitled_cents: null,
+    patreon_public: false,
+    patreon_access_token: null,
+    patreon_refresh_token: null,
+    patreon_token_expires_at: null,
+    patreon_tier_override: null,
+    patreon_tier_override_set_by: null,
+    patreon_tier_override_set_at: null,
+  };
+}
+
 // Refreshes and re-fetches status for every account with a linked Patreon
 // account. A refresh failure means Patreon rejected the refresh token
 // (revoked by the user, or otherwise invalid) — the link is cleared rather

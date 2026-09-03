@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { kickPlayer, banPlayer, unbanPlayer, unkickPlayer } from "./player-moderation-actions";
+import { kickPlayer, banPlayer, unbanPlayer, unkickPlayer, type RevokedPatron } from "./player-moderation-actions";
+import { PatreonBlockNotice } from "./patreon-block-notice";
 import type { StaffRole } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
 
@@ -54,6 +55,7 @@ function GuestRow({ account, actorRole }: { account: GuestAccount; actorRole: St
   const [timeoutMs, setTimeoutMs]   = useState(TIMEOUT_OPTIONS[4].ms); // default 7 days
   const [isPending, startTx]        = useTransition();
   const [error, setError]           = useState<string | null>(null);
+  const [revokedPatron, setRevokedPatron] = useState<RevokedPatron | null>(null);
 
   const isBanned = account.status === "banned";
   const canModerate = canActOn(actorRole, account.staffRole);
@@ -61,10 +63,14 @@ function GuestRow({ account, actorRole }: { account: GuestAccount; actorRole: St
   function handleConfirmMod() {
     setError(null);
     startTx(async () => {
-      const res = modeAction === "kick"
-        ? await kickPlayer(account.id, reason, timeoutMs)
-        : await banPlayer(account.id, reason);
-      if (res.error) { setError(res.error); return; }
+      if (modeAction === "kick") {
+        const res = await kickPlayer(account.id, reason, timeoutMs);
+        if (res.error) { setError(res.error); return; }
+      } else {
+        const res = await banPlayer(account.id, reason);
+        if (res.error) { setError(res.error); return; }
+        setRevokedPatron(res.revokedPatron ?? null);
+      }
       setModeAction(null);
       setReason("");
       router.refresh();
@@ -168,6 +174,12 @@ function GuestRow({ account, actorRole }: { account: GuestAccount; actorRole: St
           {account.isKicked ? "Kicked" : "Last kick"}: {account.kickReason}
           {account.isKicked && account.kickedUntil && ` (until ${new Date(account.kickedUntil).toLocaleString()})`}
         </p>
+      )}
+
+      {revokedPatron && (
+        <div className="px-4 pb-3">
+          <PatreonBlockNotice patron={revokedPatron} onDismiss={() => setRevokedPatron(null)} />
+        </div>
       )}
 
       {modeAction !== null && (

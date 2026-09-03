@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updatePlayerData } from "./player-actions";
-import { kickPlayer, banPlayer, unbanPlayer, unkickPlayer } from "./player-moderation-actions";
+import { kickPlayer, banPlayer, unbanPlayer, unkickPlayer, type RevokedPatron } from "./player-moderation-actions";
+import { PatreonBlockNotice } from "./patreon-block-notice";
 import { adminUpdatePlatformAccountId, adminDeletePlatformAccount } from "./platform-account-verification-actions";
 import type { StaffRole } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
@@ -180,6 +181,7 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
   const [isPending, startTx]        = useTransition();
   const [saved, setSaved]           = useState(false);
   const [error, setError]           = useState<string | null>(null);
+  const [revokedPatron, setRevokedPatron] = useState<RevokedPatron | null>(null);
 
   const [username, setUsername]     = useState(player.username);
   const [trackerUrl, setTrackerUrl] = useState(player.tracker_url);
@@ -222,10 +224,14 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
   function handleConfirmMod() {
     setError(null);
     startTx(async () => {
-      const res = modeAction === "kick"
-        ? await kickPlayer(player.id, reason, timeoutMs)
-        : await banPlayer(player.id, reason);
-      if (res.error) { setError(res.error); return; }
+      if (modeAction === "kick") {
+        const res = await kickPlayer(player.id, reason, timeoutMs);
+        if (res.error) { setError(res.error); return; }
+      } else {
+        const res = await banPlayer(player.id, reason);
+        if (res.error) { setError(res.error); return; }
+        setRevokedPatron(res.revokedPatron ?? null);
+      }
       setModeAction(null);
       setReason("");
       router.refresh();
@@ -395,6 +401,12 @@ function PlayerRow({ player, actorRole }: { player: CombinedPlayer; actorRole: S
       )}
 
       {/* Kick/ban confirmation */}
+      {revokedPatron && (
+        <div className="px-4 pb-3">
+          <PatreonBlockNotice patron={revokedPatron} onDismiss={() => setRevokedPatron(null)} />
+        </div>
+      )}
+
       {modeAction !== null && (
         <div className="border-t border-zinc-800 px-4 py-3 space-y-2">
           <input

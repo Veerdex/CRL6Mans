@@ -64,14 +64,19 @@ export function benefitsForTier(
   return byTier.get(effective) ?? new Map();
 }
 
+// A ban revokes supporter status outright (see banPlayer), which already
+// clears these columns. The status check is the invariant behind that: it also
+// covers accounts banned before that shipped, and any path that could write
+// patron fields onto a banned row.
 export async function getAccountBenefits(discordId: string): Promise<ResolvedBenefits> {
   const { data: account } = await supabaseAdmin
     .from("accounts")
-    .select("patreon_status, patreon_tier_title, patreon_tier_override")
+    .select("status, patreon_status, patreon_tier_title, patreon_tier_override")
     .eq("discord_id", discordId)
     .maybeSingle();
 
   if (!account) return new Map();
+  if (account.status === "banned") return new Map();
 
   return benefitsForTier(
     await getBenefitsByTier(),
@@ -97,6 +102,7 @@ export async function getUsernamesWithBenefit(benefitId: string): Promise<Set<st
   const { data: patrons } = await supabaseAdmin
     .from("accounts")
     .select("discord_id, username, patreon_status, patreon_tier_title, patreon_tier_override")
+    .neq("status", "banned")
     .or("patreon_status.eq.active_patron,patreon_tier_override.not.is.null");
 
   if (!patrons?.length) return new Set();

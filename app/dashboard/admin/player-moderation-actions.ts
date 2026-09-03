@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt, invalidatePlayerSessions } from "@/app/lib/session";
 import { getStaffRole, hasMfaEnabled, removeRegisteredRole, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { revokedPatronFields } from "@/app/lib/patreon-sync";
 import { addRole, removeRole, removeRoleById, timeoutMember, banMember, unbanMember } from "@/app/lib/discord-api";
 
 async function getActorRole(): Promise<StaffRole> {
@@ -117,15 +118,22 @@ export async function kickForRejectionCooldown(
   return kickPlayer(accountId, reason, ms, new Date(Date.now() + ms));
 }
 
+// Surfaced to the admin after a ban so they know a pledge is still live.
+// Patreon v2 is read-only for memberships, so nothing here can cancel it — the
+// only thing that stops the charge is a director blocking them on patreon.com.
+export type RevokedPatron = { tierTitle: string | null; entitledCents: number | null };
+
 export async function banPlayer(
   accountId: string,
   reason: string
-): Promise<{ ok?: boolean; error?: string }> {
+): Promise<{ ok?: boolean; error?: string; revokedPatron?: RevokedPatron }> {
   const actorRole = await getActorRole();
 
   const { data: account } = await supabaseAdmin
     .from("accounts")
-    .select("discord_id")
+    .select(
+      "discord_id, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_tier_override",
+    )
     .eq("id", accountId)
     .single();
   const { data: player } = await supabaseAdmin
@@ -145,6 +153,10 @@ export async function banPlayer(
       ban_reason: reason.trim() || null,
       kick_reason: null,
       kicked_until: null,
+      // A ban revokes supporter status at every level, free members included
+      // — it is the link being severed, not a pledge threshold. A kick
+      // deliberately does not do this.
+      ...revokedPatronFields(),
       updated_at: new Date().toISOString(),
     })
     .eq("id", accountId);
@@ -182,7 +194,20 @@ export async function banPlayer(
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/players");
-  return { ok: true };
+  revalidatePath("/dashboard/support");
+
+  const wasPatron = account?.patreon_status === "active_patron" || account?.patreon_tier_override != null;
+  return {
+    ok: true,
+    ...(wasPatron
+      ? {
+          revokedPatron: {
+            tierTitle: ((account?.patreon_tier_override ?? account?.patreon_tier_title) as string | null) ?? null,
+            entitledCents: (account?.patreon_entitled_cents as number | null) ?? null,
+          },
+        }
+      : {}),
+  };
 }
 
 export async function unkickPlayer(
