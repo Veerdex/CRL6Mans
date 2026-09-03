@@ -21,7 +21,12 @@ export function SupporterBadgeProvider({
 export function SupporterBadge({ username }: { username: string }) {
   const supporters = useContext(SupporterUsernames);
   if (!supporters.has(username.toLowerCase())) return null;
+  return <SupporterBadgeIcon className="ml-1" />;
+}
 
+// The badge itself, ungated. The support page lists nothing but patrons, so it
+// renders this directly instead of going through the entitlement check.
+export function SupporterBadgeIcon({ className = "" }: { className?: string }) {
   // Sized in em so it tracks whatever font size the surrounding row uses —
   // PlayerName is rendered at everything from text-xs to text-2xl.
   return (
@@ -29,7 +34,7 @@ export function SupporterBadge({ username }: { username: string }) {
       src="/supporter-badge.png"
       alt="Supporter"
       draggable={false}
-      className="shrink-0 ml-1 h-[1em] w-auto select-none"
+      className={`shrink-0 h-[1em] w-auto select-none ${className}`}
     />
   );
 }
