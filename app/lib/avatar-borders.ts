@@ -46,6 +46,13 @@ export const AVATAR_BORDERS: readonly AvatarBorder[] = [
     measured: { width: 982, height: 997 },
     opening: { top: 45, bottom: 940, left: 45, right: 940 },
   },
+  {
+    id: "space",
+    title: "Space",
+    src: "/avatar-borders/space.png",
+    measured: { width: 988, height: 1007 },
+    opening: { top: 84, bottom: 937, left: 67, right: 920 },
+  },
 ];
 
 const BY_ID = new Map(AVATAR_BORDERS.map((b) => [b.id, b]));
