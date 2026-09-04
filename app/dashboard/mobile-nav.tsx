@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LogoutButton } from "./logout-button";
 import { NavLeafContent, PodiumGlowIcon, PODIUM_HREF, podiumTabClass, podiumLabelClass } from "./podium-glow";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 type Item = { href: string; label: string; icon: React.ReactNode };
 
@@ -12,7 +13,9 @@ type Props = {
   items: Item[];
   username: string;
   displayName?: string | null;
-  avatarUrl: string;
+  avatarDiscordId: string | null;
+  avatarHash: string | null;
+  avatarBorder: string | null;
   status: "approved" | "pending" | "rejected" | "unregistered";
   priorityHrefs?: string[];
 };
@@ -21,7 +24,7 @@ function isActive(href: string, pathname: string) {
   return href === "/dashboard" ? pathname === href : pathname.startsWith(href);
 }
 
-export default function MobileNav({ items, username, displayName, avatarUrl, status, priorityHrefs = [] }: Props) {
+export default function MobileNav({ items, username, displayName, avatarDiscordId, avatarHash, avatarBorder, status, priorityHrefs = [] }: Props) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -148,7 +151,7 @@ export default function MobileNav({ items, username, displayName, avatarUrl, sta
             <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between gap-3 px-1">
               <div className="flex items-center gap-3 min-w-0">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={avatarUrl} alt="avatar" width={32} height={32} className="rounded-full shrink-0" />
+                <PlayerAvatar discordId={avatarDiscordId} avatar={avatarHash} border={avatarBorder} className="w-8 h-8" alt="avatar" />
                 <span className="text-sm text-zinc-300 truncate">{displayName ?? username}</span>
               </div>
               <LogoutButton className="shrink-0" />

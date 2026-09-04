@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { playerRatingFromRow } from "@/app/lib/rating";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 type Team = {
   id: string;
@@ -141,18 +142,7 @@ export function TeamsGrid({ teams, byTeam, avgMmr, myTeamId, initialQuery = "" }
                           rel="noopener noreferrer"
                           className="flex items-center gap-3 px-5 py-3 hover:bg-zinc-800 transition-colors group"
                         >
-                          {player.avatar ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={`https://cdn.discordapp.com/avatars/${player.discord_id}/${player.avatar}.png`}
-                              alt=""
-                              width={28}
-                              height={28}
-                              className="w-7 h-7 rounded-full shrink-0"
-                            />
-                          ) : (
-                            <div className="w-7 h-7 rounded-full bg-zinc-700 shrink-0" />
-                          )}
+                          <PlayerAvatar discordId={player.discord_id} avatar={player.avatar} username={player.username} className="w-7 h-7" />
                           <span className="flex-1 text-sm text-zinc-200 group-hover:text-white transition-colors truncate">
                             <PlayerName displayName={player.display_name} username={player.username} />
                             {player.is_captain && (

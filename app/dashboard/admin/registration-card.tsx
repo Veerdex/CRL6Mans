@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { approvePlayerWithEdits, rejectPlayer } from "./player-actions";
 import type { Player } from "@/app/lib/players";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 interface Props {
   player: Player;
@@ -52,13 +53,7 @@ export function RegistrationCard({ player }: Props) {
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-center gap-3">
-        {player.avatar && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={`https://cdn.discordapp.com/avatars/${player.discord_id}/${player.avatar}.png`}
-            alt="" width={36} height={36} className="rounded-full shrink-0"
-          />
-        )}
+        <PlayerAvatar discordId={player.discord_id} avatar={player.avatar} username={player.username} className="w-9 h-9" />
         <div>
           <p className="font-semibold text-white">{player.username}</p>
           <p className="text-xs text-zinc-500">

@@ -22,6 +22,7 @@ import { PwaDesktopHint } from "./pwa-desktop-hint";
 import { CoinGrantToast } from "./coin-grant-toast";
 import { TeamCutToast } from "./team-cut-toast";
 import { LogoutButton } from "./logout-button";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 // Server-only render timing, isolated from the component body so React's
 // purity lint (which forbids impure calls directly in a component/hook) sees
@@ -440,16 +441,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Built once here so both nav layouts share it — a branch that forgot the
   // provider would silently drop every supporter badge and name colour with no
   // error.
-  const nameDecorations = Array.from(await getNameDecorations());
+  const decorations = await getNameDecorations();
+  const nameDecorations = Array.from(decorations);
+  // The chrome sits outside NameDecorationProvider, so the signed-in patron's
+  // own border is read here and handed down rather than pulled from context.
+  const ownBorder = decorations.get((session?.username ?? "").toLowerCase())?.border ?? null;
   const content = (
     <NameDecorationProvider decorations={nameDecorations}>
       <PullToRefresh>{children}</PullToRefresh>
     </NameDecorationProvider>
   );
-
-  const avatarUrl = session?.avatar
-    ? `https://cdn.discordapp.com/avatars/${session.userId}/${session.avatar}.png`
-    : `https://cdn.discordapp.com/embed/avatars/0.png`;
 
   // ── Top + bottom bar layout (desktop preference) ───────────────────────────
   // Mobile chrome (MobileNav) is identical to the sidebar layout; only the
@@ -513,7 +514,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <footer className="app-bottombar hidden md:flex items-center justify-between gap-4 px-4 h-12 bg-zinc-900 border-t border-zinc-800 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={avatarUrl} alt="avatar" width={28} height={28} className="rounded-full shrink-0" />
+            <PlayerAvatar discordId={session?.userId ?? null} avatar={session?.avatar ?? null} border={ownBorder} className="w-7 h-7" alt="avatar" />
             <span className="text-sm text-zinc-300 truncate">{playerInfo.displayName ?? session?.username ?? "Unknown"}</span>
             <LogoutButton className="shrink-0" />
           </div>
@@ -532,7 +533,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <p className="text-sm font-medium text-yellow-500 shrink-0 whitespace-nowrap">Ctrl+R to refresh</p>
         </footer>
 
-        <MobileNav items={navItems} username={session?.username ?? "Unknown"} displayName={playerInfo.displayName} avatarUrl={avatarUrl} status={status} priorityHrefs={priorityHrefs} />
+        <MobileNav items={navItems} username={session?.username ?? "Unknown"} displayName={playerInfo.displayName} avatarDiscordId={session?.userId ?? null} avatarHash={session?.avatar ?? null} avatarBorder={ownBorder} status={status} priorityHrefs={priorityHrefs} />
       </div>
     );
   }
@@ -608,7 +609,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className="p-3 border-t border-zinc-800 flex items-center justify-between gap-2">
           <div className="flex items-center gap-3 min-w-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={avatarUrl} alt="avatar" width={32} height={32} className="rounded-full shrink-0" />
+            <PlayerAvatar discordId={session?.userId ?? null} avatar={session?.avatar ?? null} border={ownBorder} className="w-8 h-8" alt="avatar" />
             <span className="text-sm text-zinc-300 truncate">{playerInfo.displayName ?? session?.username ?? "Unknown"}</span>
           </div>
           <LogoutButton className="shrink-0" />
@@ -640,7 +641,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
       <TeamCutToast message={teamSignupMessage} />
 
-      <MobileNav items={navItems} username={session?.username ?? "Unknown"} displayName={playerInfo.displayName} avatarUrl={avatarUrl} status={status} priorityHrefs={priorityHrefs} />
+      <MobileNav items={navItems} username={session?.username ?? "Unknown"} displayName={playerInfo.displayName} avatarDiscordId={session?.userId ?? null} avatarHash={session?.avatar ?? null} avatarBorder={ownBorder} status={status} priorityHrefs={priorityHrefs} />
     </div>
   );
 }

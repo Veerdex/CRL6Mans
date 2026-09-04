@@ -12,6 +12,8 @@ import {
 } from "@/app/lib/patreon-entitlements";
 import { NAME_COLOR_BENEFIT, nameColorStyle } from "@/app/lib/name-color";
 import { TierGlow, type FieldSpec, type GlowSpec } from "./tier-glow";
+import { AVATAR_BORDER_BENEFIT, getAvatarBorder } from "@/app/lib/avatar-borders";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 const REASONS = [
   "Tournament prize pools that make competing worth it",
@@ -120,20 +122,13 @@ const TIER_LAYOUT = [
 // scales the whole chip.
 const BASE_FONT_REM = 0.875;
 
-// A stored avatar is normally a Discord hash. The demo seeder writes a data URI
-// instead, so the layout can be judged before any real patron has opted in.
-function avatarSrc(discordId: string, avatar: string): string {
-  return avatar.startsWith("data:") || avatar.startsWith("http")
-    ? avatar
-    : `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png`;
-}
-
 type Patron = {
   name: string;
   discordId: string;
   avatar: string | null;
   color: string | null;
   outline: boolean;
+  border: string | null;
 };
 type TierSection = { tier: string; rank: number; patrons: Patron[] };
 
@@ -144,7 +139,7 @@ export default async function SupportPage() {
     supabaseAdmin
       .from("accounts")
       .select(
-        "discord_id, avatar, display_name, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline",
+        "discord_id, avatar, display_name, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_avatar_border",
       )
       .neq("status", "banned")
       .or("patreon_status.eq.active_patron,patreon_tier_override.not.is.null"),
@@ -178,6 +173,9 @@ export default async function SupportPage() {
       avatar: (account.avatar as string | null) ?? null,
       color: on.has(NAME_COLOR_BENEFIT) ? ((account.patreon_name_color as string | null) ?? null) : null,
       outline: on.has(NAME_COLOR_BENEFIT) && account.patreon_name_outline === true,
+      border: on.has(AVATAR_BORDER_BENEFIT)
+        ? (getAvatarBorder(account.patreon_avatar_border as string | null)?.id ?? null)
+        : null,
     });
     byTierTitle.set(tier, section);
   }
@@ -263,7 +261,7 @@ export default async function SupportPage() {
                       className={`grid ${layout.columns} ${layout.gap}`}
                       style={{ fontSize: `${(layout.scale * BASE_FONT_REM).toFixed(4)}rem` }}
                     >
-                      {patrons.map(({ name, discordId, avatar, color, outline }) => (
+                      {patrons.map(({ name, discordId, avatar, color, outline, border }) => (
                         <span
                           key={discordId}
                           className={`flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-white rounded-lg text-zinc-200 cursor-default select-none ${layout.hoverRise ?? ""}`}
@@ -274,11 +272,10 @@ export default async function SupportPage() {
                           }}
                         >
                           {layout.avatars && avatar && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={avatarSrc(discordId, avatar)}
-                              alt=""
-                              className="rounded-full shrink-0"
+                            <PlayerAvatar
+                              discordId={discordId}
+                              avatar={avatar}
+                              border={border}
                               style={{ width: "1.7em", height: "1.7em" }}
                             />
                           )}

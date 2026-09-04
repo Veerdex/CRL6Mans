@@ -3,6 +3,7 @@
 import type { Player } from "@/app/lib/players";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { PlayerName } from "@/app/dashboard/player-name";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 export type StatAgg = {
   games: number;
@@ -39,10 +40,6 @@ export function PlayerStatsModal({
 }) {
   const rv = Math.round(playerRatingFromRow(player));
 
-  const avatarUrl = player.avatar
-    ? `https://cdn.discordapp.com/avatars/${player.discord_id}/${player.avatar}.png`
-    : `https://cdn.discordapp.com/embed/avatars/0.png`;
-
   const mmr = [
     { label: "All Time Peak 2v2", value: Number(player.peak_2v2) },
     { label: "Season Peak 2v2", value: Number(player.current_2v2) },
@@ -59,7 +56,7 @@ export function PlayerStatsModal({
         {/* Header */}
         <div className="flex items-start gap-3 px-5 py-4 border-b border-zinc-800 bg-zinc-800/40">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={avatarUrl} alt="" width={44} height={44} className="rounded-full shrink-0" />
+          <PlayerAvatar discordId={player.discord_id} avatar={player.avatar} username={player.username} className="w-11 h-11" />
           <div className="min-w-0 flex-1">
             <PlayerName
               displayName={player.display_name ?? null}

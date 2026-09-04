@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { updatePlayerData } from "./player-actions";
 import type { Player } from "@/app/lib/players";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 interface Props {
   players: Player[];
@@ -83,15 +84,7 @@ function PlayerRow({ player }: { player: Player }) {
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
       {/* Collapsed row */}
       <div className="flex items-center gap-3 px-4 py-3">
-        {player.avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={`https://cdn.discordapp.com/avatars/${player.discord_id}/${player.avatar}.png`}
-            alt="" width={28} height={28} className="rounded-full shrink-0"
-          />
-        ) : (
-          <div className="w-7 h-7 rounded-full bg-zinc-700 shrink-0" />
-        )}
+        <PlayerAvatar discordId={player.discord_id} avatar={player.avatar} username={username} className="w-7 h-7" />
         <span className="flex-1 text-sm font-medium text-zinc-200 truncate">{username}</span>
         <span className="text-xs text-zinc-500 shrink-0 tabular-nums hidden sm:block">
           {Math.round((Number(peak2v2) + Number(curr2v2)) * 0.3 + (Number(peak3v3) + Number(curr3v3)) * 0.2).toLocaleString()} RV

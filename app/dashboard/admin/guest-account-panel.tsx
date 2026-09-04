@@ -6,6 +6,7 @@ import { kickPlayer, banPlayer, unbanPlayer, unkickPlayer, type RevokedPatron } 
 import { PatreonBlockNotice } from "./patreon-block-notice";
 import type { StaffRole } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 export type GuestAccount = {
   id: string;
@@ -105,15 +106,7 @@ function GuestRow({
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
       <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
-        {account.avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={`https://cdn.discordapp.com/avatars/${account.discord_id}/${account.avatar}.png`}
-            alt="" width={28} height={28} className="rounded-full shrink-0"
-          />
-        ) : (
-          <div className="w-7 h-7 rounded-full bg-zinc-700 shrink-0" />
-        )}
+        <PlayerAvatar discordId={account.discord_id} avatar={account.avatar} username={account.username} className="w-7 h-7" />
 
         <span className="flex-1 text-sm font-medium text-zinc-200 truncate min-w-0">
           <PlayerName displayName={account.display_name} username={account.username} />

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { NAME_COLOR_BENEFIT, SUPPORTER_BADGE_BENEFIT, normalizeNameColor } from "@/app/lib/name-color";
+import { AVATAR_BORDER_BENEFIT, getAvatarBorder } from "@/app/lib/avatar-borders";
 
 // benefit id -> the per-tier `value` configured for it, or null when the
 // benefit is simply on/off. Callers check membership (`has`) for on/off
@@ -172,13 +173,14 @@ export type NameDecoration = {
   badge: boolean;
   color: string | null;
   outline: boolean;
+  border: string | null;
 };
 
 export async function getNameDecorations(): Promise<Map<string, NameDecoration>> {
   const { data: patrons } = await supabaseAdmin
     .from("accounts")
     .select(
-      "discord_id, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline",
+      "discord_id, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_avatar_border",
     )
     .neq("status", "banned")
     .or("patreon_status.eq.active_patron,patreon_tier_override.not.is.null");
@@ -194,11 +196,17 @@ export async function getNameDecorations(): Promise<Map<string, NameDecoration>>
       ? normalizeNameColor(p.patreon_name_color as string | null)
       : null;
     const badge = on.has(SUPPORTER_BADGE_BENEFIT);
-    if (!badge && !color) continue;
+    // Resolved against the catalog so an id left over from a retired border
+    // renders nothing rather than a broken image.
+    const border = on.has(AVATAR_BORDER_BENEFIT)
+      ? getAvatarBorder(p.patreon_avatar_border as string | null)?.id ?? null
+      : null;
+    if (!badge && !color && !border) continue;
     byDiscordId.set(p.discord_id as string, {
       badge,
       color,
       outline: color !== null && p.patreon_name_outline === true,
+      border,
     });
   }
   if (byDiscordId.size === 0) return new Map();

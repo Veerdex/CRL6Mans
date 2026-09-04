@@ -16,6 +16,7 @@ import { getBestOfForMatch } from "@/app/lib/discord-bot";
 import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { MyTeamEditor } from "@/app/dashboard/teams/my-team-editor";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import {
   SubRequestPanel,
   type SubRosterPlayer,
@@ -799,11 +800,7 @@ export default async function MyTeamPage() {
               ) : sortedRoster.map((p) => (
                 <a key={p.id} href={p.tracker_url || undefined} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-4 px-5 py-3 hover:bg-zinc-800/40 transition-colors group">
-                  {p.avatar ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={`https://cdn.discordapp.com/avatars/${p.discord_id}/${p.avatar}.png`}
-                      alt="" width={36} height={36} className="w-9 h-9 rounded-full shrink-0" />
-                  ) : <div className="w-9 h-9 rounded-full bg-zinc-700 shrink-0" />}
+                  <PlayerAvatar discordId={p.discord_id} avatar={p.avatar} username={p.username} className="w-9 h-9" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors min-w-0">

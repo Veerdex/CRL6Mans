@@ -5,6 +5,7 @@ import type { Player } from "@/app/lib/players";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { PlayerStatsModal, type StatAgg } from "./player-stats-modal";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 export default function PlayersList({
   players,
@@ -67,10 +68,6 @@ export default function PlayersList({
               filtered.map((player) => {
                 const rank = rankMap.get(player.id) ?? 0;
                 const rv = Math.round(playerRatingFromRow(player));
-                const avatarUrl = player.avatar
-                  ? `https://cdn.discordapp.com/avatars/${player.discord_id}/${player.avatar}.png`
-                  : `https://cdn.discordapp.com/embed/avatars/0.png`;
-
                 return (
                   <tr
                     key={player.id}
@@ -81,13 +78,11 @@ export default function PlayersList({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3 min-w-0">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={avatarUrl}
-                          alt=""
-                          width={28}
-                          height={28}
-                          className="rounded-full shrink-0"
+                        <PlayerAvatar
+                          discordId={player.discord_id}
+                          avatar={player.avatar}
+                          username={player.username}
+                          className="w-7 h-7"
                         />
                         <a
                           href={player.tracker_url || undefined}

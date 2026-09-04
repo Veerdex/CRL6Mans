@@ -2,13 +2,15 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setBenefitEnabled, setNameColor, disconnectPatreon } from "./patreon-actions";
+import { setBenefitEnabled, setNameColor, setAvatarBorder, disconnectPatreon } from "./patreon-actions";
 import {
   DEFAULT_NAME_COLOR,
   NAME_COLOR_BENEFIT,
   nameColorStyle,
   outlineColorFor,
 } from "@/app/lib/name-color";
+import { AVATAR_BORDERS, AVATAR_BORDER_BENEFIT } from "@/app/lib/avatar-borders";
+import { PlayerAvatar } from "../player-avatar";
 
 export type PatreonInfo = {
   status: "active_patron" | "declined_patron" | "former_patron" | null;
@@ -45,6 +47,9 @@ export function PatreonConnectCard({
   nameColor,
   nameOutline,
   previewName,
+  avatarBorder,
+  previewDiscordId,
+  previewAvatar,
 }: {
   info: PatreonInfo;
   benefits: PatreonBenefitRow[];
@@ -52,6 +57,9 @@ export function PatreonConnectCard({
   nameColor: string | null;
   nameOutline: boolean;
   previewName: string;
+  avatarBorder: string | null;
+  previewDiscordId: string;
+  previewAvatar: string | null;
 }) {
   const router = useRouter();
   const [enabled, setEnabled] = useState<Record<string, boolean>>(
@@ -60,6 +68,7 @@ export function PatreonConnectCard({
   const [openInfo, setOpenInfo] = useState<string | null>(null);
   const [color, setColor] = useState(nameColor ?? DEFAULT_NAME_COLOR);
   const [outline, setOutline] = useState(nameOutline);
+  const [border, setBorder] = useState(avatarBorder);
   const [pending, startToggle] = useTransition();
   const [disconnecting, startDisconnect] = useTransition();
 
@@ -94,6 +103,16 @@ export function PatreonConnectCard({
         router.refresh();
       });
     }, 400);
+  }
+
+  // Picking is a discrete click rather than a dragged input, so unlike the
+  // colour this writes straight through with no debounce.
+  function commitBorder(next: string | null) {
+    setBorder(next);
+    startToggle(async () => {
+      await setAvatarBorder(next);
+      router.refresh();
+    });
   }
 
   function handleDisconnect() {
@@ -212,6 +231,33 @@ export function PatreonConnectCard({
                             </span>
                           </span>
                         </label>
+                      </div>
+                    )}
+                    {b.id === AVATAR_BORDER_BENEFIT && enabled[b.id] && (
+                      <div className="mt-3 flex flex-wrap items-start gap-2">
+                        {[null, ...AVATAR_BORDERS].map((opt) => (
+                          <button
+                            key={opt?.id ?? "none"}
+                            type="button"
+                            onClick={() => commitBorder(opt?.id ?? null)}
+                            disabled={pending}
+                            aria-pressed={border === (opt?.id ?? null)}
+                            // Padded wider than tall because the frame overhangs the avatar box.
+                            className={`px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
+                              border === (opt?.id ?? null)
+                                ? "border-indigo-500 bg-zinc-800"
+                                : "border-zinc-700 hover:border-zinc-500"
+                            }`}
+                          >
+                            <PlayerAvatar
+                              discordId={previewDiscordId}
+                              avatar={previewAvatar}
+                              border={opt?.id ?? null}
+                              className="w-12 h-12"
+                            />
+                            <span className="block mt-1 text-[11px] text-zinc-400">{opt?.title ?? "None"}</span>
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>

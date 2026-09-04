@@ -8,6 +8,7 @@ import { PatreonBlockNotice } from "./patreon-block-notice";
 import { adminUpdatePlatformAccountId, adminDeletePlatformAccount } from "./platform-account-verification-actions";
 import type { StaffRole } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 export type PlatformAccountSummary = {
   id: string;
@@ -267,15 +268,7 @@ function PlayerRow({
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
       {/* Header row */}
       <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
-        {player.avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={`https://cdn.discordapp.com/avatars/${player.discord_id}/${player.avatar}.png`}
-            alt="" width={28} height={28} className="rounded-full shrink-0"
-          />
-        ) : (
-          <div className="w-7 h-7 rounded-full bg-zinc-700 shrink-0" />
-        )}
+        <PlayerAvatar discordId={player.discord_id} avatar={player.avatar} username={player.username} className="w-7 h-7" />
 
         <a
           href={player.tracker_url || undefined}

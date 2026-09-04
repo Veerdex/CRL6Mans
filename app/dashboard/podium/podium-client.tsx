@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 const CONFETTI_COLORS = [
   "#e88a24", "#fbbf24", "#fde68a",
@@ -44,12 +45,6 @@ export type PodiumClientProps = {
   accolades: Accolade[];
   sponsoredByLine?: ReactNode;
 };
-
-function playerAvatarUrl(p: RichPlayer): string {
-  if (p.discordId && p.avatar)
-    return `https://cdn.discordapp.com/avatars/${p.discordId}/${p.avatar}.png?size=128`;
-  return "https://cdn.discordapp.com/embed/avatars/0.png";
-}
 
 function Starfield() {
   const [stars, setStars] = useState<Star[]>([]);
@@ -335,11 +330,13 @@ export function PodiumClient({
                       style={{ animation: `fade-up 0.5s ${0.35 + i * 0.12}s ease-out both` }}
                     >
                       <div className="relative flex-shrink-0">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={playerAvatarUrl(p)}
+                        <PlayerAvatar
+                          discordId={p.discordId}
+                          avatar={p.avatar}
+                          username={p.username}
+                          cdnSize={128}
                           alt={p.displayName ?? p.username}
-                          className={`w-16 h-16 rounded-full object-cover ${
+                          className={`w-16 h-16 rounded-full ${
                             isMvp
                               ? "ring-2 ring-amber-400 shadow-[0_0_16px_rgba(234,138,36,0.55)]"
                               : "ring-2 ring-zinc-700"

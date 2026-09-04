@@ -6,6 +6,7 @@ import { swapPlayersBetweenTeams, swapRosterPlayerWithBenchPlayer, disqualifyTea
 import { MyTeamEditor } from "./my-team-editor";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { playerRatingFromRow } from "@/app/lib/rating";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 // Isolated per-card toggle so state can never bleed across cards.
 function TeamEditToggleInline({ team }: { team: { id: string; name: string; logo_url: string | null; logo_offset_x: number | null; logo_offset_y: number | null; is_locked: boolean | null } }) {
@@ -321,16 +322,7 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
                         clickable ? "cursor-pointer hover:bg-zinc-800" : ""
                       } ${isSelected ? "bg-indigo-950/50 ring-1 ring-inset ring-indigo-600" : ""}`}
                     >
-                      {player.avatar ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={`https://cdn.discordapp.com/avatars/${player.discord_id}/${player.avatar}.png`}
-                          alt="" width={28} height={28}
-                          className="w-7 h-7 rounded-full shrink-0"
-                        />
-                      ) : (
-                        <div className="w-7 h-7 rounded-full bg-zinc-700 shrink-0" />
-                      )}
+                      <PlayerAvatar discordId={player.discord_id} avatar={player.avatar} username={player.username} className="w-7 h-7" />
 
                       <span className="flex-1 text-sm text-zinc-200 min-w-0">
                         <a
