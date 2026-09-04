@@ -125,7 +125,13 @@ function ClipCard({
         </a>
       ) : (
         <div className="aspect-video w-full overflow-hidden rounded-lg border border-zinc-800 bg-black">
-          <iframe src={resolveClipEmbedUrl(clip, host)} className="w-full h-full" allowFullScreen />
+          {/* The feed mounts every clip at once, and a player shell is a few
+              hundred KB before it has drawn anything, so loading them eagerly
+              spends megabytes on clips most visitors never scroll to. Deferring
+              also means a clip nobody reaches never loads a player at all -
+              stronger than the autoplay flag, which only stops playback. Clip of
+              the Week stays eager: it is above the fold on both Home and here. */}
+          <iframe src={resolveClipEmbedUrl(clip, host)} className="w-full h-full" loading="lazy" allowFullScreen />
         </div>
       )}
       <p className="text-white font-medium">{clip.title}</p>
