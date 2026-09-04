@@ -60,6 +60,13 @@ export const AVATAR_BORDERS: readonly AvatarBorder[] = [
     measured: { width: 933, height: 961 },
     opening: { top: 139, bottom: 810, left: 133, right: 804 },
   },
+  {
+    id: "wave",
+    title: "Wave",
+    src: "/avatar-borders/wave.png",
+    measured: { width: 1024, height: 1024 },
+    opening: { top: 90, bottom: 869, left: 108, right: 887 },
+  },
 ];
 
 const BY_ID = new Map(AVATAR_BORDERS.map((b) => [b.id, b]));
