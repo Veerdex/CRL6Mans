@@ -2,7 +2,7 @@
 
 import { SupporterBadge } from "./supporter-badge";
 import { useNameDecoration } from "./name-decoration";
-import { nameColorStyle } from "@/app/lib/name-color";
+import { nameStyle } from "@/app/lib/name-glint";
 
 interface Props {
   displayName: string | null;
@@ -13,12 +13,17 @@ interface Props {
 export function PlayerName({ displayName, username, className = "" }: Props) {
   const name = displayName ?? username;
   const decoration = useNameDecoration(username);
+  const fx = nameStyle(
+    decoration?.color ?? null,
+    decoration?.outline ?? false,
+    decoration?.glint ?? null,
+  );
 
   return (
     <span className={`relative inline-flex items-center group/pname max-w-full min-w-0 ${className}`}>
       <span
-        className="truncate min-w-0"
-        style={nameColorStyle(decoration?.color ?? null, decoration?.outline ?? false)}
+        className={`truncate min-w-0 ${fx.className}`}
+        style={fx.style}
         title={name}
       >
         {name}

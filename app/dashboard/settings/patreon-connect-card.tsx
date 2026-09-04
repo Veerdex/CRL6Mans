@@ -2,13 +2,21 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setBenefitEnabled, setNameColor, setAvatarBorder, disconnectPatreon } from "./patreon-actions";
+import { setBenefitEnabled, setNameColor, setNameGlint, setAvatarBorder, disconnectPatreon } from "./patreon-actions";
 import {
   DEFAULT_NAME_COLOR,
   NAME_COLOR_BENEFIT,
   nameColorStyle,
   outlineColorFor,
 } from "@/app/lib/name-color";
+import {
+  DEFAULT_GLINT_COLORS,
+  GLINT_CLASS,
+  GLINT_MAX_COLORS,
+  GLINT_MIN_COLORS,
+  NAME_GLINT_BENEFIT,
+  nameGlintStyle,
+} from "@/app/lib/name-glint";
 import { AVATAR_BORDERS, AVATAR_BORDER_BENEFIT, getAvatarBorder } from "@/app/lib/avatar-borders";
 import { PlayerAvatar } from "../player-avatar";
 
@@ -47,6 +55,7 @@ export function PatreonConnectCard({
   banner,
   nameColor,
   nameOutline,
+  nameGlint,
   previewName,
   avatarBorder,
   previewDiscordId,
@@ -57,6 +66,7 @@ export function PatreonConnectCard({
   banner?: string | null;
   nameColor: string | null;
   nameOutline: boolean;
+  nameGlint: string[] | null;
   previewName: string;
   avatarBorder: string | null;
   previewDiscordId: string;
@@ -69,6 +79,7 @@ export function PatreonConnectCard({
   const [openInfo, setOpenInfo] = useState<string | null>(null);
   const [color, setColor] = useState(nameColor ?? DEFAULT_NAME_COLOR);
   const [outline, setOutline] = useState(nameOutline);
+  const [glint, setGlint] = useState<string[]>(nameGlint ?? DEFAULT_GLINT_COLORS);
   const [border, setBorder] = useState(avatarBorder);
   // undefined is closed. null is a real value here - the None option - so the
   // modal is gated on `!== undefined`, never on truthiness.
@@ -77,6 +88,10 @@ export function PatreonConnectCard({
   const [disconnecting, startDisconnect] = useTransition();
 
   // Always-on rows have no switch, so they are not part of "still turned off".
+  // Colored Name keeps its own switch and picker, but the glint wins on every
+  // surface while it is on, so the colour section says so rather than letting
+  // the patron drag a swatch that changes nothing.
+  const glintWins = !!enabled[NAME_GLINT_BENEFIT];
   const switchable = benefits.filter((b) => !b.alwaysOn);
   const offCount = switchable.filter((b) => !enabled[b.id]).length;
 
@@ -88,6 +103,11 @@ export function PatreonConnectCard({
     // visible effect after a refresh.
     startToggle(async () => {
       await setBenefitEnabled(id, next);
+      // The glint only supersedes Colored Name once real colours are stored, so
+      // turning it on with nothing picked would leave the switch saying one
+      // thing and every page rendering another. The picker is already showing
+      // these, so persist them.
+      if (id === NAME_GLINT_BENEFIT && next) await setNameGlint(glint);
       router.refresh();
     });
   }
@@ -122,6 +142,23 @@ export function PatreonConnectCard({
 
   // Picking is a discrete click rather than a dragged input, so unlike the
   // colour this writes straight through with no debounce.
+  const glintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (glintTimer.current) clearTimeout(glintTimer.current); }, []);
+
+  // Its own timer rather than sharing commitNameColor's: the two sections are
+  // independent, and a swatch dragged in one must not cancel a write pending
+  // in the other.
+  function commitGlint(next: string[]) {
+    setGlint(next);
+    if (glintTimer.current) clearTimeout(glintTimer.current);
+    glintTimer.current = setTimeout(() => {
+      startToggle(async () => {
+        await setNameGlint(next);
+        router.refresh();
+      });
+    }, 400);
+  }
+
   function commitBorder(next: string | null) {
     setBorder(next);
     startToggle(async () => {
@@ -252,6 +289,59 @@ export function PatreonConnectCard({
                             </span>
                           </span>
                         </label>
+                        {glintWins && (
+                          <p className="text-[11px] text-amber-400">
+                            Custom Name Glint is on, so it shows instead of this colour.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {b.id === NAME_GLINT_BENEFIT && enabled[b.id] && (
+                      <div className="mt-3 space-y-2.5">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          {glint.map((c, i) => (
+                            <span key={i} className="relative inline-flex">
+                              <input
+                                type="color"
+                                value={c}
+                                onChange={(e) =>
+                                  commitGlint(glint.map((g, j) => (j === i ? e.target.value : g)))
+                                }
+                                aria-label={`Glint colour ${i + 1}`}
+                                className="w-10 h-8 p-0 bg-transparent border border-zinc-600 rounded cursor-pointer"
+                              />
+                              {glint.length > GLINT_MIN_COLORS && (
+                                <button
+                                  type="button"
+                                  onClick={() => commitGlint(glint.filter((_, j) => j !== i))}
+                                  aria-label={`Remove colour ${i + 1}`}
+                                  className="absolute -top-1.5 -right-1.5 w-4 h-4 flex items-center justify-center rounded-full bg-zinc-700 text-zinc-300 text-[10px] leading-none hover:bg-zinc-600 transition-colors"
+                                >
+                                  &times;
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                          {glint.length < GLINT_MAX_COLORS && (
+                            <button
+                              type="button"
+                              onClick={() => commitGlint([...glint, "#ffffff"])}
+                              aria-label="Add a colour"
+                              className="w-10 h-8 rounded border border-dashed border-zinc-600 text-zinc-400 hover:text-white hover:border-zinc-400 transition-colors"
+                            >
+                              +
+                            </button>
+                          )}
+                        </div>
+                        <span
+                          className={`inline-block text-base font-semibold ${GLINT_CLASS}`}
+                          style={nameGlintStyle(glint)}
+                        >
+                          {previewName}
+                        </span>
+                        <p className="text-[11px] text-zinc-500">
+                          {GLINT_MIN_COLORS} to {GLINT_MAX_COLORS} colours, swept in the order shown.
+                        </p>
                       </div>
                     )}
                     {b.id === AVATAR_BORDER_BENEFIT && enabled[b.id] && (

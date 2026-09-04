@@ -775,3 +775,16 @@ input[type="datetime-local"]::-webkit-date-and-time-value {
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
 }
+
+/* Custom Name Glint. The gradient itself is inline (per-patron colours); only
+   the sweep lives here, because keyframes cannot be expressed in a style
+   object. Its stops are spaced so that a full 100% shift lands every colour on
+   an identical copy of itself, which is what leaves the loop seamless. See
+   app/lib/name-glint.ts. */
+.name-glint {
+  animation: name-glint 4.5s linear infinite;
+}
+@keyframes name-glint {
+  from { background-position: 0% 50%; }
+  to   { background-position: 100% 50%; }
+}

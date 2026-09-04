@@ -7,6 +7,7 @@ import { PATREON_BENEFITS, isAlwaysOnBenefit } from "@/app/lib/patreon-benefits"
 import { benefitPrefTarget } from "@/app/lib/patreon-entitlements";
 import { DISCORD_ROLE_BENEFIT, syncDiscordSupporterRole } from "@/app/lib/patreon-discord-role";
 import { normalizeNameColor } from "@/app/lib/name-color";
+import { GLINT_MAX_COLORS, GLINT_MIN_COLORS, normalizeGlintColors } from "@/app/lib/name-glint";
 import { getAvatarBorder } from "@/app/lib/avatar-borders";
 
 // Per-benefit opt-in — the only writer of a patron's benefit switches, which
@@ -87,6 +88,26 @@ export async function setNameColor(color: string, outline: boolean) {
   return { ok: true };
 }
 
+// The Custom Name Glint benefit's per-patron colours, in pick order: the order
+// is what the sweep animates through. Entitlement is not re-checked, for the
+// same reason as setNameColor. The 2-4 count is enforced here as well as on
+// read so the column never holds a list the picker could not have produced.
+export async function setNameGlint(colors: string[]) {
+  const cookieStore = await cookies();
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId) return { error: "Not signed in." };
+
+  const hexes = normalizeGlintColors(colors);
+  if (!hexes) return { error: `Pick ${GLINT_MIN_COLORS} to ${GLINT_MAX_COLORS} valid colours.` };
+
+  await supabaseAdmin
+    .from("accounts")
+    .update({ patreon_name_glint: hexes, updated_at: new Date().toISOString() })
+    .eq("discord_id", session.userId);
+
+  return { ok: true };
+}
+
 // The Avatar Border benefit's per-patron value. Stored as a catalog id and
 // validated against the catalog, so the column can only ever hold a border that
 // exists — the read path does the same check again, since a border retired
@@ -127,6 +148,7 @@ export async function disconnectPatreon() {
       patreon_benefit_prefs: {},
       patreon_name_color: null,
       patreon_name_outline: false,
+      patreon_name_glint: null,
       patreon_avatar_border: null,
       patreon_access_token: null,
       patreon_refresh_token: null,

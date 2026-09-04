@@ -56,7 +56,8 @@ export const PATREON_BENEFITS: PatreonBenefit[] = [
   {
     id: "name-glint",
     title: "Custom Name Glint",
-    description: "Upgrades the colored name to a custom 2-4 color gradient that waves across it.",
+    description:
+      "Pick 2 to 4 colors in Settings and your name sweeps between them. Replaces Colored Name while it is on.",
   },
   {
     id: "early-signup-access",

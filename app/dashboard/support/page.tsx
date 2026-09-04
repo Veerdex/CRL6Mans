@@ -7,10 +7,12 @@ import {
   enabledBenefitsForAccount,
   getBenefitsByTier,
   getTierPrices,
+  resolveNameStyleFields,
   tierRanks,
   type BenefitAccountRow,
+  type NameStyleRow,
 } from "@/app/lib/patreon-entitlements";
-import { NAME_COLOR_BENEFIT, nameColorStyle } from "@/app/lib/name-color";
+import { nameStyle } from "@/app/lib/name-glint";
 import { TierGlow, type FieldSpec, type GlowSpec } from "./tier-glow";
 import { AVATAR_BORDER_BENEFIT, getAvatarBorder } from "@/app/lib/avatar-borders";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
@@ -128,6 +130,7 @@ type Patron = {
   avatar: string | null;
   color: string | null;
   outline: boolean;
+  glint: string[] | null;
   border: string | null;
 };
 type TierSection = { tier: string; rank: number; patrons: Patron[] };
@@ -139,7 +142,7 @@ export default async function SupportPage() {
     supabaseAdmin
       .from("accounts")
       .select(
-        "discord_id, avatar, display_name, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_avatar_border",
+        "discord_id, avatar, display_name, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_name_glint, patreon_avatar_border",
       )
       .neq("status", "banned")
       .or("patreon_status.eq.active_patron,patreon_tier_override.not.is.null"),
@@ -171,8 +174,7 @@ export default async function SupportPage() {
       name: (account.display_name as string | null) || (account.username as string),
       discordId: account.discord_id as string,
       avatar: (account.avatar as string | null) ?? null,
-      color: on.has(NAME_COLOR_BENEFIT) ? ((account.patreon_name_color as string | null) ?? null) : null,
-      outline: on.has(NAME_COLOR_BENEFIT) && account.patreon_name_outline === true,
+      ...resolveNameStyleFields(on, account as NameStyleRow),
       border: on.has(AVATAR_BORDER_BENEFIT)
         ? (getAvatarBorder(account.patreon_avatar_border as string | null)?.id ?? null)
         : null,
@@ -261,7 +263,7 @@ export default async function SupportPage() {
                       className={`grid ${layout.columns} ${layout.gap}`}
                       style={{ fontSize: `${(layout.scale * BASE_FONT_REM).toFixed(4)}rem` }}
                     >
-                      {patrons.map(({ name, discordId, avatar, color, outline, border }) => (
+                      {patrons.map(({ name, discordId, avatar, color, outline, glint, border }) => (
                         <span
                           key={discordId}
                           className={`flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-white rounded-lg text-zinc-200 cursor-default select-none ${layout.hoverRise ?? ""}`}
@@ -279,7 +281,10 @@ export default async function SupportPage() {
                               style={{ width: "1.7em", height: "1.7em" }}
                             />
                           )}
-                          <span className="min-w-0 break-words" style={nameColorStyle(color, outline)}>
+                          <span
+                            className={`min-w-0 break-words ${nameStyle(color, outline, glint).className}`}
+                            style={nameStyle(color, outline, glint).style}
+                          >
                             {name}
                           </span>
                         </span>

@@ -12,6 +12,7 @@ import { DisplayNameForm } from "./display-name-form";
 import { PlatformAccountsSection, type ClaimablePlatform, type PlatformAccountRecord } from "./platform-accounts-form";
 import { PatreonConnectCard, type PatreonInfo, type PatreonBenefitRow } from "./patreon-connect-card";
 import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
+import { normalizeGlintColors } from "@/app/lib/name-glint";
 import { benefitEnabled, benefitsForTier, getBenefitsByTier, type BenefitPrefRow } from "@/app/lib/patreon-entitlements";
 import { getSettingsTabTheme } from "@/app/lib/sponsors-public";
 
@@ -38,7 +39,7 @@ export default async function SettingsPage({
     getSettingsTabTheme(),
     supabaseAdmin
       .from("accounts")
-      .select("status, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_connected_at, patreon_tier_override, patreon_avatar_border")
+      .select("status, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_name_glint, patreon_connected_at, patreon_tier_override, patreon_avatar_border")
       .eq("discord_id", session.userId)
       .single(),
   ]);
@@ -179,6 +180,7 @@ export default async function SettingsPage({
           banner={patreonBanner}
           nameColor={(account?.patreon_name_color as string | null) ?? null}
           nameOutline={account?.patreon_name_outline === true}
+          nameGlint={normalizeGlintColors(account?.patreon_name_glint)}
           previewName={(account?.display_name as string | null) || session.username || ""}
           avatarBorder={(account?.patreon_avatar_border as string | null) ?? null}
           previewDiscordId={session.userId}

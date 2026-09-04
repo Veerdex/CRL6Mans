@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { NAME_COLOR_BENEFIT, SUPPORTER_BADGE_BENEFIT, normalizeNameColor } from "@/app/lib/name-color";
 import { AVATAR_BORDER_BENEFIT, getAvatarBorder } from "@/app/lib/avatar-borders";
+import { NAME_GLINT_BENEFIT, normalizeGlintColors } from "@/app/lib/name-glint";
 import { isAlwaysOnBenefit } from "@/app/lib/patreon-benefits";
 
 // benefit id -> the per-tier `value` configured for it, or null when the
@@ -179,13 +180,39 @@ export type NameDecoration = {
   color: string | null;
   outline: boolean;
   border: string | null;
+  glint: string[] | null;
 };
+
+export type NameStyleRow = {
+  patreon_name_color?: string | null;
+  patreon_name_outline?: boolean | null;
+  patreon_name_glint?: unknown;
+};
+
+// Custom Name Glint supersedes Colored Name, and both surfaces that build a
+// decoration -- the dashboard-wide map below and the support page -- resolve it
+// here rather than each deciding the precedence for itself.
+//
+// Superseding only happens when the glint is actually usable: a benefit enabled
+// before any colours were picked, or a stored value that no longer normalizes,
+// leaves the solid colour alone instead of blanking the name.
+export function resolveNameStyleFields(
+  on: ResolvedBenefits,
+  row: NameStyleRow,
+): { color: string | null; outline: boolean; glint: string[] | null } {
+  const glint = on.has(NAME_GLINT_BENEFIT) ? normalizeGlintColors(row.patreon_name_glint) : null;
+  // No outline for a glint: the outline is a text-shadow, which paints behind
+  // glyphs the gradient renders transparent, so it would show through as fill.
+  if (glint) return { color: null, outline: false, glint };
+  const color = on.has(NAME_COLOR_BENEFIT) ? normalizeNameColor(row.patreon_name_color ?? null) : null;
+  return { color, outline: color !== null && row.patreon_name_outline === true, glint: null };
+}
 
 export async function getNameDecorations(): Promise<Map<string, NameDecoration>> {
   const { data: patrons } = await supabaseAdmin
     .from("accounts")
     .select(
-      "discord_id, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_avatar_border",
+      "discord_id, username, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_name_glint, patreon_avatar_border",
     )
     .neq("status", "banned")
     .or("patreon_status.eq.active_patron,patreon_tier_override.not.is.null");
@@ -197,22 +224,15 @@ export async function getNameDecorations(): Promise<Map<string, NameDecoration>>
   const byDiscordId = new Map<string, NameDecoration>();
   for (const p of patrons) {
     const on = enabledBenefitsForAccount(byTier, p as BenefitAccountRow);
-    const color = on.has(NAME_COLOR_BENEFIT)
-      ? normalizeNameColor(p.patreon_name_color as string | null)
-      : null;
+    const { color, outline, glint } = resolveNameStyleFields(on, p as NameStyleRow);
     const badge = on.has(SUPPORTER_BADGE_BENEFIT);
     // Resolved against the catalog so an id left over from a retired border
     // renders nothing rather than a broken image.
     const border = on.has(AVATAR_BORDER_BENEFIT)
       ? getAvatarBorder(p.patreon_avatar_border as string | null)?.id ?? null
       : null;
-    if (!badge && !color && !border) continue;
-    byDiscordId.set(p.discord_id as string, {
-      badge,
-      color,
-      outline: color !== null && p.patreon_name_outline === true,
-      border,
-    });
+    if (!badge && !color && !border && !glint) continue;
+    byDiscordId.set(p.discord_id as string, { badge, color, outline, border, glint });
   }
   if (byDiscordId.size === 0) return new Map();
 
