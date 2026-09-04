@@ -343,10 +343,11 @@ export function PatreonConnectCard({
             ) : (
               <button
                 type="button"
-                onClick={() => {
-                  commitBorder(preview);
-                  setPreview(undefined);
-                }}
+                // Stays open on apply: `border` updates optimistically, so the
+                // button is replaced by the applied line right away. That is both
+                // the confirmation and the reason a second write cannot overlap
+                // the first.
+                onClick={() => commitBorder(preview)}
                 disabled={pending}
                 className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
               >
