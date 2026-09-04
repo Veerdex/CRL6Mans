@@ -4,8 +4,8 @@ export type ClipPlatform = "youtube" | "medal" | "streamable" | "twitch" | "tikt
 // official embeds either need a third-party <script> widget or, for
 // Instagram, a registered Meta developer app + API token) — so clips on
 // these platforms are link-out only: no inline player, and (see clip-reset
-// cron) never eligible to become Clip of the Week since that slot requires
-// an autoplaying video. A best-effort thumbnail (see lib/link-preview.ts) is
+// cron) never eligible to become Clip of the Week since that slot renders a
+// player. A best-effort thumbnail (see lib/link-preview.ts) is
 // fetched at submission time so the link-out card isn't just bare text.
 export const LINK_ONLY_PLATFORMS: ReadonlySet<ClipPlatform> = new Set(["tiktok", "twitter", "instagram"]);
 
@@ -136,4 +136,28 @@ export function classifyClipUrl(rawUrl: string): ClassifiedClip | null {
 export function resolveClipEmbedUrl(clip: { platform: ClipPlatform; embed_url: string }, host: string | null = null): string {
   if (clip.platform !== "twitch") return clip.embed_url;
   return host ? `${clip.embed_url}&parent=${host}` : clip.embed_url;
+}
+
+// Poster frame for the Clip of the Week facade, derived from data we already
+// have so it works for clips submitted before the facade existed.
+//
+// Only YouTube has a thumbnail URL you can compute from the video ID. Twitch and
+// Medal both answer og:image with a generic site logo rather than a frame, and
+// Streamable's image CDN 403s unauthenticated requests, so there is nothing to
+// derive or scrape for those three - they fall back to stored thumbnail_url
+// (only ever set for the link-only platforms) and then to a plain play button.
+//
+// hqdefault is 480x360: a 480x270 frame letterboxed with 45px bars. Drawn
+// object-cover in an aspect-video box those bars crop away exactly, which is why
+// it beats maxresdefault (404s on low-res uploads) and mqdefault (320x180).
+export function clipPosterUrl(clip: {
+  platform: ClipPlatform;
+  embed_url: string;
+  thumbnail_url?: string | null;
+}): string | null {
+  if (clip.platform === "youtube") {
+    const id = clip.embed_url.match(YOUTUBE_ID_PATTERN)?.[1];
+    if (id) return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+  }
+  return clip.thumbnail_url ?? null;
 }
