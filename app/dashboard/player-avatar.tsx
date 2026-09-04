@@ -20,7 +20,13 @@ interface Props {
   avatar: string | null;
   /** Looks the supporter's border up in the decoration context. Omit for accounts not in it. */
   username?: string | null;
-  /** Border id, for chrome rendered outside NameDecorationProvider (the sidebar). */
+  /**
+   * Border id, for callers that must not take the context value. Passing this at
+   * all overrides the lookup, so `null` means *no border* rather than *unset* —
+   * the settings picker relies on that to preview each swatch and to show the
+   * None option, and the sidebar uses it because chrome renders outside the
+   * provider. Do not collapse this to `border ?? decoration?.border`.
+   */
   border?: string | null;
   /** Sizes the box — the frame scales off it, so `w-7 h-7`, an em size, anything. */
   className?: string;
