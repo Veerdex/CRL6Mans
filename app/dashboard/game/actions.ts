@@ -7,20 +7,34 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 
-export type LeaderboardRow = { username: string; display_name: string | null; score: number; rank: number };
+export type LeaderboardRow = {
+  discord_id: string;
+  username: string;
+  display_name: string | null;
+  avatar: string | null;
+  score: number;
+  rank: number;
+};
 export type Leaderboard = { top: LeaderboardRow[]; self: LeaderboardRow | null };
 
 const TOP_SCORES = 10;
 
-// Display names come from accounts (Tier 1), which exists for every Discord
+type AccountBits = { display_name: string | null; avatar: string | null };
+
+// Names and avatars both come from accounts (Tier 1), which exists for every Discord
 // login — reading them off `players` left anyone without a roster row (guests,
-// unapproved players) showing their raw username.
-async function displayNamesFor(discordIds: string[]): Promise<Map<string, string | null>> {
+// unapproved players) showing their raw username and no picture.
+async function accountsFor(discordIds: string[]): Promise<Map<string, AccountBits>> {
   const { data } = await supabaseAdmin
     .from("accounts")
-    .select("discord_id, display_name")
+    .select("discord_id, display_name, avatar")
     .in("discord_id", discordIds);
-  return new Map((data ?? []).map((a: { discord_id: string; display_name: string | null }) => [a.discord_id, a.display_name]));
+  return new Map(
+    (data ?? []).map((a: { discord_id: string } & AccountBits) => [
+      a.discord_id,
+      { display_name: a.display_name, avatar: a.avatar },
+    ]),
+  );
 }
 
 export async function getLeaderboard(viewerDiscordId?: string): Promise<Leaderboard> {
@@ -30,10 +44,12 @@ export async function getLeaderboard(viewerDiscordId?: string): Promise<Leaderbo
     .order("score", { ascending: false });
   if (!data?.length) return { top: [], self: null };
 
-  const displayNameById = await displayNamesFor(data.map((r: { discord_id: string }) => r.discord_id));
+  const accountById = await accountsFor(data.map((r: { discord_id: string }) => r.discord_id));
   const ranked = data.map((r: { discord_id: string; username: string; score: number }, i: number) => ({
+    discord_id: r.discord_id,
     username: r.username,
-    display_name: displayNameById.get(r.discord_id) ?? null,
+    display_name: accountById.get(r.discord_id)?.display_name ?? null,
+    avatar: accountById.get(r.discord_id)?.avatar ?? null,
     score: r.score,
     rank: i + 1,
   }));
@@ -94,11 +110,11 @@ export async function getAllGameScores(): Promise<GameScoreRow[]> {
     .select("discord_id, username, score, updated_at")
     .order("score", { ascending: false });
   if (!data?.length) return [];
-  const displayNameById = await displayNamesFor(data.map((r: { discord_id: string }) => r.discord_id));
+  const accountById = await accountsFor(data.map((r: { discord_id: string }) => r.discord_id));
   return data.map((r: { discord_id: string; username: string; score: number; updated_at: string }) => ({
     discord_id: r.discord_id,
     username: r.username,
-    display_name: displayNameById.get(r.discord_id) ?? null,
+    display_name: accountById.get(r.discord_id)?.display_name ?? null,
     score: r.score,
     updated_at: r.updated_at,
   }));

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { submitScore, type Leaderboard, type LeaderboardRow } from "./actions";
 import { PlayerName } from "@/app/dashboard/player-name";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 380;
@@ -760,7 +761,15 @@ function ScoreRow({ row, username, detached = false }: { row: LeaderboardRow; us
         #{row.rank}
       </td>
       <td className="py-3 text-zinc-200 font-medium">
-        <PlayerName displayName={row.display_name ?? null} username={row.username} />
+        <span className="flex items-center gap-2 min-w-0">
+          <PlayerAvatar
+            discordId={row.discord_id}
+            avatar={row.avatar}
+            username={row.username}
+            className="w-7 h-7"
+          />
+          <PlayerName displayName={row.display_name ?? null} username={row.username} />
+        </span>
       </td>
       <td className="py-3 pr-4 text-right text-white font-mono font-bold">
         {row.score}
