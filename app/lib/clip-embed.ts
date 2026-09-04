@@ -141,11 +141,15 @@ export function resolveClipEmbedUrl(clip: { platform: ClipPlatform; embed_url: s
 // Poster frame for the Clip of the Week facade, derived from data we already
 // have so it works for clips submitted before the facade existed.
 //
-// Only YouTube has a thumbnail URL you can compute from the video ID. Twitch and
-// Medal both answer og:image with a generic site logo rather than a frame, and
-// Streamable's image CDN 403s unauthenticated requests, so there is nothing to
-// derive or scrape for those three - they fall back to stored thumbnail_url
-// (only ever set for the link-only platforms) and then to a plain play button.
+// Only YouTube has a thumbnail URL you can compute from the video ID, so it is
+// the only platform handled here. The other three do publish a real per-clip
+// frame, but none of them can be reached from a pure function: Twitch and Medal
+// need an og:image scrape (and a browser User-Agent - a default one is served a
+// bot page carrying the site logo instead), Streamable needs an oEmbed call, and
+// Medal's and Streamable's image URLs are signed with a few-hour expiry so they
+// cannot be stored either. Until that server-side fetch exists those three fall
+// back to stored thumbnail_url (only ever set for the link-only platforms) and
+// then to a plain play button on black.
 //
 // hqdefault is 480x360: a 480x270 frame letterboxed with 45px bars. Drawn
 // object-cover in an aspect-video box those bars crop away exactly, which is why
