@@ -1,16 +1,13 @@
 ﻿import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
-import { getPlayerInfo, getStaffRole, hasMfaEnabled } from "@/app/lib/players";
-import { getNavVisuals } from "@/app/lib/sponsors-public";
 import { cropStyle } from "@/app/lib/media-crop";
-import { supabaseAdmin } from "@/app/lib/supabase";
-import { getNameDecorations } from "@/app/lib/patreon-entitlements";
+import { loadDashboardChrome } from "./layout-data";
 import NavLink from "./nav-link";
 import { TopNav, type TopNavEntry } from "./top-nav";
 import { SidebarNavGroup } from "./sidebar-nav-group";
 import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
-import { applyNavTabOverrides, type NavTabOverrides } from "@/app/lib/nav-tabs";
+import { applyNavTabOverrides } from "@/app/lib/nav-tabs";
 import { AppTitle } from "./app-title";
 import MobileNav from "./mobile-nav";
 import { ServiceWorkerRegistrar } from "./sw-register";
@@ -23,11 +20,6 @@ import { CoinGrantToast } from "./coin-grant-toast";
 import { TeamCutToast } from "./team-cut-toast";
 import { LogoutButton } from "./logout-button";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
-
-// Server-only render timing, isolated from the component body so React's
-// purity lint (which forbids impure calls directly in a component/hook) sees
-// a plain function call, not a disallowed side effect.
-const perfNow = () => performance.now();
 
 type NavItem = { href: string; label: string; icon: React.ReactNode };
 
@@ -207,7 +199,6 @@ function isNavGroup(entry: TopNavEntry): entry is Extract<TopNavEntry, { items: 
 
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const t0 = perfNow();
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
 
@@ -219,167 +210,39 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const navLayout = cookieStore.get("nav_layout")?.value === "topbar" ? "topbar" : "sidebar";
   const welcomeSeen = cookieStore.get("welcome_seen")?.value === "1";
 
-  // Independent of playerInfo/coin-grant state below — kicked off immediately
-  // so they resolve concurrently with that chain instead of waiting for it.
-  const settingsPromise = supabaseAdmin.from("league_settings").select("draft_active, season_active, active_tournament_id, nav_tab_overrides").single();
-  const playersCountPromise = supabaseAdmin.from("players").select("*", { count: "exact", head: true }).eq("status", "approved").eq("draft_entered", true);
-  const navSponsorsPromise = getNavVisuals();
-  // Fresh, uncached lookups on every request: staff role from staff_roles, and
-  // Discord 2FA status from players.mfa_enabled (synced on each OAuth login).
-  // A staff member without 2FA is treated as non-admin everywhere on the site —
-  // this is what makes the check "happen on refresh" rather than being baked
-  // into the session JWT at login time.
-  const staffRolePromise = getStaffRole(userId);
-  const mfaOkPromise = hasMfaEnabled(userId);
-
-  const playerInfo = await getPlayerInfo(userId);
+  // Every fetch the chrome needs, in one bundle. app/dashboard/layout-data.ts
+  // holds the LOAD_MODE switch that decides whether they run in stages or all
+  // at once; both modes issue the same queries and return the same shape.
+  const {
+    playerInfo,
+    coinGrantStart,
+    coinGrantWeekly,
+    teamSignupMessage,
+    settings,
+    hasPlayers,
+    navSponsors,
+    staffRole,
+    mfaOk,
+    hasTeams,
+    hasStatsContent,
+    hasPodium,
+    decorations,
+  } = await loadDashboardChrome(userId);
+  // The bundle resolves before this runs, so a banned account pays for a few
+  // reads on its way out. The coin grant is gated on status inside the loader
+  // rather than by this redirect, so nothing is written on that path.
   if (playerInfo.status === "banned") redirect("/login");
-  const tPlayerInfo = perfNow();
-
-  // ── Claim pending coin grants on visit ────────────────────────────────────
-  // crl_coins/coin_grant_pending_* live on accounts (Tier 1) so unregistered
-  // and pending guests can wager too, not just approved players. Rejected
-  // accounts are excluded to match the wagering gate (accounts.status !== "rejected").
-  // team_signup_not_selected/too_few_players stay on players (Tier 3) — they
-  // only make sense for someone who was actually on a roster.
-  let coinGrantStart = 0;
-  let coinGrantWeekly = 0;
-  let teamSignupMessage: string | null = null;
-  if (playerInfo.status !== "rejected" && !playerInfo.isGuest) {
-    const { data: accountCoins } = await supabaseAdmin
-      .from("accounts")
-      .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly")
-      .eq("discord_id", userId)
-      .single();
-
-    const pendingStart = accountCoins?.coin_grant_pending_start ?? false;
-    const pendingWeekly = accountCoins?.coin_grant_pending_weekly ?? false;
-
-    if ((pendingStart || pendingWeekly) && accountCoins) {
-      const { data: ls } = await supabaseAdmin
-        .from("league_settings")
-        .select("pending_start_coin_amount")
-        .single();
-
-      const startAmount = pendingStart ? ((ls?.pending_start_coin_amount as number | null) ?? 0) : 0;
-      const weeklyAmount = pendingWeekly ? 250 : 0;
-      const total = startAmount + weeklyAmount;
-
-      if (total > 0) {
-        await supabaseAdmin
-          .from("accounts")
-          .update({
-            crl_coins: (accountCoins.crl_coins ?? 0) + total,
-            coin_grant_pending_start: false,
-            coin_grant_pending_weekly: false,
-          })
-          .eq("id", accountCoins.id);
-        coinGrantStart = startAmount;
-        coinGrantWeekly = weeklyAmount;
-      }
-    }
-
-    if (playerInfo.status === "approved") {
-      const { data: playerFlags } = await supabaseAdmin
-        .from("players")
-        .select("id, team_signup_not_selected, team_signup_too_few_players")
-        .eq("discord_id", userId)
-        .single();
-
-      if (playerFlags?.team_signup_not_selected) {
-        teamSignupMessage = "Your team didn't make the cutoff for the last tournament you signed up for.";
-        await supabaseAdmin.from("players").update({ team_signup_not_selected: false }).eq("id", playerFlags.id);
-      } else if (playerFlags?.team_signup_too_few_players) {
-        teamSignupMessage = "Your team didn't reach the 3-player minimum in time, so it wasn't entered in the last tournament.";
-        await supabaseAdmin.from("players").update({ team_signup_too_few_players: false }).eq("id", playerFlags.id);
-      }
-    }
-  }
 
   const { status, teamId, isGuest } = playerInfo;
-  const [settingsRes, playersCountRes, navSponsors, staffRole, mfaOk] = await Promise.all([
-    settingsPromise, playersCountPromise, navSponsorsPromise, staffRolePromise, mfaOkPromise,
-  ]);
-  const tSettings = perfNow();
   const admin = staffRole !== null && mfaOk;
   const needsMfa = staffRole !== null && !mfaOk;
-  const seasonActive = settingsRes.data?.season_active ?? false;
-  const draftActive = settingsRes.data?.draft_active ?? false;
-  const activeTournamentId = (settingsRes.data?.active_tournament_id as string | null) ?? null;
-  const hasPlayers = (playersCountRes.count ?? 0) > 0;
+  const { seasonActive, draftActive, activeTournamentId } = settings;
   // Stats visible whenever there is live content (active season or active tournament)
   const hasActiveContent = seasonActive || !!activeTournamentId;
 
   const priorityHrefs: string[] = [];
   if (draftActive) priorityHrefs.push("/dashboard/draft");
   if (seasonActive) priorityHrefs.push("/dashboard/season");
-
-  // The four nav-visibility checks below are independent of each other (each
-  // only needs values already resolved above), so they run concurrently
-  // instead of as four separate sequential await chains.
-
-  // Determine whether the Teams page would show any teams in the current context.
-  // Active tournament: check if any player who entered it has been placed on a team.
-  // Otherwise: check if any team has at least one player assigned (browsable any time).
-  async function computeHasTeams(): Promise<boolean> {
-    if (activeTournamentId) {
-      const { data: entries } = await supabaseAdmin
-        .from("tournament_entries")
-        .select("player_id")
-        .eq("tournament_id", activeTournamentId);
-      if ((entries ?? []).length === 0) return false;
-      const entryIds = (entries ?? []).map((e: { player_id: string }) => e.player_id);
-      const { count: teamedCount } = await supabaseAdmin
-        .from("players")
-        .select("*", { count: "exact", head: true })
-        .in("id", entryIds)
-        .not("team_id", "is", null);
-      return (teamedCount ?? 0) > 0;
-    }
-    const { count: teamedCount } = await supabaseAdmin
-      .from("players")
-      .select("*", { count: "exact", head: true })
-      .not("team_id", "is", null);
-    return (teamedCount ?? 0) > 0;
-  }
-
-  // Stats is a career-wide leaderboard (player_game_stats survives resetSeason),
-  // so once any games have ever been recorded it should stay visible through the
-  // gap between events too, not just while a season/tournament is live.
-  async function computeHasStatsContent(): Promise<boolean> {
-    if (hasActiveContent) return true;
-    const { count: statsCount } = await supabaseAdmin
-      .from("player_game_stats")
-      .select("*", { count: "exact", head: true })
-      .limit(1);
-    return (statsCount ?? 0) > 0;
-  }
-
-  // Podium nav only shows when there's a non-hidden completed event with a champion.
-  async function computeHasPodium(): Promise<boolean> {
-    const [{ data: podSeasons }, { data: podTournaments }] = await Promise.all([
-      supabaseAdmin.from("seasons").select("summary").eq("hidden_from_home", false).limit(20),
-      supabaseAdmin.from("tournaments").select("summary").eq("status", "completed").eq("hidden_from_home", false).limit(20),
-    ]);
-    const anyChamp = (rows: { summary: unknown }[] | null) =>
-      (rows ?? []).some((r) => !!(r.summary as { champion?: string | null } | null)?.champion);
-    return anyChamp(podSeasons) || anyChamp(podTournaments);
-  }
-
-  const [hasTeams, hasStatsContent, hasPodium] = await Promise.all([
-    computeHasTeams(),
-    computeHasStatsContent(),
-    computeHasPodium(),
-  ]);
-  const tNav = perfNow();
-  if (process.env.NODE_ENV !== "production") {
-    console.log(
-      `[layout timing] session→playerInfo ${(tPlayerInfo - t0).toFixed(0)}ms · ` +
-      `+settings/staff/coin ${(tSettings - tPlayerInfo).toFixed(0)}ms · ` +
-      `+nav-visibility ${(tNav - tSettings).toFixed(0)}ms · ` +
-      `total ${(tNav - t0).toFixed(0)}ms`
-    );
-  }
 
   // Players/Stats/Podium/Wagers/Settings are visible to every logged-in player
   // regardless of registration status — Settings itself renders a reduced view
@@ -416,7 +279,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   } else {
     navKeys = ["home", "register", ...commonExtras, "game"];
   }
-  navKeys = applyNavTabOverrides(navKeys, (settingsRes.data?.nav_tab_overrides as NavTabOverrides | null) ?? {});
+  navKeys = applyNavTabOverrides(navKeys, settings.navTabOverrides);
 
   // Onboarding tab — shown until the player dismisses it ("I got it!").
   if (!welcomeSeen && !isGuest) navKeys.unshift("welcome");
@@ -438,10 +301,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // already has its own bottom-tab + "More" sheet pattern.
   const groupedMainNav = groupNavKeys(mainNavKeys, navMap, getNavGroups(hasActiveContent));
 
-  // Built once here so both nav layouts share it — a branch that forgot the
-  // provider would silently drop every supporter badge and name colour with no
-  // error.
-  const decorations = await getNameDecorations();
+  // Fetched once for the whole layout so both nav layouts share it - a branch
+  // that forgot the provider would silently drop every supporter badge and name
+  // colour with no error.
   const nameDecorations = Array.from(decorations);
   // The chrome sits outside NameDecorationProvider, so the signed-in patron's
   // own border is read here and handed down rather than pulled from context.
