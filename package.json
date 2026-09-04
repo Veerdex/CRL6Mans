@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "bench:supabase": "node scripts/bench-supabase.mjs",
     "test:replay-parser": "tsc app/lib/replay-parser.ts scripts/test-replay-parser.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-replay-parser.js",
     "test:replay-identity-resolver": "tsc -p scripts/tsconfig.test-replay-identity-resolver.json && node --require ./scripts/register-test-path-alias.cjs --test .test-build/scripts/test-replay-identity-resolver.js",
     "test:rating": "tsc app/lib/rating.ts scripts/test-rating.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-rating.js"
