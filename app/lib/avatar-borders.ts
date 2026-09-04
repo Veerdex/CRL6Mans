@@ -81,6 +81,13 @@ export const AVATAR_BORDERS: readonly AvatarBorder[] = [
     measured: { width: 960, height: 968 },
     opening: { top: 53, bottom: 914, left: 49, right: 910 },
   },
+  {
+    id: "volcano",
+    title: "Volcano",
+    src: "/avatar-borders/volcano.png",
+    measured: { width: 983, height: 990 },
+    opening: { top: 73, bottom: 890, left: 84, right: 901 },
+  },
 ];
 
 const BY_ID = new Map(AVATAR_BORDERS.map((b) => [b.id, b]));
