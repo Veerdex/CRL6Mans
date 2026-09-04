@@ -21,10 +21,12 @@ import { type NavTabOverrides } from "@/app/lib/nav-tabs";
 // Both modes issue exactly the same queries and return the same bundle — only
 // the scheduling differs, which is what makes the comparison mean anything.
 //
-// Expect roughly 2x, not 10x. Node's fetch opens a fresh TCP+TLS connection per
-// concurrent request, so N queries at once cost noticeably more than one round
-// trip: `npm run bench:supabase` measured four together at 301ms against 114ms
-// for one. Connection setup, not round-trip count, is what bounds bulk mode.
+// Roughly 2x, not 10x - Node's fetch opens a fresh TCP+TLS connection per
+// concurrent request, so connection setup rather than round-trip count is what
+// bounds bulk mode. `npm run bench:layout-modes` measures the two schedules
+// against the real database; on 2026-09-04 it read 1395ms median for waterfall
+// against 654ms for bulk, 17 queries either way. Re-run it after changing what
+// the chrome fetches - equal query counts are what make the comparison honest.
 export type LoadMode = "waterfall" | "bulk";
 export const LOAD_MODE: LoadMode = "bulk";
 
