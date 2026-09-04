@@ -242,19 +242,24 @@ export function PatreonConnectCard({
                             onClick={() => commitBorder(opt?.id ?? null)}
                             disabled={pending}
                             aria-pressed={border === (opt?.id ?? null)}
-                            // Padded wider than tall because the frame overhangs the avatar box.
-                            className={`px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
+                            // Ice and Wave overhang their avatar box by ~27%, roughly twice
+                            // the rest, so each swatch reserves a cell the widest frame fits
+                            // inside. Padding sized to the overhang instead would have the
+                            // big frames spilling onto their own label and the row above.
+                            className={`p-2 rounded-lg border transition-colors disabled:opacity-50 ${
                               border === (opt?.id ?? null)
                                 ? "border-indigo-500 bg-zinc-800"
                                 : "border-zinc-700 hover:border-zinc-500"
                             }`}
                           >
-                            <PlayerAvatar
-                              discordId={previewDiscordId}
-                              avatar={previewAvatar}
-                              border={opt?.id ?? null}
-                              className="w-12 h-12"
-                            />
+                            <span className="flex items-center justify-center w-16 h-16">
+                              <PlayerAvatar
+                                discordId={previewDiscordId}
+                                avatar={previewAvatar}
+                                border={opt?.id ?? null}
+                                className="w-10 h-10"
+                              />
+                            </span>
                             <span className="block mt-1 text-[11px] text-zinc-400">{opt?.title ?? "None"}</span>
                           </button>
                         ))}
