@@ -4,30 +4,11 @@ import { useEffect, useState, useTransition } from "react";
 import { clearClipOfWeek } from "@/app/dashboard/media/actions";
 import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { clipPosterUrl, resolveClipEmbedUrl } from "@/app/lib/clip-embed";
+import { resolveClipEmbedUrl } from "@/app/lib/clip-embed";
 import type { Clip } from "@/app/dashboard/media/media-feed";
-
-// Only built once the viewer clicks play, so autoplay here means "start on
-// mount" rather than "start on page load", and the click is the user gesture
-// that lets it start with sound instead of muted. Twitch's embed_url already
-// carries a query string, hence & rather than ? for that one.
-function clipOfWeekEmbedSrc(clip: Clip, host: string | null): string {
-  const base = resolveClipEmbedUrl(clip, host);
-  if (clip.platform === "youtube") return `${base}?autoplay=1`;
-  if (clip.platform === "streamable") return `${base}?autoplay=1`;
-  if (clip.platform === "medal") return `${base}?autoplay=true`;
-  if (clip.platform === "twitch") return `${base}&autoplay=true&muted=false`;
-  return base;
-}
 
 export function ClipOfWeek({ clip, isModerator }: { clip: Clip | null; isModerator: boolean }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
-  // The featured clip sits on Home as well as Media, so an iframe here would
-  // load a player - and, on the platforms that count them, register a view -
-  // for every visitor on every visit, whether or not anyone watched. Starting
-  // false means the server renders a poster and the real player is built only
-  // when someone asks for it.
-  const [playing, setPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   // Twitch embeds need the page's real hostname, but reading it during the
@@ -39,8 +20,6 @@ export function ClipOfWeek({ clip, isModerator }: { clip: Clip | null; isModerat
   useEffect(() => setHost(window.location.hostname), []);
 
   if (!clip) return null;
-
-  const poster = clipPosterUrl(clip);
 
   function handleConfirm() {
     setError(null);
@@ -71,43 +50,8 @@ export function ClipOfWeek({ clip, isModerator }: { clip: Clip | null; isModerat
           </button>
         )}
       </div>
-      <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-zinc-800 bg-black">
-        {playing ? (
-          <iframe
-            src={clipOfWeekEmbedSrc(clip, host)}
-            className="w-full h-full"
-            allow="autoplay; encrypted-media"
-            allowFullScreen
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setPlaying(true)}
-            className="group absolute inset-0 h-full w-full cursor-pointer"
-            aria-label={`Play ${clip.title}`}
-          >
-            {poster && (
-              <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={poster}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  loading="lazy"
-                  className="absolute inset-0 h-full w-full object-cover"
-                />
-                <span className="absolute inset-0 bg-black/25 transition-colors group-hover:bg-black/10" />
-              </>
-            )}
-            <span className="absolute inset-0 flex items-center justify-center">
-              <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/60 ring-1 ring-white/30 transition-transform group-hover:scale-110">
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" className="ml-1 text-white">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </span>
-            </span>
-          </button>
-        )}
+      <div className="aspect-video w-full overflow-hidden rounded-xl border border-zinc-800 bg-black">
+        <iframe src={resolveClipEmbedUrl(clip, host)} className="w-full h-full" allowFullScreen />
       </div>
       <p className="text-white font-medium">{clip.title}</p>
       <p className="text-sm text-zinc-500">

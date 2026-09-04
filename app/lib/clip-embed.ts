@@ -26,7 +26,7 @@ export const ALLOWED_CLIP_HOSTS = [
 ];
 
 const YOUTUBE_ID_PATTERN = /(?:youtube\.com\/watch\?v=|youtube\.com\/embed\/|youtube\.com\/shorts\/|youtu\.be\/)([\w-]{11})/;
-const MEDAL_ID_PATTERN = /medal\.tv\/(?:games\/[\w-]+\/)?clips\/([\w-]+)/;
+const MEDAL_ID_PATTERN = /medal\.tv\/(?:games\/[\w-]+\/)?clips?\/([\w-]+)/;
 const STREAMABLE_ID_PATTERN = /streamable\.com\/([\w-]+)/;
 // Matches both the standalone clips.twitch.tv/<slug> share link and the
 // twitch.tv/<channel>/clip/<slug> permalink shape (what the "Copy Link"
@@ -36,6 +36,18 @@ const TWITCH_ID_PATTERN = /(?:clips\.twitch\.tv\/(?:embed\?clip=)?|twitch\.tv\/\
 const TIKTOK_HOSTS = new Set(["tiktok.com", "www.tiktok.com", "vm.tiktok.com"]);
 const TWITTER_HOSTS = new Set(["twitter.com", "www.twitter.com", "x.com", "www.x.com"]);
 const INSTAGRAM_HOSTS = new Set(["instagram.com", "www.instagram.com"]);
+
+// Medal's player lives at the singular /clip/ path - the same URL Medal's own
+// oEmbed response hands out. The plural /clips/<id> is the full clip *page*,
+// which answers with x-frame-options: SAMEORIGIN and so renders as an empty box
+// when framed. The game slug is not validated (any value resolves the same
+// clip), so it is fixed here rather than stored per clip.
+const medalEmbedUrl = (id: string) => `https://medal.tv/games/rocket-league/clip/${id}`;
+
+// Clips submitted before that was corrected still hold the dead
+// /clips/<id>/embed URL, which 301s to the SAMEORIGIN page. Repaired at render
+// time in resolveClipEmbedUrl so no backfill is needed.
+const MEDAL_LEGACY_EMBED_PATTERN = /medal\.tv\/clips\/([\w-]+)\/embed/;
 
 export type ClassifiedClip = {
   platform: ClipPlatform;
@@ -75,7 +87,7 @@ export function classifyClipUrl(rawUrl: string): ClassifiedClip | null {
     return {
       platform: "medal",
       normalizedUrl: `https://medal.tv/clips/${id}`,
-      embedUrl: `https://medal.tv/clips/${id}/embed`,
+      embedUrl: medalEmbedUrl(id),
     };
   }
 
@@ -124,44 +136,48 @@ export function classifyClipUrl(rawUrl: string): ClassifiedClip | null {
   return null;
 }
 
+// Every clip player is mounted as soon as its page renders, so each one has to
+// be told not to start on its own: the Clip of the Week sits on Home, and a
+// player that starts by itself would both hijack the page and, on the platforms
+// that count a view on playback, inflate the creator's numbers for people who
+// never chose to watch. Letting the platform's own player render is what puts a
+// real thumbnail there — each one draws its own poster frame, including the
+// signed, expiring ones we could never store ourselves.
+//
+// Only Streamable is verifiably off by default (its embed ships the <video> as
+// preload="none" with no autoplay attribute, so not a byte of media moves until
+// a click). Twitch documents the opposite default, and YouTube's and Medal's
+// embeds are JS shells that read the param at runtime, so the flag is passed
+// explicitly on all four rather than trusting a default to stay put.
+const AUTOPLAY_OFF: Partial<Record<ClipPlatform, string>> = {
+  youtube: "autoplay=0",
+  streamable: "autoplay=0",
+  medal: "autoplay=false",
+  twitch: "autoplay=false",
+};
+
+// Turns a stored embed_url into the src an <iframe> can actually use.
+//
 // Twitch's embed API rejects a clip iframe unless its `parent` query param
-// matches the actual embedding page's hostname, so unlike the other
-// platforms' embed_url this can't be precomputed once at submission time.
-// Takes the hostname as an explicit argument (rather than reading
-// `window.location` itself) so it renders identically on the server and on
-// the client's first paint — callers add the real hostname client-side only
-// after mount (see useResolvedEmbedUrl below), which avoids a hydration
+// matches the actual embedding page's hostname, so unlike the other platforms'
+// embed_url this can't be precomputed once at submission time. The hostname is
+// an explicit argument (rather than read from `window.location` here) so this
+// renders identically on the server and on the client's first paint — callers
+// fill in the real hostname only after mount, which avoids a hydration
 // mismatch. Called from both clip-of-week.tsx and media-feed.tsx so the two
 // stay consistent.
 export function resolveClipEmbedUrl(clip: { platform: ClipPlatform; embed_url: string }, host: string | null = null): string {
-  if (clip.platform !== "twitch") return clip.embed_url;
-  return host ? `${clip.embed_url}&parent=${host}` : clip.embed_url;
-}
+  let url = clip.embed_url;
 
-// Poster frame for the Clip of the Week facade, derived from data we already
-// have so it works for clips submitted before the facade existed.
-//
-// Only YouTube has a thumbnail URL you can compute from the video ID, so it is
-// the only platform handled here. The other three do publish a real per-clip
-// frame, but none of them can be reached from a pure function: Twitch and Medal
-// need an og:image scrape (and a browser User-Agent - a default one is served a
-// bot page carrying the site logo instead), Streamable needs an oEmbed call, and
-// Medal's and Streamable's image URLs are signed with a few-hour expiry so they
-// cannot be stored either. Until that server-side fetch exists those three fall
-// back to stored thumbnail_url (only ever set for the link-only platforms) and
-// then to a plain play button on black.
-//
-// hqdefault is 480x360: a 480x270 frame letterboxed with 45px bars. Drawn
-// object-cover in an aspect-video box those bars crop away exactly, which is why
-// it beats maxresdefault (404s on low-res uploads) and mqdefault (320x180).
-export function clipPosterUrl(clip: {
-  platform: ClipPlatform;
-  embed_url: string;
-  thumbnail_url?: string | null;
-}): string | null {
-  if (clip.platform === "youtube") {
-    const id = clip.embed_url.match(YOUTUBE_ID_PATTERN)?.[1];
-    if (id) return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+  if (clip.platform === "medal") {
+    const legacyId = url.match(MEDAL_LEGACY_EMBED_PATTERN)?.[1];
+    if (legacyId) url = medalEmbedUrl(legacyId);
   }
-  return clip.thumbnail_url ?? null;
+
+  const params = [AUTOPLAY_OFF[clip.platform]];
+  if (clip.platform === "twitch" && host) params.push(`parent=${host}`);
+
+  const query = params.filter(Boolean).join("&");
+  if (!query) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}${query}`;
 }
