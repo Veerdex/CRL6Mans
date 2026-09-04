@@ -36,8 +36,8 @@ export const AVATAR_BORDERS: readonly AvatarBorder[] = [
     id: "cloud",
     title: "Cloud",
     src: "/avatar-borders/cloud.png",
-    measured: { width: 959, height: 942 },
-    opening: { top: 70, bottom: 877, left: 77, right: 884 },
+    measured: { width: 937, height: 916 },
+    opening: { top: 76, bottom: 831, left: 94, right: 849 },
   },
   {
     id: "tech",
