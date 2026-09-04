@@ -9,7 +9,7 @@ import {
   nameColorStyle,
   outlineColorFor,
 } from "@/app/lib/name-color";
-import { AVATAR_BORDERS, AVATAR_BORDER_BENEFIT } from "@/app/lib/avatar-borders";
+import { AVATAR_BORDERS, AVATAR_BORDER_BENEFIT, getAvatarBorder } from "@/app/lib/avatar-borders";
 import { PlayerAvatar } from "../player-avatar";
 
 export type PatreonInfo = {
@@ -69,6 +69,9 @@ export function PatreonConnectCard({
   const [color, setColor] = useState(nameColor ?? DEFAULT_NAME_COLOR);
   const [outline, setOutline] = useState(nameOutline);
   const [border, setBorder] = useState(avatarBorder);
+  // undefined is closed. null is a real value here - the None option - so the
+  // modal is gated on `!== undefined`, never on truthiness.
+  const [preview, setPreview] = useState<string | null | undefined>(undefined);
   const [pending, startToggle] = useTransition();
   const [disconnecting, startDisconnect] = useTransition();
 
@@ -92,6 +95,15 @@ export function PatreonConnectCard({
   // pair.
   const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (commitTimer.current) clearTimeout(commitTimer.current); }, []);
+
+  useEffect(() => {
+    if (preview === undefined) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPreview(undefined);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [preview]);
 
   function commitNameColor(nextColor: string, nextOutline: boolean) {
     setColor(nextColor);
@@ -234,35 +246,39 @@ export function PatreonConnectCard({
                       </div>
                     )}
                     {b.id === AVATAR_BORDER_BENEFIT && enabled[b.id] && (
-                      <div className="mt-3 flex flex-wrap items-start gap-2">
-                        {[null, ...AVATAR_BORDERS].map((opt) => (
-                          <button
-                            key={opt?.id ?? "none"}
-                            type="button"
-                            onClick={() => commitBorder(opt?.id ?? null)}
-                            disabled={pending}
-                            aria-pressed={border === (opt?.id ?? null)}
-                            // Ice and Wave overhang their avatar box by ~27%, roughly twice
-                            // the rest, so each swatch reserves a cell the widest frame fits
-                            // inside. Padding sized to the overhang instead would have the
-                            // big frames spilling onto their own label and the row above.
-                            className={`p-2 rounded-lg border transition-colors disabled:opacity-50 ${
-                              border === (opt?.id ?? null)
-                                ? "border-indigo-500 bg-zinc-800"
-                                : "border-zinc-700 hover:border-zinc-500"
-                            }`}
-                          >
-                            <span className="flex items-center justify-center w-16 h-16">
-                              <PlayerAvatar
-                                discordId={previewDiscordId}
-                                avatar={previewAvatar}
-                                border={opt?.id ?? null}
-                                className="w-10 h-10"
-                              />
-                            </span>
-                            <span className="block mt-1 text-[11px] text-zinc-400">{opt?.title ?? "None"}</span>
-                          </button>
-                        ))}
+                      <div className="mt-3">
+                        <p className="text-[11px] text-zinc-500">
+                          Click a border to see it up close, then apply it from there.
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-start gap-2">
+                          {[null, ...AVATAR_BORDERS].map((opt) => (
+                            <button
+                              key={opt?.id ?? "none"}
+                              type="button"
+                              onClick={() => setPreview(opt?.id ?? null)}
+                              aria-pressed={border === (opt?.id ?? null)}
+                              // Ice and Wave overhang their avatar box by ~27%, roughly twice
+                              // the rest, so each swatch reserves a cell the widest frame fits
+                              // inside. Padding sized to the overhang instead would have the
+                              // big frames spilling onto their own label and the row above.
+                              className={`p-2 rounded-lg border transition-colors ${
+                                border === (opt?.id ?? null)
+                                  ? "border-indigo-500 bg-zinc-800"
+                                  : "border-zinc-700 hover:border-zinc-500"
+                              }`}
+                            >
+                              <span className="flex items-center justify-center w-16 h-16">
+                                <PlayerAvatar
+                                  discordId={previewDiscordId}
+                                  avatar={previewAvatar}
+                                  border={opt?.id ?? null}
+                                  className="w-10 h-10"
+                                />
+                              </span>
+                              <span className="block mt-1 text-[11px] text-zinc-400">{opt?.title ?? "None"}</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -288,6 +304,57 @@ export function PatreonConnectCard({
         >
           Connect Patreon
         </a>
+      )}
+
+      {preview !== undefined && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setPreview(undefined)}
+        >
+          <div
+            className="relative rounded-xl border border-zinc-700 bg-zinc-900 p-4 sm:p-5 shadow-xl flex flex-col items-center gap-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setPreview(undefined)}
+              aria-label="Close preview"
+              className="absolute top-2 left-2 w-7 h-7 flex items-center justify-center rounded-md text-lg leading-none text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            >
+              &times;
+            </button>
+            {/* A 256px cell around a 168px avatar: the widest frame (Ice) lands
+                at 250px, so every border fits the cell without being upscaled
+                past the 256px art that ships. */}
+            <span className="flex items-center justify-center w-64 h-64">
+              <PlayerAvatar
+                discordId={previewDiscordId}
+                avatar={previewAvatar}
+                border={preview}
+                cdnSize={256}
+                className="w-[168px] h-[168px]"
+              />
+            </span>
+            <p className="text-sm font-semibold text-white">
+              {getAvatarBorder(preview)?.title ?? "None"}
+            </p>
+            {border === preview ? (
+              <p className="text-xs text-zinc-500">Currently applied</p>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  commitBorder(preview);
+                  setPreview(undefined);
+                }}
+                disabled={pending}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+              >
+                {preview === null ? "Remove border" : "Use this border"}
+              </button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
