@@ -27,6 +27,7 @@ export type PatreonBenefitRow = {
   title: string;
   description: string;
   enabled: boolean;
+  alwaysOn: boolean;
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -75,7 +76,9 @@ export function PatreonConnectCard({
   const [pending, startToggle] = useTransition();
   const [disconnecting, startDisconnect] = useTransition();
 
-  const offCount = benefits.filter((b) => !enabled[b.id]).length;
+  // Always-on rows have no switch, so they are not part of "still turned off".
+  const switchable = benefits.filter((b) => !b.alwaysOn);
+  const offCount = switchable.filter((b) => !enabled[b.id]).length;
 
   function toggle(id: string) {
     const next = !enabled[id];
@@ -182,7 +185,7 @@ export function PatreonConnectCard({
               <>
                 {offCount > 0 && (
                   <p className="text-amber-400">
-                    {offCount === benefits.length
+                    {offCount === switchable.length
                       ? "None of your benefits are turned on yet — they are off by default. Enable the ones you want below."
                       : `${offCount} of your benefits ${offCount === 1 ? "is" : "are"} still turned off.`}
                   </p>
@@ -203,16 +206,22 @@ export function PatreonConnectCard({
                           i
                         </button>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                        <input
-                          type="checkbox"
-                          checked={!!enabled[b.id]}
-                          onChange={() => toggle(b.id)}
-                          disabled={pending}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-zinc-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-pure-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 peer-disabled:opacity-50" />
-                      </label>
+                      {b.alwaysOn ? (
+                        <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-emerald-400">
+                          Always on
+                        </span>
+                      ) : (
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={!!enabled[b.id]}
+                            onChange={() => toggle(b.id)}
+                            disabled={pending}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-zinc-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-pure-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 peer-disabled:opacity-50" />
+                        </label>
+                      )}
                     </div>
                     {openInfo === b.id && <p className="text-zinc-500 mt-2">{b.description}</p>}
                     {b.id === NAME_COLOR_BENEFIT && enabled[b.id] && (

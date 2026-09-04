@@ -74,6 +74,7 @@ export default async function SettingsPage({
       title: b.title,
       description: b.description,
       enabled: benefitEnabled(account as BenefitPrefRow, b.id),
+      alwaysOn: !!b.alwaysOn,
     }));
   }
 

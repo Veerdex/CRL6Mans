@@ -17,6 +17,10 @@ export type PatreonBenefit = {
   // Set when the benefit is configured per-tier rather than being on/off.
   // Shown as the label on the admin's value input.
   valueLabel?: string;
+  // Granted for the whole tier with nothing for the patron to decide, so the
+  // settings card states it rather than offering a switch. Entitlement still
+  // applies; only the opt-in step is skipped.
+  alwaysOn?: boolean;
 };
 
 export const PATREON_BENEFITS: PatreonBenefit[] = [
@@ -58,10 +62,18 @@ export const PATREON_BENEFITS: PatreonBenefit[] = [
     id: "early-signup-access",
     title: "Early Signup Access",
     description: "Can sign up for tournaments one week before sign-ups open to everyone.",
+    alwaysOn: true,
   },
   {
     id: "discord-supporter-channel",
     title: "Discord Supporter Channel",
     description: "Access to the private supporters-only channel in the Discord server.",
+    alwaysOn: true,
   },
 ];
+
+const ALWAYS_ON = new Set(PATREON_BENEFITS.filter((b) => b.alwaysOn).map((b) => b.id));
+
+export function isAlwaysOnBenefit(benefitId: string): boolean {
+  return ALWAYS_ON.has(benefitId);
+}

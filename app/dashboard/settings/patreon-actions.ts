@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
+import { PATREON_BENEFITS, isAlwaysOnBenefit } from "@/app/lib/patreon-benefits";
 import { benefitPrefTarget } from "@/app/lib/patreon-entitlements";
 import { DISCORD_ROLE_BENEFIT, syncDiscordSupporterRole } from "@/app/lib/patreon-discord-role";
 import { normalizeNameColor } from "@/app/lib/name-color";
@@ -23,6 +23,7 @@ export async function setBenefitEnabled(benefitId: string, enabled: boolean) {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) return { error: "Not signed in." };
   if (!PATREON_BENEFITS.some((b) => b.id === benefitId)) return { error: "Unknown benefit." };
+  if (isAlwaysOnBenefit(benefitId)) return { error: "That benefit cannot be turned off." };
 
   const updatedAt = new Date().toISOString();
 
@@ -88,7 +89,7 @@ export async function setNameColor(color: string, outline: boolean) {
 
 // The Avatar Border benefit's per-patron value. Stored as a catalog id and
 // validated against the catalog, so the column can only ever hold a border that
-// exists  the read path does the same check again, since a border retired
+// exists — the read path does the same check again, since a border retired
 // after this was written would otherwise resolve to a 404 image.
 export async function setAvatarBorder(borderId: string | null) {
   const cookieStore = await cookies();

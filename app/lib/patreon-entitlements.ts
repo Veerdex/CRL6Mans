@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { NAME_COLOR_BENEFIT, SUPPORTER_BADGE_BENEFIT, normalizeNameColor } from "@/app/lib/name-color";
 import { AVATAR_BORDER_BENEFIT, getAvatarBorder } from "@/app/lib/avatar-borders";
+import { isAlwaysOnBenefit } from "@/app/lib/patreon-benefits";
 
 // benefit id -> the per-tier `value` configured for it, or null when the
 // benefit is simply on/off. Callers check membership (`has`) for on/off
@@ -104,6 +105,10 @@ export function benefitPrefTarget(benefitId: string): "public_column" | "prefs_m
 // Absent from the map means off, which is what makes everything default off
 // with no backfill. See scripts/patreon-benefit-prefs-migration.sql.
 export function benefitEnabled(row: BenefitPrefRow, benefitId: string): boolean {
+  // An always-on benefit has no switch, so the prefs map is not consulted for
+  // it at all: a stale entry written before it became always-on is inert
+  // rather than an override. setBenefitEnabled refuses to write new ones.
+  if (isAlwaysOnBenefit(benefitId)) return true;
   if (benefitPrefTarget(benefitId) === "public_column") return !!row.patreon_public;
   return (row.patreon_benefit_prefs ?? {})[benefitId] === true;
 }
