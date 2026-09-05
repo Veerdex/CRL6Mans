@@ -552,11 +552,6 @@ export async function forceTrackerUpdate(): Promise<{ ok?: boolean; error?: stri
 export async function resetSeason() {
   await verifyAdmin();
 
-  // Fold this event's per-game stats into the all-time table first. Everything
-  // below can throw, and the `matches` delete cascades player_game_stats away,
-  // so any later position risks losing the event's stats entirely.
-  await rollUpCareerStats();
-
   // Delete Discord match channels before wiping the DB
   await deleteMatchChannels();
 
@@ -576,6 +571,12 @@ export async function resetSeason() {
   // unassigned and redrafted, so a rating (and its form-retention anchor) carried
   // over from the old roster would be meaningless for the new one — the next
   // match lazy-inits both fresh from initialTeamRating() (see rating.ts).
+  // Fold this event's per-game stats into the all-time table, immediately before
+  // the delete that would destroy them (player_game_stats.match_id cascades).
+  // rollUpCareerStats consumes the rows it folds in, so the window where a game
+  // is counted in both the career table and the still-live rows is this narrow.
+  await rollUpCareerStats();
+
   await supabaseAdmin.from("sub_requests").delete().not("id", "is", null);
   await supabaseAdmin.from("matches").delete().not("id", "is", null);
   await supabaseAdmin.from("teams")
