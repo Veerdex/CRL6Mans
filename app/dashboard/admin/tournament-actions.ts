@@ -35,6 +35,7 @@ export type TournamentInput = {
   min_mmr_2v2: number | null;
   min_mmr_3v3: number | null;
   is_test?: boolean;
+  stats_enabled?: boolean;
   sponsor_id: string | null;
   design_id: string | null;
   prize_1st: number | null;
@@ -54,6 +55,7 @@ export type Tournament = TournamentInput & {
   updated_at: string;
   hidden_from_home: boolean;
   is_test: boolean;
+  stats_enabled: boolean;
 };
 
 export type Season = {
@@ -173,6 +175,7 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
       min_mmr_2v2: min2v2 || null,
       min_mmr_3v3: min3v3 || null,
       is_test: input.is_test ?? false,
+      stats_enabled: input.stats_enabled ?? true,
       sponsor_id: input.sponsor_id?.trim() || null,
       design_id: input.design_id?.trim() || null,
       prize_1st: prize1st || null,
@@ -244,7 +247,7 @@ export async function cancelTournament(id: string) {
     if ((settings?.active_tournament_id as string | null) === id) {
       await resetSeason();
       await supabaseAdmin.from("league_settings")
-        .update({ active_tournament_id: null, updated_at: new Date().toISOString() })
+        .update({ active_tournament_id: null, stats_enabled: true, updated_at: new Date().toISOString() })
         .not("id", "is", null);
     }
   }
@@ -417,7 +420,7 @@ export async function activateTournament(id: string) {
 }
 
 /** Champion + final standings derived from completed matches. Snapshots rosters, logos, and stat leaders before reset. */
-async function computeSummary(): Promise<TournamentSummary> {
+async function computeSummary(statsEnabled: boolean): Promise<TournamentSummary> {
   const [allTeams, completedMatches, topStats] = await Promise.all([
     fetchAllRows((from, to) =>
       supabaseAdmin.from("teams").select("id, name, logo_url").order("id").range(from, to)
@@ -434,7 +437,9 @@ async function computeSummary(): Promise<TournamentSummary> {
         .order("id")
         .range(from, to)
     ),
-    computeTopStats(),
+    // A stats-disabled tournament has no replays behind it, so leaving topStats
+    // undefined is what suppresses the podium's stat leaders and MVP crown.
+    statsEnabled ? computeTopStats() : Promise.resolve(undefined),
   ]);
 
   const records: Record<string, { wins: number; losses: number }> = {};
@@ -495,7 +500,7 @@ export async function completeTournament() {
 
   const { data: tournament } = await supabaseAdmin
     .from("tournaments")
-    .select("is_test, name, season_format, join_mode, team_assignment, started_at")
+    .select("is_test, stats_enabled, name, season_format, join_mode, team_assignment, started_at")
     .eq("id", activeId).single();
   const isTest = tournament?.is_test ?? false;
 
@@ -514,7 +519,7 @@ export async function completeTournament() {
     // Snapshot the summary AND the full archive BEFORE resetSeason wipes the matches/teams.
     const endedAt = new Date().toISOString();
     const [summary, fullArchive] = await Promise.all([
-      computeSummary(),
+      computeSummary(tournament?.stats_enabled ?? true),
       computeFullArchive({
         kind: "tournament",
         name: tournament!.name,
@@ -541,9 +546,10 @@ export async function completeTournament() {
   // Reuse the existing season-reset (wipes matches, unassigns players, strips roles).
   await resetSeason();
 
-  // Clear the live pointer (resetSeason doesn't know about it).
+  // Clear the live pointer (resetSeason doesn't know about it). Stats go back
+  // on by default — only a tournament can turn them off, and this one is over.
   await supabaseAdmin.from("league_settings")
-    .update({ active_tournament_id: null, updated_at: new Date().toISOString() })
+    .update({ active_tournament_id: null, stats_enabled: true, updated_at: new Date().toISOString() })
     .not("id", "is", null);
 
   revalidatePath("/dashboard/admin");

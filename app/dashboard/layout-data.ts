@@ -1,6 +1,7 @@
 import { getPlayerInfo, getStaffRole, hasMfaEnabled, type StaffRole } from "@/app/lib/players";
 import { getNavVisuals, type NavVisuals } from "@/app/lib/sponsors-public";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { hasAnyCareerStats } from "@/app/lib/career-stats";
 import { getNameDecorations } from "@/app/lib/patreon-entitlements";
 import { type NavTabOverrides } from "@/app/lib/nav-tabs";
 
@@ -38,6 +39,7 @@ type Settings = {
   seasonActive: boolean;
   draftActive: boolean;
   activeTournamentId: string | null;
+  statsEnabled: boolean;
   navTabOverrides: NavTabOverrides;
 };
 
@@ -63,12 +65,13 @@ export type DashboardChromeData = CoinGrants & {
 async function fetchSettings(): Promise<Settings> {
   const { data } = await supabaseAdmin
     .from("league_settings")
-    .select("draft_active, season_active, active_tournament_id, nav_tab_overrides")
+    .select("draft_active, season_active, active_tournament_id, stats_enabled, nav_tab_overrides")
     .single();
   return {
     seasonActive: data?.season_active ?? false,
     draftActive: data?.draft_active ?? false,
     activeTournamentId: (data?.active_tournament_id as string | null) ?? null,
+    statsEnabled: data?.stats_enabled ?? true,
     navTabOverrides: (data?.nav_tab_overrides as NavTabOverrides | null) ?? {},
   };
 }
@@ -182,16 +185,18 @@ async function fetchHasTeams(activeTournamentId: string | null): Promise<boolean
   return (teamedCount ?? 0) > 0;
 }
 
-// Stats is a career-wide leaderboard (player_game_stats survives resetSeason),
-// so once any games have ever been recorded it should stay visible through the
-// gap between events too, not just while a season/tournament is live.
-async function fetchHasStatsContent(hasActiveContent: boolean): Promise<boolean> {
-  if (hasActiveContent) return true;
-  const { count: statsCount } = await supabaseAdmin
-    .from("player_game_stats")
-    .select("*", { count: "exact", head: true })
-    .limit(1);
-  return (statsCount ?? 0) > 0;
+// player_game_stats only ever holds the live event (match_id cascades on the
+// delete resetSeason runs), so the all-time record lives in player_career_stats.
+// The tab shows while a stats-tracking event is live, and otherwise whenever
+// either store has anything in it — including through the gap between events.
+// An event with stats disabled contributes nothing, but past totals still do.
+async function fetchHasStatsContent(hasActiveTrackedContent: boolean): Promise<boolean> {
+  if (hasActiveTrackedContent) return true;
+  const [{ count: liveCount }, anyCareer] = await Promise.all([
+    supabaseAdmin.from("player_game_stats").select("*", { count: "exact", head: true }).limit(1),
+    hasAnyCareerStats(),
+  ]);
+  return (liveCount ?? 0) > 0 || anyCareer;
 }
 
 // Podium nav only shows when there's a non-hidden completed event with a champion.
@@ -206,6 +211,7 @@ async function fetchHasPodium(): Promise<boolean> {
 }
 
 const hasActiveContentOf = (s: Settings) => s.seasonActive || !!s.activeTournamentId;
+const hasTrackedContentOf = (s: Settings) => hasActiveContentOf(s) && s.statsEnabled;
 
 async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
   const t0 = perfNow();
@@ -234,7 +240,7 @@ async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
 
   const [hasTeams, hasStatsContent, hasPodium] = await Promise.all([
     fetchHasTeams(settings.activeTournamentId),
-    fetchHasStatsContent(hasActiveContentOf(settings)),
+    fetchHasStatsContent(hasTrackedContentOf(settings)),
     fetchHasPodium(),
   ]);
   const tNav = perfNow();
@@ -284,7 +290,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     getStaffRole(userId),
     hasMfaEnabled(userId),
     settingsPromise.then((s) => fetchHasTeams(s.activeTournamentId)),
-    settingsPromise.then((s) => fetchHasStatsContent(hasActiveContentOf(s))),
+    settingsPromise.then((s) => fetchHasStatsContent(hasTrackedContentOf(s))),
     fetchHasPodium(),
     getNameDecorations(),
   ]);

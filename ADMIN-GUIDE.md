@@ -183,6 +183,14 @@ permanently archived and does pay out. The Season Settings and League
 Controls sections of the Admin Dashboard (below) also cover the season-level
 version of this and every other setting described here.
 
+A tournament also has a **Track Stats** toggle, on by default. Turned off,
+that tournament doesn't collect player stats at all: captains report the
+series score straight from a list of legal Bo-N results ("2 – 1") instead of
+uploading replay files, the Stats tab disappears while it's running, and the
+podium shows no stat leaders or MVP when it finishes. Standings, brackets,
+ratings, and payouts are unaffected. This is a tournament-only option —
+a standalone season always tracks stats.
+
 ### Format presets
 
 When a tournament or season is set up, staff pick one of eight preset
@@ -458,13 +466,22 @@ Podium page will never reflect it at all.
   who actually played), or in the rare case automatic finalization fails.
   Uploading replays isn't just paperwork — it's also how the site pulls
   individual player stats (goals, assists, saves, shots, etc.) automatically
-  into each player's career stats and the Stats leaderboard.
+  into each player's career stats and the Stats leaderboard. In a tournament
+  with **Track Stats** turned off there are no replays to upload — the panel
+  shows the legal series scores for the format and the reporting side just
+  picks one. Confirmation, disputes, and the auto-finalize countdown work
+  exactly the same either way.
 
 ## Stats, standings, and the podium
 
-- The **Stats** page (`/dashboard/stats`) is a sortable career leaderboard
-  built entirely from uploaded match replays — click any column header to
-  sort by it. Columns: Player, Team, Games Played; a per-game group (MVP
+- The **Stats** page (`/dashboard/stats`) is a sortable leaderboard built
+  entirely from uploaded match replays — click any column header to sort by
+  it. A toggle at the top switches between **Current Event** (only the season
+  or tournament running right now) and **All Time** (every event on record,
+  including the one in progress). When an event ends, its stats are folded
+  into the all-time totals and the current-event view starts over. All-time
+  totals only go back as far as the first event completed after this feature
+  shipped — earlier events were never kept. Columns: Player, Team, Games Played; a per-game group (MVP
   rating, Goals/Game, Assists/Game, Saves/Game, Score/Game, Shots/Game, Shot
   %); and a totals group (Goals, Assists, Saves, Score, Shots). It defaults
   to sorting by MVP rating, and only aggregates stats for currently-approved
@@ -652,7 +669,7 @@ home instead of seeing an empty version of this page.
   - Opponent not yet determined: "Waiting for opponent to be determined."
   - Opponent still finishing an earlier match: "Waiting on {opponent} —
     {opponent} still has an earlier match to play before they face you.
-    You'll be able to upload replays here once they've finished it."
+    You'll be able to report the result here once they've finished it."
   - Once it's your team's turn to report: both teams' columns (logo, name,
     average Rank Value, roster) frame a running series score, with one row
     per game labeled "Game {N}." Each game slot walks through waiting (drag

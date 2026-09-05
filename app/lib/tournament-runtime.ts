@@ -81,6 +81,7 @@ export async function activateTournamentRuntime(
   await supabaseAdmin.from("league_settings").update({
     active_tournament_id: tournamentId,
     num_teams: numTeams,
+    stats_enabled: t.stats_enabled ?? true,
     season_format: t.season_format ?? null,
     match_deadline_day: t.match_deadline_day,
     match_play_day: t.match_play_day,

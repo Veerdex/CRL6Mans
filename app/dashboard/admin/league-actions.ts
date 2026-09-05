@@ -10,6 +10,7 @@ import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 import { APP_NAME } from "@/app/lib/constants";
 import { computeTopStats } from "@/app/lib/game-stats";
+import { rollUpCareerStats } from "@/app/lib/career-stats";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { computeFullArchive } from "./tournament-archive";
 
@@ -550,6 +551,11 @@ export async function forceTrackerUpdate(): Promise<{ ok?: boolean; error?: stri
 
 export async function resetSeason() {
   await verifyAdmin();
+
+  // Fold this event's per-game stats into the all-time table first. Everything
+  // below can throw, and the `matches` delete cascades player_game_stats away,
+  // so any later position risks losing the event's stats entirely.
+  await rollUpCareerStats();
 
   // Delete Discord match channels before wiping the DB
   await deleteMatchChannels();

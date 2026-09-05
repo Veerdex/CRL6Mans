@@ -306,6 +306,7 @@ type FormState = {
   stageFollow: boolean[];
   previewTeams: string;
   isTest: boolean;
+  statsEnabled: boolean;
   sponsorId: string;
   designId: string;
   prize1st: string;
@@ -333,6 +334,7 @@ const EMPTY_FORM: FormState = {
   stageFollow: [false],
   previewTeams: "",
   isTest: false,
+  statsEnabled: true,
   sponsorId: "",
   designId: "",
   prize1st: "",
@@ -444,6 +446,7 @@ export function TournamentManager({
       min_mmr_2v2: form.minMmr2v2 ? parseInt(form.minMmr2v2) || null : null,
       min_mmr_3v3: form.minMmr3v3 ? parseInt(form.minMmr3v3) || null : null,
       is_test: form.isTest,
+      stats_enabled: form.statsEnabled,
       sponsor_id: form.sponsorId || null,
       design_id: form.designId || null,
       prize_1st: form.prize1st ? parseInt(form.prize1st) || null : null,
@@ -554,6 +557,7 @@ export function TournamentManager({
       minMmr2v2: t.min_mmr_2v2 ? String(t.min_mmr_2v2) : "",
       minMmr3v3: t.min_mmr_3v3 ? String(t.min_mmr_3v3) : "",
       isTest: t.is_test ?? false,
+      statsEnabled: t.stats_enabled ?? true,
       sponsorId: t.sponsor_id ?? "",
       designId: t.design_id ?? "",
       prize1st: t.prize_1st ? String(t.prize_1st) : "",
@@ -632,6 +636,30 @@ export function TournamentManager({
                 aria-checked={form.isTest}
               >
                 <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${form.isTest ? "translate-x-4" : "translate-x-0"}`} />
+              </button>
+            </div>
+          </div>
+
+          <div className="sm:col-span-2">
+            <div className="flex items-center justify-between bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2.5">
+              <div>
+                <p className="text-xs font-medium text-zinc-300">Track Stats</p>
+                <p className="text-[11px] text-zinc-500 mt-0.5">
+                  {form.statsEnabled
+                    ? "ON \u2014 captains upload replays; Stats tab and podium stat leaders shown"
+                    : "OFF \u2014 captains just report the series score; no Stats tab, no stat leaders"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, statsEnabled: !form.statsEnabled })}
+                className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 transition-colors duration-200 focus:outline-none ${
+                  form.statsEnabled ? "bg-indigo-600 border-indigo-600" : "bg-zinc-700 border-zinc-700"
+                }`}
+                role="switch"
+                aria-checked={form.statsEnabled}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${form.statsEnabled ? "translate-x-4" : "translate-x-0"}`} />
               </button>
             </div>
           </div>

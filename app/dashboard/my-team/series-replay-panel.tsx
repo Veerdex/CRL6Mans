@@ -72,6 +72,19 @@ interface Props {
   opponentNotReady?: boolean;
   opponentName?: string | null;
   isTournament?: boolean;
+  statsEnabled?: boolean;
+}
+
+// Every legal final score for a Bo-N: the winner takes exactly `needed` games,
+// the loser anything short of that. The server runs validateSeriesScore on the
+// submission either way, so offering only these keeps a stats-free report from
+// being rejected for a score that was never selectable.
+function legalSeriesScores(bestOf: number): [number, number][] {
+  const needed = Math.ceil(bestOf / 2);
+  const out: [number, number][] = [];
+  for (let loser = needed - 1; loser >= 0; loser--) out.push([needed, loser]);
+  for (let loser = 0; loser < needed; loser++) out.push([loser, needed]);
+  return out;
 }
 
 function initSlots(bestOf: number): SlotState[] {
@@ -423,13 +436,14 @@ export function SeriesReplayPanel({
   myTeamId, pendingHomeScore, pendingAwayScore, scoreSubmittedByTeamId, scoreConfirmed,
   scoreSubmittedAt = null,
   opponentNotReady = false, opponentName = null,
-  isTournament = false,
+  isTournament = false, statsEnabled = true,
 }: Props) {
   const router = useRouter();
   const [slots, setSlots] = useState<SlotState[]>(() => initSlots(bestOf));
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [pickedScore, setPickedScore] = useState<[number, number] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeSlotRef = useRef<number>(-1);
 
@@ -518,6 +532,17 @@ export function SeriesReplayPanel({
       next[slotIndex] = { status: "waiting" };
       return next;
     });
+  }
+
+  async function handleScoreOnlySubmit() {
+    if (!matchId || !pickedScore) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    const res = await submitSeriesResult(matchId, pickedScore[0], pickedScore[1]);
+    setSubmitting(false);
+    if (res.error) { setSubmitError(res.error); return; }
+    setSubmitted(true);
+    router.refresh();
   }
 
   async function handleSubmit() {
@@ -641,7 +666,7 @@ export function SeriesReplayPanel({
             Waiting on {opponentName ?? "your opponent"}
           </p>
           <p className="text-sm text-zinc-400 max-w-md mx-auto">
-            {`${opponentName ?? "Your opponent"} still has an earlier match to play before they face you. You'll be able to upload replays here once they've finished it.`}
+            {`${opponentName ?? "Your opponent"} still has an earlier match to play before they face you. You'll be able to report the result here once they've finished it.`}
           </p>
         </div>
       </div>
@@ -657,6 +682,74 @@ export function SeriesReplayPanel({
         <div className="px-5 py-8 text-center space-y-1">
           <p className="text-sm font-semibold text-amber-400">Result submitted — awaiting opponent confirmation</p>
           <p className="text-xs text-zinc-500">The opposing captain will see your claimed score on their team page.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Score-only flow (event isn't tracking stats, so no replays to upload) ──
+
+  if (!statsEnabled) {
+    const [pickedHome, pickedAway] = pickedScore ?? [0, 0];
+    const pickedWinner = pickedScore ? (pickedHome > pickedAway ? homeTeam : awayTeam) : null;
+    return (
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        {header}
+        <div className="p-5 space-y-6">
+          <div className="flex items-start gap-4">
+            <TeamColumn team={homeTeam} side="home" />
+            <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
+              <p className="text-3xl font-bold font-mono text-white tabular-nums">
+                {pickedScore ? `${pickedHome} – ${pickedAway}` : "– – –"}
+              </p>
+              <p className="text-xs text-zinc-600 uppercase tracking-wider text-center">
+                {pickedWinner ? `${pickedWinner.name} wins` : `BO${bestOf}`}
+              </p>
+            </div>
+            <TeamColumn team={awayTeam} side="away" />
+          </div>
+
+          <div>
+            <p className="text-xs text-zinc-400 mb-2">
+              Select the series score ({homeTeam?.name ?? "Home"} – {awayTeam?.name ?? "Away"}).
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {legalSeriesScores(bestOf).map(([h, a]) => {
+                const active = pickedScore?.[0] === h && pickedScore?.[1] === a;
+                return (
+                  <button
+                    key={`${h}-${a}`}
+                    type="button"
+                    onClick={() => setPickedScore([h, a])}
+                    className={`px-3.5 py-2 rounded-lg text-sm font-mono font-semibold tabular-nums border transition-colors ${
+                      active
+                        ? "bg-emerald-700 border-emerald-600 text-white"
+                        : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
+                    }`}
+                    aria-pressed={active}
+                  >
+                    {h} – {a}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <p className="text-[11px] text-zinc-500 text-center">
+            This event doesn&apos;t track player stats, so no replays are needed — just report the series score.
+            Your opponent confirms it before it counts.
+          </p>
+
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              onClick={handleScoreOnlySubmit}
+              disabled={submitting || !pickedScore}
+              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {submitting ? "Submitting…" : "Submit Series Result"}
+            </button>
+            {submitError && <p className="text-xs text-red-400">{submitError}</p>}
+          </div>
         </div>
       </div>
     );

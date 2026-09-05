@@ -13,6 +13,7 @@ import { parseReplay } from "@/app/lib/replay-parser";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
 import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
 import { evaluateAndPersistGameCertification, resolveSubmittedGames, resolvePlatformIdMatches, hasBlockingIdentityDiscrepancy } from "@/app/lib/replay-identity-certification";
+import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
 
 // Any approved player on a team can submit/confirm results — not just the captain.
@@ -60,6 +61,11 @@ export async function submitSeriesResult(
   const bestOf = await getBestOfForMatch(matchId);
   const boError = validateSeriesScore(homeWins, awayWins, bestOf);
   if (boError) return { error: boError };
+
+  // A stats-disabled event reports the series score only. Dropping the games
+  // here (before the identity gate) means a stale client that still holds
+  // uploaded replays submits a plain score instead of failing certification.
+  if (!(await isStatsTrackingEnabled())) games = [];
 
   // Guard against a replay already committed to a different match.
   const replayIds = games.map((g) => g.replayId).filter((id): id is string => !!id);
@@ -239,6 +245,9 @@ export async function uploadGameReplay(
 ): Promise<{ homeTeamWon?: boolean; replayId?: string | null; stats?: AnalyzedGameStat[]; error?: string }> {
   const player = await getTeamMember();
   if (!player?.team_id) return { error: "Not on a team" };
+
+  if (!(await isStatsTrackingEnabled()))
+    return { error: "This tournament doesn't track stats — report the series score instead." };
 
   const file = formData.get("replay") as File | null;
   if (!file) return { error: "No file provided" };
