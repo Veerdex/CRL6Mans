@@ -468,9 +468,14 @@ Podium page will never reflect it at all.
   individual player stats (goals, assists, saves, shots, etc.) automatically
   into each player's career stats and the Stats leaderboard. In a tournament
   with **Track Stats** turned off there are no replays to upload — the panel
-  shows the legal series scores for the format and the reporting side just
-  picks one. Confirmation, disputes, and the auto-finalize countdown work
-  exactly the same either way.
+  shows a games-won box under each team name instead, and the reporting
+  captain types both numbers. The box for the captain's own team is badged
+  "Your team" and ringed in the accent color, so a 3 – 1 can't be entered
+  backwards by someone reading the two boxes as "winner, loser". Submitting
+  checks the pair against the legal results for the format (the winner needs
+  exactly the games that clinch it, the loser fewer) and explains the problem
+  rather than silently rejecting. Confirmation, disputes, and the
+  auto-finalize countdown work exactly the same either way.
 
 ## Stats, standings, and the podium
 

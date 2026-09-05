@@ -76,15 +76,58 @@ interface Props {
 }
 
 // Every legal final score for a Bo-N: the winner takes exactly `needed` games,
-// the loser anything short of that. The server runs validateSeriesScore on the
-// submission either way, so offering only these keeps a stats-free report from
-// being rejected for a score that was never selectable.
+// the loser anything short of that. The same rule the server's validateSeriesScore
+// applies, checked client-side first so a typo gets an explanation instead of a
+// round trip.
 function legalSeriesScores(bestOf: number): [number, number][] {
   const needed = Math.ceil(bestOf / 2);
   const out: [number, number][] = [];
   for (let loser = needed - 1; loser >= 0; loser--) out.push([needed, loser]);
   for (let loser = 0; loser < needed; loser++) out.push([loser, needed]);
   return out;
+}
+
+function isLegalSeriesScore(bestOf: number, home: number, away: number): boolean {
+  return legalSeriesScores(bestOf).some(([h, a]) => h === home && a === away);
+}
+
+// One team's games-won box. The submitter's own team is called out by name with
+// a badge and an accent ring, so a 3–1 can't be entered backwards by someone who
+// read the two boxes as "winner, loser" instead of "us, them".
+function ScoreField({
+  team, isMine, value, onChange,
+}: {
+  team: SeriesTeamInfo | null;
+  isMine: boolean;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex-1 min-w-0">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-sm font-semibold text-white truncate">{team?.name ?? "Team"}</span>
+        <span
+          className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+            isMine ? "bg-indigo-600 text-on-accent" : "bg-zinc-800 text-zinc-400"
+          }`}
+        >
+          {isMine ? "Your team" : "Opponent"}
+        </span>
+      </div>
+      <input
+        type="text"
+        inputMode="numeric"
+        maxLength={1}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, ""))}
+        placeholder="0"
+        aria-label={`Games won by ${team?.name ?? "team"}${isMine ? " (your team)" : ""}`}
+        className={`w-full px-3 py-2.5 rounded-lg bg-zinc-950 border text-center text-2xl font-mono font-bold tabular-nums text-white placeholder:text-zinc-700 focus:outline-none ${
+          isMine ? "border-indigo-700 focus:border-indigo-500" : "border-zinc-700 focus:border-zinc-500"
+        }`}
+      />
+    </div>
+  );
 }
 
 function initSlots(bestOf: number): SlotState[] {
@@ -443,7 +486,8 @@ export function SeriesReplayPanel({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [pickedScore, setPickedScore] = useState<[number, number] | null>(null);
+  const [homeScoreInput, setHomeScoreInput] = useState("");
+  const [awayScoreInput, setAwayScoreInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeSlotRef = useRef<number>(-1);
 
@@ -535,10 +579,21 @@ export function SeriesReplayPanel({
   }
 
   async function handleScoreOnlySubmit() {
-    if (!matchId || !pickedScore) return;
+    if (!matchId) return;
+    const home = Number(homeScoreInput);
+    const away = Number(awayScoreInput);
+    if (!homeScoreInput || !awayScoreInput || !Number.isInteger(home) || !Number.isInteger(away)) {
+      setSubmitError("Enter how many games each team won.");
+      return;
+    }
+    if (!isLegalSeriesScore(bestOf, home, away)) {
+      const needed = Math.ceil(bestOf / 2);
+      setSubmitError(`${home} – ${away} isn't a possible BO${bestOf} result — the winning team needs exactly ${needed} games and the other team fewer.`);
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
-    const res = await submitSeriesResult(matchId, pickedScore[0], pickedScore[1]);
+    const res = await submitSeriesResult(matchId, home, away);
     setSubmitting(false);
     if (res.error) { setSubmitError(res.error); return; }
     setSubmitted(true);
@@ -690,8 +745,13 @@ export function SeriesReplayPanel({
   // ── Score-only flow (event isn't tracking stats, so no replays to upload) ──
 
   if (!statsEnabled) {
-    const [pickedHome, pickedAway] = pickedScore ?? [0, 0];
-    const pickedWinner = pickedScore ? (pickedHome > pickedAway ? homeTeam : awayTeam) : null;
+    const iAmHome = myTeamId === homeTeam?.id;
+    const enteredHome = Number(homeScoreInput);
+    const enteredAway = Number(awayScoreInput);
+    const bothEntered = homeScoreInput !== "" && awayScoreInput !== "";
+    const previewWinner = bothEntered && isLegalSeriesScore(bestOf, enteredHome, enteredAway)
+      ? (enteredHome > enteredAway ? homeTeam : awayTeam)
+      : null;
     return (
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
         {header}
@@ -700,38 +760,33 @@ export function SeriesReplayPanel({
             <TeamColumn team={homeTeam} side="home" />
             <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
               <p className="text-3xl font-bold font-mono text-white tabular-nums">
-                {pickedScore ? `${pickedHome} – ${pickedAway}` : "– – –"}
+                {bothEntered ? `${homeScoreInput} – ${awayScoreInput}` : "– – –"}
               </p>
               <p className="text-xs text-zinc-600 uppercase tracking-wider text-center">
-                {pickedWinner ? `${pickedWinner.name} wins` : `BO${bestOf}`}
+                {previewWinner ? `${previewWinner.name} wins` : `BO${bestOf}`}
               </p>
             </div>
             <TeamColumn team={awayTeam} side="away" />
           </div>
 
           <div>
-            <p className="text-xs text-zinc-400 mb-2">
-              Select the series score ({homeTeam?.name ?? "Home"} – {awayTeam?.name ?? "Away"}).
+            <p className="text-xs text-zinc-400 mb-2.5">
+              Enter how many games each team won — not the goals in a game.
             </p>
-            <div className="flex flex-wrap gap-2">
-              {legalSeriesScores(bestOf).map(([h, a]) => {
-                const active = pickedScore?.[0] === h && pickedScore?.[1] === a;
-                return (
-                  <button
-                    key={`${h}-${a}`}
-                    type="button"
-                    onClick={() => setPickedScore([h, a])}
-                    className={`px-3.5 py-2 rounded-lg text-sm font-mono font-semibold tabular-nums border transition-colors ${
-                      active
-                        ? "bg-emerald-700 border-emerald-600 text-white"
-                        : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
-                    }`}
-                    aria-pressed={active}
-                  >
-                    {h} – {a}
-                  </button>
-                );
-              })}
+            <div className="flex items-end gap-3">
+              <ScoreField
+                team={homeTeam}
+                isMine={iAmHome}
+                value={homeScoreInput}
+                onChange={setHomeScoreInput}
+              />
+              <span className="pb-3 text-lg font-bold text-zinc-600">–</span>
+              <ScoreField
+                team={awayTeam}
+                isMine={!iAmHome}
+                value={awayScoreInput}
+                onChange={setAwayScoreInput}
+              />
             </div>
           </div>
 
@@ -743,7 +798,7 @@ export function SeriesReplayPanel({
           <div className="flex items-center gap-3 pt-1">
             <button
               onClick={handleScoreOnlySubmit}
-              disabled={submitting || !pickedScore}
+              disabled={submitting || !bothEntered}
               className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
             >
               {submitting ? "Submitting…" : "Submit Series Result"}

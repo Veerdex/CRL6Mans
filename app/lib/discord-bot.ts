@@ -172,8 +172,13 @@ type ChannelResult = { created: true } | { created: false; skipped?: true; error
 
 export function validateSeriesScore(home: number, away: number, bestOf: number): string | null {
   const winsNeeded = Math.ceil(bestOf / 2);
-  if (Math.max(home, away) !== winsNeeded)
-    return `Invalid BO${bestOf} score — the winning team must have exactly ${winsNeeded} wins.`;
+  if (!Number.isInteger(home) || !Number.isInteger(away) || home < 0 || away < 0)
+    return `Invalid BO${bestOf} score — game wins must be whole numbers.`;
+  // Both sides on winsNeeded passed the old max() check but leaves a series with
+  // no winner. Unreachable while scores came from uploaded replays; a stats-free
+  // event has a captain typing them, so it needs rejecting here.
+  if (Math.max(home, away) !== winsNeeded || Math.min(home, away) >= winsNeeded)
+    return `Invalid BO${bestOf} score — the winning team must have exactly ${winsNeeded} wins and the other team fewer.`;
   return null;
 }
 
