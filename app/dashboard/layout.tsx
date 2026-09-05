@@ -159,7 +159,7 @@ function getNavGroups(hasActiveContent: boolean): { label: string; icon: React.R
     {
       label: "League",
       icon: <svg key="league-group-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>,
-      keys: ["myteam", "teams", "players", "stats", "podium", "testreplay"],
+      keys: ["myteam", "teams", "players", "stats", "podium"],
     },
     ...(hasActiveContent
       ? [{
@@ -251,12 +251,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ...(hasPlayers ? ["players"] : []),
     ...(hasStatsContent ? ["stats"] : []),
     ...(hasPodium ? ["podium"] : []),
-    "testreplay",
     "wagers", // always visible — Westside Wages standings persist between events
     "sponsors",
     "media",
     "patreon",
     "settings",
+    "testreplay",
   ];
 
   // Pending and unregistered are surfaced identically — both get the
@@ -293,7 +293,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ? { ...ALL_NAV, season: { ...ALL_NAV.season, label: "Tournament" } }
     : ALL_NAV;
 
-  const BOTTOM_KEYS = new Set(["settings", "admin"]);
+  const BOTTOM_KEYS = new Set(["settings", "admin", "testreplay"]);
   const mainNavKeys = navKeys.filter((k) => !BOTTOM_KEYS.has(k));
   const mainNavItems = mainNavKeys.map((k) => navMap[k]);
   const bottomNavItems = navKeys.filter((k) => BOTTOM_KEYS.has(k)).map((k) => navMap[k]);
