@@ -117,7 +117,7 @@ const ALL_NAV: Record<string, NavItem> = {
   },
   testreplay: {
     href: "/dashboard/test-replay",
-    label: "Replay Test",
+    label: "Replay Analyzer",
     icon: <svg key="testreplay-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>,
   },
   sponsors: {
@@ -159,7 +159,7 @@ function getNavGroups(hasActiveContent: boolean): { label: string; icon: React.R
     {
       label: "League",
       icon: <svg key="league-group-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>,
-      keys: ["myteam", "teams", "players", "stats", "podium"],
+      keys: ["myteam", "teams", "players", "stats", "podium", "testreplay"],
     },
     ...(hasActiveContent
       ? [{
@@ -251,6 +251,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ...(hasPlayers ? ["players"] : []),
     ...(hasStatsContent ? ["stats"] : []),
     ...(hasPodium ? ["podium"] : []),
+    "testreplay",
     "wagers", // always visible — Westside Wages standings persist between events
     "sponsors",
     "media",
@@ -283,7 +284,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   // Onboarding tab — shown until the player dismisses it ("I got it!").
   if (!welcomeSeen && !isGuest) navKeys.unshift("welcome");
-  if (admin) navKeys.push("admin", "testreplay");
+  if (admin) navKeys.push("admin");
 
   // While a tournament is running, the "Season" tab stands in for it —
   // no separate tournament nav entry, just a relabel driven by the same
@@ -292,7 +293,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ? { ...ALL_NAV, season: { ...ALL_NAV.season, label: "Tournament" } }
     : ALL_NAV;
 
-  const BOTTOM_KEYS = new Set(["settings", "admin", "testreplay"]);
+  const BOTTOM_KEYS = new Set(["settings", "admin"]);
   const mainNavKeys = navKeys.filter((k) => !BOTTOM_KEYS.has(k));
   const mainNavItems = mainNavKeys.map((k) => navMap[k]);
   const bottomNavItems = navKeys.filter((k) => BOTTOM_KEYS.has(k)).map((k) => navMap[k]);

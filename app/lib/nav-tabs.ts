@@ -1,8 +1,8 @@
 // Canonical list of dashboard nav tabs an admin can force to always show or
 // always hide, overriding the normal automatic visibility rules computed in
 // app/dashboard/layout.tsx. Onboarding/auth/staff-gated tabs (welcome,
-// register, settings, admin, testreplay) are intentionally excluded — those
-// are tied to registration/session state, not content availability.
+// register, settings, admin) are intentionally excluded — those are tied to
+// registration/session state, not content availability.
 export const NAV_TAB_OPTIONS = [
   { key: "home", label: "Home" },
   { key: "myteam", label: "My Team" },
@@ -10,6 +10,7 @@ export const NAV_TAB_OPTIONS = [
   { key: "players", label: "Players" },
   { key: "stats", label: "Stats" },
   { key: "podium", label: "Podium" },
+  { key: "testreplay", label: "Replay Analyzer" },
   { key: "draft", label: "Live Draft" },
   { key: "season", label: "Season" },
   { key: "schedule", label: "Schedule" },

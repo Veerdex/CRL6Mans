@@ -19,7 +19,7 @@ export const TAB_LABELS: Record<string, string> = {
   wagers: "Wagers",
   game: "Game",
   admin: "Admin",
-  "test-replay": "Replay Test",
+  "test-replay": "Replay Analyzer",
 };
 
 export function tabFromPathname(pathname: string): string | null {
