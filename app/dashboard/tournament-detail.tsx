@@ -10,6 +10,7 @@ import { tournamentRulesContext } from "./rules/rules-filter";
 import { PresetEmblemRow } from "./preset-emblem-row";
 import { getPublicSponsors, type PublicSponsor } from "@/app/lib/sponsors-public";
 import { getPublicDesigns, type PublicDesign } from "@/app/lib/designs-public";
+import { prizePoolTotal } from "@/app/lib/career-points";
 import { SponsorCard } from "@/app/lib/sponsor-display";
 import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import { buildTimeline, buildStageStarts } from "@/app/lib/tournament-timeline";
@@ -128,7 +129,7 @@ export async function TournamentDetailView({
   const timeline = buildTimeline(t, true);
   const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
   const stageStarts = buildStageStarts(t.stage_starts as Record<string, string> | null, preset);
-  const totalPrizePool = (t.prize_1st ?? 0) + (t.prize_2nd ?? 0) + (t.prize_3rd4th ?? 0) * 2;
+  const totalPrizePool = prizePoolTotal(t.prize_1st, t.prize_2nd, t.prize_3rd4th);
   const summary = t.summary as SummaryShape;
 
   return (

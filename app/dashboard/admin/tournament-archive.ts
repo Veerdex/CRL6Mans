@@ -7,10 +7,12 @@ import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { fetchAllRows } from "@/app/lib/paginate";
+import { computePlacementTiers, placementsFromTiers } from "@/app/lib/placement";
+import { prizePoolTotal } from "@/app/lib/career-points";
 import { ARCHIVE_SCHEMA_VERSION } from "./archive-schema";
 
 export type TournamentArchive = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   kind: "tournament" | "season";
   exportedAt: string;
   meta: {
@@ -20,16 +22,39 @@ export type TournamentArchive = {
     joinMode: "teams" | "players" | null;
     teamAssignment: "snake_draft" | "auto_balance" | null;
     teamCount: number;
+    /** Distinct players across every participating roster. */
+    participantCount: number;
+    prize1st: number | null;
+    prize2nd: number | null;
+    prize3rd4th: number | null;
+    /** f for the career-points formula: 3rd-4th pays two teams, so it counts twice. */
+    prizePool: number;
     startedAt: string | null;
     endedAt: string | null;
   };
+  /**
+   * Finishing order, best first, teams the bracket never separated sharing an
+   * entry. Kept alongside each team's collapsed placement so a later revision of
+   * the midpoint rule can still be recomputed from the event as it was played.
+   */
+  placementTiers: string[][];
   teams: {
     id: string;
     name: string;
     logoUrl: string | null;
     wins: number;
     losses: number;
-    roster: { username: string; displayName: string | null; isCaptain: boolean; rating: number }[];
+    /** Midpoint of the ranks this team's tier spans: 3.5 for a 3rd-4th finish. */
+    placement: number;
+    /** How many teams shared that placement. */
+    placementTierSize: number;
+    roster: {
+      discordId: string | null;
+      username: string;
+      displayName: string | null;
+      isCaptain: boolean;
+      rating: number;
+    }[];
   }[];
   matches: {
     id: string;
@@ -73,6 +98,9 @@ export type ArchiveMeta = {
   seasonFormat: unknown;
   joinMode: "teams" | "players" | null;
   teamAssignment: "snake_draft" | "auto_balance" | null;
+  prize1st: number | null;
+  prize2nd: number | null;
+  prize3rd4th: number | null;
   startedAt: string | null;
   endedAt: string | null;
 };
@@ -101,7 +129,7 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
     fetchAllRows((from, to) =>
       supabaseAdmin
         .from("players")
-        .select("id, username, display_name, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+        .select("id, discord_id, username, display_name, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
         .order("id")
         .range(from, to)
     ),
@@ -149,15 +177,26 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
     }
   }
 
+  const placementTiers = computePlacementTiers(
+    allMatches ?? [],
+    participatingTeams.map((t) => t.id),
+  );
+  const placements = placementsFromTiers(placementTiers);
+
   const teams: TournamentArchive["teams"] = participatingTeams.map((t) => ({
     id: t.id,
     name: t.name,
     logoUrl: (t.logo_url as string | null) ?? null,
     wins: records[t.id]?.wins ?? 0,
     losses: records[t.id]?.losses ?? 0,
+    placement: placements.get(t.id)?.placement ?? participatingTeams.length,
+    placementTierSize: placements.get(t.id)?.tierSize ?? 1,
     roster: (allPlayers ?? [])
       .filter((p) => p.team_id === t.id)
       .map((p) => ({
+        // The join key a profile needs. Usernames are mutable, so the archive
+        // could not be tied back to an account without this.
+        discordId: (p.discord_id as string | null) ?? null,
         username: p.username,
         displayName: p.display_name ?? null,
         isCaptain: p.is_captain ?? false,
@@ -204,9 +243,15 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
       joinMode: meta.joinMode,
       teamAssignment: meta.teamAssignment,
       teamCount: teams.length,
+      participantCount: teams.reduce((n, t) => n + t.roster.length, 0),
+      prize1st: meta.prize1st,
+      prize2nd: meta.prize2nd,
+      prize3rd4th: meta.prize3rd4th,
+      prizePool: prizePoolTotal(meta.prize1st, meta.prize2nd, meta.prize3rd4th),
       startedAt: meta.startedAt,
       endedAt: meta.endedAt,
     },
+    placementTiers,
     teams,
     matches,
     playerGameStats,

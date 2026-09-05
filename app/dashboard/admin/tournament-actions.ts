@@ -500,7 +500,7 @@ export async function completeTournament() {
 
   const { data: tournament } = await supabaseAdmin
     .from("tournaments")
-    .select("is_test, stats_enabled, name, season_format, join_mode, team_assignment, started_at")
+    .select("is_test, stats_enabled, name, season_format, join_mode, team_assignment, started_at, prize_1st, prize_2nd, prize_3rd4th")
     .eq("id", activeId).single();
   const isTest = tournament?.is_test ?? false;
 
@@ -527,6 +527,9 @@ export async function completeTournament() {
         seasonFormat: tournament!.season_format ?? null,
         joinMode: (tournament!.join_mode as "teams" | "players" | null) ?? null,
         teamAssignment: (tournament!.team_assignment as "snake_draft" | "auto_balance" | null) ?? null,
+        prize1st: (tournament!.prize_1st as number | null) ?? null,
+        prize2nd: (tournament!.prize_2nd as number | null) ?? null,
+        prize3rd4th: (tournament!.prize_3rd4th as number | null) ?? null,
         startedAt: tournament!.started_at ?? null,
         endedAt,
       }),

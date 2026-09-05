@@ -635,7 +635,9 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
   await verifyAdmin();
 
   const { data: settings } = await supabaseAdmin
-    .from("league_settings").select("season_active, season_format, is_test_season").single();
+    .from("league_settings")
+    .select("season_active, season_format, is_test_season, season_prize_1st, season_prize_2nd, season_prize_3rd4th")
+    .single();
   if (!settings?.season_active) return { error: "No active season to complete." };
 
   // Snapshot standings, logos, rosters, and stat leaders BEFORE resetSeason wipes matches/teams.
@@ -706,6 +708,9 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     seasonFormat: settings.season_format ?? null,
     joinMode: null,
     teamAssignment: null,
+    prize1st: (settings.season_prize_1st as number | null) ?? null,
+    prize2nd: (settings.season_prize_2nd as number | null) ?? null,
+    prize3rd4th: (settings.season_prize_3rd4th as number | null) ?? null,
     startedAt: null,
     endedAt,
   });
