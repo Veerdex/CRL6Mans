@@ -91,18 +91,22 @@ export function PlayerProfileModal({
 
           {profile && (
             <div className="p-4 grid gap-4 sm:grid-cols-2">
-              <Identity profile={profile} />
-
-              <div className="flex flex-col gap-4">
-                <SixMans profile={profile} />
-                <Ranks profile={profile} />
+              <div className="flex flex-col gap-4 min-w-0">
+                <Identity profile={profile} />
+                {/* mt-auto pins the button to the bottom of a column that is as
+                    tall as the stats beside it. */}
                 <button
                   onClick={() => setHistoryOpen(true)}
-                  className="w-full rounded-xl border border-zinc-700 bg-zinc-800/60 hover:bg-zinc-800 px-4 py-2.5 text-sm font-medium text-white transition-colors"
+                  className="mt-auto w-full rounded-xl border border-zinc-700 bg-zinc-800/60 hover:bg-zinc-800 px-4 py-2.5 text-sm font-medium text-white transition-colors"
                 >
                   Event History
                   <span className="ml-1.5 text-zinc-400">({profile.events.length})</span>
                 </button>
+              </div>
+
+              <div className="flex flex-col gap-4 min-w-0">
+                <SixMans profile={profile} />
+                <Ranks profile={profile} />
               </div>
             </div>
           )}

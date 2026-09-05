@@ -106,10 +106,10 @@ export async function loadPlayerProfile(
     isCaptain: tierThree?.is_captain ?? false,
     sixMans,
     ranks: {
-      seasonPeak2v2: toMmr(registration?.current_2v2),
-      allTimePeak2v2: toMmr(registration?.peak_2v2),
-      seasonPeak3v3: toMmr(registration?.current_3v3),
-      allTimePeak3v3: toMmr(registration?.peak_3v3),
+      seasonPeak2v2: toMmr(registration?.current_2v2 ?? tierThree?.current_2v2),
+      allTimePeak2v2: toMmr(registration?.peak_2v2 ?? tierThree?.peak_2v2),
+      seasonPeak3v3: toMmr(registration?.current_3v3 ?? tierThree?.current_3v3),
+      allTimePeak3v3: toMmr(registration?.peak_3v3 ?? tierThree?.peak_3v3),
     },
     events,
     careerPoints: careerPoints(
@@ -147,14 +147,29 @@ async function resolveAccount(
   return (data as AccountRow | null) ?? null;
 }
 
+/**
+ * Tier 3 keeps a legacy mirror of the registered MMR, read here as the fallback
+ * for the ranks block: a player approved before pending_players existed has no
+ * Tier 2 row at all, and their MMR survives only on the mirror. Where both rows
+ * exist they agree, so Tier 2 stays the preferred source.
+ */
 async function fetchTierThree(accountId: string) {
   const { data, error } = await supabaseAdmin
     .from("players")
-    .select("team_id, is_captain")
+    .select("team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3")
     .eq("id", accountId)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return data as { team_id: string | null; is_captain: boolean } | null;
+  return data as
+    | {
+        team_id: string | null;
+        is_captain: boolean;
+        peak_2v2: string | null;
+        current_2v2: string | null;
+        peak_3v3: string | null;
+        current_3v3: string | null;
+      }
+    | null;
 }
 
 async function fetchRegistration(accountId: string) {
@@ -217,8 +232,8 @@ async function fetchSixMansStats(player: QueueBotPlayer): Promise<SixMansStats> 
         : Math.max(current, player.peak_mmr);
 
   return {
-    currentMmr: current,
-    peakMmr: peak,
+    currentMmr: displayMmr(current),
+    peakMmr: displayMmr(peak),
     wins: record.wins,
     losses: record.losses,
     band: player.band,
@@ -271,6 +286,20 @@ async function fetchSixMansPoints(queueBotPlayerId: string): Promise<number | nu
   const rows = (data ?? []) as { season_score: number | null }[];
   if (rows.length === 0) return null;
   return rows.reduce((sum, r) => sum + (r.season_score ?? 0), 0);
+}
+
+/**
+ * The queue bot rates on its own compact scale, centred near zero and routinely
+ * negative. Scaling and shifting puts a 6mans rating in the same range as the
+ * Rocket League MMR shown beside it, so the two blocks of a profile can be read
+ * against each other. The transform is monotonic, so it never reorders anyone,
+ * and it is a display concern only — the stored rating is untouched.
+ */
+const QUEUE_MMR_SCALE = 7.25;
+const QUEUE_MMR_SHIFT = 1000;
+
+function displayMmr(raw: number | null): number | null {
+  return raw === null ? null : raw * QUEUE_MMR_SCALE + QUEUE_MMR_SHIFT;
 }
 
 /** Registered MMR is stored as text and defaults to "0" — an unset value, not a rating. */
