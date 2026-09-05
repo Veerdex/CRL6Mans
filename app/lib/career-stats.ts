@@ -49,10 +49,10 @@ function addRow(t: CareerTotals, r: LiveRow) {
 /**
  * Fold every live player_game_stats row into the permanent all-time table.
  *
- * Must run at the very top of resetSeason(), before anything that can throw and
- * before `matches` is deleted: player_game_stats.match_id cascades on that
- * delete, so once the matches are gone the event's stats are unrecoverable.
- * Consumed rows are deleted so a retried reset cannot double-count them.
+ * Must run immediately before resetSeason() deletes `matches`:
+ * player_game_stats.match_id cascades on that delete, so once the matches are
+ * gone the event's stats are unrecoverable. Consumed rows are deleted here so a
+ * reset that throws part-way and gets retried cannot double-count them.
  */
 export async function rollUpCareerStats(): Promise<void> {
   const rows = await fetchLiveRows();
@@ -106,6 +106,7 @@ export async function fetchAllTimeTotals(): Promise<Map<string, CareerTotals>> {
       supabaseAdmin
         .from("player_career_stats")
         .select("player_id, games, goals, assists, saves, shots, score, demos, demoed")
+        .not("player_id", "is", null)
         .order("player_id")
         .range(from, to)
     ),
@@ -141,6 +142,7 @@ export async function hasAnyCareerStats(): Promise<boolean> {
   const { count } = await supabaseAdmin
     .from("player_career_stats")
     .select("*", { count: "exact", head: true })
+    .not("player_id", "is", null)
     .limit(1);
   return (count ?? 0) > 0;
 }

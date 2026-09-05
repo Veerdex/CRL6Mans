@@ -7,9 +7,15 @@ alter table league_settings add column if not exists stats_enabled boolean not n
 -- player_game_stats.match_id cascades on match delete and resetSeason() deletes
 -- every match, so per-game stats only ever describe the event that's currently
 -- live. This table is the permanent all-time roll-up, summed out of the live
--- rows at the top of resetSeason() before they're destroyed.
+-- rows by rollUpCareerStats() just before that delete destroys them.
+--
+-- player_id follows player_game_stats' convention: `on delete set null`, so
+-- deleting a player never destroys totals that are already banked. The surrogate
+-- primary key exists because of that — player_id has to be nullable — and the
+-- unique constraint is what rollUpCareerStats' upsert conflicts on.
 create table if not exists player_career_stats (
-  player_id  uuid        primary key references players(id) on delete cascade,
+  id         uuid        primary key default gen_random_uuid(),
+  player_id  uuid        unique references players(id) on delete set null,
   games      integer     not null default 0,
   goals      integer     not null default 0,
   assists    integer     not null default 0,
