@@ -214,10 +214,10 @@ function playScore1000() {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function FlappyBird({
-  username,
+  viewerDiscordId,
   initialLeaderboard,
 }: {
-  username: string;
+  viewerDiscordId: string;
   initialLeaderboard: Leaderboard;
 }) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
@@ -726,10 +726,10 @@ export default function FlappyBird({
             <table className="w-full text-sm">
               <tbody>
                 {leaderboard.top.map(row => (
-                  <ScoreRow key={row.username + String(row.rank)} row={row} username={username} />
+                  <ScoreRow key={row.discord_id} row={row} viewerDiscordId={viewerDiscordId} />
                 ))}
                 {leaderboard.self && (
-                  <ScoreRow row={leaderboard.self} username={username} detached />
+                  <ScoreRow row={leaderboard.self} viewerDiscordId={viewerDiscordId} detached />
                 )}
               </tbody>
             </table>
@@ -743,10 +743,13 @@ export default function FlappyBird({
 
 // The viewer's own row is rendered detached below the top 10 when they didn't
 // make the cut, so a saved score is always visible somewhere on the board.
-function ScoreRow({ row, username, detached = false }: { row: LeaderboardRow; username: string; detached?: boolean }) {
+// Matched on Discord ID, not username: game_scores.username is a snapshot from
+// whenever the score was set, so a player who has since renamed would stop
+// seeing their own row highlighted.
+function ScoreRow({ row, viewerDiscordId, detached = false }: { row: LeaderboardRow; viewerDiscordId: string; detached?: boolean }) {
   return (
     <tr
-      className={`border-b border-zinc-800 last:border-0 ${row.username === username ? "bg-indigo-950/30" : ""} ${
+      className={`border-b border-zinc-800 last:border-0 ${row.discord_id === viewerDiscordId ? "bg-indigo-950/30" : ""} ${
         detached ? "border-t-2 border-t-zinc-700" : ""
       }`}
     >

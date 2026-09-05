@@ -22,7 +22,7 @@ export default async function GamePage() {
         A little something for the waiting room. Beat the leaderboard.
       </p>
       <FlappyBird
-        username={session.username ?? ""}
+        viewerDiscordId={session.userId}
         initialLeaderboard={leaderboard}
       />
     </div>
