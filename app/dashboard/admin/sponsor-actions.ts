@@ -7,6 +7,7 @@ import { randomUUID } from "crypto";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { deleteBlobs, deleteDroppedBlobs } from "@/app/lib/blob-cleanup";
 import type { ContentCrop, CropKind, MediaCrop } from "@/app/lib/media-crop";
 import { NAV_TAB_OPTIONS, type NavTabOverrides, type NavTabVisibility } from "@/app/lib/nav-tabs";
 
@@ -147,14 +148,24 @@ export async function updateSponsorDetails(
     .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
     .filter((l) => l.label && l.url);
 
+  const { data: previous } = await supabaseAdmin
+    .from("sponsors")
+    .select("logo_url, video_url, top_nav_image_url, side_nav_image_url, background_image_url")
+    .eq("id", sponsorId)
+    .single();
+
+  const media = {
+    logo_url: details.logoUrl.trim() || null,
+    video_url: details.videoUrl.trim() || null,
+    top_nav_image_url: details.topNavImageUrl.trim() || null,
+    side_nav_image_url: details.sideNavImageUrl.trim() || null,
+    background_image_url: details.backgroundImageUrl.trim() || null,
+  };
+
   const { error } = await supabaseAdmin
     .from("sponsors")
     .update({
-      logo_url: details.logoUrl.trim() || null,
-      video_url: details.videoUrl.trim() || null,
-      top_nav_image_url: details.topNavImageUrl.trim() || null,
-      side_nav_image_url: details.sideNavImageUrl.trim() || null,
-      background_image_url: details.backgroundImageUrl.trim() || null,
+      ...media,
       links,
       promo_code: details.promoCode.trim() || null,
       theme_id: details.themeId || null,
@@ -166,6 +177,8 @@ export async function updateSponsorDetails(
     })
     .eq("id", sponsorId);
   if (error) return { error: error.message };
+
+  if (previous) await deleteDroppedBlobs(Object.values(previous), Object.values(media));
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/sponsors");
@@ -279,8 +292,16 @@ export async function deleteSponsor(
     return { error: "Member count changed — refresh and try again." };
   }
 
+  const { data: media } = await supabaseAdmin
+    .from("sponsors")
+    .select("logo_url, video_url, top_nav_image_url, side_nav_image_url, background_image_url")
+    .eq("id", sponsorId)
+    .single();
+
   const { error } = await supabaseAdmin.from("sponsors").delete().eq("id", sponsorId);
   if (error) return { error: error.message };
+
+  if (media) await deleteBlobs(Object.values(media));
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/sponsors");

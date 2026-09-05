@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { deleteBlobs, deleteDroppedBlobs } from "@/app/lib/blob-cleanup";
 import type { ContentCrop, CropKind, MediaCrop } from "@/app/lib/media-crop";
 
 async function getSession() {
@@ -58,16 +59,25 @@ export async function updateDesignDetails(
   if (!session?.userId) redirect("/login");
   if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit designs." };
 
+  const { data: previous } = await supabaseAdmin
+    .from("designs")
+    .select("background_image_url, top_nav_image_url, side_nav_image_url")
+    .eq("id", designId)
+    .single();
+
+  const media = {
+    background_image_url: details.backgroundImageUrl.trim() || null,
+    top_nav_image_url: details.topNavImageUrl.trim() || null,
+    side_nav_image_url: details.sideNavImageUrl.trim() || null,
+  };
+
   const { error } = await supabaseAdmin
     .from("designs")
-    .update({
-      background_image_url: details.backgroundImageUrl.trim() || null,
-      top_nav_image_url: details.topNavImageUrl.trim() || null,
-      side_nav_image_url: details.sideNavImageUrl.trim() || null,
-      updated_at: new Date().toISOString(),
-    })
+    .update({ ...media, updated_at: new Date().toISOString() })
     .eq("id", designId);
   if (error) return { error: error.message };
+
+  if (previous) await deleteDroppedBlobs(Object.values(previous), Object.values(media));
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard", "layout");
@@ -130,8 +140,16 @@ export async function deleteDesign(designId: string): Promise<{ ok?: boolean; er
   if (!session?.userId) redirect("/login");
   if (!(await isDirectorVerified(session.userId))) return { error: "Only Directors can edit designs." };
 
+  const { data: media } = await supabaseAdmin
+    .from("designs")
+    .select("background_image_url, top_nav_image_url, side_nav_image_url")
+    .eq("id", designId)
+    .single();
+
   const { error } = await supabaseAdmin.from("designs").delete().eq("id", designId);
   if (error) return { error: error.message };
+
+  if (media) await deleteBlobs(Object.values(media));
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard", "layout");
