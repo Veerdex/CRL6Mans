@@ -5,8 +5,8 @@ import { PlayerName } from "@/app/dashboard/player-name";
 import type { TournamentArchive } from "../tournament-archive";
 
 // Roster/logo card grid in the style of TeamsGrid (app/dashboard/teams/teams-grid.tsx),
-// but fed from the archive's denormalized roster snapshot (username/rating only —
-// no discord_id/avatar/tracker_url, since those weren't captured at export time).
+// but fed from the archive's denormalized roster snapshot, which carries
+// discordId/username/rating but no avatar or tracker_url.
 export function ArchiveRosterGrid({ teams }: { teams: TournamentArchive["teams"] }) {
   const [query, setQuery] = useState("");
 
@@ -65,7 +65,7 @@ export function ArchiveRosterGrid({ teams }: { teams: TournamentArchive["teams"]
                       <div key={player.username} className="flex items-center gap-3 px-5 py-3">
                         <div className="w-7 h-7 rounded-full bg-zinc-700 shrink-0" />
                         <span className="flex-1 text-sm text-zinc-200 truncate">
-                          <PlayerName displayName={player.displayName} username={player.username} />
+                          <PlayerName displayName={player.displayName} username={player.username} discordId={player.discordId} />
                           {player.isCaptain && (
                             <span className="ml-1.5 text-xs font-semibold text-yellow-400">C</span>
                           )}

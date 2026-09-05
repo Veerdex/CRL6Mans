@@ -806,7 +806,7 @@ export default async function MyTeamPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors min-w-0">
-                        <PlayerName displayName={p.display_name ?? null} username={p.username} />
+                        <PlayerName displayName={p.display_name ?? null} username={p.username} discordId={p.discord_id} />
                       </span>
                       {p.is_captain && (
                         <span className="text-[10px] font-bold text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded">

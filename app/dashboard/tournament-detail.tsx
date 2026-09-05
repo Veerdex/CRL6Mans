@@ -554,18 +554,19 @@ async function PlayersRegistration({
 
 type RawEntryRow = {
   player_id: string;
-  players: { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string } | null;
+  players: { id: string; discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string } | null;
 };
 
 async function PlayersDraftPool({ tournamentId }: { tournamentId: string }) {
   const { data: entryRows } = await supabaseAdmin
     .from("tournament_entries")
-    .select("player_id, players(id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3)")
+    .select("player_id, players(id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3)")
     .eq("tournament_id", tournamentId);
   const ratedPlayers = ((entryRows ?? []) as unknown as RawEntryRow[])
     .filter((e) => e.players)
     .map((e) => ({
       playerId: e.players!.id,
+      discordId: e.players!.discord_id,
       username: e.players!.username,
       displayName: e.players!.display_name,
       rating: playerRatingFromRow(e.players!),
@@ -582,7 +583,7 @@ async function PlayersDraftPool({ tournamentId }: { tournamentId: string }) {
           {ratedPlayers.map((p, i) => (
             <div key={p.playerId} className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm">
               <span className="text-xs text-zinc-600 w-5 shrink-0">{i + 1}</span>
-              <PlayerName displayName={p.displayName} username={p.username} className="text-white flex-1" />
+              <PlayerName displayName={p.displayName} username={p.username} discordId={p.discordId} className="text-white flex-1" />
               <span className="text-amber-400 font-medium tabular-nums text-xs">{Math.round(p.rating)}</span>
             </div>
           ))}

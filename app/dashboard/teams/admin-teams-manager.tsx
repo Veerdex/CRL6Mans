@@ -332,7 +332,7 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
                           onClick={(e) => e.stopPropagation()}
                           className="hover:text-indigo-400 transition-colors"
                         >
-                          <PlayerName displayName={player.display_name} username={player.username} />
+                          <PlayerName displayName={player.display_name} username={player.username} discordId={player.discord_id} />
                         </a>
                         {player.is_captain && <span className="ml-1.5 text-xs font-semibold text-yellow-400">C</span>}
                       </span>

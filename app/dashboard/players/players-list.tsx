@@ -93,6 +93,7 @@ export default function PlayersList({
                           <PlayerName
                             displayName={player.display_name ?? null}
                             username={player.username}
+                            discordId={player.discord_id}
                             className="max-w-[150px] sm:max-w-[300px]"
                           />
                         </a>

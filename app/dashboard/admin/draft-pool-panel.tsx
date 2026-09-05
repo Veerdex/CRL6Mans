@@ -32,7 +32,7 @@ export type TournamentSignupPlayer = {
 export type TournamentSignupTeam = {
   id: string;
   name: string;
-  members: { playerId: string; status: string; username: string; displayName: string | null }[];
+  members: { playerId: string; status: string; discordId: string; username: string; displayName: string | null }[];
 };
 
 export type DraftPoolTournamentGroup = {
@@ -70,7 +70,7 @@ function DraftPoolRow({ entry }: { entry: DraftPoolEntry }) {
       <Avatar discordId={entry.discord_id} avatar={entry.avatar} username={entry.username} />
 
       <span className="flex-1 text-sm font-medium text-zinc-200 truncate min-w-0">
-        <PlayerName displayName={entry.display_name} username={entry.username} />
+        <PlayerName displayName={entry.display_name} username={entry.username} discordId={entry.discord_id} />
       </span>
 
       <span className="text-xs text-zinc-500 tabular-nums shrink-0">
@@ -133,7 +133,7 @@ function TournamentEntryRow({ tournamentId, entry }: { tournamentId: string; ent
     <div className="flex items-center gap-2 px-3 py-2 flex-wrap bg-zinc-800/60 border border-zinc-700/60 rounded-lg">
       <Avatar discordId={entry.discordId} avatar={entry.avatar} username={entry.username} />
       <span className="flex-1 text-sm text-zinc-200 truncate min-w-0">
-        <PlayerName displayName={entry.displayName} username={entry.username} />
+        <PlayerName displayName={entry.displayName} username={entry.username} discordId={entry.discordId} />
       </span>
       {confirming ? (
         <div className="flex items-center gap-2 shrink-0">
@@ -222,7 +222,7 @@ function TeamSignupRow({ team }: { team: TournamentSignupTeam }) {
                 : "bg-zinc-800 border-zinc-700 text-zinc-400"
             }`}
           >
-            <PlayerName displayName={m.displayName} username={m.username} />
+            <PlayerName displayName={m.displayName} username={m.username} discordId={m.discordId} />
             {m.status !== "accepted" && " (invited)"}
           </span>
         ))}

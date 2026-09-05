@@ -95,7 +95,7 @@ function ClipOfWeekCard({ clip, isModerator, liked, canParticipate }: { clip: Cl
               username={clip.submitted_by_username}
               className="w-6 h-6"
             />
-            <PlayerName displayName={clip.submitted_by_display_name} username={clip.submitted_by_username} className="text-zinc-400" />
+            <PlayerName displayName={clip.submitted_by_display_name} username={clip.submitted_by_username} discordId={clip.submitted_by_discord_id} className="text-zinc-400" />
           </span>
         ) : (
           "a deleted player"

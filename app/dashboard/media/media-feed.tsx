@@ -148,7 +148,7 @@ function ClipCard({
               username={clip.submitted_by_username}
               className="w-5 h-5"
             />
-            <PlayerName displayName={clip.submitted_by_display_name} username={clip.submitted_by_username} className="text-zinc-400" />
+            <PlayerName displayName={clip.submitted_by_display_name} username={clip.submitted_by_username} discordId={clip.submitted_by_discord_id} className="text-zinc-400" />
           </span>
         ) : (
           // No avatar here on purpose: a default Discord egg beside this would

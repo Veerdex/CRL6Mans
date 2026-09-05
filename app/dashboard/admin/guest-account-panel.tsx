@@ -109,7 +109,7 @@ function GuestRow({
         <PlayerAvatar discordId={account.discord_id} avatar={account.avatar} username={account.username} className="w-7 h-7" />
 
         <span className="flex-1 text-sm font-medium text-zinc-200 truncate min-w-0">
-          <PlayerName displayName={account.display_name} username={account.username} />
+          <PlayerName displayName={account.display_name} username={account.username} discordId={account.discord_id} />
         </span>
 
         <div className="flex items-center gap-2 shrink-0 flex-wrap">

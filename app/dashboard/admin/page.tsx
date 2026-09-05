@@ -327,6 +327,7 @@ export default async function AdminPage() {
             return {
               playerId: m.player_id,
               status: m.status,
+              discordId: p?.discord_id ?? "",
               username: p?.username ?? "Unknown",
               displayName: p?.display_name ?? null,
             };

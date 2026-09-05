@@ -276,7 +276,7 @@ function PlayerRow({
           rel="noopener noreferrer"
           className="flex-1 text-sm font-medium text-zinc-200 truncate min-w-0 hover:text-indigo-400 transition-colors"
         >
-          <PlayerName displayName={player.display_name} username={username} />
+          <PlayerName displayName={player.display_name} username={username} discordId={player.discord_id} />
         </a>
 
         <div className="flex items-center gap-2 shrink-0 flex-wrap">

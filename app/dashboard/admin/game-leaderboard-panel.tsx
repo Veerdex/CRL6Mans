@@ -24,7 +24,7 @@ function ScoreRow({ entry }: { entry: GameScoreRow }) {
   return (
     <div className="flex items-center gap-3 px-4 py-2 flex-wrap bg-zinc-900 border border-zinc-800 rounded-xl">
       <span className="flex-1 text-sm font-medium text-zinc-200 truncate min-w-0">
-        <PlayerName displayName={entry.display_name} username={entry.username} />
+        <PlayerName displayName={entry.display_name} username={entry.username} discordId={entry.discord_id} />
       </span>
 
       <span className="text-xs text-zinc-400 tabular-nums shrink-0">{entry.score.toLocaleString()} pts</span>

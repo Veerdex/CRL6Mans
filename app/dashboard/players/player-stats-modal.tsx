@@ -61,6 +61,7 @@ export function PlayerStatsModal({
             <PlayerName
               displayName={player.display_name ?? null}
               username={player.username}
+              discordId={player.discord_id}
               className="text-lg font-bold text-white"
             />
             <p className="text-xs text-zinc-400 mt-0.5">
