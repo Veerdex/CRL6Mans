@@ -72,7 +72,12 @@ export default async function MediaPage() {
       ? supabaseAdmin.from("clip_likes").select("clip_id").eq("player_id", currentPlayerId)
       : Promise.resolve({ data: [] as { clip_id: string }[] }),
   ]);
-  const feedRows = (clips ?? []) as unknown as RawClipRow[];
+  // The cron archives the clip it crowns, but setClipOfWeek doesn't - without
+  // this the manually crowned clip would render twice, once in the card above
+  // the feed and again inside it, each with its own like button.
+  const feedRows = ((clips ?? []) as unknown as RawClipRow[]).filter(
+    (r) => r.id !== settings?.clip_of_week_id,
+  );
   const cowRow = clipOfWeekRow as unknown as RawClipRow | null;
 
   // Can only run once the clip rows are in hand, so it costs one extra round
