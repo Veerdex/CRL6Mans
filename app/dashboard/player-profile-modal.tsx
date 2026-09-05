@@ -12,9 +12,16 @@ export type ProfileKey = { username: string } | { discordId: string };
 export function PlayerProfileModal({
   target,
   onClose,
+  onOpen,
 }: {
   target: ProfileKey;
   onClose: () => void;
+  /**
+   * Passed down rather than read back from the viewer context: the provider is
+   * what renders this component, so importing the context here would make the
+   * two modules circular.
+   */
+  onOpen: (key: ProfileKey) => void;
 }) {
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,51 +61,62 @@ export function PlayerProfileModal({
   }, [historyOpen, onClose]);
 
   return (
-    <div
-      className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
+    <>
+      {/*
+        The history popup is a sibling of this overlay, not a child: nested
+        inside it, a click on the popup's own backdrop would bubble out here and
+        close the profile behind it too.
+      */}
       <div
-        className="w-full max-w-2xl max-h-[90dvh] overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-2xl"
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
+        onClick={onClose}
       >
-        <div className="flex items-start justify-between gap-3 p-4 border-b border-zinc-800">
-          <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide">Player Profile</h2>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="text-zinc-400 hover:text-white text-xl leading-none px-1"
-          >
-            ×
-          </button>
-        </div>
-
-        {error && <p className="p-6 text-sm text-zinc-400">{error}</p>}
-        {!error && !profile && <p className="p-6 text-sm text-zinc-500">Loading…</p>}
-
-        {profile && (
-          <div className="p-4 grid gap-4 sm:grid-cols-2">
-            <Identity profile={profile} />
-
-            <div className="flex flex-col gap-4">
-              <SixMans profile={profile} />
-              <Ranks profile={profile} />
-              <button
-                onClick={() => setHistoryOpen(true)}
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-800/60 hover:bg-zinc-800 px-4 py-2.5 text-sm font-medium text-white transition-colors"
-              >
-                Event History
-                <span className="ml-1.5 text-zinc-400">({profile.events.length})</span>
-              </button>
-            </div>
+        <div
+          className="w-full max-w-2xl max-h-[90dvh] overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-start justify-between gap-3 p-4 border-b border-zinc-800">
+            <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide">Player Profile</h2>
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="text-zinc-400 hover:text-white text-xl leading-none px-1"
+            >
+              ×
+            </button>
           </div>
-        )}
+
+          {error && <p className="p-6 text-sm text-zinc-400">{error}</p>}
+          {!error && !profile && <p className="p-6 text-sm text-zinc-500">Loading…</p>}
+
+          {profile && (
+            <div className="p-4 grid gap-4 sm:grid-cols-2">
+              <Identity profile={profile} />
+
+              <div className="flex flex-col gap-4">
+                <SixMans profile={profile} />
+                <Ranks profile={profile} />
+                <button
+                  onClick={() => setHistoryOpen(true)}
+                  className="w-full rounded-xl border border-zinc-700 bg-zinc-800/60 hover:bg-zinc-800 px-4 py-2.5 text-sm font-medium text-white transition-colors"
+                >
+                  Event History
+                  <span className="ml-1.5 text-zinc-400">({profile.events.length})</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {profile && historyOpen && (
-        <EventHistory events={profile.events} onClose={() => setHistoryOpen(false)} />
+        <EventHistory
+          events={profile.events}
+          onClose={() => setHistoryOpen(false)}
+          onOpen={onOpen}
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -165,9 +183,11 @@ function Ranks({ profile }: { profile: PlayerProfile }) {
 function EventHistory({
   events,
   onClose,
+  onOpen,
 }: {
   events: EventHistoryEntry[];
   onClose: () => void;
+  onOpen: (key: ProfileKey) => void;
 }) {
   return (
     <div
@@ -222,7 +242,12 @@ function EventHistory({
                 {e.teammates.length > 0 && (
                   <p className="mt-2 text-xs text-zinc-400">
                     <span className="text-zinc-500">With </span>
-                    {e.teammates.map((m) => m.displayName ?? m.username).join(", ")}
+                    {e.teammates.map((m, i) => (
+                      <span key={m.discordId ?? m.username}>
+                        {i > 0 && ", "}
+                        <Teammate mate={m} onOpen={onOpen} />
+                      </span>
+                    ))}
                   </p>
                 )}
               </li>
@@ -231,6 +256,32 @@ function EventHistory({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * A roster entry opens by discord_id, not by the username stored beside it: the
+ * username is a snapshot from the day the event ended, so a player who renamed
+ * since would not resolve by it. Archives written before schema version 2 carry
+ * no discord_id at all, and there the name stays plain text.
+ */
+function Teammate({
+  mate,
+  onOpen,
+}: {
+  mate: EventHistoryEntry["teammates"][number];
+  onOpen: (key: ProfileKey) => void;
+}) {
+  const name = mate.displayName ?? mate.username;
+  const discordId = mate.discordId;
+  if (!discordId) return <>{name}</>;
+  return (
+    <button
+      onClick={() => onOpen({ discordId })}
+      className="text-zinc-300 hover:text-white hover:underline underline-offset-2"
+    >
+      {name}
+    </button>
   );
 }
 

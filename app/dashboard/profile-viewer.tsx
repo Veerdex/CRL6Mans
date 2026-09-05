@@ -23,6 +23,7 @@ export function ProfileViewerProvider({ children }: { children: React.ReactNode 
           key={"username" in target ? target.username : target.discordId}
           target={target}
           onClose={() => setTarget(null)}
+          onOpen={open}
         />
       )}
     </ProfileViewer.Provider>
