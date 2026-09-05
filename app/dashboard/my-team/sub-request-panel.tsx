@@ -36,8 +36,9 @@ export type SubRequestRow = {
   opponentName: string | null;
   playerOutName: string;
   playerOutDisplay: string | null;
+  playerOutDiscordId: string | null;
   playerOutMmr: number;
-  subCandidates: { username: string; displayName: string | null; mmr: number }[];
+  subCandidates: { discordId: string | null; username: string; displayName: string | null; mmr: number }[];
   reason: string | null;
   status: "pending" | "approved" | "rejected" | "escalated";
   adminNote: string | null;
@@ -230,10 +231,10 @@ export function SubRequestPanel({ teamId, roster, availableSubs, existingRequest
                     {meta.label}
                   </span>
                   <span className="text-sm text-zinc-200">
-                    <PlayerName displayName={req.playerOutDisplay} username={req.playerOutName} />
+                    <PlayerName displayName={req.playerOutDisplay} username={req.playerOutName} discordId={req.playerOutDiscordId} />
                     <span className="text-zinc-500 mx-1">→</span>
                     {sub
-                      ? <PlayerName displayName={sub.displayName} username={sub.username} />
+                      ? <PlayerName displayName={sub.displayName} username={sub.username} discordId={sub.discordId} />
                       : <span className="text-zinc-500 italic">TBD</span>}
                   </span>
                 </div>

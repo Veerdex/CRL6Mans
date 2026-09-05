@@ -7,6 +7,7 @@ import type { PlayerStatRow } from "@/app/dashboard/stats/stats-table";
 
 export type StatAggregationInput = {
   key: string; // grouping identity — player_id for live queries, username for archive data
+  discordId: string | null;
   username: string;
   displayName: string | null;
   teamName: string | null;
@@ -21,6 +22,7 @@ export type StatAggregationInput = {
 
 export function aggregatePlayerGameStats(rows: StatAggregationInput[]): PlayerStatRow[] {
   type Agg = {
+    discordId: string | null;
     username: string;
     displayName: string | null;
     teamName: string | null;
@@ -37,12 +39,12 @@ export function aggregatePlayerGameStats(rows: StatAggregationInput[]): PlayerSt
   const aggMap = new Map<string, Agg>();
   for (const r of rows) {
     const prev = aggMap.get(r.key) ?? {
-      username: r.username, displayName: r.displayName, teamName: r.teamName,
+      discordId: r.discordId, username: r.username, displayName: r.displayName, teamName: r.teamName,
       totalGoals: 0, totalAssists: 0, totalSaves: 0, totalShots: 0, totalScore: 0,
       totalDemos: 0, totalDemoed: 0, games: 0,
     };
     aggMap.set(r.key, {
-      username: prev.username, displayName: prev.displayName, teamName: prev.teamName,
+      discordId: prev.discordId, username: prev.username, displayName: prev.displayName, teamName: prev.teamName,
       totalGoals:   prev.totalGoals   + r.goals,
       totalAssists: prev.totalAssists + r.assists,
       totalSaves:   prev.totalSaves   + r.saves,
@@ -56,6 +58,7 @@ export function aggregatePlayerGameStats(rows: StatAggregationInput[]): PlayerSt
 
   return [...aggMap.entries()].map(([playerId, agg]) => ({
     playerId,
+    discordId: agg.discordId,
     username: agg.username,
     displayName: agg.displayName,
     teamName: agg.teamName,

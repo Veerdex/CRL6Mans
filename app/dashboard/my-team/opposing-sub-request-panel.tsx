@@ -10,9 +10,11 @@ export type IncomingSubRequest = {
   requestingTeamName: string;
   playerOutName: string;
   playerOutDisplay: string | null;
+  playerOutDiscordId: string | null;
   playerOutMmr: number;
   subName: string | null;
   subDisplay: string | null;
+  subDiscordId: string | null;
   subMmr: number | null;
   reason: string | null;
   createdAt: string;
@@ -50,10 +52,10 @@ export function OpposingSubRequestPanel({ requests }: { requests: IncomingSubReq
           <div key={req.id} className="px-5 py-3 space-y-2">
             <p className="text-sm text-zinc-200">
               <span className="font-semibold text-white">{req.requestingTeamName}</span> wants to sub{" "}
-              <PlayerName displayName={req.playerOutDisplay} username={req.playerOutName} />
+              <PlayerName displayName={req.playerOutDisplay} username={req.playerOutName} discordId={req.playerOutDiscordId} />
               <span className="text-zinc-500 mx-1">→</span>
               {req.subName
-                ? <PlayerName displayName={req.subDisplay} username={req.subName} />
+                ? <PlayerName displayName={req.subDisplay} username={req.subName} discordId={req.subDiscordId} />
                 : <span className="text-zinc-500 italic">TBD</span>}
             </p>
 

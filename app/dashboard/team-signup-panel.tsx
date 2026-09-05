@@ -144,7 +144,7 @@ export function TeamSignupPanel({
           <ul className="space-y-1.5">
             {myTeam.members.map((m) => (
               <li key={m.memberId} className="flex items-center gap-2 text-[21px]">
-                <span className="text-zinc-200"><PlayerName displayName={m.display_name ?? null} username={m.username} /></span>
+                <span className="text-zinc-200"><PlayerName displayName={m.display_name ?? null} username={m.username} discordId={m.discord_id} /></span>
                 {m.isCreator && <span className="text-[15px] font-bold text-yellow-400">CAPTAIN</span>}
                 {m.status === "invited" && (
                   <span className="text-[15px] font-medium text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">PENDING</span>

@@ -10,12 +10,14 @@ export type SubRequestCardData = {
   teamName: string;
   playerOutName: string;
   playerOutDisplay: string | null;
+  playerOutDiscordId: string | null;
   playerOutMmr: number;
-  subCandidates: { username: string; displayName: string | null; mmr: number }[];
+  subCandidates: { discordId: string | null; username: string; displayName: string | null; mmr: number }[];
   reason: string | null;
   adminNote: string | null;
   requestedByUsername: string | null;
   requestedByDisplay: string | null;
+  requestedByDiscordId: string | null;
   createdAt: string;
 };
 
@@ -54,7 +56,7 @@ export function SubRequestCard({ request }: { request: SubRequestCardData }) {
             {request.requestedByUsername ? (
               <>
                 Requested by{" "}
-                <PlayerName displayName={request.requestedByDisplay} username={request.requestedByUsername} />
+                <PlayerName displayName={request.requestedByDisplay} username={request.requestedByUsername} discordId={request.requestedByDiscordId} />
                 {" · "}
               </>
             ) : ""}
@@ -68,7 +70,7 @@ export function SubRequestCard({ request }: { request: SubRequestCardData }) {
           <div>
             <p className="text-[10px] text-zinc-500 mb-0.5">Player Out</p>
             <p className="text-sm font-medium text-zinc-200">
-              <PlayerName displayName={request.playerOutDisplay} username={request.playerOutName} />
+              <PlayerName displayName={request.playerOutDisplay} username={request.playerOutName} discordId={request.playerOutDiscordId} />
             </p>
             <p className="text-xs text-zinc-500">{request.playerOutMmr.toLocaleString()} RV</p>
           </div>
@@ -82,7 +84,7 @@ export function SubRequestCard({ request }: { request: SubRequestCardData }) {
                   return (
                     <div key={i} className="flex items-center gap-2">
                       <p className={`text-sm font-medium ${mmrOk ? "text-zinc-200" : "text-red-400"}`}>
-                        <PlayerName displayName={c.displayName} username={c.username} />
+                        <PlayerName displayName={c.displayName} username={c.username} discordId={c.discordId} />
                       </p>
                       <p className={`text-xs ${mmrOk ? "text-zinc-500" : "text-red-400 font-semibold"}`}>
                         {c.mmr.toLocaleString()} RV{!mmrOk && " — OVER LIMIT"}

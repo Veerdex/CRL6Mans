@@ -11,6 +11,7 @@ import {
 export type SignupMember = {
   memberId: string;
   playerId: string;
+  discord_id: string | null;
   username: string;
   display_name: string | null;
   status: "invited" | "accepted";
@@ -56,8 +57,8 @@ export async function getTeamSignupView(
     for (const m of s.team_signup_members) ids.add(m.player_id);
   }
   const { data: players } = ids.size
-    ? await supabaseAdmin.from("players").select("id, username, display_name").in("id", [...ids])
-    : { data: [] as { id: string; username: string; display_name: string | null }[] };
+    ? await supabaseAdmin.from("players").select("id, discord_id, username, display_name").in("id", [...ids])
+    : { data: [] as { id: string; discord_id: string | null; username: string; display_name: string | null }[] };
   const playerById = new Map((players ?? []).map((p) => [p.id, p]));
 
   // Player IDs already accepted on some team (can't be invited / can't create)
@@ -80,6 +81,7 @@ export async function getTeamSignupView(
           .map((m) => ({
             memberId: m.id,
             playerId: m.player_id,
+            discord_id: playerById.get(m.player_id)?.discord_id ?? null,
             username: playerById.get(m.player_id)?.username ?? "Unknown",
             display_name: playerById.get(m.player_id)?.display_name ?? null,
             status: m.status,

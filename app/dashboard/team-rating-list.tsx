@@ -5,6 +5,7 @@ import { PlayerName } from "./player-name";
 
 export type TeamRatingMember = {
   playerId: string;
+  discordId: string | null;
   username: string;
   displayName: string | null;
   rating: number;
@@ -42,7 +43,7 @@ export function TeamRatingList({ teams }: { teams: TeamRatingRow[] }) {
                 .map((m) => (
                   <div key={m.playerId} className="flex items-center justify-between gap-2 text-xs">
                     <span className="flex items-center gap-1.5 min-w-0">
-                      <PlayerName displayName={m.displayName} username={m.username} className="text-zinc-300" />
+                      <PlayerName displayName={m.displayName} username={m.username} discordId={m.discordId} className="text-zinc-300" />
                       {m.status === "invited" && (
                         <span className="text-[9px] font-medium text-amber-400 bg-amber-400/10 px-1 py-0.5 rounded shrink-0">PENDING</span>
                       )}

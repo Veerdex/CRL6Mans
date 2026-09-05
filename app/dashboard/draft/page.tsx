@@ -42,7 +42,7 @@ export default async function DraftPage() {
     supabaseAdmin.from("players").select("team_id").eq("status", "approved").not("team_id", "is", null),
     supabaseAdmin
       .from("players")
-      .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+      .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
       .eq("status", "approved").eq("in_active_draft", true).is("team_id", null),
     callerId
       ? supabaseAdmin.from("players").select("team_id").eq("discord_id", callerId).single()
@@ -83,6 +83,7 @@ export default async function DraftPage() {
       }))}
       availablePlayers={availableSorted.map(p => ({
         id: p.id,
+        discord_id: p.discord_id ?? null,
         username: p.username,
         display_name: p.display_name ?? null,
         rv: Math.round(rankValue(p)),

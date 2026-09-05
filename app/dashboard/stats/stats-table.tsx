@@ -5,6 +5,8 @@ import { PlayerName } from "@/app/dashboard/player-name";
 
 export type PlayerStatRow = {
   playerId: string;
+  // Null only for archived events, whose stat snapshot is keyed by username.
+  discordId: string | null;
   username: string;
   displayName: string | null;
   teamName: string | null;
@@ -140,7 +142,7 @@ export function StatsTable({ rows }: { rows: PlayerStatRow[] }) {
             <tr key={row.playerId} className="border-b border-zinc-800/40 hover:bg-zinc-800/25 transition-colors">
               <td className="px-4 py-3 text-zinc-600 text-xs tabular-nums">{i + 1}</td>
               <td className="px-4 py-3 font-medium text-white whitespace-nowrap">
-                <PlayerName displayName={row.displayName} username={row.username} />
+                <PlayerName displayName={row.displayName} username={row.username} discordId={row.discordId} />
               </td>
               <td className="px-4 py-3 text-zinc-400 text-xs whitespace-nowrap">{row.teamName ?? "—"}</td>
               <td className="px-4 py-3 text-right text-zinc-400 tabular-nums">{row.games}</td>

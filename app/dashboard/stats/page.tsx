@@ -9,7 +9,7 @@ import type { PlayerStatRow } from "./stats-table";
 import { StatsView } from "./stats-view";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
-type PlayerRow = { id: string; username: string; display_name: string | null; team_id: string | null };
+type PlayerRow = { id: string; discord_id: string | null; username: string; display_name: string | null; team_id: string | null };
 
 export default async function StatsPage() {
   const cookieStore = await cookies();
@@ -32,7 +32,7 @@ export default async function StatsPage() {
     fetchAllRows<PlayerRow>((from, to) =>
       supabaseAdmin
         .from("players")
-        .select("id, username, display_name, team_id")
+        .select("id, discord_id, username, display_name, team_id")
         .eq("status", "approved")
         .order("id")
         .range(from, to)
@@ -54,6 +54,7 @@ export default async function StatsPage() {
       const player = playerMap[r.player_id];
       return {
         key: r.player_id,
+        discordId: player.discord_id,
         username: player.username,
         displayName: player.display_name,
         teamName: teamNameOf(player),
@@ -71,6 +72,7 @@ export default async function StatsPage() {
       const player = playerMap[playerId];
       return {
         playerId,
+        discordId: player.discord_id,
         username: player.username,
         displayName: player.display_name,
         teamName: teamNameOf(player),

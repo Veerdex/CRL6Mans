@@ -6,7 +6,7 @@ import { triggerAutoPick } from "@/app/dashboard/draft-actions";
 import { PlayerName } from "@/app/dashboard/player-name";
 
 type Team = { id: string; name: string; rosterSize: number; isOnClock: boolean };
-type Player = { id: string; username: string; display_name?: string | null; rv: number };
+type Player = { id: string; discord_id: string | null; username: string; display_name?: string | null; rv: number };
 
 interface DraftLiveProps {
   numTeams: number;
@@ -140,7 +140,7 @@ export function DraftLive({
                   <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                     <span className="text-zinc-600 tabular-nums w-5 text-right text-xs">{i + 1}</span>
                     <span className="flex-1 font-medium text-white">
-                      <PlayerName displayName={p.display_name ?? null} username={p.username} />
+                      <PlayerName displayName={p.display_name ?? null} username={p.username} discordId={p.discord_id} />
                     </span>
                     <span className="text-zinc-400 tabular-nums text-xs">RV {p.rv}</span>
                   </div>

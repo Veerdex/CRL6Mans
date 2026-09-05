@@ -196,6 +196,8 @@ function buildTabs(archive: TournamentArchive): SeasonTab[] {
 
   const statInputs: StatAggregationInput[] = archive.playerGameStats.map((s) => ({
     key: s.username,
+    // The archive's stat snapshot is denormalized by username only.
+    discordId: null,
     username: s.username,
     displayName: s.displayName,
     teamName: s.teamName,

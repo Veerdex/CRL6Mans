@@ -649,14 +649,14 @@ type RawSignupRowWithPlayers = {
   team_signup_members: {
     player_id: string;
     status: "invited" | "accepted";
-    players: { username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string } | null;
+    players: { discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string } | null;
   }[];
 };
 
 async function TeamsDraftPool({ tournamentId }: { tournamentId: string }) {
   const { data: signupsRaw } = await supabaseAdmin
     .from("team_signups")
-    .select("id, name, team_signup_members(player_id, status, players(username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3))")
+    .select("id, name, team_signup_members(player_id, status, players(discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3))")
     .eq("tournament_id", tournamentId);
   const signups = (signupsRaw ?? []) as unknown as RawSignupRowWithPlayers[];
 
@@ -664,6 +664,7 @@ async function TeamsDraftPool({ tournamentId }: { tournamentId: string }) {
     .map((s) => {
       const members = s.team_signup_members.map((m) => ({
         playerId: m.player_id,
+        discordId: m.players?.discord_id ?? null,
         username: m.players?.username ?? "Unknown",
         displayName: m.players?.display_name ?? null,
         rating: m.players ? playerRatingFromRow(m.players) : 0,

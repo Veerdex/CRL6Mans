@@ -189,7 +189,7 @@ function sortDescending(a: BracketMatch, b: BracketMatch) {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 type SubPlayerRow = {
-  id: string; username: string; display_name: string | null;
+  id: string; discord_id: string | null; username: string; display_name: string | null;
   peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
   peak_1v1: string | null; current_1v1: string | null;
 };
@@ -313,7 +313,7 @@ export default async function MyTeamPage() {
     allSubCandidateIds.length > 0
       ? supabaseAdmin
           .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
           .in("id", allSubCandidateIds)
       : Promise.resolve({ data: [] as SubPlayerRow[] }),
     // Admin-set round schedules define the allowed scheduling window per round.
@@ -440,12 +440,12 @@ export default async function MyTeamPage() {
     mySubIds.length > 0
       ? supabaseAdmin
           .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
           .in("id", mySubIds)
       : Promise.resolve({ data: [] as SubPlayerRow[] }),
     (seasonActive && nextMatch && oppId)
       ? supabaseAdmin
-          .from("players").select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .from("players").select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
           .eq("team_id", oppId).eq("status", "approved")
       : Promise.resolve({ data: [] as SubPlayerRow[] }),
     (seasonActive && nextMatch && oppId)
@@ -493,13 +493,13 @@ export default async function MyTeamPage() {
     oppSubIds.length > 0
       ? supabaseAdmin
           .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
           .in("id", oppSubIds)
       : Promise.resolve({ data: [] as SubPlayerRow[] }),
     incomingIds.length > 0
       ? supabaseAdmin
           .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
           .in("id", incomingIds)
       : Promise.resolve({ data: [] as SubPlayerRow[] }),
   ]);
@@ -640,7 +640,7 @@ export default async function MyTeamPage() {
     const subCandidates = candidateIds
       .map((id) => subPlayerMap[id])
       .filter(Boolean)
-      .map((p) => ({ username: p.username, displayName: p.display_name ?? null, mmr: peakMmrSub(p) }));
+      .map((p) => ({ discordId: p.discord_id ?? null, username: p.username, displayName: p.display_name ?? null, mmr: peakMmrSub(p) }));
     const match = myMatches.find((m) => m.id === req.match_id);
     let matchLabel: string | null = null;
     let opponentName: string | null = null;
@@ -656,6 +656,7 @@ export default async function MyTeamPage() {
       opponentName,
       playerOutName: playerOut?.username ?? "Unknown",
       playerOutDisplay: playerOut?.display_name ?? null,
+      playerOutDiscordId: playerOut?.discord_id ?? null,
       playerOutMmr:  playerOut ? peakMmrSub(playerOut) : 0,
       subCandidates,
       reason:        req.reason,
@@ -675,9 +676,11 @@ export default async function MyTeamPage() {
       requestingTeamName: teamMap[r.team_id]?.name ?? "A team",
       playerOutName: out?.username ?? "Unknown",
       playerOutDisplay: out?.display_name ?? null,
+      playerOutDiscordId: out?.discord_id ?? null,
       playerOutMmr: out ? peakMmrSub(out) : 0,
       subName: sub?.username ?? null,
       subDisplay: sub?.display_name ?? null,
+      subDiscordId: sub?.discord_id ?? null,
       subMmr: sub ? peakMmrSub(sub) : null,
       reason: r.reason,
       createdAt: r.created_at,
