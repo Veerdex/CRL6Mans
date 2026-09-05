@@ -2,6 +2,7 @@ import "server-only";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { addRoleById, getGuildRoles, getMemberRoleIds, removeRoleById } from "@/app/lib/discord-api";
 import {
+  DISCORD_ROLE_BENEFIT,
   effectiveTier,
   enabledBenefitsForAccount,
   getBenefitsByTier,
@@ -9,7 +10,7 @@ import {
   type ResolvedBenefits,
 } from "@/app/lib/patreon-entitlements";
 
-export const DISCORD_ROLE_BENEFIT = "discord-role";
+export { DISCORD_ROLE_BENEFIT };
 
 // A tier's Discord role is the guild role named after the tier — nothing is
 // typed in, so the set of tiers granting the benefit doubles as the set of role

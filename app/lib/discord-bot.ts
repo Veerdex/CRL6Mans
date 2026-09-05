@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "./supabase";
+import { getBenefitsByTier, DISCORD_ROLE_BENEFIT } from "./patreon-entitlements";
 import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
@@ -1695,11 +1696,20 @@ async function adminChecklist(userId: string) {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("rules_channel_id, announcement_channel_id, draft_channel_id, moderator_role_id, director_role_id, ceo_role_id, registered_role_id, supporter_role_id")
+    .select("rules_channel_id, announcement_channel_id, draft_channel_id, moderator_role_id, director_role_id, ceo_role_id, registered_role_id")
     .single();
 
   const { count: teamCount } = await supabaseAdmin
     .from("teams").select("id", { count: "exact", head: true });
+
+  const tierRoleNames = [...(await getBenefitsByTier())]
+    .filter(([, benefits]) => benefits.has(DISCORD_ROLE_BENEFIT))
+    .map(([title]) => title.trim())
+    .filter(Boolean);
+  const guildRoleNames = tierRoleNames.length
+    ? new Set((await getGuildRoles()).map(r => r.name))
+    : new Set<string>();
+  const absentTierRoles = tierRoleNames.filter(n => !guildRoleNames.has(n));
 
   const missing: string[] = [];
   if (!settings) missing.push("`league_settings` row is missing entirely (should always have exactly one row)");
@@ -1710,7 +1720,10 @@ async function adminChecklist(userId: string) {
   if (!settings?.director_role_id) missing.push("Director role — run `/admin setdirectorid`");
   if (!settings?.ceo_role_id) missing.push("CEO role — run `/admin setceoid`");
   if (!settings?.registered_role_id) missing.push("Registered role — run `/admin setregisteredrole`");
-  if (!settings?.supporter_role_id) missing.push("Supporter role — run `/admin setsupporterrole`");
+  if (absentTierRoles.length) missing.push(
+    `Supporter tier role(s) — create a Discord role named exactly ${absentTierRoles.map(n => `**${n}**`).join(", ")}, ` +
+    "positioned below the bot's own role. The name has to match the tier title character-for-character."
+  );
   if (!teamCount) missing.push("No team slots exist yet — add them from the dashboard admin panel");
 
   if (!missing.length) return ephemeralReply("✅ Nothing missing — the server looks fully configured.");

@@ -93,6 +93,10 @@ export function benefitsForTier(
 // the settings actions both go through them, so the two cannot drift.
 export const PUBLIC_COLUMN_BENEFIT = "featured-on-support-page";
 
+// A tier's Discord role is the guild role named exactly after the tier title, so
+// this id is all the configuration there is — see syncDiscordSupporterRole.
+export const DISCORD_ROLE_BENEFIT = "discord-role";
+
 export type BenefitPrefRow = {
   patreon_public?: boolean | null;
   patreon_benefit_prefs?: Record<string, boolean> | null;
