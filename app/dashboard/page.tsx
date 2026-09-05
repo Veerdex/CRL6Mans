@@ -10,7 +10,7 @@ import DraftCard from "./draft-card";
 import { TeamSignupPanel } from "./team-signup-panel";
 import { TournamentJoinCard } from "./tournament-join-card";
 import { getTeamSignupView, type TeamSignupView } from "./team-signup-data";
-import { earlySignupAccessByPlayerId, hasEarlySignupAccess, signupWindowOpen, type SignupWindowRow } from "@/app/lib/signup-window";
+import { earlySignupAccessByPlayerId, hasEarlySignupAccess, inEarlySignupWindow, signupWindowOpen, type SignupWindowRow } from "@/app/lib/signup-window";
 import { PastEvents, presetLabel, type PastEvent } from "./past-events";
 import { PresetEmblemRow } from "./preset-emblem-row";
 import { LocalTime } from "./local-time";
@@ -162,7 +162,12 @@ export default async function DashboardPage({
     .sort((a, b) => (b.date ? new Date(b.date).getTime() : 0) - (a.date ? new Date(a.date).getTime() : 0))
     .slice(0, 8);
   const now = Date.now();
-  const earlyAccess = await hasEarlySignupAccess(session.userId);
+  // Resolving entitlement costs three queries on a page every signed-in player
+  // loads, and outside an early window the answer cannot change any outcome —
+  // so only ask when some tournament is actually in one.
+  const earlyAccess =
+    tournaments.some((t) => inEarlySignupWindow(t as SignupWindowRow, now)) &&
+    (await hasEarlySignupAccess(session.userId));
   const openTournaments = tournaments.filter((t) => signupWindowOpen(t as SignupWindowRow, earlyAccess, now));
 
   // A supporter's Early Signup Access covers everyone they invited, so a

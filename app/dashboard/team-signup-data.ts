@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import {
   earlySignupAccessByPlayerId,
   hasEarlySignupAccess,
+  inEarlySignupWindow,
   signupWindowOpen,
   type SignupWindowRow,
 } from "@/app/lib/signup-window";
@@ -111,13 +112,20 @@ export async function getTeamSignupView(
   // team (their Early Signup Access covers the roster they built), my own
   // entitlement while I'm still deciding whether to create one, and the
   // inviting creator's for each pending invite.
-  const earlyCreators = await earlySignupAccessByPlayerId([
-    ...(mine ? [mine.creator_player_id] : []),
-    ...inviteRows.map((i) => i.creatorPlayerId),
-  ]);
+  // Skipped outside the early window: there the entitlement cannot move either
+  // edge, so signupWindowOpen returns the same answer with it false.
+  const early = inEarlySignupWindow(window);
+  const earlyCreators = early
+    ? await earlySignupAccessByPlayerId([
+        ...(mine ? [mine.creator_player_id] : []),
+        ...inviteRows.map((i) => i.creatorPlayerId),
+      ])
+    : new Set<string>();
   const registrationOpen = signupWindowOpen(
     window,
-    mine ? earlyCreators.has(mine.creator_player_id) : await hasEarlySignupAccess(discordId)
+    mine
+      ? earlyCreators.has(mine.creator_player_id)
+      : early && (await hasEarlySignupAccess(discordId))
   );
   const incomingInvites = inviteRows.map(({ creatorPlayerId, ...inv }) => ({
     ...inv,

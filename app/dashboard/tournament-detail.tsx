@@ -115,11 +115,15 @@ export async function TournamentDetailView({
 
   const now = Date.now();
   const signupWindow = t as SignupWindowRow;
-  const earlyAccess = await hasEarlySignupAccess(discordId);
+  // Outside the early window entitlement changes nothing, so the three-query
+  // lookup is skipped — which is every completed and every already-open
+  // tournament.
+  const earlyAccess =
+    inEarlySignupWindow(signupWindow, now) && (await hasEarlySignupAccess(discordId));
   const registrationOpen = signupWindowOpen(signupWindow, earlyAccess, now);
   // Only shown to someone the early window is actually letting in, so it reads
   // as an explanation for a button nobody else can see yet.
-  const showEarlyNotice = earlyAccess && inEarlySignupWindow(signupWindow, now);
+  const showEarlyNotice = earlyAccess;
 
   const timeline = buildTimeline(t, true);
   const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
