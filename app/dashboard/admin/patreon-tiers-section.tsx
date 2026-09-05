@@ -32,6 +32,22 @@ function inheritedBenefits(
   return inherited;
 }
 
+function ArrowButton({ dir, onClick, disabled }: { dir: "prev" | "next"; onClick: () => void; disabled: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={dir === "prev" ? "Previous tier" : "Next tier"}
+      className="shrink-0 p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400 transition-colors"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d={dir === "prev" ? "M15 18l-6-6 6-6" : "M9 18l6-6-6-6"} />
+      </svg>
+    </button>
+  );
+}
+
 function TierCard({
   tier,
   benefits,
@@ -51,7 +67,6 @@ function TierCard({
   );
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
-  const price = formatTierPrice(tier.amountCents);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -81,10 +96,6 @@ function TierCard({
 
   return (
     <div className="border border-zinc-800 rounded-xl p-4 space-y-3">
-      <p className="text-sm font-semibold text-white">
-        {tier.title}
-        {price && <span className="text-zinc-500 font-normal"> ({price})</span>}
-      </p>
       <div className="space-y-1.5">
         {benefits.map((b) =>
           b.id in inherited ? (
@@ -148,6 +159,14 @@ export function PatreonTiersSection({
   benefits: PatreonBenefit[];
   tierBenefitMap: Record<string, TierBenefitAssignment[]>;
 }) {
+  const [index, setIndex] = useState(0);
+  // Clamped rather than trusted: a tier disappearing from Patreon shortens the
+  // list under an index that was valid a render ago.
+  const active = Math.min(index, Math.max(tiers.length - 1, 0));
+  const step = (delta: number) => setIndex((active + delta + tiers.length) % tiers.length);
+  const activeTier = tiers[active];
+  const activePrice = activeTier ? formatTierPrice(activeTier.amountCents) : null;
+
   return (
     <div className="space-y-4">
       <p className="text-xs text-zinc-500">
@@ -165,15 +184,32 @@ export function PatreonTiersSection({
       ) : tiers.length === 0 ? (
         <p className="text-xs text-zinc-600">No tiers found on Patreon yet.</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {tiers.map((tier) => (
-            <TierCard
-              key={tier.title}
-              tier={tier}
-              benefits={benefits}
-              assigned={tierBenefitMap[tier.title] ?? []}
-              inherited={inheritedBenefits(tier, tiers, tierBenefitMap)}
-            />
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <ArrowButton dir="prev" onClick={() => step(-1)} disabled={tiers.length < 2} />
+            <div className="text-center">
+              <p className="text-sm font-semibold text-white">
+                {activeTier.title}
+                {activePrice && <span className="text-zinc-500 font-normal"> ({activePrice})</span>}
+              </p>
+              <p className="text-[11px] text-zinc-600">
+                {active + 1} of {tiers.length}
+              </p>
+            </div>
+            <ArrowButton dir="next" onClick={() => step(1)} disabled={tiers.length < 2} />
+          </div>
+
+          {/* Every card stays mounted and merely hidden, so arrowing away from one
+              mid-edit doesn't silently discard its unsaved checkboxes. */}
+          {tiers.map((tier, i) => (
+            <div key={tier.title} className={i === active ? undefined : "hidden"}>
+              <TierCard
+                tier={tier}
+                benefits={benefits}
+                assigned={tierBenefitMap[tier.title] ?? []}
+                inherited={inheritedBenefits(tier, tiers, tierBenefitMap)}
+              />
+            </div>
           ))}
         </div>
       )}
