@@ -164,8 +164,6 @@ export function PatreonTiersSection({
   // list under an index that was valid a render ago.
   const active = Math.min(index, Math.max(tiers.length - 1, 0));
   const step = (delta: number) => setIndex((active + delta + tiers.length) % tiers.length);
-  const activeTier = tiers[active];
-  const activePrice = activeTier ? formatTierPrice(activeTier.amountCents) : null;
 
   return (
     <div className="space-y-4">
@@ -188,10 +186,26 @@ export function PatreonTiersSection({
           <div className="flex items-center justify-center gap-2">
             <ArrowButton dir="prev" onClick={() => step(-1)} disabled={tiers.length < 2} />
             <div className="text-center">
-              <p className="text-sm font-semibold text-white">
-                {activeTier.title}
-                {activePrice && <span className="text-zinc-500 font-normal"> ({activePrice})</span>}
-              </p>
+              {/* Every title is stacked into the same grid cell so the block is
+                  always as wide as the longest one — the arrows hold their
+                  position instead of shifting with each tier's name. */}
+              <div className="grid">
+                {tiers.map((tier, i) => {
+                  const price = formatTierPrice(tier.amountCents);
+                  return (
+                    <p
+                      key={tier.title}
+                      aria-hidden={i !== active}
+                      className={`col-start-1 row-start-1 text-sm font-semibold text-white whitespace-nowrap${
+                        i === active ? "" : " invisible"
+                      }`}
+                    >
+                      {tier.title}
+                      {price && <span className="text-zinc-500 font-normal"> ({price})</span>}
+                    </p>
+                  );
+                })}
+              </div>
               <p className="text-[11px] text-zinc-600">
                 {active + 1} of {tiers.length}
               </p>
