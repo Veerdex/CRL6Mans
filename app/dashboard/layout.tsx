@@ -15,6 +15,7 @@ import { TabVisitTracker } from "./tab-visit-tracker";
 import { NotificationButton } from "./notification-button";
 import { PullToRefresh } from "./pull-to-refresh";
 import { NameDecorationProvider } from "./name-decoration";
+import { ProfileViewerProvider } from "./profile-viewer";
 import { PwaDesktopHint } from "./pwa-desktop-hint";
 import { CoinGrantToast } from "./coin-grant-toast";
 import { TeamCutToast } from "./team-cut-toast";
@@ -310,9 +311,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // The chrome sits outside NameDecorationProvider, so the signed-in patron's
   // own border is read here and handed down rather than pulled from context.
   const ownBorder = decorations.get((session?.username ?? "").toLowerCase())?.border ?? null;
+  // ProfileViewerProvider is inside the decoration provider so the profile modal
+  // renders a name with the same badge and colour the page behind it does.
   const content = (
     <NameDecorationProvider decorations={nameDecorations}>
-      <PullToRefresh>{children}</PullToRefresh>
+      <ProfileViewerProvider>
+        <PullToRefresh>{children}</PullToRefresh>
+      </ProfileViewerProvider>
     </NameDecorationProvider>
   );
 

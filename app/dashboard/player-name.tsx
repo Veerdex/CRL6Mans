@@ -2,27 +2,63 @@
 
 import { SupporterBadge } from "./supporter-badge";
 import { useNameDecoration } from "./name-decoration";
+import { useProfileViewer } from "./profile-viewer";
 import { nameStyle } from "@/app/lib/name-glint";
 
 interface Props {
   displayName: string | null;
   username: string;
   className?: string;
+  /**
+   * Off inside the profile modal itself, and anywhere a name is decoration
+   * rather than a reference to a player. Defaults on: every existing call site
+   * gets the profile without being touched, which is why the lookup is keyed on
+   * the username these already have rather than a discord_id they do not.
+   */
+  linkToProfile?: boolean;
 }
 
-export function PlayerName({ displayName, username, className = "" }: Props) {
+export function PlayerName({
+  displayName,
+  username,
+  className = "",
+  linkToProfile = true,
+}: Props) {
   const name = displayName ?? username;
   const decoration = useNameDecoration(username);
+  const openProfile = useProfileViewer();
   const fx = nameStyle(
     decoration?.color ?? null,
     decoration?.outline ?? false,
     decoration?.glint ?? null,
   );
 
+  const clickable = linkToProfile && openProfile !== null;
+  const open = (e: React.SyntheticEvent) => {
+    if (!clickable) return;
+    // Names sit inside rows and cards that are themselves clickable; opening a
+    // profile must not also navigate away from the page behind it.
+    e.preventDefault();
+    e.stopPropagation();
+    openProfile!({ username });
+  };
+
   return (
     <span className={`relative inline-flex items-center group/pname max-w-full min-w-0 ${className}`}>
       <span
-        className={`truncate min-w-0 ${fx.className}`}
+        // A span rather than a button: names are rendered inside anchors and
+        // other buttons, where nested interactive elements are invalid markup.
+        role={clickable ? "button" : undefined}
+        tabIndex={clickable ? 0 : undefined}
+        onClick={clickable ? open : undefined}
+        onKeyDown={
+          clickable
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") open(e);
+              }
+            : undefined
+        }
+        className={`truncate min-w-0 ${fx.className} ${clickable ? "cursor-pointer hover:underline underline-offset-2" : ""}`}
         style={fx.style}
         title={name}
       >
