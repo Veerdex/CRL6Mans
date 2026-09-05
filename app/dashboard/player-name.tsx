@@ -8,6 +8,13 @@ import { nameStyle } from "@/app/lib/name-glint";
 interface Props {
   displayName: string | null;
   username: string;
+  /**
+   * Preferred over the username for opening the profile. A username is a
+   * snapshot: anywhere one was stored rather than read live, the player may
+   * have renamed on Discord since and no longer resolves by it. The Discord ID
+   * never changes, so pass it wherever the caller has one.
+   */
+  discordId?: string | null;
   className?: string;
   /**
    * Off inside the profile modal itself, and anywhere a name is decoration
@@ -21,6 +28,7 @@ interface Props {
 export function PlayerName({
   displayName,
   username,
+  discordId = null,
   className = "",
   linkToProfile = true,
 }: Props) {
@@ -40,7 +48,7 @@ export function PlayerName({
     // profile must not also navigate away from the page behind it.
     e.preventDefault();
     e.stopPropagation();
-    openProfile!({ username });
+    openProfile!(discordId ? { discordId } : { username });
   };
 
   return (

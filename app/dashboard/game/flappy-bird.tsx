@@ -771,7 +771,11 @@ function ScoreRow({ row, viewerDiscordId, detached = false }: { row: Leaderboard
             username={row.username}
             className="w-7 h-7"
           />
-          <PlayerName displayName={row.display_name ?? null} username={row.username} />
+          <PlayerName
+            displayName={row.display_name ?? null}
+            username={row.username}
+            discordId={row.discord_id}
+          />
         </span>
       </td>
       <td className="py-3 pr-4 text-right text-white font-mono font-bold">

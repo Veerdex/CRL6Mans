@@ -19,20 +19,26 @@ export type Leaderboard = { top: LeaderboardRow[]; self: LeaderboardRow | null }
 
 const TOP_SCORES = 10;
 
-type AccountBits = { display_name: string | null; avatar: string | null };
+type AccountBits = { username: string; display_name: string | null; avatar: string | null };
 
 // Names and avatars both come from accounts (Tier 1), which exists for every Discord
 // login — reading them off `players` left anyone without a roster row (guests,
 // unapproved players) showing their raw username and no picture.
+//
+// The username comes from here too. game_scores.username is a snapshot from
+// whenever the score was set, so a player who has renamed on Discord since was
+// listed under a name the site no longer knows them by — and their profile,
+// which resolves by username, could not be opened at all. The snapshot only
+// stands in for a score whose account is gone.
 async function accountsFor(discordIds: string[]): Promise<Map<string, AccountBits>> {
   const { data } = await supabaseAdmin
     .from("accounts")
-    .select("discord_id, display_name, avatar")
+    .select("discord_id, username, display_name, avatar")
     .in("discord_id", discordIds);
   return new Map(
     (data ?? []).map((a: { discord_id: string } & AccountBits) => [
       a.discord_id,
-      { display_name: a.display_name, avatar: a.avatar },
+      { username: a.username, display_name: a.display_name, avatar: a.avatar },
     ]),
   );
 }
@@ -47,7 +53,7 @@ export async function getLeaderboard(viewerDiscordId?: string): Promise<Leaderbo
   const accountById = await accountsFor(data.map((r: { discord_id: string }) => r.discord_id));
   const ranked = data.map((r: { discord_id: string; username: string; score: number }, i: number) => ({
     discord_id: r.discord_id,
-    username: r.username,
+    username: accountById.get(r.discord_id)?.username ?? r.username,
     display_name: accountById.get(r.discord_id)?.display_name ?? null,
     avatar: accountById.get(r.discord_id)?.avatar ?? null,
     score: r.score,
@@ -120,7 +126,7 @@ export async function getAllGameScores(): Promise<GameScoreRow[]> {
   const accountById = await accountsFor(data.map((r: { discord_id: string }) => r.discord_id));
   return data.map((r: { discord_id: string; username: string; score: number; updated_at: string }) => ({
     discord_id: r.discord_id,
-    username: r.username,
+    username: accountById.get(r.discord_id)?.username ?? r.username,
     display_name: accountById.get(r.discord_id)?.display_name ?? null,
     score: r.score,
     updated_at: r.updated_at,
