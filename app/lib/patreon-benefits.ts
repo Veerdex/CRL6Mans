@@ -7,9 +7,8 @@
 //
 // Tiers are cumulative by price — see patreon-entitlements.ts. Assign a
 // benefit only to the cheapest tier that should get it; every tier above
-// inherits it. The exception is a benefit that means something *different*
-// higher up (name size on the Support Us tab): assign it at each tier with a
-// different `value`, and the highest tier the patron qualifies for wins.
+// inherits it — the admin editor shows it on the tiers above as inherited
+// rather than offering it again.
 export type PatreonBenefit = {
   id: string;
   title: string;
@@ -34,13 +33,11 @@ export const PATREON_BENEFITS: PatreonBenefit[] = [
     title: "Discord role",
     description:
       "A supporter-only Discord role in the league server, granted and removed automatically as this switch is flipped.",
-    valueLabel: "Discord role name",
   },
   {
     id: "featured-on-support-page",
     title: "Name listed on Support Us tab",
-    description: "Player's name shown in the \"Our Patrons\" list on /dashboard/support — size (small/medium/large) varies by tier.",
-    valueLabel: "Name size (large / medium / small)",
+    description: "Player's name shown in the \"Our Patrons\" list on /dashboard/support.",
   },
   {
     id: "colored-username",

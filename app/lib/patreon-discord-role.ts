@@ -1,29 +1,26 @@
 import "server-only";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { addRole, addRoleById, getGuildRoles, getMemberRoleIds, removeRoleById } from "@/app/lib/discord-api";
+import { addRoleById, getGuildRoles, getMemberRoleIds, removeRoleById } from "@/app/lib/discord-api";
 import {
+  effectiveTier,
   enabledBenefitsForAccount,
   getBenefitsByTier,
   type BenefitAccountRow,
+  type ResolvedBenefits,
 } from "@/app/lib/patreon-entitlements";
 
 export const DISCORD_ROLE_BENEFIT = "discord-role";
 
-// Every role name any tier configures for the benefit — the only names this
-// reconciler is allowed to touch. Without it a "remove the role they no longer
-// qualify for" pass would have to guess, and guessing wrong strips Captain,
-// team, or staff roles. Anything outside this set is invisible to us.
-async function managedRoleNames(): Promise<Set<string>> {
-  const { data } = await supabaseAdmin
-    .from("patreon_tier_benefits")
-    .select("value")
-    .eq("benefit_id", DISCORD_ROLE_BENEFIT)
-    .not("value", "is", null);
-
+// A tier's Discord role is the guild role named after the tier — nothing is
+// typed in, so the set of tiers granting the benefit doubles as the set of role
+// names this reconciler is allowed to touch. That bound matters: without it a
+// "remove the role they no longer qualify for" pass would have to guess, and
+// guessing wrong strips Captain, team, or staff roles.
+function managedRoleNames(byTier: Map<string, ResolvedBenefits>): Set<string> {
   const names = new Set<string>();
-  for (const row of data ?? []) {
-    const name = (row.value as string).trim();
-    if (name) names.add(name);
+  for (const [title, benefits] of byTier) {
+    const name = title.trim();
+    if (name && benefits.has(DISCORD_ROLE_BENEFIT)) names.add(name);
   }
   return names;
 }
@@ -38,34 +35,40 @@ async function managedRoleNames(): Promise<Set<string>> {
 // converge to the same correct state on the next call, with no per-account
 // bookkeeping column to drift.
 //
-// Tier inheritance already resolves the benefit to a single value (highest-
-// priced source tier wins), so a patron ends up in exactly one supporter role.
+// The role a patron lands in is their own effective tier's, not the tier the
+// benefit was assigned at — assign it once at the cheapest supporter tier and
+// every tier above inherits the benefit while keeping its own role.
 //
-// The one state it cannot converge from is a rename. setTierBenefits is
-// delete-all-then-insert, so changing the configured name drops the old one out
-// of the managed set and current holders keep it forever; renaming the role in
-// Discord instead makes the lookup miss and creates a duplicate. Set the name
-// once, and delete the orphan by hand if it has to change.
+// The one state it cannot converge from is a tier rename on Patreon: the old
+// title drops out of the managed set, so current holders keep the old role.
+// Delete the orphan by hand if a tier is ever renamed.
 export async function syncDiscordSupporterRole(discordId: string): Promise<void> {
   if (!discordId || discordId.startsWith("test_")) return;
 
-  const [{ data: account }, managed] = await Promise.all([
+  const [{ data: account }, byTier] = await Promise.all([
     supabaseAdmin
       .from("accounts")
       .select("status, patreon_status, patreon_tier_title, patreon_tier_override, patreon_public, patreon_benefit_prefs")
       .eq("discord_id", discordId)
       .maybeSingle(),
-    managedRoleNames(),
+    getBenefitsByTier(),
   ]);
 
-  // No tier names a role yet, so there is nothing this benefit could grant or
-  // revoke — skip before spending any Discord calls.
+  // No tier grants the benefit, so there is nothing to grant or revoke — skip
+  // before spending any Discord calls.
+  const managed = managedRoleNames(byTier);
   if (managed.size === 0) return;
 
   let target: string | null = null;
   if (account && account.status !== "banned") {
-    const enabled = enabledBenefitsForAccount(await getBenefitsByTier(), account as BenefitAccountRow);
-    target = enabled.get(DISCORD_ROLE_BENEFIT)?.trim() || null;
+    const row = account as BenefitAccountRow;
+    if (enabledBenefitsForAccount(byTier, row).has(DISCORD_ROLE_BENEFIT))
+      target =
+        effectiveTier(
+          row.patreon_status ?? null,
+          row.patreon_tier_title ?? null,
+          row.patreon_tier_override ?? null,
+        )?.trim() || null;
   }
 
   const [guildRoles, memberRoleIds] = await Promise.all([getGuildRoles(), getMemberRoleIds(discordId)]);
@@ -85,13 +88,9 @@ export async function syncDiscordSupporterRole(discordId: string): Promise<void>
 
   if (!target) return;
 
+  // A missing role is left missing rather than created: the tier is meant to
+  // map onto a role that already exists, so creating one here would only
+  // manufacture a duplicate of it under the same name.
   const targetId = idByName.get(target);
-  if (targetId) {
-    if (!held.has(targetId)) await addRoleById(discordId, targetId);
-    return;
-  }
-  // First grant of a role a director named but never created in Discord.
-  // addRole creates it, which also lands it at the bottom of the hierarchy —
-  // below the bot's own role, so the bot can keep assigning it.
-  await addRole(discordId, target);
+  if (targetId && !held.has(targetId)) await addRoleById(discordId, targetId);
 }

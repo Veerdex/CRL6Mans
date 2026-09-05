@@ -10,19 +10,44 @@ function formatTierPrice(amountCents: number | null): string | null {
   return `$${dollars % 1 === 0 ? dollars.toFixed(0) : dollars.toFixed(2)}`;
 }
 
+// What a tier already gets from every cheaper tier, mapped to the tier it comes
+// from. Cheapest first so a benefit assigned redundantly at several tiers is
+// credited to the one it actually originates at. A tier with no cached price
+// has no place in the cumulative order, so it neither inherits nor is inherited
+// from.
+function inheritedBenefits(
+  tier: LiveTier,
+  tiers: LiveTier[],
+  tierBenefitMap: Record<string, TierBenefitAssignment[]>,
+): Record<string, string> {
+  const cents = tier.amountCents;
+  if (cents === null) return {};
+
+  const inherited: Record<string, string> = {};
+  const cheaper = tiers
+    .filter((t): t is LiveTier & { amountCents: number } => t.amountCents !== null && t.amountCents < cents)
+    .sort((a, b) => a.amountCents - b.amountCents);
+  for (const source of cheaper)
+    for (const a of tierBenefitMap[source.title] ?? []) if (!(a.id in inherited)) inherited[a.id] = source.title;
+  return inherited;
+}
+
 function TierCard({
   tier,
   benefits,
   assigned,
+  inherited,
 }: {
   tier: LiveTier;
   benefits: PatreonBenefit[];
   assigned: TierBenefitAssignment[];
+  inherited: Record<string, string>;
 }) {
   // Presence of the key means the benefit is assigned; the string is its
-  // per-tier value ("" for on/off benefits).
+  // per-tier value ("" for on/off benefits). Inherited ids are dropped so the
+  // next save clears rows a cheaper tier already covers.
   const [selected, setSelected] = useState<Record<string, string>>(
-    Object.fromEntries(assigned.map((a) => [a.id, a.value ?? ""])),
+    Object.fromEntries(assigned.filter((a) => !(a.id in inherited)).map((a) => [a.id, a.value ?? ""])),
   );
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
@@ -42,7 +67,11 @@ function TierCard({
   function handleSave() {
     setFeedback(null);
     startTransition(async () => {
-      const assignments = Object.entries(selected).map(([id, value]) => ({ id, value: value || null }));
+      // Re-filtered rather than trusted from init: saving another card can turn
+      // one of these into an inherited benefit while this one sits untouched.
+      const assignments = Object.entries(selected)
+        .filter(([id]) => !(id in inherited))
+        .map(([id, value]) => ({ id, value: value || null }));
       const res = await setTierBenefits(tier.title, assignments);
       if (res.error) setFeedback({ msg: res.error, ok: false });
       else setFeedback({ msg: "Saved!", ok: true });
@@ -57,7 +86,21 @@ function TierCard({
         {price && <span className="text-zinc-500 font-normal"> ({price})</span>}
       </p>
       <div className="space-y-1.5">
-        {benefits.map((b) => (
+        {benefits.map((b) =>
+          b.id in inherited ? (
+            // Still listed, because a director reading this card needs to see
+            // everything the tier grants — just not as a choice, since a
+            // cheaper tier already decided it.
+            <div key={b.id} className="bg-zinc-900/40 border border-zinc-800/60 rounded-lg px-3 py-2">
+              <div className="flex items-start gap-2.5">
+                <input type="checkbox" checked disabled readOnly className="mt-0.5 shrink-0 opacity-50" />
+                <span>
+                  <span className="block text-sm text-zinc-400 font-medium">{b.title}</span>
+                  <span className="block text-xs text-zinc-600">Inherited from {inherited[b.id]}</span>
+                </span>
+              </div>
+            </div>
+          ) : (
           <div
             key={b.id}
             className="bg-zinc-800/60 border border-zinc-800 rounded-lg px-3 py-2 hover:bg-zinc-800 transition-colors"
@@ -79,7 +122,8 @@ function TierCard({
               />
             )}
           </div>
-        ))}
+          ),
+        )}
       </div>
       <div className="flex items-center gap-3">
         <button
@@ -109,7 +153,8 @@ export function PatreonTiersSection({
       <p className="text-xs text-zinc-500">
         Tiers are pulled live from the Patreon campaign — they aren&apos;t created here. Benefits are a hardcoded catalog
         (edited in <code className="text-zinc-400">app/lib/patreon-benefits.ts</code>); pick which ones each tier includes.
-        Tiers are cumulative, so assign a benefit only to the cheapest tier that gets it — every tier above inherits it.
+        Tiers are cumulative: assign a benefit to the cheapest tier that gets it and every tier above inherits it, listed
+        there as inherited rather than offered again.
       </p>
 
       {benefits.length === 0 ? (
@@ -122,7 +167,13 @@ export function PatreonTiersSection({
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {tiers.map((tier) => (
-            <TierCard key={tier.title} tier={tier} benefits={benefits} assigned={tierBenefitMap[tier.title] ?? []} />
+            <TierCard
+              key={tier.title}
+              tier={tier}
+              benefits={benefits}
+              assigned={tierBenefitMap[tier.title] ?? []}
+              inherited={inheritedBenefits(tier, tiers, tierBenefitMap)}
+            />
           ))}
         </div>
       )}
