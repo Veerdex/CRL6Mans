@@ -21,6 +21,11 @@ const PRIZE_OFFSET = 1.028185056;
 
 const SEASON_MULTIPLIER = 2;
 
+// The 6mans half enters the career total at half weight. season_score is on its
+// own scale (100 for first) and is summed across every closed season, so at full
+// weight it outgrows the event half.
+const SIX_MANS_WEIGHT = 0.5;
+
 export type EventKind = "tournament" | "season";
 
 export type EventPointsInput = {
@@ -78,16 +83,16 @@ export function eventPoints(input: EventPointsInput): number {
 }
 
 /**
- * Career points = 6mans points + event points. The 6mans half is the sum of
- * season_score across closed queue-bot seasons, so it only moves when a season
- * closes; null means the player has never appeared in one (distinct from a
- * measured zero).
+ * Career points = half the 6mans points + event points. The 6mans half is the
+ * sum of season_score across closed queue-bot seasons, so it only moves when a
+ * season closes; null means the player has never appeared in one (distinct from
+ * a measured zero).
  */
 export function careerPoints(
   sixMansPoints: number | null,
   events: EventPointsInput[],
 ): number {
-  return (sixMansPoints ?? 0) + events.reduce((sum, e) => sum + eventPoints(e), 0);
+  return (sixMansPoints ?? 0) * SIX_MANS_WEIGHT + events.reduce((sum, e) => sum + eventPoints(e), 0);
 }
 
 /**
