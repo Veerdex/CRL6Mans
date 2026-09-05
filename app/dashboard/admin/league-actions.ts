@@ -13,6 +13,7 @@ import { computeTopStats } from "@/app/lib/game-stats";
 import { rollUpCareerStats } from "@/app/lib/career-stats";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { computeFullArchive } from "./tournament-archive";
+import { recordEventResults } from "@/app/lib/event-results";
 
 const TEAM_ROLE_COLOR = 0x3498db; // blue
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -715,7 +716,7 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     endedAt,
   });
 
-  const { error: archiveError } = await supabaseAdmin.from("seasons").insert({
+  const { data: archivedSeason, error: archiveError } = await supabaseAdmin.from("seasons").insert({
     name,
     year,
     season_format: settings.season_format ?? null,
@@ -732,8 +733,19 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     },
     full_archive: fullArchive,
     ended_at: endedAt,
-  });
+  }).select("id").single();
   if (archiveError) return { error: `Failed to archive season: ${archiveError.message}` };
+
+  // Index the archive into per-player rows for profiles. Derived data, so a
+  // failure here must not take the completion with it — the archive is already
+  // written and rebuildEventResults() can regenerate this later.
+  if (archivedSeason?.id) {
+    try {
+      await recordEventResults(archivedSeason.id as string, fullArchive);
+    } catch (e) {
+      console.error("[completeSeason] failed to record player event results", e);
+    }
+  }
 
   // Only wipe once the archive is safely written.
   await resetSeason();

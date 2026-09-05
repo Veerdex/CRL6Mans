@@ -10,6 +10,7 @@ import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
 import { computeTopStats, type TopStats } from "@/app/lib/game-stats";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { computeFullArchive } from "./tournament-archive";
+import { recordEventResults } from "@/app/lib/event-results";
 import { resetSeason } from "./league-actions";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 
@@ -544,6 +545,15 @@ export async function completeTournament() {
         updated_at: new Date().toISOString(),
       })
       .eq("id", activeId);
+
+    // Index the archive into per-player rows for profiles. Derived data, so a
+    // failure here must not take the completion with it — the archive is
+    // already written and rebuildEventResults() can regenerate this later.
+    try {
+      await recordEventResults(activeId, fullArchive);
+    } catch (e) {
+      console.error("[completeTournament] failed to record player event results", e);
+    }
   }
 
   // Reuse the existing season-reset (wipes matches, unassigns players, strips roles).
