@@ -12,10 +12,16 @@ import {
   type BenefitAccountRow,
   type NameStyleRow,
 } from "@/app/lib/patreon-entitlements";
+import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
 import { nameStyle } from "@/app/lib/name-glint";
 import { TierGlow, type FieldSpec, type GlowSpec } from "./tier-glow";
+import { BenefitsPreview, type PreviewTier } from "./benefits-preview";
 import { AVATAR_BORDER_BENEFIT, getAvatarBorder } from "@/app/lib/avatar-borders";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
+
+// Access is handed out by a director in Discord, so advertising it next to a
+// pledge button would promise something the pledge doesn't buy.
+const PREVIEW_HIDDEN_BENEFITS = new Set(["discord-supporter-channel"]);
 
 const REASONS = [
   "Tournament prize pools that make competing worth it",
@@ -135,6 +141,29 @@ type Patron = {
 };
 type TierSection = { tier: string; rank: number; patrons: Patron[] };
 
+// What a prospective patron would get, resolved from the tier data the page has
+// already fetched - no extra queries. Keyed by title so duplicate rows in
+// patreon_tier_prices can't produce two cards for one tier.
+function buildPreviewTiers(
+  prices: { title: string; cents: number }[],
+  ranks: Map<string, number>,
+  byTier: Map<string, Map<string, string | null>>,
+): PreviewTier[] {
+  const tiers = new Map<string, PreviewTier>();
+  for (const { title, cents } of prices) {
+    const rank = ranks.get(title);
+    if (rank === undefined) continue;
+    const resolved = byTier.get(title);
+    const benefitIds = PATREON_BENEFITS.filter(
+      (b) => !PREVIEW_HIDDEN_BENEFITS.has(b.id) && resolved?.has(b.id),
+    ).map((b) => b.id);
+    if (benefitIds.length === 0) continue;
+    tiers.set(title, { title, rank, cents, benefitIds });
+  }
+  // Cheapest first, so the cards read as a ladder from where someone starts.
+  return Array.from(tiers.values()).sort((a, b) => a.cents - b.cents || a.title.localeCompare(b.title));
+}
+
 export default async function SupportPage() {
   const prices = await getTierPrices();
   const [patreonUrl, { data: accounts }, byTier] = await Promise.all([
@@ -192,6 +221,15 @@ export default async function SupportPage() {
     });
   }
 
+  const previewTiers = buildPreviewTiers(prices, ranks, byTier);
+  const previewShown = new Set(previewTiers.flatMap((t) => t.benefitIds));
+  const previewBenefits = PATREON_BENEFITS.filter((b) => previewShown.has(b.id)).map((b) => ({
+    id: b.id,
+    title: b.title,
+    description: b.description,
+    alwaysOn: b.alwaysOn === true,
+  }));
+
   const sections = Array.from(byTierTitle.values()).sort((a, b) => a.rank - b.rank);
   for (const section of sections) section.patrons.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -229,18 +267,24 @@ export default async function SupportPage() {
           ))}
         </ul>
 
-        {patreonUrl ? (
-          <a
-            href={patreonUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
-          >
-            Become a Patron
-          </a>
-        ) : (
-          <p className="text-sm text-zinc-500">Patron sign-ups are coming soon — check back shortly.</p>
-        )}
+        <div className="flex flex-col items-center gap-3">
+          <div className="flex items-center justify-center gap-3 flex-wrap">
+            {patreonUrl && (
+              <a
+                href={patreonUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                Become a Patron
+              </a>
+            )}
+            {previewTiers.length > 0 && <BenefitsPreview tiers={previewTiers} benefits={previewBenefits} />}
+          </div>
+          {!patreonUrl && (
+            <p className="text-sm text-zinc-500">Patron sign-ups are coming soon — check back shortly.</p>
+          )}
+        </div>
 
         {sections.length > 0 && (
           <div className="space-y-8 pt-4">

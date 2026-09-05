@@ -37,7 +37,7 @@ export const PATREON_BENEFITS: PatreonBenefit[] = [
   {
     id: "featured-on-support-page",
     title: "Name listed on Support Us tab",
-    description: "Player's name shown in the \"Our Patrons\" list on /dashboard/support.",
+    description: "Player's name shown in the \"Our Patrons\" list on the Support Us page.",
   },
   {
     id: "colored-username",
