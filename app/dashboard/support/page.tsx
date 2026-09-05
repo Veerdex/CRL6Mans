@@ -19,10 +19,6 @@ import { BenefitsPreview, type PreviewTier } from "./benefits-preview";
 import { AVATAR_BORDER_BENEFIT, getAvatarBorder } from "@/app/lib/avatar-borders";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
-// Access is handed out by a director in Discord, so advertising it next to a
-// pledge button would promise something the pledge doesn't buy.
-const PREVIEW_HIDDEN_BENEFITS = new Set(["discord-supporter-channel"]);
-
 const REASONS = [
   "Tournament prize pools that make competing worth it",
   "Server hosting, bot infrastructure, and site costs",
@@ -154,9 +150,7 @@ function buildPreviewTiers(
     const rank = ranks.get(title);
     if (rank === undefined) continue;
     const resolved = byTier.get(title);
-    const benefitIds = PATREON_BENEFITS.filter(
-      (b) => !PREVIEW_HIDDEN_BENEFITS.has(b.id) && resolved?.has(b.id),
-    ).map((b) => b.id);
+    const benefitIds = PATREON_BENEFITS.filter((b) => resolved?.has(b.id)).map((b) => b.id);
     if (benefitIds.length === 0) continue;
     tiers.set(title, { title, rank, cents, benefitIds });
   }

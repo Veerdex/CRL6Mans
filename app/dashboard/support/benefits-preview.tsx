@@ -84,7 +84,7 @@ export function BenefitsPreview({ tiers, benefits }: { tiers: PreviewTier[]; ben
                             {byId.get(id)?.title}
                             {byId.get(id)?.alwaysOn && (
                               <span className="ml-1.5 align-middle text-[0.65rem] uppercase tracking-wide text-zinc-500">
-                                Automatic
+                                Included
                               </span>
                             )}
                           </span>
@@ -109,7 +109,8 @@ export function BenefitsPreview({ tiers, benefits }: { tiers: PreviewTier[]; ben
 
               <p className="text-xs text-zinc-500 border-t border-zinc-800 pt-4">
                 Each tier includes everything from the tiers below it. Benefits start switched off — turn on the ones
-                you want in Settings after you pledge. Ones marked Automatic apply on their own.
+                you want in Settings after you pledge. Ones marked Included come with the tier, with nothing to turn
+                on.
               </p>
             </div>
           </div>
