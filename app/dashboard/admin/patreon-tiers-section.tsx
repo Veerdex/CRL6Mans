@@ -202,16 +202,18 @@ export function PatreonTiersSection({
         next[tierTitle] = own;
         return next;
       }
-      // A benefit starts at exactly one tier, so claiming it here has to clear
-      // it from everything cheaper — that is what turns "inherited" into
-      // "starts here" instead of adding a redundant second row.
-      const tier = tiers.find((t) => t.title === tierTitle);
-      if (tier)
-        for (const source of cheaperTiers(tier, tiers))
-          if (benefitId in (prev[source.title] ?? {})) {
-            const stripped = { ...prev[source.title] };
+      // A benefit starts at exactly one tier, so claiming it here clears every
+      // other priced tier's row: cheaper tiers lose it outright, more expensive
+      // ones keep it by inheritance. Leaving a redundant row above would let it
+      // quietly become the new origin the next time this is unchecked, so the
+      // benefit would survive a removal that looked complete.
+      const cents = tiers.find((t) => t.title === tierTitle)?.amountCents ?? null;
+      if (cents !== null)
+        for (const other of tiers)
+          if (other.title !== tierTitle && other.amountCents !== null && benefitId in (prev[other.title] ?? {})) {
+            const stripped = { ...prev[other.title] };
             delete stripped[benefitId];
-            next[source.title] = stripped;
+            next[other.title] = stripped;
           }
       next[tierTitle] = { ...prev[tierTitle], [benefitId]: "" };
       return next;
