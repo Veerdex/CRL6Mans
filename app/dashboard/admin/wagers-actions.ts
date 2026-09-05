@@ -4,15 +4,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isModeratorVerified, isDirectorVerified } from "@/app/lib/players";
+import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-
-async function requireModerator(): Promise<string> {
-  const cookieStore = await cookies();
-  const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isModeratorVerified(session.userId))) redirect("/dashboard");
-  return session.userId;
-}
 
 async function requireDirector(): Promise<string> {
   const cookieStore = await cookies();
@@ -34,7 +27,7 @@ export async function adjustPlayerBalance(
   amount: number,
   reason: string,
 ): Promise<{ error?: string; ok?: boolean }> {
-  const adminId = await requireModerator();
+  const adminId = await requireDirector();
   if (!Number.isInteger(amount) || amount === 0) return { error: "Enter a non-zero whole number." };
   if (!reason.trim()) return { error: "A reason is required." };
 

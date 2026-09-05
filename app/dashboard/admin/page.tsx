@@ -10,7 +10,7 @@ import { AdminNotificationToggles } from "./admin-notification-toggles";
 import { InsightsChart, type InsightsPoint } from "./insights-chart";
 import { FormatEditor, type SeasonFormatConfig } from "../season/format-editor";
 import { AdminSubSection } from "./admin-sub-section";
-import { AdminTabsProvider, AdminSidebar, AdminSection, type SidebarSection } from "./admin-tabs";
+import { AdminTabsProvider, AdminSidebar, AdminSection, ACCESS_RANK, type SidebarSection } from "./admin-tabs";
 import { RegistrationCard } from "./registration-card";
 import { PlayerPanel, type CombinedPlayer, type PlatformAccountSummary } from "./player-panel";
 import { GuestAccountPanel, type GuestAccount } from "./guest-account-panel";
@@ -945,98 +945,97 @@ export default async function AdminPage() {
     else if (e.type === "draft_join") b.draftJoins++;
   }
 
-  const SECTIONS: SidebarSection[] = [
+  const ALL_SECTIONS: SidebarSection[] = [
     {
       id: "overview",
       label: "Overview",
       subTabs: [
-        { id: "notifications", label: "Notifications" },
-        ...(userIsDirector ? [{ id: "team-slots", label: "Team Slots", value: (teamSlots ?? []).length }] : []),
+        { id: "notifications", label: "Notifications", level: "director" },
+        { id: "team-slots", label: "Team Slots", level: "director", value: (teamSlots ?? []).length },
       ],
     },
     {
       id: "players-staff",
       label: "Players & Staff",
-      notification: identityDiscrepancyCards.length,
       subTabs: [
-        { id: "players", label: "Players", value: combinedPlayers.length },
-        { id: "pending-accounts", label: "Unregistered / Pending Accounts", value: guestAccounts.length },
-        ...(userIsDirector ? [{ id: "identity-discrepancies", label: "Identity Discrepancies", notification: identityDiscrepancyCards.length }] : []),
-        { id: "staff-management", label: "Staff Management" },
+        { id: "players", label: "Players", level: "moderator", value: combinedPlayers.length },
+        { id: "pending-accounts", label: "Unregistered / Pending Accounts", level: "moderator", value: guestAccounts.length },
+        { id: "identity-discrepancies", label: "Identity Discrepancies", level: "director", notification: identityDiscrepancyCards.length },
+        { id: "staff-management", label: "Staff Management", level: "director" },
       ],
     },
     {
       id: "match-ops",
       label: "Match Ops",
-      notification: matchesUnderReviewCount + subRequestCards.length + scheduleOverrideCards.length,
       subTabs: [
-        { id: "match-reporting", label: "Match Reporting", value: matchRows.length, notification: matchesUnderReviewCount || undefined },
-        { id: "sub-requests", label: "Sub Requests", notification: subRequestCards.length || undefined },
-        { id: "schedule-approvals", label: "Schedule Approvals", notification: scheduleOverrideCards.length || undefined },
+        { id: "match-reporting", label: "Match Reporting", level: "moderator", value: matchRows.length, notification: matchesUnderReviewCount || undefined },
+        { id: "sub-requests", label: "Sub Requests", level: "moderator", notification: subRequestCards.length || undefined },
+        { id: "schedule-approvals", label: "Schedule Approvals", level: "moderator", notification: scheduleOverrideCards.length || undefined },
       ],
     },
     {
       id: "approvals",
       label: "Approvals",
-      notification: pending.length + platformClaimCards.length + playerEditRequestCards.length,
       subTabs: [
-        { id: "registrations-platform", label: "Registrations & Platform Claims", notification: (pending.length + platformClaimCards.length) || undefined },
-        { id: "profile-changes", label: "Profile Change Requests", notification: playerEditRequestCards.length || undefined },
-        { id: "verified-platform", label: "Verified Platform Accounts", value: platformVerifiedCards.length },
+        { id: "registrations-platform", label: "Registrations & Platform Claims", level: "moderator", notification: (pending.length + platformClaimCards.length) || undefined },
+        { id: "profile-changes", label: "Profile Change Requests", level: "moderator", notification: playerEditRequestCards.length || undefined },
+        { id: "verified-platform", label: "Verified Platform Accounts", level: "moderator", value: platformVerifiedCards.length },
       ],
     },
     {
       id: "season-league",
       label: "Season & League",
-      notification: userIsDirector && seasonActive ? schedulingUnscheduledCount : 0,
-      subTabs: userIsDirector
-        ? [
-            { id: "announcements", label: "Announcements", value: settings?.announcement_text ? 1 : undefined },
-            ...(seasonActive ? [{ id: "scheduling", label: "Scheduling", notification: schedulingUnscheduledCount || undefined }] : []),
-            { id: "tournaments", label: "Tournaments", value: (tournaments ?? []).filter((t) => t.status === "scheduled" || t.status === "active").length },
-            { id: "season-settings", label: "Season Settings" },
-            { id: "draft-pool", label: "Draft Pool", value: enteredCount + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0) },
-            { id: "league-controls", label: "League Controls" },
-          ]
-        : [],
+      subTabs: [
+        { id: "announcements", label: "Announcements", level: "director", value: settings?.announcement_text ? 1 : undefined },
+        ...(seasonActive ? [{ id: "scheduling", label: "Scheduling", level: "director" as const, notification: schedulingUnscheduledCount || undefined }] : []),
+        { id: "tournaments", label: "Tournaments", level: "director", value: (tournaments ?? []).filter((t) => t.status === "scheduled" || t.status === "active").length },
+        { id: "season-settings", label: "Season Settings", level: "director" },
+        { id: "draft-pool", label: "Draft Pool", level: "director", value: enteredCount + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0) },
+        { id: "league-controls", label: "League Controls", level: "director" },
+      ],
     },
     {
       id: "wagers",
       label: "Wagers",
       subTabs: [
-        { id: "wagers", label: "Wagers" },
-        { id: "game-leaderboard", label: "Game Leaderboard", value: gameScores.length },
+        { id: "wagers", label: "Wagers", level: "director" },
+        { id: "game-leaderboard", label: "Game Leaderboard", level: "director", value: gameScores.length },
       ],
     },
     {
       id: "data",
       label: "Data",
       subTabs: [
-        { id: "insights", label: "Insights" },
-        { id: "event-overview", label: "Event Overview" },
-        { id: "tab-visits", label: "Tab Visits" },
-        { id: "patrons", label: "Patrons" },
-        ...(userIsDirector ? [{ id: "patreon-tiers", label: "Tiers & Benefits" }] : []),
-        ...(userIsDirector ? [{ id: "patreon-overrides", label: "Tier Overrides" }] : []),
-        ...(userIsDirector ? [{ id: "storage", label: "Storage & Limits" }] : []),
+        { id: "insights", label: "Insights", level: "moderator" },
+        { id: "event-overview", label: "Event Overview", level: "moderator" },
+        { id: "tab-visits", label: "Tab Visits", level: "moderator" },
+        { id: "patrons", label: "Patrons", level: "moderator" },
+        { id: "patreon-tiers", label: "Tiers & Benefits", level: "director" },
+        { id: "patreon-overrides", label: "Tier Overrides", level: "director" },
+        { id: "storage", label: "Storage & Limits", level: "director" },
       ],
     },
-    ...(userIsDirector
-      ? [{
-          id: "sponsors",
-          label: "Sponsors",
-          subTabs: [
-            { id: "sponsors-list", label: "Sponsors" },
-            { id: "designs", label: "Designs" },
-            { id: "tab-manager", label: "Tab Manager" },
-            { id: "theme-designer", label: "Theme Designer" },
-          ],
-        }]
-      : []),
+    {
+      id: "sponsors",
+      label: "Sponsors",
+      subTabs: [
+        { id: "sponsors-list", label: "Sponsors", level: "director" },
+        { id: "designs", label: "Designs", level: "director" },
+        { id: "tab-manager", label: "Tab Manager", level: "director" },
+        { id: "theme-designer", label: "Theme Designer", level: "director" },
+      ],
+    },
   ];
 
+  // Tabs above this admin's rank are dropped, and a section left with nothing
+  // visible disappears with them rather than rendering an empty dropdown.
+  const viewerRank = ACCESS_RANK[userIsCEO ? "ceo" : userIsDirector ? "director" : "moderator"];
+  const SECTIONS: SidebarSection[] = ALL_SECTIONS
+    .map((s) => ({ ...s, subTabs: s.subTabs.filter((t) => ACCESS_RANK[t.level] <= viewerRank) }))
+    .filter((s) => s.subTabs.length > 0);
+
   return (
-    <AdminTabsProvider>
+    <AdminTabsProvider sections={SECTIONS}>
     <div className="p-4 sm:p-6 lg:p-8">
 
       {/* ── Missing settings row warning ── */}
@@ -1058,6 +1057,7 @@ export default async function AdminPage() {
 
       <AdminSection id="overview">
       {/* ── Notifications ── */}
+      {userIsDirector && (
       <AdminSubSection
         sectionId="overview"
         tabId="notifications"
@@ -1070,6 +1070,7 @@ export default async function AdminPage() {
           initial={(settings?.admin_notification_prefs as Record<string, boolean> | null) ?? {}}
         />
       </AdminSubSection>
+      )}
       </AdminSection>
 
       <AdminSection id="players-staff">
@@ -1271,7 +1272,7 @@ export default async function AdminPage() {
       )}
 
       {/* ── Staff Management ── */}
-      <StaffSection userIsCEO={userIsCEO} userIsDirector={userIsDirector} />
+      {userIsDirector && <StaffSection userIsCEO={userIsCEO} userIsDirector={userIsDirector} />}
       </AdminSection>
 
       <AdminSection id="match-ops">
@@ -1477,6 +1478,7 @@ export default async function AdminPage() {
       )}
       </AdminSection>
 
+      {userIsDirector && (
       <AdminSection id="wagers">
       {/* ── Wagers ── */}
       <AdminSubSection
@@ -1488,9 +1490,9 @@ export default async function AdminPage() {
       >
         <div className="space-y-6">
           <WagersBalanceTable rows={wagerBalanceRows} />
-          {userIsDirector && <WagersModeToggle currentMode={globalBettingMode} />}
-          {userIsDirector && <WagersBulkForm approvedCount={wagerBalanceRows.length} />}
-          {userIsDirector && <WagersResetForm approvedCount={wagerBalanceRows.length} />}
+          <WagersModeToggle currentMode={globalBettingMode} />
+          <WagersBulkForm approvedCount={wagerBalanceRows.length} />
+          <WagersResetForm approvedCount={wagerBalanceRows.length} />
           <div>
             <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Recent Adjustments</p>
             {balanceAdjustmentLog.length === 0 ? (
@@ -1528,6 +1530,7 @@ export default async function AdminPage() {
         <GameLeaderboardPanel scores={gameScores} />
       </AdminSubSection>
       </AdminSection>
+      )}
 
       <AdminSection id="data">
         {/* ── Insights ── */}

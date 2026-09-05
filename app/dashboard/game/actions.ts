@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isModeratorVerified } from "@/app/lib/players";
+import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 
 export type LeaderboardRow = {
@@ -105,6 +105,13 @@ export async function submitScore(
 export type GameScoreRow = { discord_id: string; username: string; display_name: string | null; score: number; updated_at: string };
 
 export async function getAllGameScores(): Promise<GameScoreRow[]> {
+  // Returns empty rather than redirecting — the admin page awaits this
+  // unconditionally, so a redirect would bounce moderators off the whole page
+  // instead of just hiding the Director-only leaderboard.
+  const cookieStore = await cookies();
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId || !(await isDirectorVerified(session.userId))) return [];
+
   const { data } = await supabaseAdmin
     .from("game_scores")
     .select("discord_id, username, score, updated_at")
@@ -123,7 +130,7 @@ export async function getAllGameScores(): Promise<GameScoreRow[]> {
 export async function deleteGameScore(discordId: string) {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isModeratorVerified(session.userId))) redirect("/dashboard");
+  if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
 
   const { error } = await supabaseAdmin.from("game_scores").delete().eq("discord_id", discordId);
   if (error) return { error: error.message };

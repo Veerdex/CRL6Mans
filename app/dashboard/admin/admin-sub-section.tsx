@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAdminNav } from "./admin-tabs";
+import { ACCESS_LABEL, useAdminNav } from "./admin-tabs";
 
 interface Props {
   /** Must match the id of the SidebarSection this belongs to. */
@@ -34,8 +34,15 @@ export function AdminSubSection({
   defaultOpen = true,
   children,
 }: Props) {
-  const { isDesktop, hydrated, activeSubTabBySection, openMobilePanel, setOpenMobilePanel } = useAdminNav();
+  const { isDesktop, hydrated, activeSubTabBySection, openMobilePanel, setOpenMobilePanel, levelByTab } = useAdminNav();
   const [mobileOpen, setMobileOpen] = useState(defaultOpen);
+
+  // Shown beside the heading rather than folded into `title`, which would make
+  // the sidebar labels unreadably long.
+  const level = levelByTab[`${sectionId}:${tabId}`];
+  const levelSuffix = level ? (
+    <span className="ml-2 text-sm font-normal text-zinc-500 shrink-0">({ACCESS_LABEL[level]})</span>
+  ) : null;
 
   // Apply the admin's persisted mobile-panel preference once, right when it loads
   // from localStorage. A stored value (including "" for "explicitly none") overrides
@@ -52,7 +59,10 @@ export function AdminSubSection({
     return (
       <section>
         <div className="mb-5 pb-3 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-white">{title}</h2>
+          <h2 className="text-lg font-semibold text-white">
+            {title}
+            {levelSuffix}
+          </h2>
           {description && <p className="mt-1.5 text-sm text-zinc-500">{description}</p>}
         </div>
         {children}
@@ -72,7 +82,10 @@ export function AdminSubSection({
     <section>
       <div className="w-full flex items-center gap-3 mb-5 pb-3 border-b border-zinc-800">
         <button onClick={toggleMobile} className="flex items-center gap-2 flex-1 text-left group min-w-0">
-          <h2 className="text-lg font-semibold text-white truncate min-w-0">{title}</h2>
+          <h2 className="text-lg font-semibold text-white truncate min-w-0">
+            {title}
+            {levelSuffix}
+          </h2>
           {description && (
             <span className="relative group/tip shrink-0 hidden md:inline-flex">
               <svg

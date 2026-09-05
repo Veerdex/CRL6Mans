@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isDirectorVerified, isCEOVerified, isModeratorVerified } from "@/app/lib/players";
+import { isDirectorVerified, isCEOVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { addRoleById, removeRoleById } from "@/app/lib/discord-api";
 import { getStaffRoleIdMap } from "@/app/lib/discord-bot";
@@ -48,7 +48,7 @@ export type StaffMember = {
 
 export async function getStaffList(): Promise<StaffMember[]> {
   const session = await getSession();
-  if (!session?.userId || !(await isModeratorVerified(session.userId))) return [];
+  if (!session?.userId || !(await isDirectorVerified(session.userId))) return [];
   const { data } = await supabaseAdmin
     .from("staff_roles")
     .select("discord_id, role, username, added_by, created_at")

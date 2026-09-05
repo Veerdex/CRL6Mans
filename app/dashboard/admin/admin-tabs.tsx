@@ -14,18 +14,32 @@ const ACTIVE_SUBTAB_KEY = "crl6mans_admin_active_subtab";
 // panels keep using their own defaultOpen prop).
 const OPEN_MOBILE_PANEL_KEY = "crl6mans_admin_open_mobile_panel";
 
+// Minimum staff rank that may see a tab. The page filters SECTIONS by this and
+// drops any section left with no visible tabs, so a moderator never sees a
+// dropdown whose contents are all above them.
+export type AccessLevel = "moderator" | "director" | "ceo";
+
+export const ACCESS_RANK: Record<AccessLevel, number> = { moderator: 1, director: 2, ceo: 3 };
+export const ACCESS_LABEL: Record<AccessLevel, string> = {
+  moderator: "Moderator +",
+  director: "Director +",
+  ceo: "CEO",
+};
+
 export interface SidebarSubTab {
   id: string;
   label: string;
+  level: AccessLevel;
   value?: number;
   notification?: number;
 }
 export interface SidebarSection {
   id: string;
   label: string;
-  notification?: number;
   subTabs: SidebarSubTab[];
 }
+
+const tabKey = (sectionId: string, tabId: string) => `${sectionId}:${tabId}`;
 
 interface AdminNavState {
   isDesktop: boolean;
@@ -37,6 +51,8 @@ interface AdminNavState {
   /** undefined = no persisted preference yet; "" = persisted "nothing open" */
   openMobilePanel: string | undefined;
   setOpenMobilePanel: (title: string) => void;
+  /** Keyed by `sectionId:tabId` — drives the "(Director +)" suffix on panel headings. */
+  levelByTab: Record<string, AccessLevel>;
 }
 
 const AdminNavContext = createContext<AdminNavState>({
@@ -48,16 +64,17 @@ const AdminNavContext = createContext<AdminNavState>({
   setActiveSubTab: () => {},
   openMobilePanel: undefined,
   setOpenMobilePanel: () => {},
+  levelByTab: {},
 });
 
 export function useAdminNav() {
   return useContext(AdminNavContext);
 }
 
-export function AdminTabsProvider({ children }: { children: React.ReactNode }) {
+export function AdminTabsProvider({ sections, children }: { sections: SidebarSection[]; children: React.ReactNode }) {
   const [isDesktop, setIsDesktop] = useState(false);
   const [hydrated, setHydrated] = useState(false);
-  const [activeSection, setActiveSectionState] = useState("overview");
+  const [activeSection, setActiveSectionState] = useState(sections[0]?.id ?? "");
   const [activeSubTabBySection, setActiveSubTabBySectionState] = useState<Record<string, string>>({});
   const [openMobilePanel, setOpenMobilePanelState] = useState<string | undefined>(undefined);
 
@@ -67,13 +84,22 @@ export function AdminTabsProvider({ children }: { children: React.ReactNode }) {
     const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
     mql.addEventListener("change", onChange);
 
+    // Persisted selections are dropped when they name a section or tab this
+    // admin cannot see — a demoted director would otherwise restore a hidden tab
+    // and land on a blank content area.
+    const visibleSections = new Set(sections.map((s) => s.id));
+    const visibleTabs = new Set(sections.flatMap((s) => s.subTabs.map((t) => tabKey(s.id, t.id))));
+
     const storedSection = localStorage.getItem(ACTIVE_SECTION_KEY);
-    if (storedSection) setActiveSectionState(storedSection);
+    if (storedSection && visibleSections.has(storedSection)) setActiveSectionState(storedSection);
 
     const storedSubTabs = localStorage.getItem(ACTIVE_SUBTAB_KEY);
     if (storedSubTabs) {
       try {
-        setActiveSubTabBySectionState(JSON.parse(storedSubTabs));
+        const parsed = JSON.parse(storedSubTabs) as Record<string, string>;
+        setActiveSubTabBySectionState(
+          Object.fromEntries(Object.entries(parsed).filter(([sectionId, tabId]) => visibleTabs.has(tabKey(sectionId, tabId)))),
+        );
       } catch {
         /* ignore malformed persisted state */
       }
@@ -84,7 +110,13 @@ export function AdminTabsProvider({ children }: { children: React.ReactNode }) {
 
     setHydrated(true);
     return () => mql.removeEventListener("change", onChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const levelByTab: Record<string, AccessLevel> = {};
+  for (const sec of sections) {
+    for (const t of sec.subTabs) levelByTab[tabKey(sec.id, t.id)] = t.level;
+  }
 
   const setActiveSection = (id: string) => {
     setActiveSectionState(id);
@@ -115,6 +147,7 @@ export function AdminTabsProvider({ children }: { children: React.ReactNode }) {
         setActiveSubTab,
         openMobilePanel,
         setOpenMobilePanel,
+        levelByTab,
       }}
     >
       {children}
@@ -160,6 +193,8 @@ export function AdminSidebar({ sections }: { sections: SidebarSection[] }) {
       {sections.map((sec) => {
         const expanded = sec.id === activeSection;
         const activeSub = activeSubTabBySection[sec.id] ?? sec.subTabs[0]?.id;
+        const sectionValue = sec.subTabs.reduce((n, t) => n + (t.value ?? 0), 0);
+        const sectionNotification = sec.subTabs.reduce((n, t) => n + (t.notification ?? 0), 0);
         return (
           <div key={sec.id}>
             <button
@@ -182,7 +217,7 @@ export function AdminSidebar({ sections }: { sections: SidebarSection[] }) {
                 <polyline points="9 6 15 12 9 18" />
               </svg>
               <span className="flex-1 truncate">{sec.label}</span>
-              <Badge notification={sec.notification} />
+              <Badge value={sectionValue} notification={sectionNotification} />
             </button>
             {expanded && (
               <div className="ml-4 mt-1 pl-3 border-l border-zinc-800 space-y-0.5">
