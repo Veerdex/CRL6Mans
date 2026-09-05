@@ -6,7 +6,7 @@ import { MediaFeed, type Clip } from "@/app/dashboard/media/media-feed";
 import { ClipOfWeek } from "@/app/dashboard/media/clip-of-week";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
-const CLIP_SELECT = "id, title, url, embed_url, thumbnail_url, platform, likes_count, created_at, players!clips_player_id_fkey(username, display_name)";
+const CLIP_SELECT = "id, title, url, embed_url, thumbnail_url, platform, likes_count, created_at, players!clips_player_id_fkey(discord_id, username, display_name)";
 
 type RawClipRow = {
   id: string;
@@ -17,10 +17,15 @@ type RawClipRow = {
   platform: Clip["platform"];
   likes_count: number;
   created_at: string;
-  players: { username: string; display_name: string | null } | null;
+  players: { discord_id: string; username: string; display_name: string | null } | null;
 };
 
-function toClip(row: RawClipRow): Clip {
+// The avatar comes from accounts (Tier 1), which every login refreshes. The copy
+// on players is only whatever was there at approval, so reading it would show a
+// submitter's old picture forever. Passed in as a map rather than joined because
+// the Clip of the Week row is fetched separately and its author is not
+// necessarily anywhere in the feed.
+function toClip(row: RawClipRow, avatarByDiscordId: Map<string, string | null>): Clip {
   return {
     id: row.id,
     title: row.title,
@@ -32,6 +37,8 @@ function toClip(row: RawClipRow): Clip {
     created_at: row.created_at,
     submitted_by_username: row.players?.username ?? null,
     submitted_by_display_name: row.players?.display_name ?? null,
+    submitted_by_discord_id: row.players?.discord_id ?? null,
+    submitted_by_avatar: row.players?.discord_id ? avatarByDiscordId.get(row.players.discord_id) ?? null : null,
   };
 }
 
@@ -65,7 +72,27 @@ export default async function MediaPage() {
       ? supabaseAdmin.from("clip_likes").select("clip_id").eq("player_id", currentPlayerId)
       : Promise.resolve({ data: [] as { clip_id: string }[] }),
   ]);
-  const clipOfWeek = clipOfWeekRow ? toClip(clipOfWeekRow as unknown as RawClipRow) : null;
+  const feedRows = (clips ?? []) as unknown as RawClipRow[];
+  const cowRow = clipOfWeekRow as unknown as RawClipRow | null;
+
+  // Can only run once the clip rows are in hand, so it costs one extra round
+  // trip rather than joining onto CLIP_SELECT - the price of reading the avatar
+  // from the tier that actually keeps it current.
+  const authorDiscordIds = [
+    ...new Set(
+      [...feedRows, ...(cowRow ? [cowRow] : [])]
+        .map((r) => r.players?.discord_id)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const { data: authorAccounts } = authorDiscordIds.length
+    ? await supabaseAdmin.from("accounts").select("discord_id, avatar").in("discord_id", authorDiscordIds)
+    : { data: [] as { discord_id: string; avatar: string | null }[] };
+  const avatarByDiscordId = new Map<string, string | null>(
+    (authorAccounts ?? []).map((a) => [a.discord_id as string, (a.avatar as string | null) ?? null]),
+  );
+
+  const clipOfWeek = cowRow ? toClip(cowRow, avatarByDiscordId) : null;
   const likedClipIds: string[] = (likes ?? []).map((l) => l.clip_id as string);
 
   return (
@@ -82,7 +109,7 @@ export default async function MediaPage() {
         <ClipOfWeek clip={clipOfWeek} isModerator={moderator} />
 
         <MediaFeed
-          clips={((clips ?? []) as unknown as RawClipRow[]).map(toClip)}
+          clips={feedRows.map((r) => toClip(r, avatarByDiscordId))}
           likedClipIds={likedClipIds}
           canParticipate={currentPlayerId !== null}
           isModerator={moderator}

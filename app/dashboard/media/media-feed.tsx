@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import { submitClip, toggleClipLike, deleteClip, setClipOfWeek, toggleClipConfirmations } from "@/app/dashboard/media/actions";
 import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { isLinkOnlyPlatform, resolveClipEmbedUrl, type ClipPlatform } from "@/app/lib/clip-embed";
 
@@ -20,6 +21,8 @@ export type Clip = {
   created_at: string;
   submitted_by_username: string | null;
   submitted_by_display_name: string | null;
+  submitted_by_discord_id: string | null;
+  submitted_by_avatar: string | null;
 };
 
 const LINK_ONLY_LABELS: Record<string, string> = {
@@ -138,8 +141,18 @@ function ClipCard({
       <p className="text-xs text-zinc-500">
         Posted by{" "}
         {clip.submitted_by_username ? (
-          <PlayerName displayName={clip.submitted_by_display_name} username={clip.submitted_by_username} className="text-zinc-400" />
+          <span className="inline-flex items-center gap-1.5 align-middle max-w-full min-w-0">
+            <PlayerAvatar
+              discordId={clip.submitted_by_discord_id}
+              avatar={clip.submitted_by_avatar}
+              username={clip.submitted_by_username}
+              className="w-5 h-5"
+            />
+            <PlayerName displayName={clip.submitted_by_display_name} username={clip.submitted_by_username} className="text-zinc-400" />
+          </span>
         ) : (
+          // No avatar here on purpose: a default Discord egg beside this would
+          // read as a real account rather than an absent one.
           "a deleted player"
         )}
       </p>

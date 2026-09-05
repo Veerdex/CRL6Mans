@@ -78,16 +78,21 @@ export default async function DashboardPage({
     platform: Clip["platform"];
     likes_count: number;
     created_at: string;
-    players: { username: string; display_name: string | null } | null;
+    players: { discord_id: string; username: string; display_name: string | null } | null;
   };
   const { data: clipOfWeekRow } = settings?.clip_of_week_id
     ? await supabaseAdmin
         .from("clips")
-        .select("id, title, url, embed_url, thumbnail_url, platform, likes_count, created_at, players!clips_player_id_fkey(username, display_name)")
+        .select("id, title, url, embed_url, thumbnail_url, platform, likes_count, created_at, players!clips_player_id_fkey(discord_id, username, display_name)")
         .eq("id", settings.clip_of_week_id)
         .single()
     : { data: null as RawClipOfWeekRow | null };
   const rawClipOfWeek = clipOfWeekRow as unknown as RawClipOfWeekRow | null;
+  // Read off accounts (Tier 1) rather than the joined players row: every login
+  // refreshes the avatar there, while the players copy is frozen at approval.
+  const { data: clipAuthor } = rawClipOfWeek?.players?.discord_id
+    ? await supabaseAdmin.from("accounts").select("avatar").eq("discord_id", rawClipOfWeek.players.discord_id).single()
+    : { data: null as { avatar: string | null } | null };
   const clipOfWeek: Clip | null = rawClipOfWeek
     ? {
         id: rawClipOfWeek.id,
@@ -100,6 +105,8 @@ export default async function DashboardPage({
         created_at: rawClipOfWeek.created_at,
         submitted_by_username: rawClipOfWeek.players?.username ?? null,
         submitted_by_display_name: rawClipOfWeek.players?.display_name ?? null,
+        submitted_by_discord_id: rawClipOfWeek.players?.discord_id ?? null,
+        submitted_by_avatar: (clipAuthor?.avatar as string | null) ?? null,
       }
     : null;
   const draftQueue = draftQueueRes.data ?? [];

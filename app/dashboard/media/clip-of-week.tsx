@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { clearClipOfWeek } from "@/app/dashboard/media/actions";
 import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
+import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { resolveClipEmbedUrl } from "@/app/lib/clip-embed";
 import type { Clip } from "@/app/dashboard/media/media-feed";
@@ -57,7 +58,15 @@ export function ClipOfWeek({ clip, isModerator }: { clip: Clip | null; isModerat
       <p className="text-sm text-zinc-500">
         Posted by{" "}
         {clip.submitted_by_username ? (
-          <PlayerName displayName={clip.submitted_by_display_name} username={clip.submitted_by_username} className="text-zinc-400" />
+          <span className="inline-flex items-center gap-1.5 align-middle max-w-full min-w-0">
+            <PlayerAvatar
+              discordId={clip.submitted_by_discord_id}
+              avatar={clip.submitted_by_avatar}
+              username={clip.submitted_by_username}
+              className="w-6 h-6"
+            />
+            <PlayerName displayName={clip.submitted_by_display_name} username={clip.submitted_by_username} className="text-zinc-400" />
+          </span>
         ) : (
           "a deleted player"
         )}
