@@ -106,7 +106,12 @@ export default async function MediaPage() {
           <p className="text-zinc-400">Clips from the community — like your favorites, the top clip each week gets crowned.</p>
         </div>
 
-        <ClipOfWeek clip={clipOfWeek} isModerator={moderator} />
+        <ClipOfWeek
+          clip={clipOfWeek}
+          isModerator={moderator}
+          liked={clipOfWeek ? likedClipIds.includes(clipOfWeek.id) : false}
+          canParticipate={currentPlayerId !== null}
+        />
 
         <MediaFeed
           clips={feedRows.map((r) => toClip(r, avatarByDiscordId))}

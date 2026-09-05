@@ -1,16 +1,27 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { clearClipOfWeek } from "@/app/dashboard/media/actions";
+import { useEffect, useOptimistic, useState, useTransition } from "react";
+import { clearClipOfWeek, toggleClipLike } from "@/app/dashboard/media/actions";
 import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { resolveClipEmbedUrl } from "@/app/lib/clip-embed";
 import type { Clip } from "@/app/dashboard/media/media-feed";
 
-export function ClipOfWeek({ clip, isModerator }: { clip: Clip | null; isModerator: boolean }) {
+type CardProps = { isModerator: boolean; liked: boolean; canParticipate: boolean };
+
+// The body lives in a separate component so the "no clip crowned yet" guard can
+// return before any hook runs — the like state needs a non-null clip to read its
+// count from, and hooks can't sit behind an early return.
+export function ClipOfWeek({ clip, ...rest }: { clip: Clip | null } & CardProps) {
+  if (!clip) return null;
+  return <ClipOfWeekCard clip={clip} {...rest} />;
+}
+
+function ClipOfWeekCard({ clip, isModerator, liked, canParticipate }: { clip: Clip } & CardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [likeError, setLikeError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   // Twitch embeds need the page's real hostname, but reading it during the
   // initial render would differ between server and client and cause a
@@ -20,7 +31,26 @@ export function ClipOfWeek({ clip, isModerator }: { clip: Clip | null; isModerat
   // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of window.location, not an ongoing sync
   useEffect(() => setHost(window.location.hostname), []);
 
-  if (!clip) return null;
+  // Reflects the toggle instantly instead of waiting on the server action +
+  // revalidatePath round trip. Automatically reverts to the real liked/
+  // likes_count props once that round trip settles (success or error).
+  const [optimisticLike, setOptimisticLike] = useOptimistic(
+    { liked, likes_count: clip.likes_count },
+    (_state, nextLiked: boolean) => ({
+      liked: nextLiked,
+      likes_count: clip.likes_count + (nextLiked ? 1 : -1),
+    })
+  );
+
+  function handleLike() {
+    setLikeError(null);
+    const nextLiked = !liked;
+    startTransition(async () => {
+      setOptimisticLike(nextLiked);
+      const result = await toggleClipLike(clip.id);
+      if (result?.error) setLikeError(result.error);
+    });
+  }
 
   function handleConfirm() {
     setError(null);
@@ -70,8 +100,20 @@ export function ClipOfWeek({ clip, isModerator }: { clip: Clip | null; isModerat
         ) : (
           "a deleted player"
         )}
-        {" · "}{clip.likes_count} like{clip.likes_count === 1 ? "" : "s"}
       </p>
+      <button
+        onClick={handleLike}
+        disabled={!canParticipate || isPending}
+        className={`inline-flex items-center gap-1.5 text-sm font-medium transition-colors disabled:opacity-40 ${
+          optimisticLike.liked ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"
+        }`}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill={optimisticLike.liked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+          <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+        </svg>
+        {optimisticLike.likes_count}
+      </button>
+      {likeError && <p className="text-xs text-red-400">{likeError}</p>}
 
       <ClipConfirmModal
         open={confirmOpen}

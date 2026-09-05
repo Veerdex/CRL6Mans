@@ -106,7 +106,10 @@ export async function toggleClipLike(clipId: string): Promise<{ ok?: boolean; er
     .eq("clip_id", clipId);
   await supabaseAdmin.from("clips").update({ likes_count: count ?? 0 }).eq("id", clipId);
 
+  // The Clip of the Week card renders on the dashboard home too, so a like from
+  // there has to invalidate both paths or the count on the other one goes stale.
   revalidatePath("/dashboard/media");
+  revalidatePath("/dashboard");
   return { ok: true };
 }
 

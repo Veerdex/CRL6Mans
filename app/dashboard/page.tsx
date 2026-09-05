@@ -91,9 +91,20 @@ export default async function DashboardPage({
   const rawClipOfWeek = clipOfWeekRow as unknown as RawClipOfWeekRow | null;
   // Read off accounts (Tier 1) rather than the joined players row: every login
   // refreshes the avatar there, while the players copy is frozen at approval.
-  const { data: clipAuthor } = rawClipOfWeek?.players?.discord_id
-    ? await supabaseAdmin.from("accounts").select("avatar").eq("discord_id", rawClipOfWeek.players.discord_id).single()
-    : { data: null as { avatar: string | null } | null };
+  const currentPlayerId: string | null = player?.status === "approved" ? player.id : null;
+  const [{ data: clipAuthor }, { data: clipOfWeekLike }] = await Promise.all([
+    rawClipOfWeek?.players?.discord_id
+      ? supabaseAdmin.from("accounts").select("avatar").eq("discord_id", rawClipOfWeek.players.discord_id).single()
+      : Promise.resolve({ data: null as { avatar: string | null } | null }),
+    rawClipOfWeek && currentPlayerId
+      ? supabaseAdmin
+          .from("clip_likes")
+          .select("clip_id")
+          .eq("clip_id", rawClipOfWeek.id)
+          .eq("player_id", currentPlayerId)
+          .maybeSingle()
+      : Promise.resolve({ data: null as { clip_id: string } | null }),
+  ]);
   const clipOfWeek: Clip | null = rawClipOfWeek
     ? {
         id: rawClipOfWeek.id,
@@ -278,7 +289,12 @@ export default async function DashboardPage({
         <span className="text-zinc-500">↗</span>
       </a>
 
-      <ClipOfWeek clip={clipOfWeek} isModerator={moderator} />
+      <ClipOfWeek
+        clip={clipOfWeek}
+        isModerator={moderator}
+        liked={clipOfWeekLike !== null}
+        canParticipate={currentPlayerId !== null}
+      />
 
       {/* Active-event card — covers both a tournament-driven active event and a legacy
           manually-run active season (the two are mutually exclusive states of the same
