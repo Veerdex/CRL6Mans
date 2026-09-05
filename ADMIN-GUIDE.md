@@ -478,10 +478,12 @@ Podium page will never reflect it at all.
   entirely from uploaded match replays — click any column header to sort by
   it. A toggle at the top switches between **Current Event** (only the season
   or tournament running right now) and **All Time** (every event on record,
-  including the one in progress). When an event ends, its stats are folded
-  into the all-time totals and the current-event view starts over. All-time
-  totals only go back as far as the first event completed after this feature
-  shipped — earlier events were never kept. Columns: Player, Team, Games Played; a per-game group (MVP
+  including the one in progress). Both move together: a goal scored today
+  raises that player's current-event count and their all-time count at the
+  same time. The difference is what happens when an event ends — the
+  current-event view starts over from zero, while the all-time totals keep
+  everything. All-time totals only go back as far as the first event
+  completed after this feature shipped — earlier events were never kept. Columns: Player, Team, Games Played; a per-game group (MVP
   rating, Goals/Game, Assists/Game, Saves/Game, Score/Game, Shots/Game, Shot
   %); and a totals group (Goals, Assists, Saves, Score, Shots). It defaults
   to sorting by MVP rating, and only aggregates stats for currently-approved
