@@ -59,6 +59,7 @@ export type DashboardChromeData = CoinGrants & {
   hasTeams: boolean;
   hasStatsContent: boolean;
   hasPodium: boolean;
+  hasSponsors: boolean;
   decorations: Awaited<ReturnType<typeof getNameDecorations>>;
 };
 
@@ -199,6 +200,16 @@ async function fetchHasStatsContent(hasActiveTrackedContent: boolean): Promise<b
   return (liveCount ?? 0) > 0 || anyCareer;
 }
 
+// Sponsors nav only shows when the page would have something on it — same
+// status filter as getPublicSponsors, so an all-inactive roster hides the tab.
+async function fetchHasSponsors(): Promise<boolean> {
+  const { count } = await supabaseAdmin
+    .from("sponsors")
+    .select("*", { count: "exact", head: true })
+    .eq("status", "active");
+  return (count ?? 0) > 0;
+}
+
 // Podium nav only shows when there's a non-hidden completed event with a champion.
 async function fetchHasPodium(): Promise<boolean> {
   const [{ data: podSeasons }, { data: podTournaments }] = await Promise.all([
@@ -238,10 +249,11 @@ async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
   ]);
   const tSettings = perfNow();
 
-  const [hasTeams, hasStatsContent, hasPodium] = await Promise.all([
+  const [hasTeams, hasStatsContent, hasPodium, hasSponsors] = await Promise.all([
     fetchHasTeams(settings.activeTournamentId),
     fetchHasStatsContent(hasTrackedContentOf(settings)),
     fetchHasPodium(),
+    fetchHasSponsors(),
   ]);
   const tNav = perfNow();
 
@@ -258,7 +270,7 @@ async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
     );
   }
 
-  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasStatsContent, hasPodium, decorations };
+  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasStatsContent, hasPodium, hasSponsors, decorations };
 }
 
 async function loadBulk(userId: string): Promise<DashboardChromeData> {
@@ -280,6 +292,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     hasTeams,
     hasStatsContent,
     hasPodium,
+    hasSponsors,
     decorations,
   ] = await Promise.all([
     playerInfoPromise,
@@ -292,6 +305,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     settingsPromise.then((s) => fetchHasTeams(s.activeTournamentId)),
     settingsPromise.then((s) => fetchHasStatsContent(hasTrackedContentOf(s))),
     fetchHasPodium(),
+    fetchHasSponsors(),
     getNameDecorations(),
   ]);
 
@@ -299,7 +313,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     console.log(`[layout timing] mode=bulk · total ${(perfNow() - t0).toFixed(0)}ms`);
   }
 
-  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasStatsContent, hasPodium, decorations };
+  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasStatsContent, hasPodium, hasSponsors, decorations };
 }
 
 export function loadDashboardChrome(userId: string): Promise<DashboardChromeData> {
