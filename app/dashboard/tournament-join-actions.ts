@@ -9,6 +9,7 @@ import { isTrackerStale } from "@/app/lib/tracker";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
 import { isCurrentlyKicked } from "@/app/lib/players";
+import { hasEarlySignupAccess, signupWindowOpen } from "@/app/lib/signup-window";
 
 async function currentPlayer() {
   const cookieStore = await cookies();
@@ -41,11 +42,9 @@ export async function joinTournament(tournamentId: string, confirmTrackerSame = 
     .single();
   if (!t) return { error: "Tournament not found." };
   if (t.join_mode !== "players") return { error: "This tournament uses team sign-ups." };
-  if (t.status !== "scheduled") return { error: "Sign-ups are not open." };
   if ((t as { signups_closed?: boolean }).signups_closed) return { error: "Sign-ups are closed." };
-  const now = Date.now();
-  const withinWindow = t.draft_open_at && now >= new Date(t.draft_open_at).getTime() && (!t.draft_close_at || now < new Date(t.draft_close_at).getTime());
-  if (!t.signups_open && !withinWindow) return { error: "Sign-ups are not open." };
+  if (!signupWindowOpen(t, await hasEarlySignupAccess(player.userId)))
+    return { error: "Sign-ups are not open." };
 
   const min2v2 = (t.min_mmr_2v2 as number | null) ?? null;
   const min3v3 = (t.min_mmr_3v3 as number | null) ?? null;

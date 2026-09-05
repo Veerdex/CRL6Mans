@@ -10,6 +10,7 @@ import DraftCard from "./draft-card";
 import { TeamSignupPanel } from "./team-signup-panel";
 import { TournamentJoinCard } from "./tournament-join-card";
 import { getTeamSignupView, type TeamSignupView } from "./team-signup-data";
+import { earlySignupAccessByPlayerId, hasEarlySignupAccess, signupWindowOpen, type SignupWindowRow } from "@/app/lib/signup-window";
 import { PastEvents, presetLabel, type PastEvent } from "./past-events";
 import { PresetEmblemRow } from "./preset-emblem-row";
 import { LocalTime } from "./local-time";
@@ -52,7 +53,7 @@ export default async function DashboardPage({
       .order("draft_entered_at", { ascending: true, nullsFirst: false }),
     supabaseAdmin
       .from("tournaments")
-      .select("id, name, status, signups_open, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th")
+      .select("id, name, status, signups_open, signups_closed, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th")
       .in("status", ["scheduled", "active", "completed"])
       .order("created_at", { ascending: false }),
     supabaseAdmin
@@ -161,11 +162,29 @@ export default async function DashboardPage({
     .sort((a, b) => (b.date ? new Date(b.date).getTime() : 0) - (a.date ? new Date(a.date).getTime() : 0))
     .slice(0, 8);
   const now = Date.now();
-  const openTournaments = tournaments.filter((t) => {
-    if (t.status !== "scheduled") return false;
-    if (t.signups_open) return true;
-    return t.draft_open_at && now >= new Date(t.draft_open_at).getTime() && (!t.draft_close_at || now < new Date(t.draft_close_at).getTime());
-  });
+  const earlyAccess = await hasEarlySignupAccess(session.userId);
+  const openTournaments = tournaments.filter((t) => signupWindowOpen(t as SignupWindowRow, earlyAccess, now));
+
+  // A supporter's Early Signup Access covers everyone they invited, so a
+  // team-mode tournament in its early window also has to surface for invitees
+  // who aren't supporters themselves — otherwise the invite exists on a card
+  // they can't see. Listing is deliberately permissive here; every action
+  // re-resolves the window against the specific team's creator.
+  const earlyTeamCandidates = tournaments.filter(
+    (t) => t.join_mode === "teams" && !openTournaments.includes(t) && signupWindowOpen(t as SignupWindowRow, true, now)
+  );
+  if (player?.id && earlyTeamCandidates.length) {
+    const { data: signupRows } = await supabaseAdmin
+      .from("team_signups")
+      .select("tournament_id, creator_player_id, team_signup_members(player_id)")
+      .in("tournament_id", earlyTeamCandidates.map((t) => t.id));
+    const mine = ((signupRows ?? []) as { tournament_id: string; creator_player_id: string; team_signup_members: { player_id: string }[] }[])
+      .filter((s) => s.team_signup_members.some((m) => m.player_id === player.id));
+    const earlyCreators = await earlySignupAccessByPlayerId(mine.map((s) => s.creator_player_id));
+    const unlocked = new Set(mine.filter((s) => earlyCreators.has(s.creator_player_id)).map((s) => s.tournament_id));
+    for (const t of earlyTeamCandidates) if (unlocked.has(t.id)) openTournaments.push(t);
+  }
+
   const upcomingTournaments = tournaments.filter((t) =>
     t.status === "scheduled" && !openTournaments.includes(t)
   );
@@ -183,7 +202,7 @@ export default async function DashboardPage({
           .in("tournament_id", openPlayerTs.map((t) => t.id))
       : Promise.resolve({ data: [] as { tournament_id: string; player_id: string }[] }),
     isApproved && player?.id
-      ? Promise.all(openTeamTs.map(async (t) => [t.id, await getTeamSignupView(player.id, t.id, true)] as const))
+      ? Promise.all(openTeamTs.map(async (t) => [t.id, await getTeamSignupView(player.id, t.id, t as SignupWindowRow, session.userId)] as const))
       : Promise.resolve([] as (readonly [string, TeamSignupView])[]),
   ]);
 

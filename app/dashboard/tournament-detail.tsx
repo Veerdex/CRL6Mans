@@ -18,6 +18,7 @@ import { playerRatingFromRow, initialTeamRating } from "@/app/lib/rating";
 import { isDirectorVerified } from "@/app/lib/players";
 import { TeamRatingList, type TeamRatingRow } from "./team-rating-list";
 import { PlayerName } from "./player-name";
+import { hasEarlySignupAccess, inEarlySignupWindow, signupWindowOpen, type SignupWindowRow } from "@/app/lib/signup-window";
 import {
   PRESETS,
   STAGE_SLOTS_BY_PRESET,
@@ -70,7 +71,7 @@ export async function TournamentDetailView({
     supabaseAdmin
       .from("tournaments")
       .select(
-        "id, name, status, join_mode, team_assignment, signups_open, draft_open_at, draft_close_at, draft_start_at, season_start_at, season_format, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, min_mmr_2v2, min_mmr_3v3, summary"
+        "id, name, status, join_mode, team_assignment, signups_open, signups_closed, draft_open_at, draft_close_at, draft_start_at, season_start_at, season_format, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, min_mmr_2v2, min_mmr_3v3, summary"
       )
       .eq("id", tournamentId)
       .maybeSingle(),
@@ -113,11 +114,12 @@ export async function TournamentDetailView({
   const backgroundCrop = sponsor?.content_crop?.background ?? design?.content_crop?.background;
 
   const now = Date.now();
-  const withinDraftWindow =
-    !!t.draft_open_at &&
-    now >= new Date(t.draft_open_at).getTime() &&
-    (!t.draft_close_at || now < new Date(t.draft_close_at).getTime());
-  const registrationOpen = t.status === "scheduled" && (!!t.signups_open || withinDraftWindow);
+  const signupWindow = t as SignupWindowRow;
+  const earlyAccess = await hasEarlySignupAccess(discordId);
+  const registrationOpen = signupWindowOpen(signupWindow, earlyAccess, now);
+  // Only shown to someone the early window is actually letting in, so it reads
+  // as an explanation for a button nobody else can see yet.
+  const showEarlyNotice = earlyAccess && inEarlySignupWindow(signupWindow, now);
 
   const timeline = buildTimeline(t, true);
   const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
@@ -211,13 +213,20 @@ export async function TournamentDetailView({
             </div>
           )}
 
+          {showEarlyNotice && (
+            <p className="text-[15px] text-amber-300">
+              Early access — sign-ups open to everyone <LocalTime iso={t.draft_open_at} />.
+            </p>
+          )}
+
           {t.status === "scheduled" &&
             (t.join_mode === "teams" ? (
               <TeamsRegistration
                 tournamentId={tournamentId}
                 tournamentName={t.name}
                 playerId={playerId}
-                registrationOpen={registrationOpen}
+                discordId={discordId}
+                signupWindow={signupWindow}
                 timeline={timeline}
                 nextEvent={nextEvent}
                 prize1st={t.prize_1st}
@@ -582,7 +591,8 @@ async function TeamsRegistration({
   tournamentId,
   tournamentName,
   playerId,
-  registrationOpen,
+  discordId,
+  signupWindow,
   timeline,
   nextEvent,
   prize1st,
@@ -595,7 +605,8 @@ async function TeamsRegistration({
   tournamentId: string;
   tournamentName: string;
   playerId: string | null;
-  registrationOpen: boolean;
+  discordId: string;
+  signupWindow: SignupWindowRow;
   timeline: { label: string; iso: string }[];
   nextEvent: { label: string; iso: string } | null;
   prize1st: number | null;
@@ -605,7 +616,7 @@ async function TeamsRegistration({
   fallbackBackgroundUrl?: string | null;
   fallbackBackgroundCrop?: MediaCrop;
 }) {
-  const view = playerId ? await getTeamSignupView(playerId, tournamentId, registrationOpen) : null;
+  const view = playerId ? await getTeamSignupView(playerId, tournamentId, signupWindow, discordId) : null;
 
   return view ? (
     <TeamSignupPanel

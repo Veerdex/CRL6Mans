@@ -5,14 +5,25 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
+import {
+  hasEarlySignupAccess,
+  playerHasEarlySignupAccess,
+  signupWindowOpen,
+  type SignupWindowRow,
+} from "@/app/lib/signup-window";
 
 const ROSTER_MAX = 4; // 3 starters + 1 substitute
 const TEAM_MIN = 3;
 
+// The window is carried raw rather than collapsed into a single
+// registrationOpen boolean because Early Signup Access is not always the
+// acting player's: a supporter who creates a team opens the early window for
+// everyone they invite, so each action resolves it from whoever governs it.
 type Ctx = {
   playerId: string;
+  discordId: string;
   tournamentId: string;
-  registrationOpen: boolean;
+  window: SignupWindowRow;
 };
 
 /** Resolve the current approved player against a specific team-signup tournament. */
@@ -37,13 +48,8 @@ async function getContext(tournamentId: string): Promise<{ ctx?: Ctx; error?: st
   if (!t) return { error: "Tournament not found." };
   if (t.join_mode !== "teams") return { error: "This tournament does not use team sign-ups." };
 
-  const now = Date.now();
-  const withinWindow = t.draft_open_at && now >= new Date(t.draft_open_at).getTime() && (!t.draft_close_at || now < new Date(t.draft_close_at).getTime());
-  const signupsClosed = !!(t as { signups_closed?: boolean }).signups_closed;
-  const registrationOpen = t.status === "scheduled" && !signupsClosed && (!!t.signups_open || !!withinWindow);
-
   return {
-    ctx: { playerId: player.id, tournamentId, registrationOpen },
+    ctx: { playerId: player.id, discordId: session.userId, tournamentId, window: t as SignupWindowRow },
   };
 }
 
@@ -61,14 +67,17 @@ async function findMyTeam(playerId: string, tournamentId: string) {
   ) ?? null;
 }
 
-/** Resolve which tournament a member row belongs to (for member-scoped actions). */
-async function tournamentForMember(memberId: string): Promise<string | null> {
+/** Resolve the signup a member row belongs to (for member-scoped actions). */
+async function signupForMember(
+  memberId: string
+): Promise<{ tournamentId: string; creatorPlayerId: string } | null> {
   const { data: member } = await supabaseAdmin
     .from("team_signup_members").select("team_signup_id").eq("id", memberId).single();
   if (!member) return null;
   const { data: ts } = await supabaseAdmin
-    .from("team_signups").select("tournament_id").eq("id", member.team_signup_id).single();
-  return (ts?.tournament_id as string | null) ?? null;
+    .from("team_signups").select("tournament_id, creator_player_id").eq("id", member.team_signup_id).single();
+  if (!ts) return null;
+  return { tournamentId: ts.tournament_id as string, creatorPlayerId: ts.creator_player_id as string };
 }
 
 async function checkJoinGate(playerId: string): Promise<string | null> {
@@ -84,7 +93,8 @@ function refresh() {
 export async function createTeam(tournamentId: string, name: string) {
   const { ctx, error } = await getContext(tournamentId);
   if (error || !ctx) return { error: error ?? "Unavailable." };
-  if (!ctx.registrationOpen) return { error: "Team registration is closed." };
+  if (!signupWindowOpen(ctx.window, await hasEarlySignupAccess(ctx.discordId)))
+    return { error: "Team registration is closed." };
 
   const trimmed = name.trim();
   if (!trimmed) return { error: "Team name is required." };
@@ -126,7 +136,8 @@ export async function createTeam(tournamentId: string, name: string) {
 export async function invitePlayer(tournamentId: string, targetPlayerId: string) {
   const { ctx, error } = await getContext(tournamentId);
   if (error || !ctx) return { error: error ?? "Unavailable." };
-  if (!ctx.registrationOpen) return { error: "Team registration is closed." };
+  if (!signupWindowOpen(ctx.window, await hasEarlySignupAccess(ctx.discordId)))
+    return { error: "Team registration is closed." };
 
   const { data: team } = await supabaseAdmin
     .from("team_signups")
@@ -162,20 +173,18 @@ export async function invitePlayer(tournamentId: string, targetPlayerId: string)
 }
 
 export async function revokeInvite(memberId: string) {
-  const tournamentId = await tournamentForMember(memberId);
-  if (!tournamentId) return { error: "Invite not found." };
-  const { ctx, error } = await getContext(tournamentId);
+  const signup = await signupForMember(memberId);
+  if (!signup) return { error: "Invite not found." };
+  const { ctx, error } = await getContext(signup.tournamentId);
   if (error || !ctx) return { error: error ?? "Unavailable." };
 
   const { data: member } = await supabaseAdmin
     .from("team_signup_members")
-    .select("id, status, team_signup_id")
+    .select("id, status")
     .eq("id", memberId)
     .single();
   if (!member) return { error: "Invite not found." };
-  const { data: ts } = await supabaseAdmin
-    .from("team_signups").select("creator_player_id").eq("id", member.team_signup_id).single();
-  if (ts?.creator_player_id !== ctx.playerId) return { error: "Not allowed." };
+  if (signup.creatorPlayerId !== ctx.playerId) return { error: "Not allowed." };
   if (member.status !== "invited") return { error: "That player already accepted." };
 
   await supabaseAdmin.from("team_signup_members").delete().eq("id", memberId);
@@ -184,9 +193,9 @@ export async function revokeInvite(memberId: string) {
 }
 
 export async function respondInvite(memberId: string, accept: boolean) {
-  const tournamentId = await tournamentForMember(memberId);
-  if (!tournamentId) return { error: "Invite not found." };
-  const { ctx, error } = await getContext(tournamentId);
+  const signup = await signupForMember(memberId);
+  if (!signup) return { error: "Invite not found." };
+  const { ctx, error } = await getContext(signup.tournamentId);
   if (error || !ctx) return { error: error ?? "Unavailable." };
 
   const { data: member } = await supabaseAdmin
@@ -203,7 +212,11 @@ export async function respondInvite(memberId: string, accept: boolean) {
     return { ok: true, message: "Invite declined." };
   }
 
-  if (!ctx.registrationOpen) return { error: "Team registration is closed." };
+  // Deliberately the creator's entitlement rather than the responder's: the
+  // invitee is usually not a patron, and the point of the benefit is that the
+  // supporter's whole team signs up early with them.
+  if (!signupWindowOpen(ctx.window, await playerHasEarlySignupAccess(signup.creatorPlayerId)))
+    return { error: "Team registration is closed." };
 
   const existing = await findMyTeam(ctx.playerId, ctx.tournamentId);
   if (existing) return { error: "You're already on a team." };

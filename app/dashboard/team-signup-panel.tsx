@@ -113,7 +113,7 @@ export function TeamSignupPanel({
             </span>
           )}
           <p className="text-[21px] text-zinc-400 mt-1">
-            {registrationOpen
+            {registrationOpen || incomingInvites.some((i) => i.canAccept)
               ? "Form a team of 3 (plus an optional 4th as substitute)."
               : "Registration is closed."}
           </p>
@@ -220,7 +220,7 @@ export function TeamSignupPanel({
                   </span>
                   <button
                     onClick={() => run(() => respondInvite(inv.memberId, true))}
-                    disabled={isPending || !registrationOpen}
+                    disabled={isPending || !inv.canAccept}
                     className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-lg font-medium rounded-lg"
                   >
                     Accept

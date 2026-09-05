@@ -1,5 +1,11 @@
 import "server-only";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import {
+  earlySignupAccessByPlayerId,
+  hasEarlySignupAccess,
+  signupWindowOpen,
+  type SignupWindowRow,
+} from "@/app/lib/signup-window";
 
 export type SignupMember = {
   memberId: string;
@@ -15,7 +21,10 @@ export type TeamSignupView = {
   myTeam:
     | { id: string; name: string; isCreator: boolean; members: SignupMember[] }
     | null;
-  incomingInvites: { memberId: string; teamName: string; creatorName: string }[];
+  // canAccept is per-invite because Early Signup Access belongs to the team's
+  // creator: during the early window one invite can be actionable while
+  // another, from a non-supporter's team, is not.
+  incomingInvites: { memberId: string; teamName: string; creatorName: string; canAccept: boolean }[];
   invitable: { id: string; username: string; display_name: string | null }[];
 };
 
@@ -30,7 +39,8 @@ type RawSignup = {
 export async function getTeamSignupView(
   playerId: string,
   tournamentId: string,
-  registrationOpen: boolean
+  window: SignupWindowRow,
+  discordId: string
 ): Promise<TeamSignupView> {
   const { data: signupsRaw } = await supabaseAdmin
     .from("team_signups")
@@ -84,7 +94,7 @@ export async function getTeamSignupView(
     : null;
 
   // Invites addressed to me (only relevant if I'm not yet on a team)
-  const incomingInvites = myTeam
+  const inviteRows = myTeam
     ? []
     : signups.flatMap((s) =>
         s.team_signup_members
@@ -92,9 +102,27 @@ export async function getTeamSignupView(
           .map((m) => ({
             memberId: m.id,
             teamName: s.name,
+            creatorPlayerId: s.creator_player_id,
             creatorName: playerById.get(s.creator_player_id)?.username ?? "Unknown",
           }))
       );
+
+  // Whoever governs each action decides its window: the creator once I'm on a
+  // team (their Early Signup Access covers the roster they built), my own
+  // entitlement while I'm still deciding whether to create one, and the
+  // inviting creator's for each pending invite.
+  const earlyCreators = await earlySignupAccessByPlayerId([
+    ...(mine ? [mine.creator_player_id] : []),
+    ...inviteRows.map((i) => i.creatorPlayerId),
+  ]);
+  const registrationOpen = signupWindowOpen(
+    window,
+    mine ? earlyCreators.has(mine.creator_player_id) : await hasEarlySignupAccess(discordId)
+  );
+  const incomingInvites = inviteRows.map(({ creatorPlayerId, ...inv }) => ({
+    ...inv,
+    canAccept: signupWindowOpen(window, earlyCreators.has(creatorPlayerId)),
+  }));
 
   // Players the creator can still invite: approved, not accepted anywhere, not already on my roster
   let invitable: { id: string; username: string; display_name: string | null }[] = [];
