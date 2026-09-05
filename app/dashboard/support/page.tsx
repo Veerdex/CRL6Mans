@@ -277,7 +277,7 @@ export default async function SupportPage() {
                           minHeight: `${layout.chipEm}em`,
                         }}
                       >
-                        Nobody in this tier yet — this spot could be yours.
+                        Nobody in this tier yet
                       </div>
                     ) : (
                       <div
