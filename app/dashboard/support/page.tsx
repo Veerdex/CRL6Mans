@@ -154,7 +154,19 @@ export default async function SupportPage() {
   // a tier shows up only once a director has assigned featured-on-support-page
   // to it. patreon_public stays a hard gate — a director-set override grants
   // the benefit but never the consent to publish someone's name.
+  //
+  // Sections come from the tier list rather than from whoever happens to be
+  // pledging, so an empty tier still shows its panel with a placeholder. The
+  // benefit propagates upward by price, so assigning it at the cheapest paid
+  // tier lights up every tier above it too.
   const byTierTitle = new Map<string, TierSection>();
+  for (const { title: tierTitle } of prices) {
+    const rank = ranks.get(tierTitle);
+    if (rank === undefined) continue;
+    if (!byTier.get(tierTitle)?.has("featured-on-support-page")) continue;
+    byTierTitle.set(tierTitle, { tier: tierTitle, rank, patrons: [] });
+  }
+
   for (const account of accounts ?? []) {
     if (!account.patreon_public) continue;
 
@@ -164,12 +176,11 @@ export default async function SupportPage() {
 
     const tier = effectiveTier(status, title, override);
     if (!tier) continue;
-    const rank = ranks.get(tier);
-    if (rank === undefined) continue;
+    const section = byTierTitle.get(tier);
+    if (!section) continue;
     const on = enabledBenefitsForAccount(byTier, account as BenefitAccountRow);
     if (!on.has("featured-on-support-page")) continue;
 
-    const section = byTierTitle.get(tier) ?? { tier, rank, patrons: [] };
     section.patrons.push({
       name: (account.display_name as string | null) || (account.username as string),
       discordId: account.discord_id as string,
@@ -179,7 +190,6 @@ export default async function SupportPage() {
         ? (getAvatarBorder(account.patreon_avatar_border as string | null)?.id ?? null)
         : null,
     });
-    byTierTitle.set(tier, section);
   }
 
   const sections = Array.from(byTierTitle.values()).sort((a, b) => a.rank - b.rank);
@@ -259,37 +269,49 @@ export default async function SupportPage() {
                       <span className="font-semibold text-zinc-100">{tier}</span>
                       <span className="font-normal text-[0.5em] text-zinc-400 whitespace-nowrap pl-[0.7em]">(Tier {rank})</span>
                     </h2>
-                    <div
-                      className={`grid ${layout.columns} ${layout.gap}`}
-                      style={{ fontSize: `${(layout.scale * BASE_FONT_REM).toFixed(4)}rem` }}
-                    >
-                      {patrons.map(({ name, discordId, avatar, color, outline, glint, border }) => (
-                        <span
-                          key={discordId}
-                          className={`flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-white rounded-lg text-zinc-200 cursor-default select-none ${layout.hoverRise ?? ""}`}
-                          style={{
-                            backgroundColor: "rgba(0, 0, 0, 0.55)",
-                            borderWidth: `${layout.chipBorderPx}px`,
-                            minHeight: `${layout.chipEm}em`,
-                          }}
-                        >
-                          {layout.avatars && avatar && (
-                            <PlayerAvatar
-                              discordId={discordId}
-                              avatar={avatar}
-                              border={border}
-                              style={{ width: "1.7em", height: "1.7em" }}
-                            />
-                          )}
+                    {patrons.length === 0 ? (
+                      <div
+                        className="flex items-center justify-center text-center text-zinc-400 italic"
+                        style={{
+                          fontSize: `${(layout.scale * BASE_FONT_REM).toFixed(4)}rem`,
+                          minHeight: `${layout.chipEm}em`,
+                        }}
+                      >
+                        Nobody in this tier yet — this spot could be yours.
+                      </div>
+                    ) : (
+                      <div
+                        className={`grid ${layout.columns} ${layout.gap}`}
+                        style={{ fontSize: `${(layout.scale * BASE_FONT_REM).toFixed(4)}rem` }}
+                      >
+                        {patrons.map(({ name, discordId, avatar, color, outline, glint, border }) => (
                           <span
-                            className={`min-w-0 break-words ${nameStyle(color, outline, glint).className}`}
-                            style={nameStyle(color, outline, glint).style}
+                            key={discordId}
+                            className={`flex items-center justify-center gap-[0.5em] text-center break-words min-w-0 px-[0.85em] py-[0.4em] border border-white rounded-lg text-zinc-200 cursor-default select-none ${layout.hoverRise ?? ""}`}
+                            style={{
+                              backgroundColor: "rgba(0, 0, 0, 0.55)",
+                              borderWidth: `${layout.chipBorderPx}px`,
+                              minHeight: `${layout.chipEm}em`,
+                            }}
                           >
-                            {name}
+                            {layout.avatars && avatar && (
+                              <PlayerAvatar
+                                discordId={discordId}
+                                avatar={avatar}
+                                border={border}
+                                style={{ width: "1.7em", height: "1.7em" }}
+                              />
+                            )}
+                            <span
+                              className={`min-w-0 break-words ${nameStyle(color, outline, glint).className}`}
+                              style={nameStyle(color, outline, glint).style}
+                            >
+                              {name}
+                            </span>
                           </span>
-                        </span>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </TierGlow>
               );
