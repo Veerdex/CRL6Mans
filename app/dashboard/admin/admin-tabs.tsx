@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
+import type { AccessLevel } from "./access-levels";
 
 // The sidebar+tabs layout is a desktop-only navigation layer — on mobile every
 // panel still renders in original order as one long list, exactly as it
@@ -13,18 +14,6 @@ const ACTIVE_SUBTAB_KEY = "crl6mans_admin_active_subtab";
 // means "explicitly none open", absent means "never interacted" (so untouched
 // panels keep using their own defaultOpen prop).
 const OPEN_MOBILE_PANEL_KEY = "crl6mans_admin_open_mobile_panel";
-
-// Minimum staff rank that may see a tab. The page filters SECTIONS by this and
-// drops any section left with no visible tabs, so a moderator never sees a
-// dropdown whose contents are all above them.
-export type AccessLevel = "moderator" | "director" | "ceo";
-
-export const ACCESS_RANK: Record<AccessLevel, number> = { moderator: 1, director: 2, ceo: 3 };
-export const ACCESS_LABEL: Record<AccessLevel, string> = {
-  moderator: "Moderator +",
-  director: "Director +",
-  ceo: "CEO",
-};
 
 export interface SidebarSubTab {
   id: string;

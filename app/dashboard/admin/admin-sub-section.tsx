@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ACCESS_LABEL, useAdminNav } from "./admin-tabs";
+import { ACCESS_LABEL } from "./access-levels";
+import { useAdminNav } from "./admin-tabs";
 
 interface Props {
   /** Must match the id of the SidebarSection this belongs to. */
