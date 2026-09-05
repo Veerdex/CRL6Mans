@@ -185,7 +185,7 @@ export function PatreonTiersSection({
         <p className="text-xs text-zinc-600">No tiers found on Patreon yet.</p>
       ) : (
         <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-center gap-2">
             <ArrowButton dir="prev" onClick={() => step(-1)} disabled={tiers.length < 2} />
             <div className="text-center">
               <p className="text-sm font-semibold text-white">
