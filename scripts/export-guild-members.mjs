@@ -73,9 +73,40 @@ async function fetchAllMembers() {
   }
 }
 
-// Fallback when the intent is off: look each known id up one at a time. Covers
-// only people already in the database, so it cannot find anyone who is in the
-// server but has never touched the site.
+// Fallback when the intent is off. /members/search needs no privileged intent
+// and matches a prefix against username, nickname and global name, so sweeping
+// the alphabet reaches almost everyone. A prefix that comes back at the cap is
+// re-queried one character deeper. "Almost" is the catch: a name starting with
+// a character outside SEED (an emoji, say) is unreachable this way, which is why
+// the run is still labelled PARTIAL and measured against the true member count.
+const SEED = "abcdefghijklmnopqrstuvwxyz0123456789_.-[]()!$&+~^*'";
+const SEARCH_CAP = 1000;
+
+async function fetchMembersBySearch() {
+  const found = new Map();
+  const queue = [...SEED];
+  let queries = 0;
+
+  while (queue.length) {
+    const q = queue.shift();
+    const page = await discord(
+      `/guilds/${GUILD_ID}/members/search?query=${encodeURIComponent(q)}&limit=${SEARCH_CAP}`,
+      { soft: true },
+    );
+    queries++;
+    if (page) {
+      for (const m of page) if (m.user?.id) found.set(m.user.id, m);
+      if (page.length >= SEARCH_CAP) for (const c of SEED) queue.push(q + c);
+    }
+    if (queries % 10 === 0) process.stdout.write(`\r  ${queries} queries, ${found.size} members`);
+    await sleep(250);
+  }
+  process.stdout.write(`\r  ${queries} queries, ${found.size} members\n`);
+  return [...found.values()];
+}
+
+// Last resort: look each known id up one at a time. Covers only people already
+// in the database, so it cannot find anyone who has never touched the site.
 async function fetchMembersById(ids) {
   const out = [];
   for (const [i, id] of ids.entries()) {
@@ -93,16 +124,27 @@ const csvCell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
 const accounts = await select("accounts", "select=discord_id,username,display_name,status&limit=5000");
 const queueBot = await select("crl6mansqueuebot_players", "select=discord_id,display_name&limit=5000");
 
+const guild = await discord(`/guilds/${GUILD_ID}?with_counts=true`, { soft: true });
+const trueCount = guild?.approximate_member_count ?? null;
+
 let members = await fetchAllMembers();
 const complete = members !== null;
 if (!complete) {
-  const known = [...new Set([...accounts, ...queueBot].map((r) => r.discord_id).filter(Boolean))];
   console.warn(
-    `\n!! SERVER MEMBERS intent is off — cannot list the guild.\n` +
-    `   Falling back to ${known.length} ids already in the database.\n` +
-    `   Anyone in the server who has never used the site will be MISSING.\n`
+    `\n!! SERVER MEMBERS intent is off — cannot list the guild directly.\n` +
+    `   Sweeping /members/search by prefix instead.\n`
   );
-  members = await fetchMembersById(known);
+  members = await fetchMembersBySearch();
+
+  // Anyone the sweep missed but the database knows about is still recoverable
+  // by id, so top up from there before giving up on them.
+  const seen = new Set(members.map((m) => m.user.id));
+  const missing = [...new Set([...accounts, ...queueBot].map((r) => r.discord_id).filter(Boolean))]
+    .filter((id) => !seen.has(id));
+  if (missing.length) {
+    console.log(`  topping up ${missing.length} known ids the sweep missed`);
+    members.push(...(await fetchMembersById(missing)));
+  }
 }
 
 const rows = new Map();
@@ -167,16 +209,21 @@ const withNick = humans.filter((r) => r.nick).length;
 
 const botCount = all.filter((r) => r.isBot).length;
 
+const guildRows = all.filter((r) => r.inGuild).length;
+const coverage = trueCount ? `${guildRows} of ${trueCount} (${Math.round((guildRows / trueCount) * 100)}%)` : `${guildRows}`;
+
 console.log(`\nWrote ${all.length} rows to ${OUT}`);
-console.log(`  coverage: ${complete ? "COMPLETE (full guild list)" : "PARTIAL (database ids only)"}`);
+console.log(`  coverage: ${complete ? "COMPLETE (full guild list)" : "PARTIAL (prefix sweep)"} — ${coverage}`);
 console.log(`  guild members seen: ${members.length} (${botCount} bots)`);
 console.log(`  site accounts: ${accounts.length} | queue-bot: ${queueBot.length}`);
 console.log(`  in guild, no site account: ${guildNotSite}`);
 console.log(`  has site account, not in guild: ${siteNotGuild}`);
 console.log(`  has a server nickname: ${withNick} of ${humans.length}`);
-if (!complete) {
+if (!complete && (trueCount === null || guildRows < trueCount)) {
   console.log(
-    `\n  To get the complete list: Discord Developer Portal -> your app -> Bot ->\n` +
-    `  Privileged Gateway Intents -> enable SERVER MEMBERS INTENT -> Save, then re-run.`
+    `\n  ${trueCount === null ? "Coverage is unverified" : `Missed ${trueCount - guildRows}`} — the prefix sweep cannot reach names\n` +
+    `  starting outside its seed alphabet. For a guaranteed-complete list:\n` +
+    `  Discord Developer Portal -> your app -> Bot -> Privileged Gateway Intents\n` +
+    `  -> enable SERVER MEMBERS INTENT -> Save, then re-run.`
   );
 }
