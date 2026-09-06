@@ -17,6 +17,7 @@ import {
 import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow } from "./rating";
 import { hasBlockingIdentityDiscrepancy } from "./replay-identity-certification";
+import { createClip } from "./clip-submit";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 
@@ -1596,6 +1597,47 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
 
 function site() {
   return ephemeralReply("🔗 https://www.crlw6m.fyi/");
+}
+
+// /postclip — the Discord entry point to the same submission the Media tab
+// uses. Everything that can reject the clip runs before the insert, so an
+// invalid link leaves no row and posts no message. The clips channel message
+// is plain content with the URL last, so Discord renders its own player;
+// the Clip of the Week cron deliberately uses an embed instead.
+async function postClip(userId: string, url: string, title: string, underSixtySeconds: boolean, appropriate: boolean) {
+  const { data: player } = await supabaseAdmin
+    .from("players")
+    .select("id, status")
+    .eq("discord_id", userId)
+    .single();
+  if (!player || player.status !== "approved") {
+    return ephemeralReply("❌ Only approved players can post clips.");
+  }
+
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings")
+    .select("clip_confirmations_enabled, clips_channel_id")
+    .single();
+
+  if (settings?.clip_confirmations_enabled ?? true) {
+    if (!underSixtySeconds) return ephemeralReply("❌ Set `under_60s:True` to confirm the clip is 60 seconds or shorter.");
+    if (!appropriate) return ephemeralReply("❌ Set `appropriate:True` to confirm the clip is appropriate for the league community.");
+  }
+
+  const channelId = settings?.clips_channel_id as string | null;
+  if (!channelId) {
+    return ephemeralReply("❌ No clips channel is set. An admin has to run `/admin setclipschannel` in the clips channel first.");
+  }
+
+  const result = await createClip(player.id as string, title, url);
+  if (!result.clip) return ephemeralReply(`❌ ${result.error}`);
+  const clip = result.clip;
+
+  const posted = await sendChannelMessage(channelId, `🎬 **${clip.title}** — <@${userId}>\n${clip.url}`);
+  if (!posted) {
+    return ephemeralReply(`⚠️ Added **${clip.title}** to the Media tab, but the message in <#${channelId}> failed to send.`);
+  }
+  return ephemeralReply(`✅ Posted **${clip.title}** in <#${channelId}> and on the Media tab.`);
 }
 
 async function totalPlayers() {
@@ -3434,6 +3476,13 @@ export async function handleCommand(interaction: Interaction) {
     case "totalusers":    return totalUsers();
     case "playerinfo":    return playerInfo(String(opt(interaction, "username")));
     case "pick":          return pickPlayer(userId, String(opt(interaction, "player")));
+    case "postclip":      return postClip(
+      userId,
+      String(opt(interaction, "url")),
+      String(opt(interaction, "title")),
+      opt(interaction, "under_60s") === true,
+      opt(interaction, "appropriate") === true,
+    );
     case "openround": {
       const w = opt(interaction, "round");
       return openRound(userId, w ? Number(w) : undefined);

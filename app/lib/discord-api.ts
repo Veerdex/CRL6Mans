@@ -358,14 +358,20 @@ export type DiscordEmbed = {
   thumbnail?: { url: string };
 };
 
-export async function sendChannelMessage(channelId: string, content: string, embeds?: DiscordEmbed[]): Promise<void> {
-  if (!BOT_TOKEN) return;
+// Returns whether the message actually landed, so a caller that told a user
+// "posted" can tell the truth. Most callers are fire-and-forget and ignore it.
+export async function sendChannelMessage(channelId: string, content: string, embeds?: DiscordEmbed[]): Promise<boolean> {
+  if (!BOT_TOKEN) return false;
   const res = await fetch(`${API}/channels/${channelId}/messages`, {
     method: "POST",
     headers: botHeaders(true),
     body: JSON.stringify({ content, ...(embeds ? { embeds } : {}) }),
   });
-  if (!res.ok) console.error(`[sendChannelMessage] channel=${channelId} status=${res.status}`, await res.text());
+  if (!res.ok) {
+    console.error(`[sendChannelMessage] channel=${channelId} status=${res.status}`, await res.text());
+    return false;
+  }
+  return true;
 }
 
 export async function deleteChannel(channelId: string): Promise<boolean> {

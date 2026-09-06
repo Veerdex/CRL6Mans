@@ -155,6 +155,18 @@ const commands = [
     description: "Get the link to the CRL 6Mans website",
   },
   {
+    name: "postclip",
+    description: "Post a clip to the clips channel and the website's Media tab",
+    options: [
+      { name: "url", description: "YouTube, medal.tv, Streamable, Twitch, TikTok, X, or Instagram link", type: STRING, required: true },
+      { name: "title", description: "Title shown on the clip", type: STRING, required: true },
+      // Optional because Discord options can't be conditionally required — the
+      // handler enforces them only while clip_confirmations_enabled is on.
+      { name: "under_60s", description: "Confirm the clip is 60 seconds or shorter", type: BOOLEAN, required: false },
+      { name: "appropriate", description: "Confirm the clip is appropriate for the league community", type: BOOLEAN, required: false },
+    ],
+  },
+  {
     name: "pick",
     description: "Pick a player for your team during the snake draft",
     options: [

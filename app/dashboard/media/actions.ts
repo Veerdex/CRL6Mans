@@ -6,12 +6,8 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { classifyClipUrl, isLinkOnlyPlatform, type ClipPlatform } from "@/app/lib/clip-embed";
-import { fetchClipThumbnail } from "@/app/lib/link-preview";
-import { computeClipExpiry } from "@/app/lib/clip-schedule";
-
-const MAX_ACTIVE_SUBMISSIONS_PER_PLAYER = 5;
-const MAX_TITLE_LENGTH = 150;
+import { isLinkOnlyPlatform, type ClipPlatform } from "@/app/lib/clip-embed";
+import { createClip } from "@/app/lib/clip-submit";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -43,39 +39,8 @@ export async function submitClip(title: string, url: string, durationConfirmed: 
     if (!appropriateConfirmed) return { error: "You must confirm the clip is appropriate for the league community." };
   }
 
-  const trimmedTitle = title.trim().slice(0, MAX_TITLE_LENGTH);
-  if (!trimmedTitle) return { error: "Title is required." };
-
-  const classified = classifyClipUrl(url);
-  if (!classified) return { error: "Link must be a valid YouTube, medal.tv, Streamable, Twitch, TikTok, X/Twitter, or Instagram URL." };
-
-  const { count } = await supabaseAdmin
-    .from("clips")
-    .select("id", { count: "exact", head: true })
-    .eq("player_id", playerId)
-    .is("archived_at", null);
-  if ((count ?? 0) >= MAX_ACTIVE_SUBMISSIONS_PER_PLAYER) {
-    return { error: `You can only have ${MAX_ACTIVE_SUBMISSIONS_PER_PLAYER} active submissions at a time.` };
-  }
-
-  const thumbnailUrl = isLinkOnlyPlatform(classified.platform)
-    ? await fetchClipThumbnail(classified.platform, classified.normalizedUrl)
-    : null;
-
-  const { error } = await supabaseAdmin.from("clips").insert({
-    player_id: playerId,
-    title: trimmedTitle,
-    url: classified.normalizedUrl,
-    normalized_url: classified.normalizedUrl,
-    platform: classified.platform,
-    embed_url: classified.embedUrl,
-    thumbnail_url: thumbnailUrl,
-    expires_at: computeClipExpiry(new Date()).toISOString(),
-  });
-  if (error) {
-    if (error.code === "23505") return { error: "This clip has already been submitted this week." };
-    return { error: error.message };
-  }
+  const { error } = await createClip(playerId, title, url);
+  if (error) return { error };
 
   revalidatePath("/dashboard/media");
   return { ok: true };

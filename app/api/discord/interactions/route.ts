@@ -3,7 +3,7 @@ import { after } from "next/server";
 import nacl from "tweetnacl";
 import { handleCommand, handleAutocomplete, handleModalSubmit } from "@/app/lib/discord-bot";
 
-const DEFERRED_COMMANDS = new Set(["openround"]);
+const DEFERRED_COMMANDS = new Set(["openround", "postclip"]);
 // Subcommands of /admin that are slow enough to need deferral (matched against
 // interaction.data.options[0].name, since Discord nests subcommand names one level deep).
 const DEFERRED_ADMIN_SUBCOMMANDS = new Set(["syncroles", "disconnect", "wipe", "resyncmoderation"]);
