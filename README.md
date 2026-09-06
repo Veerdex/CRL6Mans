@@ -179,6 +179,8 @@ No **privileged gateway intents** are required — interactions arrive as signed
 - [ ] **Set up team roles:** create a Discord role for each team and paste its role ID into the team's slot under **Admin → Team Slots** (slots show "⚠ no role ID set" until linked). Make sure each team role sits **below** the bot's role. (Status roles like `Captain`/`Drafted` are auto-created — only team roles need linking.)
 - [ ] If using the Patreon "Discord role" tier benefit: create a Discord role for supporters, then link it with `/admin setsupporterrole`.
 
+> Moving an already-running league to a different Discord server is a different job — see [SERVER-TRANSFER.md](SERVER-TRANSFER.md).
+
 ---
 
 ## Setup
