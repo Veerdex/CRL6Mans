@@ -2609,7 +2609,7 @@ async function kickCmd(userId: string, targetUserId: string, reason: string, dur
   const resolved = await moderationTarget(userId, targetUserId, "kick");
   if ("error" in resolved) return ephemeralReply(`❌ ${resolved.error}`);
 
-  const choice = KICK_DURATIONS.find(d => d.value === duration) ?? KICK_DURATIONS.find(d => d.ms === DEFAULT_KICK_TIMEOUT_MS)!;
+  const choice = KICK_DURATIONS.find(d => d.value === duration) ?? KICK_DURATIONS.find(d => d.value === "7d")!;
   const result = await kickAccount(actor.role, resolved.target.accountId, reason, choice.ms);
   if (result.error) return ephemeralReply(`❌ ${result.error}`);
 
