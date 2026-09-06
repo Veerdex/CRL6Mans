@@ -15,6 +15,9 @@ Permissions, scopes, and role hierarchy are not repeated here — they are in
   That is deliberate — a role ID only means something in the guild it came from —
   but it means the slots have to be rebuilt by hand afterwards. Screenshot the
   **Admin → Team Slots** panel before you start if you want the names and logos back.
+- Deleting the teams also **deletes every sub request** (`sub_requests.team_id`
+  cascades). Match results, player rows, stats, and clips are keyed elsewhere and
+  survive; the sub-request history does not.
 - `/admin disconnect` and `/admin wipe` are different commands. Disconnect clears the
   Discord *connection*. Wipe clears *game and season data* and keeps the connection.
   You want disconnect. Do not run wipe.
@@ -36,6 +39,12 @@ any match carries a captain-submitted score, and disconnect fails outright.
 The script is a no-op if the constraint is already correct, so run it regardless of
 whether you think it has been run before.
 
+This is the only foreign key into `teams` that is missing an on-delete rule — every
+other one (`players.team_id`, the four team columns on `matches`,
+`league_settings.current_bid_team_id`, the match identity snapshots) already sets null,
+and `sub_requests.team_id` already cascades. So this one script is the whole
+prerequisite; there is nothing else to patch first.
+
 ## Step 2 — Invite the app to the official server
 
 - Invite with scopes **`bot`** + **`applications.commands`** and the permissions in the
@@ -54,8 +63,10 @@ needs it, and Step 8 depends on it.
 
 ## Step 4 — Update the environment variables
 
-In **Vercel → Settings → Environment Variables** (Production, and any Preview scope
-you use), and in your local `.env.local` so local dev matches:
+Update these in **two** places — **Vercel → Settings → Environment Variables**
+(Production, and any Preview scope you use) **and** your local `.env.local`. The
+`.env.local` copy is not just for local dev: Step 5 runs on your machine and reads
+`DISCORD_GUILD_ID` from that file, not from Vercel.
 
 | Variable | New value |
 |---|---|
@@ -76,6 +87,11 @@ you use), and in your local `.env.local` so local dev matches:
 ```bash
 node scripts/register-commands.mjs
 ```
+
+This reads `DISCORD_GUILD_ID` from **`.env.local`**, not from Vercel. If you only
+updated Vercel in Step 4, this silently re-registers the commands to the *test* server
+again and the official server gets nothing — which then leaves you with no
+`/admin disconnect` to run in Step 6. Check `.env.local` before running it.
 
 Commands are registered **per guild** when `DISCORD_GUILD_ID` is set, so the official
 server has none until you re-run this with the new ID in place. The test server's
@@ -134,6 +150,11 @@ Finally:
 
 which reconciles every player's roles against the database in the new server.
 
+Run it here to seed the roles, then **run it again at the end of Step 8**. Right now
+almost nobody has joined the official server yet, and Discord cannot give a role to
+someone who is not a member — so this first pass will skip most of the roster. The
+second pass, after people have crossed over, is the one that actually lands the roles.
+
 > README.md's Part 2 setup checklist writes some of these without the `admin` prefix
 > (`/setmoderatorid` etc.). That form is stale — the `/admin ` prefix above is correct.
 
@@ -160,6 +181,9 @@ node scripts/export-player-names.mjs
 Its summary line reads `in guild <id>: N of M` — chase the gap until N reaches M. (It
 also writes `player-names.csv`, which is gitignored; the row count spans everyone the
 site knows about, not only approved players.)
+
+Once the roster has crossed over, run `/admin syncroles sync_registered:true` again —
+the Step 7 pass could not give roles to people who were not members yet.
 
 ## Step 9 — Verify
 
