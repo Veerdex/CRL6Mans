@@ -21,6 +21,29 @@ export type ResolvedBenefits = Map<string, string | null>;
 // their tier title through the result with no further I/O.
 export type TierPrice = { title: string; cents: number };
 
+export type NumberedTier = { number: number; title: string; cents: number };
+
+// The numbers admins type into /admin setsupporterrole. Most expensive is 1,
+// matching the order the Tiers & Benefits panel already displays, so the
+// position shown on that carousel is the number to type. Free tiers are left
+// out entirely — they hand out no Discord role, so they are never numbered.
+//
+// A number is only ever a way to pick a tier: it shifts as soon as a tier is
+// added or repriced, which is why nothing persists it.
+export function numberedPaidTiers(prices: TierPrice[]): NumberedTier[] {
+  return prices
+    .filter((p) => p.cents > 0)
+    .sort((a, b) => b.cents - a.cents || a.title.localeCompare(b.title))
+    .map((t, i) => ({ number: i + 1, title: t.title, cents: t.cents }));
+}
+
+// tier title -> Discord role id. Storing the id rather than the role's name is
+// what lets the role be renamed in Discord without breaking the connection.
+export async function getTierRoleIds(): Promise<Map<string, string>> {
+  const { data } = await supabaseAdmin.from("patreon_tier_roles").select("tier_title, role_id");
+  return new Map((data ?? []).map((r) => [r.tier_title as string, r.role_id as string]));
+}
+
 export async function getTierPrices(): Promise<TierPrice[]> {
   const { data } = await supabaseAdmin.from("patreon_tier_prices").select("tier_title, amount_cents");
   return (data ?? []).map((r) => ({ title: r.tier_title as string, cents: (r.amount_cents as number | null) ?? 0 }));
@@ -93,8 +116,8 @@ export function benefitsForTier(
 // the settings actions both go through them, so the two cannot drift.
 export const PUBLIC_COLUMN_BENEFIT = "featured-on-support-page";
 
-// A tier's Discord role is the guild role named exactly after the tier title, so
-// this id is all the configuration there is — see syncDiscordSupporterRole.
+// Which Discord role a tier hands out is stored in patreon_tier_roles and set
+// with /admin setsupporterrole — see syncDiscordSupporterRole.
 export const DISCORD_ROLE_BENEFIT = "discord-role";
 
 export type BenefitPrefRow = {

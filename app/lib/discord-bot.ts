@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "./supabase";
-import { getBenefitsByTier, DISCORD_ROLE_BENEFIT } from "./patreon-entitlements";
+import { getTierPrices, getTierRoleIds, numberedPaidTiers } from "./patreon-entitlements";
 import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
@@ -130,19 +130,41 @@ async function setRegisteredRoleId(userId: string, roleId: string) {
   );
 }
 
-// Stores the role granted to Patreon supporters (the "Discord role" tier benefit).
-// This command only identifies which Discord role to use — it doesn't grant/revoke
-// it from anyone yet; that sync is separate follow-up work.
-async function setSupporterRoleId(userId: string, roleId: string) {
+function tierPickerList(tiers: { number: number; title: string }[]) {
+  return tiers.map(t => `• **${t.number}** — ${t.title}`).join("\n");
+}
+
+// Connects one Discord role to one supporter tier, which is the whole of the
+// "Discord role" tier benefit's configuration. The number is only how the admin
+// picks a tier off the Tiers & Benefits panel; what gets stored is the tier's
+// title and the role's id, so renaming the role — or renumbering the tiers by
+// adding one — leaves the connection intact.
+async function setSupporterRoleId(userId: string, roleId: string, tierNumber: number) {
   const denied = await directorGuard(userId);
   if (denied) return denied;
   if (!roleId) return ephemeralReply("❌ You must specify a role.");
-  const { error } = await supabaseAdmin.from("league_settings")
-    .update({ supporter_role_id: roleId, updated_at: new Date().toISOString() })
-    .not("id", "is", null);
+
+  const tiers = numberedPaidTiers(await getTierPrices());
+  if (!tiers.length) return ephemeralReply(
+    "❌ No paid tiers are known yet. Open **Tiers & Benefits** on the dashboard once to pull them from Patreon."
+  );
+
+  const tier = tiers.find(t => t.number === tierNumber);
+  if (!tier) return ephemeralReply(`❌ There is no tier ${tierNumber}. Pick one of:\n${tierPickerList(tiers)}`);
+
+  const previousId = (await getTierRoleIds()).get(tier.title);
+
+  const { error } = await supabaseAdmin.from("patreon_tier_roles").upsert(
+    { tier_title: tier.title, role_id: roleId, updated_at: new Date().toISOString() },
+    { onConflict: "tier_title" },
+  );
   if (error) return ephemeralReply(`❌ Failed to save: ${error.message}`);
+
   return ephemeralReply(
-    `✅ Supporter role set to <@&${roleId}>.\n` +
+    `✅ Tier ${tier.number} (**${tier.title}**) is now <@&${roleId}>.\n` +
+    (previousId && previousId !== roleId
+      ? `It was <@&${previousId}> — supporters already holding that one keep it, so delete it by hand if it's no longer wanted.\n`
+      : "") +
     `Make sure the bot's own role is **above** it in the server's role list, or Discord will reject the assignment.`
   );
 }
@@ -1702,14 +1724,14 @@ async function adminChecklist(userId: string) {
   const { count: teamCount } = await supabaseAdmin
     .from("teams").select("id", { count: "exact", head: true });
 
-  const tierRoleNames = [...(await getBenefitsByTier())]
-    .filter(([, benefits]) => benefits.has(DISCORD_ROLE_BENEFIT))
-    .map(([title]) => title.trim())
-    .filter(Boolean);
-  const guildRoleNames = tierRoleNames.length
-    ? new Set((await getGuildRoles()).map(r => r.name))
+  const paidTiers = numberedPaidTiers(await getTierPrices());
+  const tierRoleIds = await getTierRoleIds();
+  const guildRoleIds = paidTiers.length
+    ? new Set((await getGuildRoles()).map(r => r.id))
     : new Set<string>();
-  const absentTierRoles = tierRoleNames.filter(n => !guildRoleNames.has(n));
+  const unconnectedTiers = paidTiers
+    .map(t => ({ ...t, roleId: tierRoleIds.get(t.title) }))
+    .filter(t => !t.roleId || !guildRoleIds.has(t.roleId));
 
   const missing: string[] = [];
   if (!settings) missing.push("`league_settings` row is missing entirely (should always have exactly one row)");
@@ -1720,9 +1742,12 @@ async function adminChecklist(userId: string) {
   if (!settings?.director_role_id) missing.push("Director role — run `/admin setdirectorid`");
   if (!settings?.ceo_role_id) missing.push("CEO role — run `/admin setceoid`");
   if (!settings?.registered_role_id) missing.push("Registered role — run `/admin setregisteredrole`");
-  if (absentTierRoles.length) missing.push(
-    `Supporter tier role(s) — create a Discord role named exactly ${absentTierRoles.map(n => `**${n}**`).join(", ")}, ` +
-    "positioned below the bot's own role. The name has to match the tier title character-for-character."
+  if (unconnectedTiers.length) missing.push(
+    `Supporter tier role(s) — ${paidTiers.length - unconnectedTiers.length} of ${paidTiers.length} connected. ` +
+    "Run `/admin setsupporterrole` with the role and tier number for:\n" +
+    unconnectedTiers.map(t =>
+      `  • **${t.number}** — ${t.title}${t.roleId ? " (its role was deleted)" : ""}`
+    ).join("\n")
   );
   if (!teamCount) missing.push("No team slots exist yet — add them from the dashboard admin panel");
 
@@ -3364,7 +3389,7 @@ export async function handleCommand(interaction: Interaction) {
       case "setdirectorid":     return setStaffRoleId(userId, String(sOpt("role")), "director");
       case "setceoid":          return setStaffRoleId(userId, String(sOpt("role")), "ceo");
       case "setregisteredrole": return setRegisteredRoleId(userId, String(sOpt("role")));
-      case "setsupporterrole":  return setSupporterRoleId(userId, String(sOpt("role")));
+      case "setsupporterrole":  return setSupporterRoleId(userId, String(sOpt("role")), Number(sOpt("tier")));
       case "assignrole":        return assignRole(userId, String(sOpt("user")), String(sOpt("role")));
       case "removerole":        return removeRoleCmd(userId, String(sOpt("user")), String(sOpt("role")));
       case "setruleschannel":   return setRulesChannel(userId, interaction.channel_id ?? "");

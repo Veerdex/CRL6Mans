@@ -11,6 +11,7 @@ const ADMIN_ONLY = { default_member_permissions: "0" };
 // Subcommand type constants (Discord ApplicationCommandOptionType)
 const SUB_COMMAND = 1;
 const STRING = 3;
+const INTEGER = 4;
 const BOOLEAN = 5;
 const USER = 6;
 const CHANNEL = 7;
@@ -108,8 +109,17 @@ const commands = [
       {
         type: SUB_COMMAND,
         name: "setsupporterrole",
-        description: "Set the Discord role granted to Patreon supporters",
-        options: [{ name: "role", description: "The Supporter role", type: ROLE, required: true }],
+        description: "Connect a Discord role to a supporter tier",
+        options: [
+          { name: "role", description: "The role to grant", type: ROLE, required: true },
+          {
+            name: "tier",
+            description: "Tier number — 1 is the most expensive, matching the Tiers & Benefits panel",
+            type: INTEGER,
+            required: true,
+            min_value: 1,
+          },
+        ],
       },
       {
         type: SUB_COMMAND,

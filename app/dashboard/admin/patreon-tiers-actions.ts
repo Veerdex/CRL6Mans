@@ -25,6 +25,13 @@ function sortTiersByPriceDesc(tiers: LiveTier[]): LiveTier[] {
   return tiers.sort((a, b) => (b.amountCents ?? -1) - (a.amountCents ?? -1) || a.title.localeCompare(b.title));
 }
 
+// A free tier isn't something to configure: it grants no paid benefit and hands
+// out no Discord role. Its price is still cached below, so anyone already on it
+// still resolves — it just stops being offered as a thing to set up.
+function withoutFreeTiers(tiers: LiveTier[]): LiveTier[] {
+  return tiers.filter((t) => t.amountCents !== 0);
+}
+
 // Mirrors live tier prices into patreon_tier_prices, which is what
 // patreon-entitlements.ts reads to make tiers cumulative. Kept as a side
 // effect of viewing tiers (rather than a separate exported action) so the
@@ -65,7 +72,7 @@ export async function getLiveTiers(): Promise<LiveTier[]> {
       if (byTitle.size > 0) {
         const live = sortTiersByPriceDesc(Array.from(byTitle, ([title, amountCents]) => ({ title, amountCents })));
         await cacheTierPrices(live);
-        return live;
+        return withoutFreeTiers(live);
       }
 
       const { members } = await fetchCampaignMembers(fresh.accessToken, fresh.campaignId);
@@ -74,14 +81,14 @@ export async function getLiveTiers(): Promise<LiveTier[]> {
       if (byMemberTitle.size > 0) {
         const live = sortTiersByPriceDesc(Array.from(byMemberTitle, ([title, amountCents]) => ({ title, amountCents })));
         await cacheTierPrices(live);
-        return live;
+        return withoutFreeTiers(live);
       }
     }
   }
 
   const { data } = await supabaseAdmin.from("accounts").select("patreon_tier_title").not("patreon_tier_title", "is", null);
   const titles = Array.from(new Set((data ?? []).map((r) => r.patreon_tier_title as string)));
-  return sortTiersByPriceDesc(titles.map((title) => ({ title, amountCents: null })));
+  return withoutFreeTiers(sortTiersByPriceDesc(titles.map((title) => ({ title, amountCents: null }))));
 }
 
 export type TierBenefitAssignment = { id: string; value: string | null };
@@ -140,8 +147,10 @@ export type TierOverride = {
 // would be a dropdown entry that silently grants nothing.
 export async function getOverridableTiers(): Promise<LiveTier[]> {
   const { data } = await supabaseAdmin.from("patreon_tier_prices").select("tier_title, amount_cents");
-  return sortTiersByPriceDesc(
-    (data ?? []).map((r) => ({ title: r.tier_title as string, amountCents: (r.amount_cents as number | null) ?? null })),
+  return withoutFreeTiers(
+    sortTiersByPriceDesc(
+      (data ?? []).map((r) => ({ title: r.tier_title as string, amountCents: (r.amount_cents as number | null) ?? null })),
+    ),
   );
 }
 
