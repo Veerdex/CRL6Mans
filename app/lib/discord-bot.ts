@@ -1718,7 +1718,7 @@ async function adminChecklist(userId: string) {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("rules_channel_id, announcement_channel_id, draft_channel_id, moderator_role_id, director_role_id, ceo_role_id, registered_role_id")
+    .select("rules_channel_id, announcement_channel_id, draft_channel_id, clips_channel_id, moderator_role_id, director_role_id, ceo_role_id, registered_role_id")
     .single();
 
   const { count: teamCount } = await supabaseAdmin
@@ -1738,6 +1738,7 @@ async function adminChecklist(userId: string) {
   if (!settings?.rules_channel_id) missing.push("Rules channel — run `/setruleschannel` in the target channel");
   if (!settings?.announcement_channel_id) missing.push("Announcement channel — run `/setannouncement` in the target channel");
   if (!settings?.draft_channel_id) missing.push("Draft channel — run `/setdraftchannel` in the target channel");
+  if (!settings?.clips_channel_id) missing.push("Clips channel — run `/setclipschannel` in the target channel");
   if (!settings?.moderator_role_id) missing.push("Moderator role — run `/admin setmoderatorid`");
   if (!settings?.director_role_id) missing.push("Director role — run `/admin setdirectorid`");
   if (!settings?.ceo_role_id) missing.push("CEO role — run `/admin setceoid`");
@@ -1768,12 +1769,12 @@ async function adminDisconnect(userId: string, confirm: string) {
   if (denied) return denied;
   if (confirm !== "CONFIRM DISCONNECT") return ephemeralReply('❌ Type exactly: "CONFIRM DISCONNECT"');
 
-  await Promise.all([
+  const [settingsRes, teamsRes, matchesRes, categoriesRes, tierRolesRes] = await Promise.all([
     supabaseAdmin.from("league_settings").update({
       rules_channel_id: null, announcement_channel_id: null, match_category_anchor_id: null,
-      match_category_id: null, draft_channel_id: null, moderator_role_id: null,
-      director_role_id: null, ceo_role_id: null, registered_role_id: null,
-      supporter_role_id: null,
+      match_category_id: null, draft_channel_id: null, clips_channel_id: null,
+      moderator_role_id: null, director_role_id: null, ceo_role_id: null,
+      registered_role_id: null, supporter_role_id: null,
       updated_at: new Date().toISOString(),
     }).not("id", "is", null),
     supabaseAdmin.from("teams").delete().not("id", "is", null),
@@ -1781,6 +1782,23 @@ async function adminDisconnect(userId: string, confirm: string) {
     supabaseAdmin.from("match_discord_categories").delete().not("id", "is", null),
     supabaseAdmin.from("patreon_tier_roles").delete().not("tier_title", "is", null),
   ]);
+
+  // supabase-js resolves rather than throws on a failed write, so without this the command
+  // would report success while stale guild IDs silently survived the switch.
+  const failed = ([
+    ["Channel/role settings", settingsRes],
+    ["Team slots", teamsRes],
+    ["Match channels", matchesRes],
+    ["Match categories", categoriesRes],
+    ["Supporter tier roles", tierRolesRes],
+  ] as const).filter(([, res]) => res.error);
+
+  if (failed.length) {
+    return ephemeralReply(
+      `⚠️ **Disconnect incomplete — ${failed.length} of 5 step(s) failed.** Stale Discord IDs may remain; fix the errors below and re-run.\n` +
+      failed.map(([label, res]) => `• ${label}: ${res.error!.message}`).join("\n")
+    );
+  }
 
   return ephemeralReply("✅ Disconnected. All Discord channel/role/category references cleared and team slots removed — no changes were made in the Discord server itself. Run `/admin checklist` to see what to reconfigure.");
 }
