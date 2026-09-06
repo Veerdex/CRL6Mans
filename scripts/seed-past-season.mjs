@@ -65,13 +65,27 @@ const SB_HEADERS = {
 // no division column at all.
 const raw = fs.readFileSync(cfg.placementFile, "utf8").split(/\r?\n/);
 
+const lc = (s) => s.trim().toLowerCase();
+
+// teamAliases maps a misspelling to the team's real name, whichever side of the
+// file the typo landed on — 2025 has the roster row wrong and the placement
+// block right. Both sides are renamed, so team_name records the real name.
+const aliases = new Map(Object.entries(cfg.teamAliases ?? {}).map(([from, to]) => [lc(from), to]));
+const aliasUsed = new Set();
+const canonical = (name) => {
+  const hit = aliases.get(lc(name));
+  if (!hit) return name.trim();
+  aliasUsed.add(lc(name));
+  return hit;
+};
+
 const teams = [];
 let rosterEnd = 1;
 for (; rosterEnd < raw.length; rosterEnd++) {
   if (!raw[rosterEnd].trim()) break;
   const f = raw[rosterEnd].split("\t").map((s) => s.trim()).filter(Boolean);
   if (f.length < 4) throw new Error(`short roster row: ${JSON.stringify(raw[rosterEnd])}`);
-  teams.push({ name: f[0], roster: f.slice(-3) });
+  teams.push({ name: canonical(f[0]), roster: f.slice(-3) });
 }
 
 const BAND_RE = /^(\d+)(?:st|nd|rd|th)(?:\s*-\s*(\d+)(?:st|nd|rd|th))?$/i;
@@ -84,13 +98,6 @@ const band = (label) => {
   return { label, placement: start + (size - 1) / 2, size };
 };
 
-const lc = (s) => s.trim().toLowerCase();
-
-// The roster spelling is canonical; teamAliases records a placement-side typo
-// the same way manual records a name a human had to resolve.
-const aliases = new Map(Object.entries(cfg.teamAliases ?? {}).map(([from, to]) => [lc(from), lc(to)]));
-const teamKey = (name) => aliases.get(lc(name)) ?? lc(name);
-
 // Two shapes in the wild: "<Team Name>: <band>" per line, or a bare band label
 // heading a block of team names.
 const placements = new Map();
@@ -100,16 +107,16 @@ for (const line of raw.slice(rosterEnd)) {
   if (!text) { heading = null; continue; }
   const inline = text.match(/^(.+?):\s*(\S.*?)$/);
   const inlineBand = inline && band(inline[2]);
-  if (inlineBand) { placements.set(teamKey(inline[1]), inlineBand); heading = null; continue; }
+  if (inlineBand) { placements.set(lc(canonical(inline[1])), inlineBand); heading = null; continue; }
   const b = band(text);
   if (b) { heading = b; continue; }
-  if (heading) placements.set(teamKey(text), heading);
+  if (heading) placements.set(lc(canonical(text)), heading);
 }
 
 const fatal = [];
 for (const t of teams) if (!placements.has(lc(t.name))) fatal.push(`roster team "${t.name}" has no placement line`);
 for (const k of placements.keys()) if (!teams.some((t) => lc(t.name) === k)) fatal.push(`placement "${k}" has no roster row`);
-for (const [from, to] of aliases) if (!teams.some((t) => lc(t.name) === to)) fatal.push(`teamAliases "${from}" -> "${to}" matches no roster team`);
+for (const from of aliases.keys()) if (!aliasUsed.has(from)) fatal.push(`teamAliases "${from}" matches no team name in the file`);
 if (teams.length !== cfg.teamCount) fatal.push(`parsed ${teams.length} teams, config says ${cfg.teamCount}`);
 // prizePool feeds eventPoints and endedAt orders the profile modal; a placeholder
 // for either writes rows that look right and are not.
@@ -156,12 +163,24 @@ for (const m of members) {
 
 // --- resolve every roster slot to a discord id --------------------------
 const manual = cfg.manual ?? {};
+
+// A player who has since left the guild has no id left to record anywhere. Their
+// roster name stands in for it, which keeps the team whole and the participant
+// count honest; no Discord account can ever log in as a name, so the row is a
+// pure archive until someone identifies them and it is re-run with a real id.
+const archived = new Set(cfg.archived ?? []);
+
 const slots = [];
 const unresolved = [];
 
 for (const t of teams) {
   const b = placements.get(lc(t.name));
   for (const name of t.roster) {
+    if (archived.has(name)) {
+      const member = { discord_id: name, username: "", in_site: "no", in_guild: "no" };
+      slots.push({ name, team: t.name, band: b, member, how: "archived" });
+      continue;
+    }
     const forced = manual[name];
     if (forced) {
       const m = byId.get(forced);
@@ -177,6 +196,10 @@ for (const t of teams) {
 
 for (const k of Object.keys(manual)) {
   if (!teams.some((t) => t.roster.includes(k))) fatal.push(`manual entry "${k}" matches no roster slot`);
+  if (archived.has(k)) fatal.push(`"${k}" is in both manual and archived`);
+}
+for (const k of archived) {
+  if (!teams.some((t) => t.roster.includes(k))) fatal.push(`archived entry "${k}" matches no roster slot`);
 }
 
 // The same person on two rosters would be credited twice for one event.
@@ -212,13 +235,19 @@ const rows = slots.map((s) => ({
   team_name: s.team,
   teammates: byTeam.get(s.team)
     .filter((mate) => mate.member.discord_id !== s.member.discord_id)
-    .map((mate) => ({ discordId: mate.member.discord_id, username: mate.member.username || mate.name, displayName: mate.name })),
+    // A null discordId is what makes the profile modal render a teammate as
+    // plain text instead of a button opening a profile that cannot exist.
+    .map((mate) => ({
+      discordId: mate.how === "archived" ? null : mate.member.discord_id,
+      username: mate.member.username || mate.name,
+      displayName: mate.name,
+    })),
 }));
 
 // --- report -------------------------------------------------------------
 console.log(`${cfg.eventName} — ${cfg.eventKind}, ${cfg.teamCount} teams, prize pool ${cfg.prizePool}, ended ${cfg.endedAt}`);
 console.log(`  roster slots: ${teams.length * 3}`);
-console.log(`  resolved: ${slots.length} (auto ${slots.filter((s) => s.how === "auto").length}, manual ${slots.filter((s) => s.how === "manual").length})`);
+console.log(`  resolved: ${slots.length} (auto ${slots.filter((s) => s.how === "auto").length}, manual ${slots.filter((s) => s.how === "manual").length}, archived without an id ${slots.filter((s) => s.how === "archived").length})`);
 console.log(`  already on the website: ${slots.filter((s) => s.member.in_site === "yes").length}`);
 console.log(`  not currently in the guild: ${slots.filter((s) => s.member.in_guild !== "yes").length}`);
 
