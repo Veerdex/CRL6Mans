@@ -232,11 +232,12 @@ async function upsert(batch) {
 
 if (VERIFY) {
   const res = await fetch(
-    `${SB}/rest/v1/player_event_results?event_id=eq.${cfg.eventId}&select=discord_id,display_name,team_name,placement,placement_tier_size,team_count,prize_pool,ended_at&order=placement.asc`,
+    `${SB}/rest/v1/player_event_results?event_id=eq.${cfg.eventId}&select=discord_id,display_name,team_name,event_kind,placement,placement_tier_size,team_count,prize_pool,ended_at&order=placement.asc`,
     { headers: SB_HEADERS },
   );
   const stored = await res.json();
   console.log(`\nstored rows: ${stored.length}`);
+  console.log(`stored event_kind: ${[...new Set(stored.map((r) => r.event_kind))].join(", ")}`);
   const distinct = new Map();
   for (const r of stored) distinct.set(`${r.placement}/${r.placement_tier_size}`, (distinct.get(`${r.placement}/${r.placement_tier_size}`) ?? 0) + 1);
   console.log(`stored placement -> players: ${[...distinct.entries()].map(([k, v]) => `${k}=${v}`).join(" ")}`);
