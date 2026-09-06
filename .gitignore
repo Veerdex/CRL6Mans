@@ -48,3 +48,4 @@ next-env.d.ts
 # Local player exports (contain Discord ids)
 player-names.csv
 guild-members.csv
+/scripts/past-seasons/
