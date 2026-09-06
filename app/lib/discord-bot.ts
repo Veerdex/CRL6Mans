@@ -1761,6 +1761,8 @@ async function adminChecklist(userId: string) {
 // are global user IDs, not scoped to any one guild. Team slots are deleted here (not in
 // /admin wipe) because a slot's discord_role_id is only meaningful for the guild it was
 // created in — switching servers invalidates every slot, so they get recreated from scratch.
+// Supporter tier->role connections go for the same reason: the stored role id belongs to the
+// old guild, and left behind it would have the sync granting a role that no longer exists.
 async function adminDisconnect(userId: string, confirm: string) {
   const denied = await ceoGuard(userId);
   if (denied) return denied;
@@ -1777,6 +1779,7 @@ async function adminDisconnect(userId: string, confirm: string) {
     supabaseAdmin.from("teams").delete().not("id", "is", null),
     supabaseAdmin.from("matches").update({ discord_channel_id: null }).not("id", "is", null),
     supabaseAdmin.from("match_discord_categories").delete().not("id", "is", null),
+    supabaseAdmin.from("patreon_tier_roles").delete().not("tier_title", "is", null),
   ]);
 
   return ephemeralReply("✅ Disconnected. All Discord channel/role/category references cleared and team slots removed — no changes were made in the Discord server itself. Run `/admin checklist` to see what to reconfigure.");
