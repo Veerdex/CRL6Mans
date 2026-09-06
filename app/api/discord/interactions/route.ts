@@ -6,7 +6,7 @@ import { handleCommand, handleAutocomplete, handleModalSubmit } from "@/app/lib/
 const DEFERRED_COMMANDS = new Set(["openround", "postclip"]);
 // Subcommands of /admin that are slow enough to need deferral (matched against
 // interaction.data.options[0].name, since Discord nests subcommand names one level deep).
-const DEFERRED_ADMIN_SUBCOMMANDS = new Set(["syncroles", "disconnect", "wipe", "resyncmoderation"]);
+const DEFERRED_ADMIN_SUBCOMMANDS = new Set(["syncroles", "disconnect", "wipe", "resyncmoderation", "kick", "ban"]);
 const DEFERRED_MODALS = new Set(["confirm_startdraft", "confirm_enddraft", "confirm_startseason"]);
 
 function verify(publicKey: string, signature: string, timestamp: string, body: string): boolean {
@@ -27,7 +27,10 @@ async function followUp(token: string, content: string) {
   await fetch(`https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
+    // Deferred output can carry text an admin typed (a kick reason, say), and this
+    // path drops whatever allowed_mentions the handler set. Nothing here needs to
+    // ping, so nothing does.
+    body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
   });
 }
 

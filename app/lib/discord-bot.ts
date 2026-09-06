@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "./supabase";
 import { getTierPrices, getTierRoleIds, numberedPaidTiers } from "./patreon-entitlements";
 import { fetchAllRows } from "./paginate";
-import { isModerator, isDirector, isCEO, isCurrentlyKicked } from "./players";
+import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfaEnabled, type StaffRole } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
 import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember } from "./discord-api";
@@ -18,6 +18,7 @@ import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow } from "./rating";
 import { hasBlockingIdentityDiscrepancy } from "./replay-identity-certification";
 import { createClip } from "./clip-submit";
+import { kickAccount, banAccount, findAccountByDiscordId, DEFAULT_KICK_TIMEOUT_MS, type RevokedPatron } from "./moderation";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 
@@ -2503,8 +2504,6 @@ async function diagRoles(userId: string) {
   return ephemeralReply(lines.join("\n"));
 }
 
-const DEFAULT_KICK_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000;
-
 // Re-applies ban/timeout/"Kicked" state to the currently-configured guild for
 // players whose DB moderation state (guild-independent) says they should
 // currently be banned or kicked. Needed after moving the bot to a new Discord
@@ -2563,6 +2562,96 @@ async function resyncModeration(userId: string) {
     (warnings.length ? "⚠️ Partial resync" : "✅ Moderation resynced") + "\n" + lines.join("\n") +
     "\n\nThis re-applies bans/timeouts/the Kicked role to the guild currently configured for this bot — run it once after pointing the bot at a new Discord server."
   );
+}
+
+// ─── Moderation ───────────────────────────────────────────────────────────────
+// /admin kick and /admin ban run the same kickAccount/banAccount the admin panel
+// runs, so the DB writes, the Discord role/timeout/ban work and the session
+// invalidation are identical. Only actor identification differs: a session
+// cookie on the site, the invoking member here.
+
+// Both gates the panel puts in front of moderation. The MFA requirement is the
+// reason getActorRole rejects a session without it — skipping it here would
+// make Discord the soft way in.
+async function resolveModerator(userId: string): Promise<{ role: StaffRole } | { error: string }> {
+  const role = await getStaffRole(userId);
+  if (!role) return { error: "You don't have permission to use this command." };
+  if (!(await hasMfaEnabled(userId)))
+    return { error: "Turn on two-factor authentication in Settings before moderating from Discord." };
+  return { role };
+}
+
+// Mirrors the panel's timeout dropdown. These size the Discord timeout only —
+// the site-side kick has no expiry either way, exactly as on the website.
+const KICK_DURATIONS: { value: string; label: string; ms: number }[] = [
+  { value: "1h",  label: "1 hour",   ms: 60 * 60 * 1000 },
+  { value: "12h", label: "12 hours", ms: 12 * 60 * 60 * 1000 },
+  { value: "1d",  label: "1 day",    ms: 24 * 60 * 60 * 1000 },
+  { value: "3d",  label: "3 days",   ms: 3 * 24 * 60 * 60 * 1000 },
+  { value: "7d",  label: "7 days",   ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: "14d", label: "14 days",  ms: 14 * 24 * 60 * 60 * 1000 },
+  { value: "28d", label: "28 days",  ms: 28 * 24 * 60 * 60 * 1000 },
+];
+
+async function moderationTarget(actorId: string, targetUserId: string, verb: string) {
+  if (targetUserId === actorId) return { error: `You can't ${verb} yourself.` };
+  const target = await findAccountByDiscordId(targetUserId);
+  if (!target) return { error: `<@${targetUserId}> has never signed in to the site, so there's no account to ${verb}.` };
+  if (target.status === "banned")
+    return { error: `**${target.displayName}** is already banned. Unban them on the admin page first.` };
+  return { target };
+}
+
+async function kickCmd(userId: string, targetUserId: string, reason: string, duration: string) {
+  const actor = await resolveModerator(userId);
+  if ("error" in actor) return ephemeralReply(`❌ ${actor.error}`);
+
+  const resolved = await moderationTarget(userId, targetUserId, "kick");
+  if ("error" in resolved) return ephemeralReply(`❌ ${resolved.error}`);
+
+  const choice = KICK_DURATIONS.find(d => d.value === duration) ?? KICK_DURATIONS.find(d => d.ms === DEFAULT_KICK_TIMEOUT_MS)!;
+  const result = await kickAccount(actor.role, resolved.target.accountId, reason, choice.ms);
+  if (result.error) return ephemeralReply(`❌ ${result.error}`);
+
+  return ephemeralReply(
+    `✅ Kicked **${resolved.target.displayName}** (<@${targetUserId}>).\n` +
+    `• Reason: ${reason}\n` +
+    `• Removed from their team and the draft, given the Kicked role, timed out for ${choice.label}.\n` +
+    `• The site kick has no expiry — lift it from the admin page.`
+  );
+}
+
+async function banCmd(userId: string, targetUserId: string, reason: string) {
+  const actor = await resolveModerator(userId);
+  if ("error" in actor) return ephemeralReply(`❌ ${actor.error}`);
+
+  const resolved = await moderationTarget(userId, targetUserId, "ban");
+  if ("error" in resolved) return ephemeralReply(`❌ ${resolved.error}`);
+
+  const result = await banAccount(actor.role, resolved.target.accountId, reason);
+  if (result.error) return ephemeralReply(`❌ ${result.error}`);
+
+  const patron = result.revokedPatron;
+  // The one thing a ban can't do is stop the money — Patreon's API is read-only
+  // for memberships. The panel says so after a ban; so does this.
+  const pledgeNote = patron
+    ? `\n\n⚠️ Supporter status revoked (${formatPledge(patron)}). They keep being charged until you block them at ` +
+      `<https://www.patreon.com/members> — that also cancels their membership and stops them rejoining.`
+    : "";
+
+  return ephemeralReply(
+    `✅ Banned **${resolved.target.displayName}** (<@${targetUserId}>).\n` +
+    `• Reason: ${reason}\n` +
+    `• Removed from their team and the draft, stripped of league roles, banned from the server.` +
+    pledgeNote
+  );
+}
+
+function formatPledge(patron: RevokedPatron): string {
+  if (patron.tierTitle && patron.entitledCents) return `${patron.tierTitle} — $${(patron.entitledCents / 100).toFixed(2)}/mo`;
+  if (patron.tierTitle) return patron.tierTitle;
+  if (patron.entitledCents) return `$${(patron.entitledCents / 100).toFixed(2)}/mo`;
+  return "a free membership";
 }
 
 async function assignRole(userId: string, targetUserId: string, roleId: string) {
@@ -3472,6 +3561,8 @@ export async function handleCommand(interaction: Interaction) {
       case "checklist":  return adminChecklist(userId);
       case "disconnect": return adminDisconnect(userId, String(sOpt("confirm")));
       case "wipe":       return adminWipe(userId, String(sOpt("confirm")), sOpt("clear_history") === true);
+      case "kick":       return kickCmd(userId, String(sOpt("user")), String(sOpt("reason")), String(sOpt("duration") || ""));
+      case "ban":        return banCmd(userId, String(sOpt("user")), String(sOpt("reason")));
       case "resyncmoderation": return resyncModeration(userId);
       default:           return ephemeralReply("Unknown admin subcommand.");
     }

@@ -145,6 +145,39 @@ const commands = [
       },
       {
         type: SUB_COMMAND,
+        name: "kick",
+        description: "Kick a player: off their team and the draft, Kicked role, Discord timeout",
+        options: [
+          { name: "user", description: "The player to kick", type: USER, required: true },
+          { name: "reason", description: "Shown to them on the site", type: STRING, required: true },
+          {
+            name: "duration",
+            description: "Discord timeout length (default: 7 days). The site kick has no expiry.",
+            type: STRING,
+            required: false,
+            choices: [
+              { name: "1 hour", value: "1h" },
+              { name: "12 hours", value: "12h" },
+              { name: "1 day", value: "1d" },
+              { name: "3 days", value: "3d" },
+              { name: "7 days", value: "7d" },
+              { name: "14 days", value: "14d" },
+              { name: "28 days", value: "28d" },
+            ],
+          },
+        ],
+      },
+      {
+        type: SUB_COMMAND,
+        name: "ban",
+        description: "Ban a player: revokes their account and supporter status, bans them from the server",
+        options: [
+          { name: "user", description: "The player to ban", type: USER, required: true },
+          { name: "reason", description: "Shown to them on the site", type: STRING, required: true },
+        ],
+      },
+      {
+        type: SUB_COMMAND,
         name: "resyncmoderation",
         description: "CEO only: re-apply bans/timeouts/Kicked role to this guild for players the DB says are banned/kicked",
       },
