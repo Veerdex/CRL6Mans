@@ -119,7 +119,10 @@ insert into pending_players (
 )
 select
   id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2,
-  college_image_url, coalesce(sub_willing, false), tracker_confirmed_at, created_at, updated_at
+  -- Was players.college_image_url; that column is dropped (see
+  -- scripts/drop-players-college-image-url.sql) so there is nothing to carry
+  -- over. Proof is deleted the moment a registration is decided anyway.
+  '', coalesce(sub_willing, false), tracker_confirmed_at, created_at, updated_at
 from players
 on conflict (account_id) do nothing;
 

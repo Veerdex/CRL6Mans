@@ -97,7 +97,6 @@ async function createTestAccounts(
         current_3v3: s.current_3v3,
         peak_2v2: s.peak_2v2,
         current_2v2: s.current_2v2,
-        college_image_url: "",
         updated_at: timestamp,
       };
     }))

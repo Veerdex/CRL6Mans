@@ -48,7 +48,6 @@ create table if not exists players (
   peak_2v2            text        not null default '0',
   current_2v2         text        not null default '0',
   tracker_url         text        not null default '',
-  college_image_url   text        not null default '',
   draft_entered       boolean     not null default false,
   draft_entered_at    timestamptz,
   tracker_confirmed_at timestamptz,
@@ -76,7 +75,9 @@ alter table players add column if not exists current_3v3        text not null de
 alter table players add column if not exists peak_2v2           text not null default '0';
 alter table players add column if not exists current_2v2        text not null default '0';
 alter table players add column if not exists tracker_url        text not null default '';
-alter table players add column if not exists college_image_url  text not null default '';
+-- No players.college_image_url: enrollment proof lives only on pending_players
+-- and is deleted once the registration is decided. Re-adding it here would
+-- silently undo scripts/drop-players-college-image-url.sql on the next run.
 alter table players add column if not exists draft_entered      boolean not null default false;
 alter table players add column if not exists draft_entered_at   timestamptz;
 alter table players add column if not exists tracker_confirmed_at timestamptz;

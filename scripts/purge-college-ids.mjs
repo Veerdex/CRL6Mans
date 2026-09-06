@@ -48,7 +48,6 @@ const files = await listRes.json();
 
 const accounts = await rest("accounts?select=id,username,status");
 const pending = await rest("pending_players?select=account_id,college_image_url");
-const players = await rest("players?select=id,college_image_url");
 
 const statusOf = new Map(accounts.map((a) => [a.id, a.status]));
 const nameOf = new Map(accounts.map((a) => [a.id, a.username]));
@@ -70,17 +69,11 @@ const doomed = files
 const clearPending = pending.filter(
   (r) => r.college_image_url && statusOf.get(r.account_id) !== "pending",
 );
-const clearPlayers = players.filter(
-  (r) => r.college_image_url && statusOf.get(r.id) !== "pending",
-);
-
 console.log(`storage objects to delete: ${doomed.length}`);
 for (const n of doomed) console.log(`  ${n}`);
 console.log(`\nleft in place for pending review: ${keep.size}`);
 console.log(`pending_players rows to clear: ${clearPending.length}`);
 for (const r of clearPending) console.log(`  ${nameOf.get(r.account_id) ?? r.account_id}`);
-console.log(`players rows to clear: ${clearPlayers.length}`);
-for (const r of clearPlayers) console.log(`  ${nameOf.get(r.id) ?? r.id}`);
 
 if (!confirmed) {
   console.log("\nDry run. Re-run with --confirm to apply. This cannot be undone.");
@@ -107,16 +100,6 @@ if (clearPending.length) {
     body: JSON.stringify({ college_image_url: "" }),
   });
   console.log(`cleared ${clearPending.length} pending_players rows`);
-}
-
-if (clearPlayers.length) {
-  const ids = clearPlayers.map((r) => r.id).join(",");
-  await rest(`players?id=in.(${ids})`, {
-    method: "PATCH",
-    headers: { ...headers, Prefer: "return=minimal" },
-    body: JSON.stringify({ college_image_url: "" }),
-  });
-  console.log(`cleared ${clearPlayers.length} players rows`);
 }
 
 console.log("done");

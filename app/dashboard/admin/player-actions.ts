@@ -104,7 +104,6 @@ export async function approvePlayerWithEdits(
       peak_2v2: editable.peak_2v2,
       current_2v2: editable.current_2v2,
       tracker_url: editable.tracker_url,
-      college_image_url: "",
       sub_willing: pending?.sub_willing ?? false,
       tracker_confirmed_at: pending?.tracker_confirmed_at ?? null,
       updated_at: now,
