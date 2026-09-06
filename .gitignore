@@ -45,5 +45,6 @@ next-env.d.ts
 .idea/
 .vscode/
 
-# Local player export (contains Discord ids)
+# Local player exports (contain Discord ids)
 player-names.csv
+guild-members.csv
