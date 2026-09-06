@@ -368,7 +368,12 @@ export async function reportMatchResult(
     if (rows.length) await supabaseAdmin.from("player_game_stats").insert(rows);
   } catch { /* best-effort */ }
 
-  await supabaseAdmin.from("matches").update({ identity_status: gate.identityStatus }).eq("id", matchId);
+  // An admin reporting the result settles any pending replay review, so the
+  // flag would otherwise sit set on a match that's already scored.
+  await supabaseAdmin
+    .from("matches")
+    .update({ identity_status: gate.identityStatus, replay_review_status: "none" })
+    .eq("id", matchId);
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/season");

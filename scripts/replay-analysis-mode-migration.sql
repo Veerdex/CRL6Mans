@@ -18,7 +18,7 @@ alter table matches
 -- Replay player names that resolved to no registered player. Non-empty means
 -- the game is "bad": amber warning on loose, admin review on strict.
 alter table replay_identity_certifications
-  add column if not exists unmatched_names text[];
+  add column if not exists unmatched_names text[] not null default '{}';
 
 create index if not exists matches_replay_review_status_idx
   on matches(replay_review_status)
