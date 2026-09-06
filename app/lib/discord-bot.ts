@@ -1633,7 +1633,14 @@ async function postClip(userId: string, url: string, title: string, underSixtySe
   if (!result.clip) return ephemeralReply(`❌ ${result.error}`);
   const clip = result.clip;
 
-  const posted = await sendChannelMessage(channelId, `🎬 **${clip.title}** — <@${userId}>\n${clip.url}`);
+  // The title is player-typed, so the submitter's own mention is the only one
+  // let through — otherwise a title of "@everyone" pings the server.
+  const posted = await sendChannelMessage(
+    channelId,
+    `🎬 **${clip.title}** — <@${userId}>\n${clip.url}`,
+    undefined,
+    { parse: [], users: [userId] }
+  );
   if (!posted) {
     return ephemeralReply(`⚠️ Added **${clip.title}** to the Media tab, but the message in <#${channelId}> failed to send.`);
   }

@@ -358,14 +358,28 @@ export type DiscordEmbed = {
   thumbnail?: { url: string };
 };
 
+// Discord's mention whitelist. Pass one whenever any part of `content` came
+// from a player rather than from the league itself, or a clip title reading
+// "@everyone" pings the server through the bot.
+export type AllowedMentions = { parse: Array<"roles" | "users" | "everyone">; users?: string[]; roles?: string[] };
+
 // Returns whether the message actually landed, so a caller that told a user
 // "posted" can tell the truth. Most callers are fire-and-forget and ignore it.
-export async function sendChannelMessage(channelId: string, content: string, embeds?: DiscordEmbed[]): Promise<boolean> {
+export async function sendChannelMessage(
+  channelId: string,
+  content: string,
+  embeds?: DiscordEmbed[],
+  allowedMentions?: AllowedMentions
+): Promise<boolean> {
   if (!BOT_TOKEN) return false;
   const res = await fetch(`${API}/channels/${channelId}/messages`, {
     method: "POST",
     headers: botHeaders(true),
-    body: JSON.stringify({ content, ...(embeds ? { embeds } : {}) }),
+    body: JSON.stringify({
+      content,
+      ...(embeds ? { embeds } : {}),
+      ...(allowedMentions ? { allowed_mentions: allowedMentions } : {}),
+    }),
   });
   if (!res.ok) {
     console.error(`[sendChannelMessage] channel=${channelId} status=${res.status}`, await res.text());
