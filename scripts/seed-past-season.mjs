@@ -58,17 +58,19 @@ const SB_HEADERS = {
 
 // --- placement file -----------------------------------------------------
 // Tab separated. Row 1 is a header, then one row per team until a blank line,
-// then "<Team Name>: <band>" lines grouped by band.
+// then the placements.
 //
 // Anchoring the roster on "first cell is the team, last three are the players"
-// survives a row whose division wrapped into an extra cell.
+// survives a row whose division wrapped into an extra cell, and a year that has
+// no division column at all.
 const raw = fs.readFileSync(cfg.placementFile, "utf8").split(/\r?\n/);
 
 const teams = [];
-for (const line of raw.slice(1)) {
-  if (!line.trim()) break;
-  const f = line.split("\t").map((s) => s.trim()).filter(Boolean);
-  if (f.length < 5) throw new Error(`short roster row: ${JSON.stringify(line)}`);
+let rosterEnd = 1;
+for (; rosterEnd < raw.length; rosterEnd++) {
+  if (!raw[rosterEnd].trim()) break;
+  const f = raw[rosterEnd].split("\t").map((s) => s.trim()).filter(Boolean);
+  if (f.length < 4) throw new Error(`short roster row: ${JSON.stringify(raw[rosterEnd])}`);
   teams.push({ name: f[0], roster: f.slice(-3) });
 }
 
@@ -83,18 +85,36 @@ const band = (label) => {
 };
 
 const lc = (s) => s.trim().toLowerCase();
+
+// The roster spelling is canonical; teamAliases records a placement-side typo
+// the same way manual records a name a human had to resolve.
+const aliases = new Map(Object.entries(cfg.teamAliases ?? {}).map(([from, to]) => [lc(from), lc(to)]));
+const teamKey = (name) => aliases.get(lc(name)) ?? lc(name);
+
+// Two shapes in the wild: "<Team Name>: <band>" per line, or a bare band label
+// heading a block of team names.
 const placements = new Map();
-for (const line of raw) {
-  const m = line.match(/^(.+?):\s*(\S.*?)\s*$/);
-  if (!m) continue;
-  const b = band(m[2]);
-  if (b) placements.set(lc(m[1]), b);
+let heading = null;
+for (const line of raw.slice(rosterEnd)) {
+  const text = line.trim();
+  if (!text) { heading = null; continue; }
+  const inline = text.match(/^(.+?):\s*(\S.*?)$/);
+  const inlineBand = inline && band(inline[2]);
+  if (inlineBand) { placements.set(teamKey(inline[1]), inlineBand); heading = null; continue; }
+  const b = band(text);
+  if (b) { heading = b; continue; }
+  if (heading) placements.set(teamKey(text), heading);
 }
 
 const fatal = [];
 for (const t of teams) if (!placements.has(lc(t.name))) fatal.push(`roster team "${t.name}" has no placement line`);
 for (const k of placements.keys()) if (!teams.some((t) => lc(t.name) === k)) fatal.push(`placement "${k}" has no roster row`);
+for (const [from, to] of aliases) if (!teams.some((t) => lc(t.name) === to)) fatal.push(`teamAliases "${from}" -> "${to}" matches no roster team`);
 if (teams.length !== cfg.teamCount) fatal.push(`parsed ${teams.length} teams, config says ${cfg.teamCount}`);
+// prizePool feeds eventPoints and endedAt orders the profile modal; a placeholder
+// for either writes rows that look right and are not.
+if (cfg.prizePool == null) fatal.push(`prizePool is not set`);
+if (cfg.endedAt == null) fatal.push(`endedAt is not set`);
 
 // --- guild member index -------------------------------------------------
 function parseCsv(text) {
