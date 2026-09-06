@@ -389,15 +389,14 @@ export async function uploadGameReplay(
       .eq("status", "approved");
 
     for (const c of (candidates ?? []) as { id: string; username: string; tracker_url: string | null }[]) {
-      if (!c.tracker_url) {
-        return {
-          error: `Sub candidate ${c.username} has no tracker URL set — ask them to set it in Settings before uploading.`,
-        };
-      }
+      // A tracker name we can't get is not a failure in itself: this loop runs
+      // for every approved sub, including ones who never ended up playing, and a
+      // sub who did play may still resolve below by verified platform ID — the
+      // stronger signal, since that ID survives renames. Leave the unmatched
+      // check as the only thing that can reject a replay.
+      if (!c.tracker_url) continue;
       const trackerName = await resolveTrackerName(c.tracker_url);
-      if (!trackerName) {
-        return { error: `Could not resolve tracker name for sub candidate ${c.username}.` };
-      }
+      if (!trackerName) continue;
       nameToId.set(normalizeName(trackerName), c.id);
       if (isHomeTeam) homeTrackerNames.add(normalizeName(trackerName));
     }

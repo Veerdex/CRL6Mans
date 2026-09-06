@@ -167,7 +167,10 @@ export async function adminAnalyzeGameReplay(
     }
   }
 
-  // Apply approved subs (same logic as captain upload)
+  // Apply approved subs: add each candidate's tracker alongside the original
+  // roster without removing the player they replace, so a series where the
+  // original played some games and the sub played others resolves either way.
+  // Kept identical to the captain upload in my-team/series-actions.ts.
   const { data: approvedSubs } = await supabaseAdmin
     .from("sub_requests")
     .select("player_out_id, sub_player_ids, sub_player_id")
@@ -183,11 +186,6 @@ export async function adminAnalyzeGameReplay(
     if (!candidateIds.length) continue;
 
     const isHomeTeam = playerOut.team_id === match.home_team_id;
-    if (playerOut.trackerName) {
-      const norm = normalizeName(playerOut.trackerName);
-      nameToId.delete(norm);
-      if (isHomeTeam) homeTrackerNames.delete(norm);
-    }
 
     const { data: candidates } = await supabaseAdmin
       .from("players")
