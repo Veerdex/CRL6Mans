@@ -74,10 +74,14 @@ export function RegistrationCard({ player }: Props) {
 
       {/* Links */}
       <div className="flex flex-col gap-1">
-        <a href={player.college_image_url} target="_blank" rel="noopener noreferrer"
-          className="text-sm text-indigo-400 hover:underline">
-          View college enrollment proof →
-        </a>
+        {player.college_image_url ? (
+          <a href={player.college_image_url} target="_blank" rel="noopener noreferrer"
+            className="text-sm text-indigo-400 hover:underline">
+            View college enrollment proof →
+          </a>
+        ) : (
+          <p className="text-sm text-zinc-500">Enrollment proof no longer stored.</p>
+        )}
         <a href={trackerUrl || player.tracker_url} target="_blank" rel="noopener noreferrer"
           className="text-sm text-indigo-400 hover:underline">
           View tracker profile →

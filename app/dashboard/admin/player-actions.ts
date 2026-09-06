@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified, addRegisteredRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { deleteCollegeIdImage } from "@/app/lib/college-ids";
 import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
 
 export type PlayerEditFields = {
@@ -69,8 +70,9 @@ export async function approvePlayerWithEdits(
   if (!account?.discord_id) return { error: "Account not found." };
 
   // Tier 2 (pending_players) stays the source of truth for MMR/tracker going
-  // forward. college_image_url/sub_willing/tracker_confirmed_at are read back
-  // here so the new Tier 3 row can seed from them below.
+  // forward. sub_willing/tracker_confirmed_at are read back here so the new
+  // Tier 3 row can seed from them below; college_image_url is read so the
+  // proof can be purged once the approval is committed.
   const { data: pending, error: pendingError } = await supabaseAdmin
     .from("pending_players")
     .update({
@@ -102,7 +104,7 @@ export async function approvePlayerWithEdits(
       peak_2v2: editable.peak_2v2,
       current_2v2: editable.current_2v2,
       tracker_url: editable.tracker_url,
-      college_image_url: pending?.college_image_url ?? "",
+      college_image_url: "",
       sub_willing: pending?.sub_willing ?? false,
       tracker_confirmed_at: pending?.tracker_confirmed_at ?? null,
       updated_at: now,
@@ -118,6 +120,16 @@ export async function approvePlayerWithEdits(
   if (statusError) return { error: statusError.message };
 
   await addRegisteredRole(account.discord_id);
+
+  // Enrollment proof is only kept until the registration is decided. Every step
+  // that could still fail the approval has returned by now, so an admin never
+  // loses a document they still need to review.
+  await deleteCollegeIdImage(pending?.college_image_url);
+  await supabaseAdmin
+    .from("pending_players")
+    .update({ college_image_url: "" })
+    .eq("account_id", id);
+
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard", "layout");
   return { ok: true };
