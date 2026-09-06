@@ -16,7 +16,8 @@ import {
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow } from "./rating";
-import { hasBlockingIdentityDiscrepancy } from "./replay-identity-certification";
+import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
+import { notifyMatchChannel } from "./match-notifications";
 import { createClip } from "./clip-submit";
 import { kickAccount, banAccount, findAccountByDiscordId, DEFAULT_KICK_TIMEOUT_MS, type RevokedPatron } from "./moderation";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
@@ -2269,6 +2270,63 @@ export async function processExpiredCheckIns(): Promise<void> {
   }
 }
 
+// ─── Series finalization ────────────────────────────────────────────────────────
+
+// Posts the result, then closes the match channel. Called once a series is
+// genuinely over — after admin review on strict, immediately otherwise — so the
+// channel outlives the review and an admin's rejection has somewhere to land.
+export async function finalizeMatchAndCloseChannel(
+  matchId: string,
+  homeScore: number,
+  awayScore: number,
+): Promise<void> {
+  try {
+    await execReportMatchResult(matchId, homeScore, awayScore);
+  } catch { /* best-effort — admin can still finalize manually */ }
+
+  const { data: match } = await supabaseAdmin
+    .from("matches").select("discord_channel_id").eq("id", matchId).maybeSingle();
+  if (!match?.discord_channel_id) return;
+  try {
+    await deleteChannel(match.discord_channel_id);
+    await supabaseAdmin.from("matches").update({ discord_channel_id: null }).eq("id", matchId);
+  } catch { /* best-effort */ }
+}
+
+// Both teams have now agreed the score. On loose, and on strict where every
+// replay player was recognised, that's the end of it. On strict with unmatched
+// players the match goes to an admin instead — waiting until both teams have
+// accepted means the admin sees every replay in the series at once rather than
+// adjudicating the first bad one with the rest still missing.
+export async function finalizeAcceptedSeries(
+  matchId: string,
+  homeScore: number,
+  awayScore: number,
+): Promise<void> {
+  const needsReview =
+    (await getReplayAnalysisMode()) === "strict" && (await matchHasUnmatchedPlayers(matchId));
+
+  if (!needsReview) {
+    await finalizeMatchAndCloseChannel(matchId, homeScore, awayScore);
+    return;
+  }
+
+  await supabaseAdmin
+    .from("matches").update({ replay_review_status: "pending_admin" }).eq("id", matchId);
+
+  pushToAdmins({
+    title: "Replay Review Required",
+    body: `Both teams accepted a ${homeScore}–${awayScore} series, but its replays contain unrecognised players.`,
+    url: "/dashboard/admin",
+    tag: "replay-review",
+  }).catch(() => {});
+
+  notifyMatchChannel(
+    matchId,
+    `🔍 Both teams accepted the **${homeScore}–${awayScore}** result, but some players in the replays weren't recognised. An admin will review the replays and finalise the match.`,
+  ).catch(() => {});
+}
+
 // ─── Score auto-confirm ─────────────────────────────────────────────────────────
 
 const TOURNAMENT_SCORE_CONFIRM_WINDOW_MS = 5 * 60 * 1000;
@@ -2292,11 +2350,6 @@ export async function processExpiredScoreConfirmations(): Promise<void> {
     .not("score_submitted_at", "is", null)
     .lte("score_submitted_at", cutoff);
   for (const m of matches ?? []) {
-    // Step 8: an auto-confirm must not be able to clear an identity
-    // discrepancy either — leave the match pending for admin review instead
-    // of silently finalizing it once the window elapses.
-    if (await hasBlockingIdentityDiscrepancy(m.id)) continue;
-
     // Atomic claim: only the caller that flips score_confirmed false→true proceeds,
     // so a concurrent cron + client trigger can't both finalize the same match.
     const { data: claimed } = await supabaseAdmin
@@ -2306,9 +2359,12 @@ export async function processExpiredScoreConfirmations(): Promise<void> {
       .eq("score_confirmed", false)
       .select("id");
     if (!claimed || claimed.length === 0) continue;
-    try {
-      await execReportMatchResult(m.id, m.pending_home_score as number, m.pending_away_score as number);
-    } catch { /* admin can finalize manually */ }
+
+    // Letting the window elapse counts as accepting, including on strict —
+    // which sends the match to admin review rather than finalizing it.
+    await finalizeAcceptedSeries(
+      m.id, m.pending_home_score as number, m.pending_away_score as number,
+    );
 
     // Let the team that didn't confirm know the result was auto-submitted.
     const otherTeam = m.score_submitted_by_team_id === m.home_team_id ? m.away_team_id : m.home_team_id;

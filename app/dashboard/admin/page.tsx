@@ -24,7 +24,9 @@ import { PlayerEditRequestCard, type PlayerEditRequestCardData } from "./player-
 import { PlatformAccountClaimCard, type PlatformAccountClaimCardData } from "./platform-account-claim-card";
 import { PlatformAccountVerifiedCard, type PlatformAccountVerifiedCardData } from "./platform-account-verified-card";
 import { IdentityDiscrepancyCard, type IdentityDiscrepancyCardData } from "./identity-discrepancy-card";
-import { IdentityEnforcementToggle } from "./identity-enforcement-toggle";
+import { ReplayAnalysisModeToggle } from "./replay-analysis-mode-toggle";
+import { ReplayReviewCard, type ReplayReviewCardData } from "./replay-review-card";
+import type { ReplayAnalysisMode } from "@/app/lib/replay-analysis-mode";
 import { JoinGateToggle } from "./join-gate-toggle";
 import { TournamentManager } from "./tournament-manager";
 import type { Tournament, Season } from "./tournament-actions";
@@ -196,7 +198,7 @@ export default async function AdminPage() {
 
   const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors, publicDesigns] = await Promise.all([
     getAllPendingPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, season_design_id, identity_enforcement_enabled, join_gate_enabled").maybeSingle(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, season_design_id, replay_analysis_mode, join_gate_enabled").maybeSingle(),
     supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
@@ -376,8 +378,64 @@ export default async function AdminPage() {
     };
   });
 
-  const identityEnforcementEnabled = settings?.identity_enforcement_enabled ?? false;
+  const replayAnalysisMode: ReplayAnalysisMode =
+    settings?.replay_analysis_mode === "strict" ? "strict" : "loose";
   const joinGateEnabled = settings?.join_gate_enabled ?? false;
+
+  const { data: reviewMatchRows } = await supabaseAdmin
+    .from("matches")
+    .select("id, home_team_id, away_team_id, stage, round, pending_home_score, pending_away_score")
+    .eq("replay_review_status", "pending_admin")
+    .is("home_score", null)
+    .order("score_submitted_at", { ascending: true });
+
+  const replayReviewCards: ReplayReviewCardData[] = [];
+  for (const m of reviewMatchRows ?? []) {
+    const { data: certRows } = await supabaseAdmin
+      .from("replay_identity_certifications")
+      .select("replay_id, game_number, unmatched_names, replay_file_path")
+      .eq("match_id", m.id)
+      .order("game_number", { ascending: true });
+
+    const games = await Promise.all(
+      (certRows ?? []).map(async (r) => {
+        let url: string | null = null;
+        if (r.replay_file_path) {
+          const { data } = await supabaseAdmin.storage
+            .from("match-replays").createSignedUrl(r.replay_file_path, 3600);
+          url = data?.signedUrl ?? null;
+        }
+        return {
+          gameNumber: r.game_number as number,
+          unmatchedNames: ((r.unmatched_names ?? []) as string[]),
+          replayDownloadUrl: url,
+        };
+      }),
+    );
+
+    const teamIds = [m.home_team_id, m.away_team_id].filter((id): id is string => !!id);
+    const [{ data: reviewTeams }, { data: reviewRoster }] = await Promise.all([
+      supabaseAdmin.from("teams").select("id, name").in("id", teamIds),
+      supabaseAdmin.from("players").select("id, username, display_name, team_id")
+        .in("team_id", teamIds).eq("status", "approved"),
+    ]);
+    const reviewTeamName = Object.fromEntries((reviewTeams ?? []).map((t) => [t.id, t.name]));
+    const stageLabel = m.stage ? m.stage.replace(/_/g, " ") : "match";
+    const roundLabel = m.round != null ? ` r${m.round}` : "";
+
+    replayReviewCards.push({
+      matchId: m.id,
+      matchLabel: `${reviewTeamName[m.home_team_id ?? ""] ?? "TBD"} vs ${reviewTeamName[m.away_team_id ?? ""] ?? "TBD"} (${stageLabel}${roundLabel})`,
+      homeScore: m.pending_home_score as number,
+      awayScore: m.pending_away_score as number,
+      games,
+      rosterOptions: (reviewRoster ?? []).map((p) => ({
+        id: p.id,
+        label: p.display_name ?? p.username,
+        teamName: reviewTeamName[p.team_id ?? ""] ?? "—",
+      })),
+    });
+  }
 
   const { data: openDiscrepancyRows } = await supabaseAdmin
     .from("replay_identity_discrepancies")
@@ -973,6 +1031,7 @@ export default async function AdminPage() {
       label: "Match Ops",
       subTabs: [
         { id: "match-reporting", label: "Match Reporting", level: "moderator", value: matchRows.length, notification: matchesUnderReviewCount || undefined },
+        { id: "replay-review", label: "Replay Review", level: "moderator", notification: replayReviewCards.length || undefined },
         { id: "sub-requests", label: "Sub Requests", level: "moderator", notification: subRequestCards.length || undefined },
         { id: "schedule-approvals", label: "Schedule Approvals", level: "moderator", notification: scheduleOverrideCards.length || undefined },
       ],
@@ -1257,10 +1316,10 @@ export default async function AdminPage() {
           title="Identity Discrepancies"
           notification={identityDiscrepancyCards.length}
           defaultOpen={identityDiscrepancyCards.length > 0}
-          description="Flags cases where a submitted replay's platform account doesn't match the expected roster — wrong account, wrong team, or an unverifiable ID. Also houses the identity enforcement and join-gate toggles."
+          description="Flags cases where a submitted replay's platform account doesn't match the expected roster — wrong account, wrong team, or an unverifiable ID. Also houses the replay analysis and join-gate toggles."
         >
           <div className="mb-4 space-y-2">
-            <IdentityEnforcementToggle initialEnabled={identityEnforcementEnabled} />
+            <ReplayAnalysisModeToggle initialMode={replayAnalysisMode} />
             <JoinGateToggle initialEnabled={joinGateEnabled} />
           </div>
           {identityDiscrepancyCards.length === 0 ? (
@@ -1280,6 +1339,26 @@ export default async function AdminPage() {
       </AdminSection>
 
       <AdminSection id="match-ops">
+      {/* ── Replay Review ── */}
+      <AdminSubSection
+        sectionId="match-ops"
+        tabId="replay-review"
+        title="Replay Review"
+        notification={replayReviewCards.length}
+        defaultOpen={replayReviewCards.length > 0}
+        description="Strict mode only. Both teams have accepted the score, but the replays contain players the site couldn't identify. Map each one to finalise the match, or reject the submission and send the teams back to re-upload."
+      >
+        {replayReviewCards.length === 0 ? (
+          <p className="text-zinc-400 text-sm">No series awaiting replay review.</p>
+        ) : (
+          <div className="space-y-4">
+            {replayReviewCards.map(review => (
+              <ReplayReviewCard key={review.matchId} review={review} />
+            ))}
+          </div>
+        )}
+      </AdminSubSection>
+
       {/* ── Schedule Approvals ── */}
       <AdminSubSection
         sectionId="match-ops"

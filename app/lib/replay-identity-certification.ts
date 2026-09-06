@@ -9,13 +9,10 @@ const EXPECTED_ACTIVE_PLAYERS = 6;
 
 export type PlatformIdRescue = { playerId: string; team: "home" | "away" | null };
 
-// Lets a verified platform ID rescue a replay participant whose in-replay name
-// doesn't match any registered tracker/username/display name — the exact
-// "Aerose-"/"camwin" case that motivated this whole feature. Scoped narrowly:
-// this only fills in names that *don't already* resolve by name. It does not
-// override an existing name match, even a contradictory one — that stronger
-// rule ("a contradictory platform ID can never fall back to a name match")
-// needs an admin-adjudication surface (Step 8) and is out of scope here.
+// Maps replay participants to players by verified platform ID — the claimed
+// account, which survives a rename that a scraped tracker name does not.
+// Callers apply this over their name map, not under it: a name match and a
+// verified ID that disagree resolve to the ID.
 export async function resolvePlatformIdMatches(
   matchId: string,
   activePlayers: PlayerStat[],
@@ -60,8 +57,10 @@ export async function evaluateAndPersistGameCertification(input: {
   activePlayers: PlayerStat[];
   stats: AnalyzedGameStat[];
   homeTeamWon: boolean;
+  unmatchedNames?: string[];
 }): Promise<{ certified: boolean; reason?: string }> {
   const { matchId, gameNumber, replayId, activePlayers, stats, homeTeamWon } = input;
+  const unmatchedNames = input.unmatchedNames ?? [];
 
   let certified = false;
   let reason = "Could not verify roster snapshot for this match";
@@ -154,6 +153,7 @@ export async function evaluateAndPersistGameCertification(input: {
         reason,
         home_team_won: homeTeamWon,
         stats_json: stats,
+        unmatched_names: unmatchedNames,
         player_resolutions_json: playerResolutionsForReverify,
         evaluated_at: new Date().toISOString(),
       },
@@ -164,47 +164,20 @@ export async function evaluateAndPersistGameCertification(input: {
   return { certified, reason };
 }
 
-// Step 8: guards every path that can finalize an already-pending match
-// (a teammate's confirm, the auto-confirm timeout) against
-// clearing an identity discrepancy. submitSeriesResult/reportMatchResult
-// already gate at submission, but a discrepancy can appear afterward — e.g. a
-// stray replay re-upload for this match while confirmation is pending — so
-// finalization paths must re-check rather than trust the earlier gate.
-export async function hasBlockingIdentityDiscrepancy(matchId: string): Promise<boolean> {
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings")
-    .select("identity_enforcement_enabled")
-    .single();
-  if (!settings?.identity_enforcement_enabled) return false;
-
-  const { data: openDiscrepancy } = await supabaseAdmin
-    .from("replay_identity_discrepancies")
-    .select("id")
-    .eq("match_id", matchId)
-    .eq("status", "open")
-    .limit(1)
-    .maybeSingle();
-  return !!openDiscrepancy;
-}
-
-// Whole-match gate, run at series/match submission (Step 7). Looks up the
-// certification persisted for each submitted game by replay_id — never by the
-// client-supplied game_number — so a client can't relabel a certified replay
-// as a different game slot and smuggle tampered stats through.
+// Run at series/match submission. Looks up the certification persisted for
+// each submitted game by replay_id — never by the client-supplied
+// game_number — so a client can't relabel a certified replay as a different
+// game slot and smuggle tampered stats through.
 //
-// Always computes identityStatus for visibility, even when enforcement is
-// off, so matches.identity_status carries real signal ahead of Step 8's
-// adjudication UI. Only blocks the caller when identity_enforcement_enabled
-// is true in league_settings.
+// Certification no longer blocks anything: the loose/strict replay analysis
+// mode decides that, on unmatched players rather than on platform-ID
+// certification. identityStatus is still computed and stored for visibility.
 export async function resolveSubmittedGames(
   matchId: string,
   clientGames: SubmittedGame[],
-): Promise<
-  | { ok: true; games: SubmittedGame[]; identityStatus: "pending" | "certified" | "review_required" }
-  | { ok: false; message: string; identityStatus: "review_required" }
-> {
+): Promise<{ games: SubmittedGame[]; identityStatus: "pending" | "certified" | "review_required" }> {
   if (clientGames.length === 0) {
-    return { ok: true, games: [], identityStatus: "pending" };
+    return { games: [], identityStatus: "pending" };
   }
 
   const replayIds = clientGames.map(g => g.replayId).filter((id): id is string => !!id);
@@ -229,27 +202,14 @@ export async function resolveSubmittedGames(
 
   const identityStatus = allCertified ? "certified" : "review_required";
 
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings")
-    .select("identity_enforcement_enabled")
-    .single();
-
-  if (settings?.identity_enforcement_enabled && !allCertified) {
-    return {
-      ok: false,
-      message: "One or more games in this series failed platform-identity verification and require admin review before this match can be completed.",
-      identityStatus: "review_required",
-    };
-  }
-
   // Prefer server-persisted, resolver-checked stats over the client payload
-  // wherever a certification record exists. Games with no record (enforcement
-  // off, or a replay that was never analyzed through the resolver) fall back
-  // to whatever the client submitted, exactly as before Step 7.
+  // wherever a certification record exists. Games with no record (a replay
+  // that was never analyzed through the resolver) fall back to whatever the
+  // client submitted.
   const games = clientGames.map(g => {
     const row = g.replayId ? certByReplayId.get(g.replayId) : undefined;
     return row ? { gameNumber: g.gameNumber, replayId: g.replayId, stats: row.stats_json } : g;
   });
 
-  return { ok: true, games, identityStatus };
+  return { games, identityStatus };
 }

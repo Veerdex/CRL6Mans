@@ -13,6 +13,7 @@ import {
   GROUP_STAGE_PREFIX, parseGroupNum,
 } from "@/app/lib/bracket";
 import { getBestOfForMatch } from "@/app/lib/discord-bot";
+import { getUnmatchedByGame } from "@/app/lib/replay-analysis-mode";
 import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { MyTeamEditor } from "@/app/dashboard/teams/my-team-editor";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
@@ -235,7 +236,7 @@ export default async function MyTeamPage() {
       .eq("team_id", teamId).eq("status", "approved"),
     supabaseAdmin.from("teams").select("id, name, logo_url, logo_offset_x, logo_offset_y"),
     supabaseAdmin.from("league_settings")
-      .select("season_active, season_format, num_teams, active_tournament_id, subs_enabled, stats_enabled").single(),
+      .select("season_active, season_format, num_teams, active_tournament_id, subs_enabled, stats_enabled, replay_analysis_mode").single(),
     supabaseAdmin.from("sub_requests")
       .select("id, match_id, player_out_id, sub_player_id, sub_player_ids, reason, status, admin_note, created_at")
       .eq("team_id", teamId).order("created_at", { ascending: false }),
@@ -246,6 +247,7 @@ export default async function MyTeamPage() {
 
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
   const statsEnabled = settings?.stats_enabled ?? true;
+  const replayAnalysisMode = settings?.replay_analysis_mode === "strict" ? "strict" as const : "loose" as const;
   const seasonActive = settings?.season_active ?? false;
   const preset       = (settings?.season_format as { preset?: string })?.preset ?? "single_elimination";
   // isDE covers all formats that use a double-elimination bracket (full or qualifier)
@@ -475,6 +477,10 @@ export default async function MyTeamPage() {
   const scheduleMap: Record<string, ScheduleRow> = {};
   (scheduleRows ?? []).forEach((r: ScheduleRow) => { scheduleMap[r.id] = r; });
   const opponentNotReady = (oppEarlier ?? 0) > 0;
+
+  // Fetched server-side so the captain who didn't upload sees the same warning
+  // about unrecognised players before deciding whether to accept the score.
+  const unmatchedByGame = nextMatch ? await getUnmatchedByGame(nextMatch.id) : {};
 
   const oppApprovedSubs = (oppApprovedSubsRaw ?? []) as { player_out_id: string; sub_player_id: string | null }[];
   const oppSubIds = oppApprovedSubs.map((r) => r.sub_player_id).filter((x): x is string => !!x);
@@ -790,6 +796,8 @@ export default async function MyTeamPage() {
           opponentName={opponentName}
           isTournament={!!activeTournamentId}
           statsEnabled={statsEnabled}
+          replayAnalysisMode={replayAnalysisMode}
+          unmatchedByGame={unmatchedByGame}
         />
       )}
 

@@ -55,7 +55,7 @@ type SlotState =
   | { status: "locked" }
   | { status: "waiting" }
   | { status: "analyzing" }
-  | { status: "done"; homeWon: boolean; replayId: string | null; stats: AnalyzedGameStat[] }
+  | { status: "done"; homeWon: boolean; replayId: string | null; stats: AnalyzedGameStat[]; unmatchedNames: string[] }
   | { status: "error"; message: string };
 
 interface Props {
@@ -73,6 +73,29 @@ interface Props {
   opponentName?: string | null;
   isTournament?: boolean;
   statsEnabled?: boolean;
+  replayAnalysisMode?: "loose" | "strict";
+  // Server-side, so the team that didn't upload sees the same warning while it
+  // decides whether to accept. Keyed by game number.
+  unmatchedByGame?: Record<number, string[]>;
+}
+
+// The whole reason a series can't just submit: names in the replays that
+// resolved to nobody. Red on strict (an admin will have to sort it out), amber
+// on loose (it just costs those players their stats).
+function UnmatchedNote({ names, mode }: { names: string[]; mode: "loose" | "strict" }) {
+  if (names.length === 0) return null;
+  const list = [...new Set(names)].join(", ");
+  return mode === "strict" ? (
+    <div className="rounded-lg border border-red-800/50 bg-red-950/20 px-3 py-2 text-xs text-red-300">
+      <span className="font-semibold">Unmatched players: {list}.</span> These replays will require
+      admin review once both teams accept the score.
+    </div>
+  ) : (
+    <div className="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
+      <span className="font-semibold">Unmatched players: {list}.</span> Stats won&apos;t be
+      calculated for them.
+    </div>
+  );
 }
 
 // Every legal final score for a Bo-N: the winner takes exactly `needed` games,
@@ -204,13 +227,13 @@ function TeamColumn({ team, side }: { team: SeriesTeamInfo | null; side: "home" 
 // ── Confirmed / awaiting-admin view ────────────────────────────────────────────
 
 function ConfirmedView({
-  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, submittedByUs,
+  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, awaitingReview,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
   pendingHomeScore: number;
   pendingAwayScore: number;
-  submittedByUs: boolean;
+  awaitingReview: boolean;
 }) {
   return (
     <div className="p-5 space-y-4">
@@ -226,9 +249,9 @@ function ConfirmedView({
       <div className="bg-emerald-950/40 border border-emerald-700/40 rounded-lg px-4 py-3 text-center space-y-1">
         <p className="text-sm font-semibold text-emerald-300">Both captains confirmed this result</p>
         <p className="text-xs text-emerald-600">
-          {submittedByUs
-            ? "Waiting for an admin to finalise the match."
-            : "Waiting for an admin to finalise the match."}
+          {awaitingReview
+            ? "Some players in the replays weren't recognised — an admin is reviewing them before the match is finalised."
+            : "Finalising the match."}
         </p>
       </div>
     </div>
@@ -239,6 +262,7 @@ function ConfirmedView({
 
 function WaitingView({
   homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, matchId, scoreSubmittedAt, isTournament,
+  unmatchedNames, mode,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
@@ -247,6 +271,8 @@ function WaitingView({
   matchId: string;
   scoreSubmittedAt: string | null;
   isTournament: boolean;
+  unmatchedNames: string[];
+  mode: "loose" | "strict";
 }) {
   const router = useRouter();
   const [cancelling, startCancel] = useTransition();
@@ -273,6 +299,7 @@ function WaitingView({
         </div>
         <TeamColumn team={awayTeam} side="away" />
       </div>
+      <UnmatchedNote names={unmatchedNames} mode={mode} />
       <div className="bg-amber-950/40 border border-amber-700/40 rounded-lg px-4 py-3 space-y-2">
         <p className="text-sm font-semibold text-amber-300">Result submitted — awaiting opponent confirmation</p>
         <p className="text-xs text-amber-500">
@@ -370,6 +397,7 @@ function ConfirmResultModal({
 
 function OpponentSubmittedView({
   homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, submitterTeamName, matchId, myTeamId, scoreSubmittedAt, isTournament,
+  unmatchedNames, mode,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
@@ -380,6 +408,8 @@ function OpponentSubmittedView({
   myTeamId: string;
   scoreSubmittedAt: string | null;
   isTournament: boolean;
+  unmatchedNames: string[];
+  mode: "loose" | "strict";
 }) {
   const router = useRouter();
   const [confirming, startConfirm] = useTransition();
@@ -422,6 +452,7 @@ function OpponentSubmittedView({
         </div>
         <TeamColumn team={awayTeam} side="away" />
       </div>
+      <UnmatchedNote names={unmatchedNames} mode={mode} />
       <div className="bg-indigo-950/40 border border-indigo-700/40 rounded-lg px-4 py-3 space-y-3">
         <div>
           <p className="text-sm font-semibold text-indigo-300">
@@ -480,6 +511,7 @@ export function SeriesReplayPanel({
   scoreSubmittedAt = null,
   opponentNotReady = false, opponentName = null,
   isTournament = false, statsEnabled = true,
+  replayAnalysisMode = "loose", unmatchedByGame = {},
 }: Props) {
   const router = useRouter();
   const [slots, setSlots] = useState<SlotState[]>(() => initSlots(bestOf));
@@ -532,6 +564,7 @@ export function SeriesReplayPanel({
           homeWon: result.homeTeamWon!,
           replayId: result.replayId ?? null,
           stats: result.stats ?? [],
+          unmatchedNames: result.unmatchedNames ?? [],
         };
         const done = next.filter((s) => s.status === "done") as Extract<SlotState, { status: "done" }>[];
         const h = done.filter(s => s.homeWon).length;
@@ -651,7 +684,11 @@ export function SeriesReplayPanel({
     );
   }
 
-  // ── Confirmed (both captains agreed, admin to finalise) ──
+  // Every replay name the server couldn't place, across the series. Comes from
+  // the server so both captains see it, not just the one who uploaded.
+  const seriesUnmatched = Object.values(unmatchedByGame).flat();
+
+  // ── Confirmed (both captains agreed) ──
 
   if (scoreConfirmed && pendingHomeScore !== null && pendingAwayScore !== null) {
     return (
@@ -662,7 +699,7 @@ export function SeriesReplayPanel({
           awayTeam={awayTeam}
           pendingHomeScore={pendingHomeScore}
           pendingAwayScore={pendingAwayScore}
-          submittedByUs={scoreSubmittedByTeamId === myTeamId}
+          awaitingReview={replayAnalysisMode === "strict" && seriesUnmatched.length > 0}
         />
       </div>
     );
@@ -682,6 +719,8 @@ export function SeriesReplayPanel({
           matchId={matchId}
           scoreSubmittedAt={scoreSubmittedAt ?? null}
           isTournament={isTournament}
+          unmatchedNames={seriesUnmatched}
+          mode={replayAnalysisMode}
         />
       </div>
     );
@@ -704,6 +743,8 @@ export function SeriesReplayPanel({
           myTeamId={myTeamId}
           scoreSubmittedAt={scoreSubmittedAt ?? null}
           isTournament={isTournament}
+          unmatchedNames={seriesUnmatched}
+          mode={replayAnalysisMode}
         />
       </div>
     );
@@ -890,11 +931,20 @@ export function SeriesReplayPanel({
                 )}
 
                 {isDone && (() => {
-                  const s = slot as { status: "done"; homeWon: boolean };
+                  const s = slot as { status: "done"; homeWon: boolean; unmatchedNames: string[] };
                   const winner = s.homeWon ? homeTeam : awayTeam!;
                   return (
                     <>
                       <span className="flex-1 text-xs text-zinc-300">{winner.name} won</span>
+                      {s.unmatchedNames.length > 0 && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded shrink-0 ${
+                          replayAnalysisMode === "strict"
+                            ? "bg-red-700/40 text-red-300"
+                            : "bg-amber-700/40 text-amber-300"
+                        }`}>
+                          {s.unmatchedNames.length} unmatched
+                        </span>
+                      )}
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded shrink-0 ${
                         s.homeWon
                           ? "bg-indigo-700/40 text-indigo-300"
@@ -916,9 +966,14 @@ export function SeriesReplayPanel({
           })}
         </div>
 
+        <UnmatchedNote
+          names={slots.flatMap((s) => (s.status === "done" ? s.unmatchedNames : []))}
+          mode={replayAnalysisMode}
+        />
+
         {/* Help note */}
         <p className="text-[11px] text-zinc-500 text-center">
-          Having trouble? If a replay won&apos;t upload or a player isn&apos;t recognized, contact an admin to report the score.
+          Having trouble? If a replay won&apos;t upload, contact an admin to report the score.
         </p>
 
         {/* Submit (any team member, series decided) */}

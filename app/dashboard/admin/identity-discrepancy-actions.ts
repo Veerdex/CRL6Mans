@@ -31,26 +31,8 @@ async function requireAdmin(): Promise<string> {
   return session.userId;
 }
 
-// League-wide gate, so require Director+ — same bar as the other serious
-// league toggles in league-actions.ts.
-export async function setIdentityEnforcementEnabled(value: boolean): Promise<{ error?: string; ok?: boolean }> {
-  const cookieStore = await cookies();
-  const session = await decrypt(cookieStore.get("session")?.value);
-  if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
-
-  const { error } = await supabaseAdmin
-    .from("league_settings")
-    .update({ identity_enforcement_enabled: value })
-    .not("id", "is", null);
-  if (error) return { error: "Failed to update." };
-
-  revalidatePath("/dashboard/admin");
-  return { ok: true };
-}
-
-// Step 9 join gate, Director+ same as the enforcement toggle above — this
-// blocks new entrants league-wide the instant it's on, so it's as serious a
-// lever as identity_enforcement_enabled.
+// Step 9 join gate, Director+ — this blocks new entrants league-wide the
+// instant it's on, so it's as serious a lever as the other league toggles.
 export async function setJoinGateEnabled(value: boolean): Promise<{ error?: string; ok?: boolean }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);

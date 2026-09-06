@@ -68,7 +68,7 @@ export async function adjustPlayerBalance(
 
 // League-wide economic mutation touching every approved player at once —
 // Director+ only, same bar as the other serious league-wide toggles
-// (setIdentityEnforcementEnabled, setJoinGateEnabled).
+// (setJoinGateEnabled, setReplayAnalysisMode).
 export async function bulkAdjustAllBalances(
   amount: number,
   reason: string,

@@ -7,12 +7,11 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { roleMention, notifyMatchChannel } from "@/app/lib/match-notifications";
 import { pushToAdmins } from "@/app/lib/push";
-import { execReportMatchResult, getBestOfForMatch, validateSeriesScore, processExpiredScoreConfirmations } from "@/app/lib/discord-bot";
-import { deleteChannel } from "@/app/lib/discord-api";
+import { getBestOfForMatch, validateSeriesScore, processExpiredScoreConfirmations, finalizeAcceptedSeries } from "@/app/lib/discord-bot";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
 import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
-import { evaluateAndPersistGameCertification, resolveSubmittedGames, resolvePlatformIdMatches, hasBlockingIdentityDiscrepancy } from "@/app/lib/replay-identity-certification";
+import { evaluateAndPersistGameCertification, resolveSubmittedGames, resolvePlatformIdMatches } from "@/app/lib/replay-identity-certification";
 import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
 
@@ -78,20 +77,10 @@ export async function submitSeriesResult(
       return { error: "One of these replays was already uploaded for another match." };
   }
 
-  // Step 7 whole-match identity gate: swaps in server-persisted, resolver-checked
-  // stats and — only once identity_enforcement_enabled is on — blocks submission
-  // outright when any game failed platform-identity certification.
+  // Swaps in server-persisted, resolver-checked stats. Doesn't block: the
+  // loose/strict mode decides what happens to a series with unmatched players,
+  // and it decides after the opponent has accepted.
   const gate = await resolveSubmittedGames(matchId, games);
-  if (!gate.ok) {
-    await supabaseAdmin.from("matches").update({ identity_status: gate.identityStatus }).eq("id", matchId);
-    pushToAdmins({
-      title: "Identity Review Required",
-      body: `A submitted match result needs admin review before it can be completed.`,
-      url: "/dashboard/admin",
-      tag: "identity-review",
-    }).catch(() => {});
-    return { error: gate.message };
-  }
   games = gate.games;
 
   const { error } = await supabaseAdmin
@@ -167,7 +156,9 @@ export async function submitSeriesResult(
 }
 
 // Opposing captain confirms the submitted result.
-// Auto-approves: finalises the match, advances the bracket, and deletes the Discord channel.
+// On loose, or on strict with every replay player recognised, this finalises
+// the match outright. On strict with unmatched players it hands the match to
+// an admin instead — see finalizeAcceptedSeries.
 export async function confirmSeriesResult(
   matchId: string
 ): Promise<{ error?: string }> {
@@ -188,9 +179,6 @@ export async function confirmSeriesResult(
   if (match.score_submitted_by_team_id === player.team_id)
     return { error: "You cannot confirm your own submission — wait for the opposing captain" };
 
-  if (await hasBlockingIdentityDiscrepancy(matchId))
-    return { error: "This match has an open identity discrepancy and requires admin review before it can be confirmed." };
-
   const { error } = await supabaseAdmin
     .from("matches")
     .update({ score_confirmed: true })
@@ -198,21 +186,7 @@ export async function confirmSeriesResult(
 
   if (error) return { error: error.message };
 
-  // Auto-approve: finalize the match, update W/L, advance the bracket,
-  // and create the next channel if both opponents are already known.
-  try {
-    await execReportMatchResult(matchId, match.pending_home_score!, match.pending_away_score!);
-  } catch { /* best-effort — admin can still finalize manually */ }
-
-  // Delete this match's Discord channel now that the result has been posted.
-  if (match.discord_channel_id) {
-    try {
-      await deleteChannel(match.discord_channel_id);
-      await supabaseAdmin.from("matches")
-        .update({ discord_channel_id: null })
-        .eq("id", matchId);
-    } catch { /* best-effort */ }
-  }
+  await finalizeAcceptedSeries(matchId, match.pending_home_score!, match.pending_away_score!);
 
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/admin");
@@ -242,7 +216,13 @@ export async function uploadGameReplay(
   formData: FormData,
   matchId: string,
   gameNumber = 1,
-): Promise<{ homeTeamWon?: boolean; replayId?: string | null; stats?: AnalyzedGameStat[]; error?: string }> {
+): Promise<{
+  homeTeamWon?: boolean;
+  replayId?: string | null;
+  stats?: AnalyzedGameStat[];
+  unmatchedNames?: string[];
+  error?: string;
+}> {
   const player = await getTeamMember();
   if (!player?.team_id) return { error: "Not on a team" };
 
@@ -402,34 +382,40 @@ export async function uploadGameReplay(
     }
   }
 
-  // Reject the replay if any active player can't be matched to a known tracker name —
-  // unless a verified platform ID rescues them (e.g. a player who renamed since
-  // registering their tracker). See resolvePlatformIdMatches for scope.
-  let unmatched = activePlayers.filter(
-    p => !nameToId.has(normalizeName(p.name)),
-  );
-  if (unmatched.length > 0) {
-    const rescues = await resolvePlatformIdMatches(matchId, activePlayers);
-    for (const p of unmatched) {
-      const rescue = rescues.get(normalizeName(p.name));
-      if (!rescue) continue;
-      nameToId.set(normalizeName(p.name), rescue.playerId);
-      if (rescue.team === "home") homeTrackerNames.add(normalizeName(p.name));
-    }
-    unmatched = activePlayers.filter(p => !nameToId.has(normalizeName(p.name)));
+  // Claimed accounts win. A verified platform ID is tied to the account itself
+  // and survives a rename; a tracker name is a string scraped at registration
+  // that doesn't. So this runs over the whole lobby, not just the players the
+  // name passes missed, and overwrites a name match that disagrees with it.
+  const rescues = await resolvePlatformIdMatches(matchId, activePlayers);
+  for (const p of activePlayers) {
+    const key = normalizeName(p.name);
+    const rescue = rescues.get(key);
+    if (!rescue) continue;
+    nameToId.set(key, rescue.playerId);
+    if (rescue.team === "home") homeTrackerNames.add(key);
+    else if (rescue.team === "away") homeTrackerNames.delete(key);
   }
-  if (unmatched.length > 0) {
-    const names = unmatched.map(p => p.name).join(", ");
-    return {
-      error: `Bad replay — ${unmatched.length} player${unmatched.length > 1 ? "s" : ""} not recognised: ${names}`,
-    };
-  }
+
+  // An unrecognised player no longer rejects the replay — the series carries
+  // the warning instead, and on strict an admin resolves it after both teams
+  // agree the score. Their scoreboard line is kept with a null player_id so
+  // the admin has something to map.
+  const unmatchedNames = activePlayers
+    .filter(p => !nameToId.has(normalizeName(p.name)))
+    .map(p => p.name);
 
   // Whichever replay team has more home-tracker-name matches is the home team.
   const team0Hits = activePlayers
     .filter(p => p.team === 0 && homeTrackerNames.has(normalizeName(p.name))).length;
   const team1Hits = activePlayers
     .filter(p => p.team === 1 && homeTrackerNames.has(normalizeName(p.name))).length;
+
+  // With no home-side hit on either team there is nothing to read the sides
+  // off, and team0Hits >= team1Hits would silently call it blue. A replay
+  // nobody in it belongs to is the wrong replay, not a bad one.
+  if (team0Hits === 0 && team1Hits === 0)
+    return { error: "Bad replay — none of these players are on either team in this match." };
+
   const blueIsHome = team0Hits >= team1Hits;
 
   const homeTeamWon = blueIsHome
@@ -469,9 +455,6 @@ export async function uploadGameReplay(
     demoed: p.demoed,
   }));
 
-  // Identity resolution + certification persistence (Steps 6 + 7). Never
-  // blocks this analyze-time call — the hard block, when enabled, happens at
-  // series submission via resolveSubmittedGames.
   const certResult = await evaluateAndPersistGameCertification({
     matchId,
     gameNumber,
@@ -479,6 +462,7 @@ export async function uploadGameReplay(
     activePlayers,
     stats,
     homeTeamWon,
+    unmatchedNames,
   });
 
   // Only keep the raw file for games that failed certification, so an admin
@@ -498,7 +482,7 @@ export async function uploadGameReplay(
     }
   }
 
-  return { homeTeamWon, replayId: replayData.replayId, stats };
+  return { homeTeamWon, replayId: replayData.replayId, stats, unmatchedNames };
 }
 
 // Either captain can retract / dispute a pending submission.

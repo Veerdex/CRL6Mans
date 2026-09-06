@@ -11,7 +11,6 @@ import { parseReplay } from "@/app/lib/replay-parser";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
 import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
 import { evaluateAndPersistGameCertification, resolveSubmittedGames, resolvePlatformIdMatches } from "@/app/lib/replay-identity-certification";
-import { pushToAdmins } from "@/app/lib/push";
 
 async function verifyAdmin() {
   const cookieStore = await cookies();
@@ -204,6 +203,19 @@ export async function adminAnalyzeGameReplay(
     }
   }
 
+  // Claimed accounts beat tracker names — the ID survives a rename, the name
+  // doesn't — so this runs over the whole lobby and overwrites a name match
+  // that disagrees with it. Admin aka overrides still sit above both.
+  const rescues = await resolvePlatformIdMatches(matchId, activePlayers);
+  for (const p of activePlayers) {
+    const key = normalizeName(p.name);
+    const rescue = rescues.get(key);
+    if (!rescue) continue;
+    nameToId.set(key, rescue.playerId);
+    if (rescue.team === "home") homeTrackerNames.add(key);
+    else if (rescue.team === "away") homeTrackerNames.delete(key);
+  }
+
   // Apply admin aka overrides (highest priority — lets admin fix wrong-account plays)
   for (const [replayName, playerId] of Object.entries(akaNames)) {
     if (!replayName || !playerId) continue;
@@ -216,19 +228,9 @@ export async function adminAnalyzeGameReplay(
     else homeTrackerNames.delete(norm);
   }
 
-  let unmatched = activePlayers.filter(
+  const unmatched = activePlayers.filter(
     (p) => !nameToId.has(normalizeName(p.name)),
   );
-  if (unmatched.length > 0) {
-    const rescues = await resolvePlatformIdMatches(matchId, activePlayers);
-    for (const p of unmatched) {
-      const rescue = rescues.get(normalizeName(p.name));
-      if (!rescue) continue;
-      nameToId.set(normalizeName(p.name), rescue.playerId);
-      if (rescue.team === "home") homeTrackerNames.add(normalizeName(p.name));
-    }
-    unmatched = activePlayers.filter((p) => !nameToId.has(normalizeName(p.name)));
-  }
   if (unmatched.length > 0) {
     return { unmatched: unmatched.map((p) => p.name) };
   }
@@ -239,6 +241,9 @@ export async function adminAnalyzeGameReplay(
   const team1Hits = activePlayers.filter(
     (p) => p.team === 1 && homeTrackerNames.has(normalizeName(p.name)),
   ).length;
+  if (team0Hits === 0 && team1Hits === 0)
+    return { error: "None of these players are on either team in this match." };
+
   const blueIsHome = team0Hits >= team1Hits;
 
   const homeTeamWon = blueIsHome
@@ -310,20 +315,9 @@ export async function reportMatchResult(
       return { ok: false, message: "One of these replays was already uploaded for another match." };
   }
 
-  // Step 7 whole-match identity gate: swaps in server-persisted, resolver-checked
-  // stats and — only once identity_enforcement_enabled is on — blocks submission
-  // outright when any game failed platform-identity certification.
+  // Swaps in server-persisted, resolver-checked stats. An admin reporting the
+  // result is the review, so nothing here blocks them.
   const gate = await resolveSubmittedGames(matchId, games);
-  if (!gate.ok) {
-    await supabaseAdmin.from("matches").update({ identity_status: gate.identityStatus }).eq("id", matchId);
-    pushToAdmins({
-      title: "Identity Review Required",
-      body: `A submitted match result needs admin review before it can be completed.`,
-      url: "/dashboard/admin",
-      tag: "identity-review",
-    }).catch(() => {});
-    return { ok: false, message: gate.message };
-  }
   games = gate.games;
 
   // Compute goal differential from submitted replay stats when available.
