@@ -7,6 +7,8 @@ import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 interface Props {
   player: Player;
+  // Signed on the server per render — the stored URL is never handed to the browser.
+  proofUrl: string | null;
 }
 
 const COOLDOWN_OPTIONS: { value: "none" | "5m" | "1d" | "forever"; label: string }[] = [
@@ -16,7 +18,7 @@ const COOLDOWN_OPTIONS: { value: "none" | "5m" | "1d" | "forever"; label: string
   { value: "forever", label: "Forever" },
 ];
 
-export function RegistrationCard({ player }: Props) {
+export function RegistrationCard({ player, proofUrl }: Props) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -74,8 +76,8 @@ export function RegistrationCard({ player }: Props) {
 
       {/* Links */}
       <div className="flex flex-col gap-1">
-        {player.college_image_url ? (
-          <a href={player.college_image_url} target="_blank" rel="noopener noreferrer"
+        {proofUrl ? (
+          <a href={proofUrl} target="_blank" rel="noopener noreferrer"
             className="text-sm text-indigo-400 hover:underline">
             View college enrollment proof →
           </a>

@@ -11,6 +11,7 @@ import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { sendDm, isGuildMember } from "@/app/lib/discord-api";
 import { APP_NAME } from "@/app/lib/constants";
 import { validateImageUpload } from "@/app/lib/uploads";
+import { deleteCollegeIdImage } from "@/app/lib/college-ids";
 
 export async function registerPlayer(_prevState: unknown, formData: FormData) {
   const cookieStore = await cookies();
@@ -146,6 +147,13 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
       await supabaseAdmin.storage.from("college-ids").remove([uploadedFileName]);
     }
     return { error: "Failed to submit registration. Please try again." };
+  }
+
+  // The filename carries a timestamp, so a re-upload never overwrites the old
+  // object — nothing would ever point at it again. Deleting it only once the row
+  // is committed keeps the rollback above able to fall back to the old file.
+  if (uploadedFileName && existingPending?.college_image_url !== collegeImageUrl) {
+    await deleteCollegeIdImage(existingPending?.college_image_url);
   }
 
   const { error: statusError } = await supabaseAdmin

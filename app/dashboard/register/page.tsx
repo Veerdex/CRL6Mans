@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { isGuildMember } from "@/app/lib/discord-api";
+import { collegeIdSignedUrl } from "@/app/lib/college-ids";
 import { RegisterForm, type ExistingPlayerData } from "./register-form";
 
 export default async function RegisterPage() {
@@ -66,6 +67,9 @@ export default async function RegisterPage() {
   }
 
   const isResubmit = account?.status === "rejected";
+  // The link the player follows is signed, not the stored path — same reason as
+  // the admin card. Normally null, since a rejection deletes the proof.
+  const proofUrl = isResubmit ? await collegeIdSignedUrl(existing?.college_image_url) : null;
   const existingData: ExistingPlayerData | null = isResubmit && existing
     ? {
         tracker_url:       existing.tracker_url,
@@ -73,7 +77,7 @@ export default async function RegisterPage() {
         current_3v3:       existing.current_3v3,
         peak_2v2:          existing.peak_2v2,
         current_2v2:       existing.current_2v2,
-        college_image_url: existing.college_image_url,
+        college_image_url: proofUrl ?? "",
         sub_willing:       existing.sub_willing ?? false,
       }
     : null;
@@ -93,8 +97,10 @@ export default async function RegisterPage() {
           <p className="text-sm font-semibold text-red-300">Your registration was rejected</p>
           <p className="text-sm text-red-400/80">
             Please review and update your information, then re-submit. Your previous
-            values have been pre-filled. You may keep your existing enrollment proof
-            or upload a new one.
+            values have been pre-filled.{" "}
+            {proofUrl
+              ? "You may keep your existing enrollment proof or upload a new one."
+              : "Your enrollment proof was deleted when the registration was decided, so you will need to upload it again."}
           </p>
         </div>
       )}

@@ -59,7 +59,7 @@ type PendingPlayerRow = {
   current_2v2: string;
   peak_1v1: string | null;
   current_1v1: string | null;
-  college_image_url: string;
+  college_image_url?: string;
   created_at: string;
 };
 
@@ -148,7 +148,10 @@ export async function getApprovedPlayers(): Promise<Player[]> {
   const [{ data: pendingRows }, { data: playerRows }] = await Promise.all([
     supabaseAdmin
       .from("pending_players")
-      .select("account_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, college_image_url, created_at")
+      // No college_image_url: an approved player's proof is deleted at approval,
+      // so it would always be empty here. Only the pending-review query below,
+      // which feeds the admin card's link, still needs it.
+      .select("account_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, created_at")
       .in("account_id", accountIds),
     supabaseAdmin.from("players").select("account_id, team_id, draft_entered").in("account_id", accountIds),
   ]);

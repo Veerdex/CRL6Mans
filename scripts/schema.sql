@@ -566,12 +566,14 @@ alter table seasons add column if not exists hidden_from_home boolean not null d
 -- ─────────────────────────────────────────────
 -- STORAGE BUCKETS
 -- Note: if the SQL editor returns an error on this block, create the buckets
--- manually in Supabase Dashboard → Storage. Both should be set to Public.
+-- manually in Supabase Dashboard → Storage, matching the public flags below.
+-- college-ids is private: enrollment proof is only ever linked through a
+-- short-lived signed URL minted server-side (app/lib/college-ids.ts).
 -- ─────────────────────────────────────────────
 insert into storage.buckets (id, name, public)
 values
   ('team-logos',  'team-logos',  true),
-  ('college-ids', 'college-ids', true),
+  ('college-ids', 'college-ids', false),
   ('platform-verification-replays', 'platform-verification-replays', false)
 on conflict (id) do update set public = excluded.public;
 

@@ -1,6 +1,7 @@
 import { invalidatePlayerSessions } from "./session";
 import { getStaffRole, removeRegisteredRole, type StaffRole } from "./players";
 import { supabaseAdmin } from "./supabase";
+import { deleteCollegeIdImage } from "./college-ids";
 import { revokedPatronFields } from "./patreon-sync";
 import { syncDiscordSupporterRole } from "./patreon-discord-role";
 import { addRole, removeRole, removeRoleById, timeoutMember, banMember } from "./discord-api";
@@ -150,6 +151,23 @@ export async function banAccount(
     .from("players")
     .update({ status: "banned", updated_at: new Date().toISOString() })
     .eq("account_id", accountId);
+
+  // A ban on a still-pending registration is the decision on it — no admin will
+  // review that proof now, and unbanning drops the Tier 2 row entirely, which
+  // would leave the file with nothing pointing at it. Approved accounts have
+  // already had theirs deleted, so this is a no-op for them.
+  const { data: pendingRow } = await supabaseAdmin
+    .from("pending_players")
+    .select("college_image_url")
+    .eq("account_id", accountId)
+    .maybeSingle();
+  if (pendingRow?.college_image_url) {
+    await deleteCollegeIdImage(pendingRow.college_image_url);
+    await supabaseAdmin
+      .from("pending_players")
+      .update({ college_image_url: "" })
+      .eq("account_id", accountId);
+  }
 
   if (account?.discord_id && !account.discord_id.startsWith("test_")) {
     const discordId = account.discord_id;

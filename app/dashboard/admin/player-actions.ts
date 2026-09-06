@@ -141,12 +141,31 @@ export async function rejectPlayer(
   cooldown?: RejectionCooldown
 ): Promise<{ error?: string; ok?: boolean }> {
   await assertAdmin();
-  const { error } = await supabaseAdmin
+  const { data: rejected, error } = await supabaseAdmin
     .from("accounts")
     .update({ status: "rejected", updated_at: new Date().toISOString() })
     .eq("id", id)
-    .eq("status", "pending");
+    .eq("status", "pending")
+    .select("id");
   if (error) return { error: error.message };
+
+  // A rejection is as final a decision as an approval, so the proof goes with it.
+  // This runs before the cooldown step because that step can return early, and a
+  // failed cooldown would otherwise leave the document behind for good. Guarded
+  // on a row actually transitioning so a second click can't delete a proof that
+  // a re-registration has since replaced.
+  if (rejected?.length) {
+    const { data: pending } = await supabaseAdmin
+      .from("pending_players")
+      .select("college_image_url")
+      .eq("account_id", id)
+      .maybeSingle();
+    await deleteCollegeIdImage(pending?.college_image_url);
+    await supabaseAdmin
+      .from("pending_players")
+      .update({ college_image_url: "" })
+      .eq("account_id", id);
+  }
 
   if (cooldown) {
     const cooldownResult = await kickForRejectionCooldown(

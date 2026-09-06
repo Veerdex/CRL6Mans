@@ -4,6 +4,7 @@ import Link from "next/link";
 import { decrypt } from "@/app/lib/session";
 import { getAllPendingPlayers, isModeratorVerified, isDirector, isCEO, isCurrentlyKicked, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { collegeIdSignedUrl } from "@/app/lib/college-ids";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { LeagueControls } from "./league-controls";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
@@ -212,6 +213,14 @@ export default async function AdminPage() {
     getPublicSponsors(),
     getPublicDesigns(),
   ]);
+  // Signed here rather than in the card so the stored object path never reaches
+  // the client. One short-lived URL per pending registration.
+  const proofUrls = new Map(
+    await Promise.all(
+      pending.map(async (p) => [p.id, await collegeIdSignedUrl(p.college_image_url)] as const)
+    )
+  );
+
   const sponsorOptions = publicSponsors.map((s) => ({ id: s.id, name: s.name }));
   const designOptions = publicDesigns.map((d) => ({ id: d.id, name: d.name }));
 
@@ -1250,7 +1259,13 @@ export default async function AdminPage() {
               <div className="space-y-4">
                 <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Pending Registrations</p>
                 {pending.map(player => (
-                  <RegistrationCard key={player.id} player={player} />
+                  <RegistrationCard
+                    key={player.id}
+                    // Blanked because a prop crosses into the client whether or not
+                    // the card reads it, and the stored value is the public object URL.
+                    player={{ ...player, college_image_url: "" }}
+                    proofUrl={proofUrls.get(player.id) ?? null}
+                  />
                 ))}
               </div>
             )}
