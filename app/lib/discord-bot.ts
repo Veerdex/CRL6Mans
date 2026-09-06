@@ -872,9 +872,9 @@ async function getCaptainPing(teamNum: number): Promise<string> {
 export async function execStartDraft(maxTeams?: number | "max" | null): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
   if (!settings?.draft_channel_id)
-    return { ok: false, message: "Set a draft channel first with `/setdraftchannel`." };
+    return { ok: false, message: "Set a draft channel first with `/admin setdraftchannel`." };
   if (settings.draft_active)
-    return { ok: false, message: "❌ A draft is already in progress. Use `/enddraft` first." };
+    return { ok: false, message: "❌ A draft is already in progress. End it from League Controls on the admin dashboard first." };
   if (settings.season_active)
     return { ok: false, message: "❌ A season is currently active. End the season before starting a new draft." };
 
@@ -1786,10 +1786,10 @@ async function adminChecklist(userId: string) {
 
   const missing: string[] = [];
   if (!settings) missing.push("`league_settings` row is missing entirely (should always have exactly one row)");
-  if (!settings?.rules_channel_id) missing.push("Rules channel — run `/setruleschannel` in the target channel");
-  if (!settings?.announcement_channel_id) missing.push("Announcement channel — run `/setannouncement` in the target channel");
-  if (!settings?.draft_channel_id) missing.push("Draft channel — run `/setdraftchannel` in the target channel");
-  if (!settings?.clips_channel_id) missing.push("Clips channel — run `/setclipschannel` in the target channel");
+  if (!settings?.rules_channel_id) missing.push("Rules channel — run `/admin setruleschannel` in the target channel");
+  if (!settings?.announcement_channel_id) missing.push("Announcement channel — run `/admin setannouncement` in the target channel");
+  if (!settings?.draft_channel_id) missing.push("Draft channel — run `/admin setdraftchannel` in the target channel");
+  if (!settings?.clips_channel_id) missing.push("Clips channel — run `/admin setclipschannel` in the target channel");
   if (!settings?.moderator_role_id) missing.push("Moderator role — run `/admin setmoderatorid`");
   if (!settings?.director_role_id) missing.push("Director role — run `/admin setdirectorid`");
   if (!settings?.ceo_role_id) missing.push("CEO role — run `/admin setceoid`");
