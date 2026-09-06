@@ -170,6 +170,13 @@ const manual = cfg.manual ?? {};
 // pure archive until someone identifies them and it is re-run with a real id.
 const archived = new Set(cfg.archived ?? []);
 
+// A player who has left the guild but whose id we recovered from elsewhere. The
+// id is real, so the credit still attaches the moment they log in — the only
+// thing missing is a member row to check the id against, which is exactly what
+// makes an unlisted manual id fatal otherwise. Naming them here is the opt-in
+// that says "absent on purpose" rather than "mistyped".
+const departed = new Set(cfg.departed ?? []);
+
 const slots = [];
 const unresolved = [];
 
@@ -183,9 +190,10 @@ for (const t of teams) {
     }
     const forced = manual[name];
     if (forced) {
-      const m = byId.get(forced);
+      const m = byId.get(forced)
+        ?? (departed.has(name) ? { discord_id: forced, username: "", in_site: "no", in_guild: "no" } : null);
       if (!m) { unresolved.push(`"${name}" -> ${forced} is not in ${cfg.membersCsv}`); continue; }
-      slots.push({ name, team: t.name, band: b, member: m, how: "manual" });
+      slots.push({ name, team: t.name, band: b, member: m, how: departed.has(name) ? "departed" : "manual" });
       continue;
     }
     const hits = index.get(norm(name)) ?? [];
@@ -200,6 +208,13 @@ for (const k of Object.keys(manual)) {
 }
 for (const k of archived) {
   if (!teams.some((t) => t.roster.includes(k))) fatal.push(`archived entry "${k}" matches no roster slot`);
+}
+for (const k of departed) {
+  if (!manual[k]) fatal.push(`departed entry "${k}" has no id in manual`);
+  if (archived.has(k)) fatal.push(`"${k}" is in both departed and archived`);
+  // Once they are back in the guild the exemption is stale, and keeping it would
+  // go on skipping the typo check on an id we can now actually verify.
+  if (manual[k] && byId.has(manual[k])) fatal.push(`departed entry "${k}" is in ${cfg.membersCsv} — drop it from "departed"`);
 }
 
 // The same person on two rosters would be credited twice for one event.
@@ -236,7 +251,9 @@ const rows = slots.map((s) => ({
   teammates: byTeam.get(s.team)
     .filter((mate) => mate.member.discord_id !== s.member.discord_id)
     // A null discordId is what makes the profile modal render a teammate as
-    // plain text instead of a button opening a profile that cannot exist.
+    // plain text instead of a button opening a profile that cannot exist. Only
+    // an archived name earns that: a departed player's id is real, so the link
+    // starts working by itself the day they log in.
     .map((mate) => ({
       discordId: mate.how === "archived" ? null : mate.member.discord_id,
       username: mate.member.username || mate.name,
@@ -247,7 +264,7 @@ const rows = slots.map((s) => ({
 // --- report -------------------------------------------------------------
 console.log(`${cfg.eventName} — ${cfg.eventKind}, ${cfg.teamCount} teams, prize pool ${cfg.prizePool}, ended ${cfg.endedAt}`);
 console.log(`  roster slots: ${teams.length * 3}`);
-console.log(`  resolved: ${slots.length} (auto ${slots.filter((s) => s.how === "auto").length}, manual ${slots.filter((s) => s.how === "manual").length}, archived without an id ${slots.filter((s) => s.how === "archived").length})`);
+console.log(`  resolved: ${slots.length} (auto ${slots.filter((s) => s.how === "auto").length}, manual ${slots.filter((s) => s.how === "manual").length}, departed with an id ${slots.filter((s) => s.how === "departed").length}, archived without an id ${slots.filter((s) => s.how === "archived").length})`);
 console.log(`  already on the website: ${slots.filter((s) => s.member.in_site === "yes").length}`);
 console.log(`  not currently in the guild: ${slots.filter((s) => s.member.in_guild !== "yes").length}`);
 
