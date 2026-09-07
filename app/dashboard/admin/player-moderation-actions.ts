@@ -9,8 +9,6 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { canActOn, kickAccount, banAccount, NO_PERMISSION, type RevokedPatron } from "@/app/lib/moderation";
 import { removeRole, timeoutMember, unbanMember } from "@/app/lib/discord-api";
 
-export type { RevokedPatron };
-
 async function getActorRole(): Promise<StaffRole> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);

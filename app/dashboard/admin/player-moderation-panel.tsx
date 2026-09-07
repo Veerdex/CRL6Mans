@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { kickPlayer, banPlayer, unbanPlayer, type RevokedPatron } from "./player-moderation-actions";
+import { kickPlayer, banPlayer, unbanPlayer } from "./player-moderation-actions";
+import type { RevokedPatron } from "@/app/lib/moderation";
 import { PatreonBlockNotice } from "./patreon-block-notice";
 import type { StaffRole } from "@/app/lib/players";
 

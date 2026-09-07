@@ -1,6 +1,6 @@
 "use client";
 
-import type { RevokedPatron } from "./player-moderation-actions";
+import type { RevokedPatron } from "@/app/lib/moderation";
 
 function formatPledge(patron: RevokedPatron): string {
   const tier = patron.tierTitle;

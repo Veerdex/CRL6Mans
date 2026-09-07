@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updatePlayerData } from "./player-actions";
-import { kickPlayer, banPlayer, unbanPlayer, unkickPlayer, type RevokedPatron } from "./player-moderation-actions";
+import { kickPlayer, banPlayer, unbanPlayer, unkickPlayer } from "./player-moderation-actions";
+import type { RevokedPatron } from "@/app/lib/moderation";
 import { PatreonBlockNotice } from "./patreon-block-notice";
 import { adminUpdatePlatformAccountId, adminDeletePlatformAccount } from "./platform-account-verification-actions";
 import type { StaffRole } from "@/app/lib/players";
