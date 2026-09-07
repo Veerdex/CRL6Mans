@@ -320,12 +320,50 @@ export async function stripRoleIdsFromMembers(userIds: string[], roleIds: string
   }
 }
 
+export type GuildMembership = "member" | "not_member" | "unknown";
+
+/**
+ * Only a 404 means the user is genuinely not in the guild. A 401, 403, 5xx, or
+ * a 429 we couldn't wait out means we failed to ask, which is a different fact —
+ * telling someone to join a server they are already in is worse than letting an
+ * outsider reach a form an admin reviews by hand.
+ */
+export async function guildMembership(userId: string, attempt = 0): Promise<GuildMembership> {
+  if (!GUILD_ID || !BOT_TOKEN) return "unknown";
+
+  let res: Response;
+  try {
+    res = await fetch(`${API}/guilds/${GUILD_ID}/members/${userId}`, {
+      headers: botHeaders(),
+    });
+  } catch (err) {
+    // fetch throws on DNS/network failure instead of returning a response, and
+    // this runs inside the register page's Promise.all — an escaping throw takes
+    // down the whole render, not just the check.
+    console.error(`[guildMembership] user=${userId} network error`, err);
+    return "unknown";
+  }
+
+  if (res.ok) return "member";
+  if (res.status === 404) return "not_member";
+
+  if (res.status === 429 && attempt === 0) {
+    const { retry_after: retryAfter = 5 } = await res.json().catch(() => ({})) as { retry_after?: number };
+    if (retryAfter <= 3) {
+      await new Promise(r => setTimeout(r, Math.ceil(retryAfter * 1000) + 250));
+      return guildMembership(userId, 1);
+    }
+  }
+
+  console.error(`[guildMembership] user=${userId} HTTP ${res.status} — treating as unverified`);
+  return "unknown";
+}
+
+// Fails open on "unknown" — see guildMembership. Every caller of this gates a
+// convenience check that sits behind an admin-reviewed `approved` status or an
+// admin-reviewed registration, so an unverifiable membership is not a hole.
 export async function isGuildMember(userId: string): Promise<boolean> {
-  if (!GUILD_ID || !BOT_TOKEN) return true; // fail open if not configured
-  const res = await fetch(`${API}/guilds/${GUILD_ID}/members/${userId}`, {
-    headers: botHeaders(),
-  });
-  return res.ok;
+  return (await guildMembership(userId)) !== "not_member";
 }
 
 export async function sendDm(userId: string, content: string): Promise<void> {
