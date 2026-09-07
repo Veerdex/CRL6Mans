@@ -6,6 +6,10 @@
 -- regenerated wholesale by rebuildEventResults(), so an award written there
 -- would be erased the next time the placement or points logic changed. An
 -- accolade is not derivable from an archive, so it needs its own row.
+--
+-- If a database ran the first draft of this file, re-running it fixes nothing:
+-- `create table if not exists` is a silent no-op on the wrong-shaped table it
+-- left behind. Run scripts/season-accolades-migration-fix.sql instead.
 
 -- Values for the season currently being run, alongside season_prize_*.
 alter table league_settings add column if not exists accolade_prize_mvp integer;
