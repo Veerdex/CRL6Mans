@@ -44,7 +44,7 @@ export function StatsView({
           ? "Per-player performance from this event's uploaded game replays. Click any column header to sort."
           : "Per-player performance across every event, including the one in progress. Click any column header to sort."}
       </p>
-      <StatsTable rows={rows} />
+      <StatsTable rows={rows} showTeam={scope === "current"} />
     </>
   );
 }

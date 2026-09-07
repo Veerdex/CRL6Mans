@@ -79,7 +79,10 @@ const COLS: { key: SortKey; label: string; title: string; decimals: number; suff
   { key: "totalDemoed",  label: "Dmd",   title: "Total times demoed",                          decimals: 0,                group: "tot" },
 ];
 
-export function StatsTable({ rows }: { rows: PlayerStatRow[] }) {
+// teamName is whichever roster the player sits on right now, which only lines up
+// with the numbers for a single event. Across all time it would label career
+// totals with a team most of them weren't earned on.
+export function StatsTable({ rows, showTeam = true }: { rows: PlayerStatRow[]; showTeam?: boolean }) {
   const [sortKey, setSortKey] = useState<SortKey>("mvp");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -112,7 +115,9 @@ export function StatsTable({ rows }: { rows: PlayerStatRow[] }) {
           <tr className="border-b border-zinc-800">
             <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 w-8">#</th>
             <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Player</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Team</th>
+            {showTeam && (
+              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Team</th>
+            )}
             <th className="px-4 py-3 text-right text-xs font-semibold text-zinc-400 whitespace-nowrap">GP</th>
             {COLS.map((col, i) => {
               const prevGroup = i > 0 ? COLS[i - 1].group : col.group;
@@ -144,7 +149,9 @@ export function StatsTable({ rows }: { rows: PlayerStatRow[] }) {
               <td className="px-4 py-3 font-medium text-white whitespace-nowrap">
                 <PlayerName displayName={row.displayName} username={row.username} discordId={row.discordId} />
               </td>
-              <td className="px-4 py-3 text-zinc-400 text-xs whitespace-nowrap">{row.teamName ?? "—"}</td>
+              {showTeam && (
+                <td className="px-4 py-3 text-zinc-400 text-xs whitespace-nowrap">{row.teamName ?? "—"}</td>
+              )}
               <td className="px-4 py-3 text-right text-zinc-400 tabular-nums">{row.games}</td>
               {COLS.map((col, i) => {
                 const v = sortValue(row, col.key);
