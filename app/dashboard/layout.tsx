@@ -266,7 +266,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // draft/team/wager access, just enough to browse and manage their own theme.
   let navKeys: string[];
   if (isGuest) {
-    navKeys = ["home", "media", ...(hasSponsors ? ["sponsors"] : []), "patreon", "settings"];
+    navKeys = ["home", "stats", "media", ...(hasSponsors ? ["sponsors"] : []), "patreon", "settings"];
   } else if (status === "approved") {
     navKeys = [
       "home",
