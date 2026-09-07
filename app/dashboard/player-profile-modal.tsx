@@ -109,11 +109,17 @@ export function PlayerProfileModal({
             <div className="p-4 grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-4 min-w-0">
                 <Identity profile={profile} />
-                {/* mt-auto pins the button to the bottom of a column that is as
-                    tall as the stats beside it. */}
+                {/* mt-auto pins these to the bottom of a column that is as tall
+                    as the stats beside it. */}
+                <div className="mt-auto rounded-xl bg-indigo-950/40 border border-indigo-700/40 px-4 py-3">
+                  <p className="text-[11px] uppercase tracking-wider text-indigo-400">Rank Value</p>
+                  <p className="text-2xl font-bold text-white tabular-nums mt-0.5">
+                    {fmt(profile.rankValue)}
+                  </p>
+                </div>
                 <button
                   onClick={() => setHistoryOpen(true)}
-                  className="mt-auto w-full rounded-xl border border-zinc-700 bg-zinc-800/60 hover:bg-zinc-800 px-4 py-2.5 text-sm font-medium text-white transition-colors"
+                  className="w-full rounded-xl border border-zinc-700 bg-zinc-800/60 hover:bg-zinc-800 px-4 py-2.5 text-sm font-medium text-white transition-colors"
                 >
                   Event History
                   <span className="ml-1.5 text-zinc-400">({profile.events.length})</span>

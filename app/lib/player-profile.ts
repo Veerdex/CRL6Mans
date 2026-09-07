@@ -3,6 +3,7 @@ import "server-only";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./paginate";
 import { careerPoints } from "./career-points";
+import { playerRatingFromRow } from "./rating";
 import { fetchEventHistory, type EventHistoryEntry } from "./event-results";
 
 /**
@@ -56,6 +57,8 @@ export type PlayerProfile = {
   isCaptain: boolean;
   sixMans: SixMansStats;
   ranks: RankStats;
+  /** Rank Value under crl-final-rating-v1, derived from `ranks`. */
+  rankValue: number | null;
   events: EventHistoryEntry[];
   /** 6mans points + placement and accolade points from every event in `events`. */
   careerPoints: number;
@@ -94,6 +97,13 @@ export async function loadPlayerProfile(
     fetchEventHistory(account.discord_id),
   ]);
 
+  const ranks: RankStats = {
+    seasonPeak2v2: toMmr(registration?.current_2v2 ?? tierThree?.current_2v2),
+    allTimePeak2v2: toMmr(registration?.peak_2v2 ?? tierThree?.peak_2v2),
+    seasonPeak3v3: toMmr(registration?.current_3v3 ?? tierThree?.current_3v3),
+    allTimePeak3v3: toMmr(registration?.peak_3v3 ?? tierThree?.peak_3v3),
+  };
+
   return {
     identity: {
       discordId: account.discord_id,
@@ -105,12 +115,8 @@ export async function loadPlayerProfile(
     teamName,
     isCaptain: tierThree?.is_captain ?? false,
     sixMans,
-    ranks: {
-      seasonPeak2v2: toMmr(registration?.current_2v2 ?? tierThree?.current_2v2),
-      allTimePeak2v2: toMmr(registration?.peak_2v2 ?? tierThree?.peak_2v2),
-      seasonPeak3v3: toMmr(registration?.current_3v3 ?? tierThree?.current_3v3),
-      allTimePeak3v3: toMmr(registration?.peak_3v3 ?? tierThree?.peak_3v3),
-    },
+    ranks,
+    rankValue: rankValueOf(ranks),
     events,
     careerPoints: careerPoints(
       sixMans.points,
@@ -301,6 +307,28 @@ const QUEUE_MMR_SHIFT = 1000;
 
 function displayMmr(raw: number | null): number | null {
   return raw === null ? null : raw * QUEUE_MMR_SCALE + QUEUE_MMR_SHIFT;
+}
+
+/**
+ * Derived from the same four figures the ranks block renders, so the rating and
+ * the MMR it came from can never disagree on screen. Null when none of them are
+ * set: playerRatingFromRow reads a missing column as 0, which would show an
+ * unregistered player a confident rating rather than nothing to rate.
+ */
+function rankValueOf(ranks: RankStats): number | null {
+  const registered = [
+    ranks.allTimePeak2v2,
+    ranks.seasonPeak2v2,
+    ranks.allTimePeak3v3,
+    ranks.seasonPeak3v3,
+  ];
+  if (registered.every((v) => v === null)) return null;
+  return playerRatingFromRow({
+    peak_2v2: ranks.allTimePeak2v2,
+    current_2v2: ranks.seasonPeak2v2,
+    peak_3v3: ranks.allTimePeak3v3,
+    current_3v3: ranks.seasonPeak3v3,
+  });
 }
 
 /** Registered MMR is stored as text and defaults to "0" — an unset value, not a rating. */
