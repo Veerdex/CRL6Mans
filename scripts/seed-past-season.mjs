@@ -183,6 +183,12 @@ const archived = new Set(cfg.archived ?? []);
 // that says "absent on purpose" rather than "mistyped".
 const departed = new Set(cfg.departed ?? []);
 
+// A player who was rostered but never actually queued. Every other slot must
+// appear in the stats file, because a missing row is otherwise a mistyped
+// roster name — the one thing that guard exists to catch. Naming them here is
+// the opt-in that says "did not play" rather than "mistyped".
+const noStats = new Set(cfg.noStats ?? []);
+
 const slots = [];
 const unresolved = [];
 
@@ -214,6 +220,9 @@ for (const k of Object.keys(manual)) {
 }
 for (const k of archived) {
   if (!teams.some((t) => t.roster.includes(k))) fatal.push(`archived entry "${k}" matches no roster slot`);
+}
+for (const k of noStats) {
+  if (!teams.some((t) => t.roster.includes(k))) fatal.push(`noStats entry "${k}" matches no roster slot`);
 }
 for (const k of departed) {
   if (!manual[k]) fatal.push(`departed entry "${k}" has no id in manual`);
@@ -322,9 +331,10 @@ if (STATS) {
     // "skip the names we could not match" case, made explicit rather than left
     // to happen by accident.
     const skipped = slots.filter((s) => s.how === "archived");
+    const didNotPlay = slots.filter((s) => noStats.has(s.name));
     const matched = [];
     for (const s of slots) {
-      if (s.how === "archived") continue;
+      if (s.how === "archived" || noStats.has(s.name)) continue;
       const hit = byName.get(norm(s.name));
       if (!hit) { fatal.push(`roster slot "${s.name}" (${s.team}) has no row in the stats file`); continue; }
       byName.delete(norm(s.name));
@@ -355,7 +365,7 @@ if (STATS) {
       updated_at: new Date().toISOString(),
     }));
 
-    console.log(`stats file: ${parsed.length} rows -> ${matched.length} credited, ${skipped.length} skipped without an id (${skipped.map((s) => s.name).join(", ") || "none"})`);
+    console.log(`stats file: ${parsed.length} rows -> ${matched.length} credited, ${skipped.length} skipped without an id (${skipped.map((s) => s.name).join(", ") || "none"}), ${didNotPlay.length} rostered but did not play (${didNotPlay.map((s) => s.name).join(", ") || "none"})`);
     console.log(`  columns: ${Object.keys(ZERO_STATS).filter((f) => f in (matched[0]?.stats ?? {})).join(", ")}`);
   }
 }
