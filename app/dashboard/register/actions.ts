@@ -10,7 +10,7 @@ import { pushToAdmins } from "@/app/lib/push";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { sendDm, isGuildMember } from "@/app/lib/discord-api";
 import { APP_NAME } from "@/app/lib/constants";
-import { validateImageUpload } from "@/app/lib/uploads";
+import { validateDocumentUpload } from "@/app/lib/uploads";
 import { deleteCollegeIdImage } from "@/app/lib/college-ids";
 
 export async function registerPlayer(_prevState: unknown, formData: FormData) {
@@ -101,7 +101,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
   let uploadedFileName: string | null = null;
 
   if (file?.size) {
-    const validated = await validateImageUpload(file);
+    const validated = await validateDocumentUpload(file);
     if ("error" in validated) return { error: validated.error };
 
     const fileName = `${session.userId}-${Date.now()}.${validated.ext}`;
@@ -112,7 +112,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
 
     if (uploadError) {
       console.error("Storage upload error:", uploadError);
-      return { error: "Failed to upload image. Please try again." };
+      return { error: "Failed to upload your enrollment proof. Please try again." };
     }
 
     const { data: urlData } = supabaseAdmin.storage

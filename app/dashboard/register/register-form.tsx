@@ -53,6 +53,26 @@ export function RegisterForm({ isResubmit, existing }: Props) {
     const maxSizeMB = 5;
     const maxSizeBytes = maxSizeMB * 1024 * 1024;
 
+    // Matched to validateDocumentUpload. Checked by extension, not file.type:
+    // browsers report an empty type for a .pdf with no registered handler, and
+    // rejecting on that would refuse a file the server would have accepted.
+    const ext = file.name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
+
+    if (ext === "heic" || ext === "heif") {
+      setFileError(
+        "iPhone HEIC photos aren't supported. Screenshot the photo and upload that, " +
+        "or switch Settings → Camera → Formats to \"Most Compatible\" and retake it."
+      );
+      e.target.value = "";
+      return;
+    }
+
+    if (!["png", "jpg", "jpeg", "webp", "gif", "pdf"].includes(ext)) {
+      setFileError("Upload a PNG, JPG, WEBP, GIF, or PDF.");
+      e.target.value = "";
+      return;
+    }
+
     if (file.size > maxSizeBytes) {
       const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
       setFileError(
@@ -125,7 +145,7 @@ export function RegisterForm({ isResubmit, existing }: Props) {
         <input
           type="file"
           name="college_image"
-          accept="image/*,.pdf"
+          accept="image/*,.png,.jpg,.jpeg,.webp,.gif,.pdf"
           required={!isResubmit || !existing?.college_image_url}
           onChange={handleFileChange}
           className="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-zinc-700 file:text-white hover:file:bg-zinc-600 cursor-pointer"
