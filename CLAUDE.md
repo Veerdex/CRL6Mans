@@ -253,6 +253,7 @@ so deletes go Tier 3 → Tier 1 (which then cascades Tier 2).
 | `player_game_stats` | Per-player, per-game scoreboard stats (goals/assists/saves/shots/score) parsed from submitted series replays |
 | `clips` | Media tab clip submissions (YouTube/medal.tv/Streamable); `archived_at` marks past weeks instead of deleting |
 | `clip_likes` | One row per (clip, player) like on the Media tab |
+| `season_accolades` | Hand-awarded season accolades (MVP/OPOTY/DPOTY/ROTY); one holder per accolade per season. Values live on `seasons.accolade_prize_*` |
 
 ---
 

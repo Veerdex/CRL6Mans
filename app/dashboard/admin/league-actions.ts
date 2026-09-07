@@ -14,6 +14,7 @@ import { rollUpCareerStats } from "@/app/lib/career-stats";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { computeFullArchive } from "./tournament-archive";
 import { recordEventResults } from "@/app/lib/event-results";
+import { ACCOLADE_PRIZE_COLUMNS, SEASON_ACCOLADES } from "@/app/lib/accolades";
 
 const TEAM_ROLE_COLOR = 0x3498db; // blue
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -636,7 +637,7 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("season_active, season_format, is_test_season, season_prize_1st, season_prize_2nd, season_prize_3rd4th")
+    .select("season_active, season_format, is_test_season, season_prize_1st, season_prize_2nd, season_prize_3rd4th, accolade_prize_mvp, accolade_prize_offensive, accolade_prize_defensive, accolade_prize_rookie")
     .single();
   if (!settings?.season_active) return { error: "No active season to complete." };
 
@@ -715,11 +716,19 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     endedAt,
   });
 
+  // The prize columns are named the same on both tables, so the live season's
+  // accolade values carry onto the archive with a plain copy. They stay
+  // editable there afterwards — see app/dashboard/accolade-actions.ts.
+  const accoladePrizeColumns = Object.fromEntries(
+    ACCOLADE_PRIZE_COLUMNS.map((col) => [col, (settings as unknown as Record<string, unknown>)[col] ?? null]),
+  );
+
   const { data: archivedSeason, error: archiveError } = await supabaseAdmin.from("seasons").insert({
     name,
     year,
     season_format: settings.season_format ?? null,
     team_count: finalStandings.length,
+    ...accoladePrizeColumns,
     summary: {
       champion: finalStandings[0]?.name ?? null,
       runnerUp: finalStandings[1]?.name ?? null,
@@ -1011,7 +1020,12 @@ export async function saveMinMmr(min2v2: number | null, min3v3: number | null) {
   return { ok: true, message: "Minimum MMR saved." };
 }
 
-export async function saveSeasonPrizes(prize1st: number | null, prize2nd: number | null, prize3rd4th: number | null) {
+export async function saveSeasonPrizes(
+  prize1st: number | null,
+  prize2nd: number | null,
+  prize3rd4th: number | null,
+  accoladePrizes: Record<string, number | null> = {},
+) {
   await verifyAdmin();
   const norm = (v: number | null): number | null | undefined => {
     if (v === null || Number.isNaN(v) || v === 0) return null;
@@ -1024,12 +1038,20 @@ export async function saveSeasonPrizes(prize1st: number | null, prize2nd: number
   if (a === undefined || b === undefined || c === undefined)
     return { ok: false, message: "Prize amounts must be non-negative whole numbers." };
 
-  await supabaseAdmin.from("league_settings").update({
+  const update: Record<string, unknown> = {
     season_prize_1st: a,
     season_prize_2nd: b,
     season_prize_3rd4th: c,
     updated_at: new Date().toISOString(),
-  }).not("id", "is", null);
+  };
+  for (const meta of SEASON_ACCOLADES) {
+    const value = norm(accoladePrizes[meta.key] ?? null);
+    if (value === undefined)
+      return { ok: false, message: "Prize amounts must be non-negative whole numbers." };
+    update[meta.prizeColumn] = value;
+  }
+
+  await supabaseAdmin.from("league_settings").update(update).not("id", "is", null);
 
   revalidatePath("/dashboard/admin");
   return { ok: true, message: "Season prize pool saved." };

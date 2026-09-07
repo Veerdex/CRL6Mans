@@ -3,6 +3,7 @@ import "server-only";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./paginate";
 import { eventPoints, type EventKind } from "./career-points";
+import { fetchPlayerAccolades, type HeldAccolade } from "./season-accolades";
 import type { TournamentArchive } from "@/app/dashboard/admin/tournament-archive";
 
 /**
@@ -39,7 +40,15 @@ export type EventResultRow = {
   teammates: { discordId: string | null; username: string; displayName: string | null }[];
 };
 
-export type EventHistoryEntry = EventResultRow & { points: number };
+/**
+ * `points` is placement points only. Accolades pay separately and are stored
+ * outside this derived table (see app/lib/season-accolades.ts), so they are
+ * carried alongside rather than folded in.
+ */
+export type EventHistoryEntry = EventResultRow & {
+  points: number;
+  accolades: HeldAccolade[];
+};
 
 /** Flatten an archive into one row per rostered player. */
 export function rowsFromArchive(
@@ -144,6 +153,8 @@ export async function fetchEventHistory(discordId: string): Promise<EventHistory
     .order("ended_at", { ascending: false, nullsFirst: false });
   if (error) throw new Error(error.message);
 
+  const accoladesBySeason = await fetchPlayerAccolades(discordId);
+
   return (data ?? []).map((row) => {
     const result = row as EventResultRow;
     return {
@@ -155,6 +166,7 @@ export async function fetchEventHistory(discordId: string): Promise<EventHistory
         prizePool: result.prize_pool,
         kind: result.event_kind,
       }),
+      accolades: accoladesBySeason.get(result.event_id) ?? [],
     };
   });
 }

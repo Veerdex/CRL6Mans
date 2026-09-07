@@ -1,13 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { PlayerAvatar } from "./player-avatar";
 import { PlayerName } from "./player-name";
-import { formatPlacement } from "@/app/lib/career-points";
+import { accoladePoints, accoladeTotal, formatPlacement } from "@/app/lib/career-points";
+import { accoladeMeta } from "@/app/lib/accolades";
+import {
+  getSeasonAccolades,
+  saveSeasonAccoladePrizes,
+  setSeasonAccolade,
+  type AccoladeResult,
+  type AccoladeSlot,
+} from "./accolade-actions";
 import type { PlayerProfile } from "@/app/lib/player-profile";
 import type { EventHistoryEntry } from "@/app/lib/event-results";
 
 export type ProfileKey = { username: string } | { discordId: string };
+
+/** `canEditAccolades` is decided per viewer by the profile route, not stored on the player. */
+type LoadedProfile = PlayerProfile & { canEditAccolades: boolean };
 
 export function PlayerProfileModal({
   target,
@@ -23,9 +34,12 @@ export function PlayerProfileModal({
    */
   onOpen: (key: ProfileKey) => void;
 }) {
-  const [profile, setProfile] = useState<PlayerProfile | null>(null);
+  const [profile, setProfile] = useState<LoadedProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Bumped after an accolade change so career points and badges reflect it
+  // without closing the popup the change was made from.
+  const [reloadKey, setReloadKey] = useState(0);
 
   const query =
     "username" in target
@@ -47,7 +61,9 @@ export function PlayerProfileModal({
     return () => {
       live = false;
     };
-  }, [query]);
+  }, [query, reloadKey]);
+
+  const refresh = useCallback(() => setReloadKey((k) => k + 1), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -116,8 +132,11 @@ export function PlayerProfileModal({
       {profile && historyOpen && (
         <EventHistory
           events={profile.events}
+          discordId={profile.identity.discordId}
+          canEdit={profile.canEditAccolades}
           onClose={() => setHistoryOpen(false)}
           onOpen={onOpen}
+          onChanged={refresh}
         />
       )}
     </>
@@ -186,13 +205,23 @@ function Ranks({ profile }: { profile: PlayerProfile }) {
 
 function EventHistory({
   events,
+  discordId,
+  canEdit,
   onClose,
   onOpen,
+  onChanged,
 }: {
   events: EventHistoryEntry[];
+  discordId: string;
+  canEdit: boolean;
   onClose: () => void;
   onOpen: (key: ProfileKey) => void;
+  onChanged: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  // Accolades are a season award, so a player with no seasons has nothing to edit.
+  const seasons = events.filter((e) => e.event_kind === "season");
+
   return (
     <div
       className="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center p-4"
@@ -202,8 +231,23 @@ function EventHistory({
         className="w-full max-w-lg max-h-[85dvh] overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-3 p-4 border-b border-zinc-800 sticky top-0 bg-zinc-900">
-          <h2 className="text-sm font-semibold text-white">Event History</h2>
+        <div className="flex items-center justify-between gap-3 p-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-white">Event History</h2>
+            {canEdit && seasons.length > 0 && (
+              <button
+                onClick={() => setEditing((v) => !v)}
+                aria-expanded={editing}
+                className={`rounded-lg border px-2 py-0.5 text-xs font-medium transition-colors ${
+                  editing
+                    ? "border-indigo-500 bg-indigo-600 text-white"
+                    : "border-zinc-700 bg-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-700"
+                }`}
+              >
+                Edit
+              </button>
+            )}
+          </div>
           <button
             onClick={onClose}
             aria-label="Close"
@@ -212,6 +256,10 @@ function EventHistory({
             ×
           </button>
         </div>
+
+        {editing && (
+          <AccoladeEditor seasons={seasons} discordId={discordId} onChanged={onChanged} />
+        )}
 
         {events.length === 0 ? (
           <p className="p-6 text-sm text-zinc-500">No finished events yet.</p>
@@ -237,6 +285,23 @@ function EventHistory({
                   </div>
                 </div>
 
+                {e.accolades.length > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {e.accolades.map((a) => (
+                      <span
+                        key={a.key}
+                        title={accoladeMeta(a.key).label}
+                        className="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300"
+                      >
+                        {accoladeMeta(a.key).short}
+                      </span>
+                    ))}
+                    <span className="text-xs text-zinc-500 tabular-nums">
+                      +{Math.round(accoladeTotal(e.accolades.map((a) => a.prize))).toLocaleString()} pts
+                    </span>
+                  </div>
+                )}
+
                 <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
                   <Meta label="Prize Pool" value={`${e.prize_pool.toLocaleString()} coins`} />
                   <Meta label="Teams" value={String(e.team_count)} />
@@ -259,6 +324,151 @@ function EventHistory({
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Director+ panel for the four hand-awarded season accolades.
+ *
+ * The season list is the player's own season history, so an accolade can only
+ * be given for a season they actually played in — the server action re-checks
+ * that against player_event_results rather than trusting this list.
+ *
+ * Prize values are edited here too. A season completed before the fields
+ * existed — every backfilled one — has no values to inherit, so being able to
+ * set them after the fact is the only way those seasons can award anything.
+ */
+function AccoladeEditor({
+  seasons,
+  discordId,
+  onChanged,
+}: {
+  seasons: EventHistoryEntry[];
+  discordId: string;
+  onChanged: () => void;
+}) {
+  const [seasonId, setSeasonId] = useState(seasons[0]?.event_id ?? "");
+  const [slots, setSlots] = useState<AccoladeSlot[] | null>(null);
+  const [prizeDraft, setPrizeDraft] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  // `notify` is false for the initial read: nothing changed, so re-fetching the
+  // profile behind the popup would be a wasted round trip.
+  const apply = useCallback(
+    (res: AccoladeResult, notify: boolean) => {
+      if ("error" in res) return setError(res.error);
+      setError(null);
+      setSlots(res.slots);
+      setPrizeDraft(
+        Object.fromEntries(res.slots.map((s) => [s.key, s.prize ? String(s.prize) : ""])),
+      );
+      if (notify) onChanged();
+    },
+    [onChanged],
+  );
+
+  useEffect(() => {
+    if (!seasonId) return;
+    let live = true;
+    setSlots(null);
+    setError(null);
+    getSeasonAccolades(seasonId).then((res) => live && apply(res, false));
+    return () => {
+      live = false;
+    };
+  }, [seasonId, apply]);
+
+  const savePrizes = () =>
+    startTransition(async () => {
+      const values = Object.fromEntries(
+        Object.entries(prizeDraft).map(([k, v]) => [k, v.trim() === "" ? null : Number(v)]),
+      );
+      apply(await saveSeasonAccoladePrizes(seasonId, values), true);
+    });
+
+  const toggle = (key: string) =>
+    startTransition(async () => {
+      apply(await setSeasonAccolade(seasonId, key, discordId), true);
+    });
+
+  return (
+    <div className="border-b border-zinc-800 bg-zinc-950/60 p-4 space-y-3">
+      <div className="space-y-1.5">
+        <label className="text-[11px] uppercase tracking-wide text-zinc-500">Season</label>
+        <select
+          value={seasonId}
+          onChange={(e) => setSeasonId(e.target.value)}
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        >
+          {seasons.map((s) => (
+            <option key={s.event_id} value={s.event_id}>
+              {s.event_name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {!slots && !error && <p className="text-xs text-zinc-500">Loading accolades…</p>}
+
+      {slots && (
+        <>
+          <ul className="space-y-2">
+            {slots.map((slot) => {
+              const meta = accoladeMeta(slot.key);
+              const held = slot.holder?.discordId === discordId;
+              return (
+                <li key={slot.key} className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-white truncate">{meta.label}</p>
+                    <p className="text-[11px] text-zinc-500 truncate">
+                      {held
+                        ? "Held by this player"
+                        : slot.holder
+                          ? `Held by ${slot.holder.displayName ?? slot.holder.username}`
+                          : "Unassigned"}
+                      {" · "}
+                      {Math.round(accoladePoints(slot.prize)).toLocaleString()} pts
+                    </p>
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={prizeDraft[slot.key] ?? ""}
+                    onChange={(e) =>
+                      setPrizeDraft((d) => ({ ...d, [slot.key]: e.target.value }))
+                    }
+                    placeholder="0"
+                    aria-label={`${meta.label} value`}
+                    className="w-20 shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-white placeholder-zinc-600 tabular-nums focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <button
+                    onClick={() => toggle(slot.key)}
+                    disabled={pending}
+                    className={`w-20 shrink-0 rounded-lg px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                      held
+                        ? "bg-amber-600 hover:bg-amber-500 text-white"
+                        : "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700"
+                    }`}
+                  >
+                    {held ? "Remove" : slot.holder ? "Take" : "Award"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          <button
+            onClick={savePrizes}
+            disabled={pending}
+            className="rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+          >
+            Save Values
+          </button>
+        </>
+      )}
     </div>
   );
 }

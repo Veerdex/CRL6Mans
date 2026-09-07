@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
+import { isDirectorVerified } from "@/app/lib/players";
 import { loadPlayerProfile } from "@/app/lib/player-profile";
 
 // Profiles are fetched only when one is opened, never alongside the pages that
@@ -17,10 +18,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Missing username or discordId" }, { status: 400 });
   }
 
-  const profile = await loadPlayerProfile(
-    discordId ? { discordId } : { username: username! },
-  );
+  const [profile, canEditAccolades] = await Promise.all([
+    loadPlayerProfile(discordId ? { discordId } : { username: username! }),
+    isDirectorVerified(session.userId),
+  ]);
   if (!profile) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  return NextResponse.json(profile);
+  // Only decides whether the edit affordance renders — every accolade write is
+  // gated again server-side in app/dashboard/accolade-actions.ts.
+  return NextResponse.json({ ...profile, canEditAccolades });
 }

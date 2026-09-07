@@ -3,6 +3,7 @@
 import { useState, useTransition, useEffect } from "react";
 import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, saveSeasonPrizes, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate, setIsTestSeason, setSubsEnabled } from "./league-actions";
 import { auditMatchChannels, applyChannelChanges, type ChannelAuditItem, type ChannelAuditResult } from "./channel-debug-actions";
+import { SEASON_ACCOLADES } from "@/app/lib/accolades";
 import { ExportAndResetSeasonButton } from "./export-pdf-button";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -23,6 +24,7 @@ interface LeagueControlsProps {
   seasonPrize1st: number | null;
   seasonPrize2nd: number | null;
   seasonPrize3rd4th: number | null;
+  seasonAccoladePrizes: Record<string, number | null>;
   draftActive: boolean;
   draftPhase: string | null;
   hasPickDeadline: boolean;
@@ -64,7 +66,7 @@ const COMMANDS: Record<ActionKey, { label: string; code: string; description: st
   },
 };
 
-export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, seasonPrize1st, seasonPrize2nd, seasonPrize3rd4th, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, teamSlotCount, draftFormatMax, seasonFormatLabel, isTestSeason, subsEnabled, isCEO }: LeagueControlsProps) {
+export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matchPlayHour, minMmr2v2, minMmr3v3, seasonPrize1st, seasonPrize2nd, seasonPrize3rd4th, seasonAccoladePrizes, draftActive, draftPhase, hasPickDeadline, seasonActive, eventActive, testingMode, notificationsEnabled, draftCurrentMax, teamSlotCount, draftFormatMax, seasonFormatLabel, isTestSeason, subsEnabled, isCEO }: LeagueControlsProps) {
   const [isPending, startTransition] = useTransition();
   const [active, setActive] = useState<ActionKey | null>(null);
   const [codeInput, setCodeInput] = useState("");
@@ -96,6 +98,9 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
   const [prize1st, setPrize1st] = useState(seasonPrize1st != null ? String(seasonPrize1st) : "");
   const [prize2nd, setPrize2nd] = useState(seasonPrize2nd != null ? String(seasonPrize2nd) : "");
   const [prize3rd4th, setPrize3rd4th] = useState(seasonPrize3rd4th != null ? String(seasonPrize3rd4th) : "");
+  const [accoladePrizes, setAccoladePrizes] = useState<Record<string, string>>(() =>
+    Object.fromEntries(SEASON_ACCOLADES.map(a => [a.key, seasonAccoladePrizes[a.key] != null ? String(seasonAccoladePrizes[a.key]) : ""])),
+  );
 
   useEffect(() => {
     if (!pendingFinalConfirm) return;
@@ -356,12 +361,42 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
             />
           </div>
         </div>
+        <div className="border-t border-zinc-700 pt-4 space-y-3">
+          <div>
+            <p className="text-sm font-medium text-white">Accolade Values</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              What each end-of-season award pays. A Director hands these out from a player&apos;s
+              Event History once the season is archived; the value is what sets the career points
+              it is worth.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-2xl">
+            {SEASON_ACCOLADES.map(a => (
+              <div key={a.key} className="space-y-1.5">
+                <label className="text-xs text-zinc-500" title={a.label}>{a.short}</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={accoladePrizes[a.key] ?? ""}
+                  onChange={e => setAccoladePrizes(p => ({ ...p, [a.key]: e.target.value }))}
+                  placeholder="0"
+                  aria-label={a.label}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
         <button
           onClick={() => startTransition(async () => {
             const result = await saveSeasonPrizes(
               prize1st.trim() === "" ? null : Number(prize1st),
               prize2nd.trim() === "" ? null : Number(prize2nd),
               prize3rd4th.trim() === "" ? null : Number(prize3rd4th),
+              Object.fromEntries(
+                SEASON_ACCOLADES.map(a => [a.key, (accoladePrizes[a.key] ?? "").trim() === "" ? null : Number(accoladePrizes[a.key])]),
+              ),
             );
             showFeedback(result.message, result.ok);
           })}

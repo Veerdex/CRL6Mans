@@ -36,7 +36,28 @@ export type EventPointsInput = {
   /** f — total prize pool in CRL coins. */
   prizePool: number;
   kind: EventKind;
+  /**
+   * Prize values of the hand-awarded accolades this player holds for the event.
+   * Seasons only; see app/lib/accolades.ts.
+   */
+  accoladePrizes?: number[];
 };
+
+// An accolade pays on its own prize rather than riding the placement curve, so
+// the term is additive and independent of where the player's team finished —
+// the season MVP need not have won. Base 1.3 is a slow log: it separates a $10
+// accolade from a $50 one far more than it separates $500 from $1000, which is
+// the range these are actually set in.
+const ACCOLADE_LOG_BASE = 1.3;
+
+/** Points earned by holding one accolade worth `prize` CRL coins. Zero at $0. */
+export function accoladePoints(prize: number | null | undefined): number {
+  return (5 * Math.log(Math.max(0, prize ?? 0) + 1)) / Math.log(ACCOLADE_LOG_BASE);
+}
+
+export function accoladeTotal(prizes: number[] | null | undefined): number {
+  return (prizes ?? []).reduce((sum, p) => sum + accoladePoints(p), 0);
+}
 
 /**
  * The prize pool a points calculation sees: 3rd-4th pays two teams, so its
@@ -83,16 +104,19 @@ export function eventPoints(input: EventPointsInput): number {
 }
 
 /**
- * Career points = half the 6mans points + event points. The 6mans half is the
- * sum of season_score across closed queue-bot seasons, so it only moves when a
- * season closes; null means the player has never appeared in one (distinct from
- * a measured zero).
+ * Career points = half the 6mans points + event points + accolade points. The
+ * 6mans half is the sum of season_score across closed queue-bot seasons, so it
+ * only moves when a season closes; null means the player has never appeared in
+ * one (distinct from a measured zero).
  */
 export function careerPoints(
   sixMansPoints: number | null,
   events: EventPointsInput[],
 ): number {
-  return (sixMansPoints ?? 0) * SIX_MANS_WEIGHT + events.reduce((sum, e) => sum + eventPoints(e), 0);
+  return (
+    (sixMansPoints ?? 0) * SIX_MANS_WEIGHT +
+    events.reduce((sum, e) => sum + eventPoints(e) + accoladeTotal(e.accoladePrizes), 0)
+  );
 }
 
 /**

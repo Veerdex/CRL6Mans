@@ -57,7 +57,7 @@ export type PlayerProfile = {
   sixMans: SixMansStats;
   ranks: RankStats;
   events: EventHistoryEntry[];
-  /** 6mans points + the points from every event in `events`. */
+  /** 6mans points + placement and accolade points from every event in `events`. */
   careerPoints: number;
 };
 
@@ -119,6 +119,7 @@ export async function loadPlayerProfile(
         teamCount: e.team_count,
         prizePool: e.prize_pool,
         kind: e.event_kind,
+        accoladePrizes: e.accolades.map((a) => a.prize),
       })),
     ),
   };
