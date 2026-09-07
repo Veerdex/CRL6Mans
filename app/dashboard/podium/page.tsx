@@ -70,7 +70,12 @@ export default async function PodiumPage() {
   let players: RichPlayer[] = [];
   let mvpPlayerId: string | null = null;
 
-  const mvpUsername = summary.topStats?.mvpUsername ?? null;
+  // Accolades are a tournament-only feature. Seasons still snapshot topStats at
+  // completion — the stats cascade away with their matches on a wipe, so leaving
+  // the snapshot in place is what keeps this reversible.
+  const isTournament = eventKind === "tournament";
+
+  const mvpUsername = isTournament ? summary.topStats?.mvpUsername ?? null : null;
   const rosterUsernames = summary.championPlayers?.map((p) => p.username) ?? [];
   const lookupUsernames = mvpUsername && !rosterUsernames.includes(mvpUsername)
     ? [...rosterUsernames, mvpUsername]
@@ -105,8 +110,8 @@ export default async function PodiumPage() {
     mvpPlayerId = mvpUsername ? byUsername[mvpUsername]?.id ?? null : null;
   }
 
-  // Stat leaders for this specific season/tournament, snapshotted at completion time
-  const accolades: Accolade[] = summary.topStats?.accolades ?? [];
+  // Stat leaders for this specific tournament, snapshotted at completion time
+  const accolades: Accolade[] = isTournament ? summary.topStats?.accolades ?? [] : [];
 
   return (
     <PodiumClient
