@@ -187,9 +187,10 @@ async function fetchHasTeams(activeTournamentId: string | null): Promise<boolean
 }
 
 // player_game_stats only ever holds the live event (match_id cascades on the
-// delete resetSeason runs), so the all-time record lives in player_career_stats.
-// The tab shows while a stats-tracking event is live, and otherwise whenever
-// either store has anything in it — including through the gap between events.
+// delete resetSeason runs), so the all-time record lives in player_career_stats
+// and seeded_player_stats. The tab shows while a stats-tracking event is live,
+// and otherwise whenever either store has anything in it — including through the
+// gap between events.
 // An event with stats disabled contributes nothing, but past totals still do.
 async function fetchHasStatsContent(hasActiveTrackedContent: boolean): Promise<boolean> {
   if (hasActiveTrackedContent) return true;

@@ -4,6 +4,11 @@
 //   node scripts/seed-past-season.mjs scripts/past-seasons/<event>.json --confirm
 //   node scripts/seed-past-season.mjs scripts/past-seasons/<event>.json --verify
 //
+// Add --stats to any of those to write seeded_player_stats instead of
+// player_event_results, off the config's statsFile. Same run, same name->id
+// resolution: the scoreboard is credited to exactly the accounts the placement
+// was, so the two can never disagree about who played.
+//
 // Without --confirm it only matches and reports; nothing is written.
 //
 // Why this writes player_event_results directly, against that table's usual
@@ -28,13 +33,14 @@ import fs from "fs";
 const CONFIG_PATH = process.argv[2];
 const CONFIRM = process.argv.includes("--confirm");
 const VERIFY = process.argv.includes("--verify");
+const STATS = process.argv.includes("--stats");
 const ONLY = (() => {
   const i = process.argv.indexOf("--only");
   return i === -1 ? null : process.argv[i + 1];
 })();
 
 if (!CONFIG_PATH) {
-  console.error("usage: node scripts/seed-past-season.mjs <config.json> [--confirm] [--only <discord_id>] [--verify]");
+  console.error("usage: node scripts/seed-past-season.mjs <config.json> [--stats] [--confirm] [--only <discord_id>] [--verify]");
   process.exit(1);
 }
 
@@ -261,6 +267,99 @@ const rows = slots.map((s) => ({
     })),
 }));
 
+// --- seeded scoreboard totals (--stats) ---------------------------------
+// A whitespace- or tab-separated table: a header naming the columns, then one
+// row per player. The player column may contain spaces, so a row is split on
+// its trailing run of numbers rather than on the separator.
+const STAT_LABELS = {
+  games: "games", gp: "games",
+  goals: "goals", gls: "goals",
+  assists: "assists", ast: "assists",
+  saves: "saves", sv: "saves",
+  shots: "shots", sh: "shots",
+  score: "score", sc: "score",
+  demos: "demos", dm: "demos",
+  demoed: "demoed", dmd: "demoed",
+};
+const ZERO_STATS = { games: 0, goals: 0, assists: 0, saves: 0, shots: 0, score: 0, demos: 0, demoed: 0 };
+
+function parseStatsFile(path) {
+  const lines = fs.readFileSync(path, "utf8").split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) throw new Error(`${path} is empty`);
+
+  const fields = lines[0].trim().split(/[\t ]+/).slice(1).map((h) => {
+    const field = STAT_LABELS[h.toLowerCase().replace(/[^a-z]/g, "")];
+    if (!field) throw new Error(`unknown stats column "${h}" in ${path}`);
+    return field;
+  });
+  if (new Set(fields).size !== fields.length) throw new Error(`duplicate stats column in ${path}`);
+
+  return lines.slice(1).map((line) => {
+    const m = line.trim().match(/^(.+?)[\t ]+((?:\d+[\t ]+)*\d+)$/);
+    if (!m) throw new Error(`stats row is not "<name> <numbers>": ${JSON.stringify(line)}`);
+    const values = m[2].split(/[\t ]+/).map(Number);
+    if (values.length !== fields.length) {
+      throw new Error(`stats row "${m[1]}" has ${values.length} values, header has ${fields.length}`);
+    }
+    return { name: m[1].trim(), stats: Object.fromEntries(fields.map((f, i) => [f, values[i]])) };
+  });
+}
+
+let statRows = [];
+if (STATS) {
+  if (!cfg.statsFile) fatal.push(`--stats needs "statsFile" in the config`);
+  else {
+    const parsed = parseStatsFile(cfg.statsFile);
+
+    const byName = new Map();
+    for (const p of parsed) {
+      if (byName.has(norm(p.name))) fatal.push(`stats file lists "${p.name}" twice`);
+      byName.set(norm(p.name), p);
+    }
+
+    // An archived slot's discord_id is its roster name, which no account can
+    // ever log in as — a stats row keyed on one would wait forever. This is the
+    // "skip the names we could not match" case, made explicit rather than left
+    // to happen by accident.
+    const skipped = slots.filter((s) => s.how === "archived");
+    const matched = [];
+    for (const s of slots) {
+      if (s.how === "archived") continue;
+      const hit = byName.get(norm(s.name));
+      if (!hit) { fatal.push(`roster slot "${s.name}" (${s.team}) has no row in the stats file`); continue; }
+      byName.delete(norm(s.name));
+      matched.push({ slot: s, stats: hit.stats });
+    }
+    for (const leftover of byName.values()) {
+      if (skipped.some((s) => norm(s.name) === norm(leftover.name))) continue;
+      fatal.push(`stats row "${leftover.name}" matches no roster slot`);
+    }
+
+    // games is the divisor behind MVP and every per-game column. Seeding a row
+    // with goals but no games would divide those goals by whatever games the
+    // player later plays live, and the number would drift further every season.
+    const noGames = matched.filter(({ stats }) => !(stats.games > 0));
+    if (noGames.length) {
+      fatal.push(
+        `${noGames.length} row(s) have no games played — their goals would be divided by whatever games they later play live: ` +
+        noGames.map(({ slot }) => slot.name).join(", "),
+      );
+    }
+
+    statRows = matched.map(({ slot, stats }) => ({
+      event_id: cfg.eventId,
+      discord_id: slot.member.discord_id,
+      display_name: slot.name,
+      ...ZERO_STATS,
+      ...stats,
+      updated_at: new Date().toISOString(),
+    }));
+
+    console.log(`stats file: ${parsed.length} rows -> ${matched.length} credited, ${skipped.length} skipped without an id (${skipped.map((s) => s.name).join(", ") || "none"})`);
+    console.log(`  columns: ${Object.keys(ZERO_STATS).filter((f) => f in (matched[0]?.stats ?? {})).join(", ")}`);
+  }
+}
+
 // --- report -------------------------------------------------------------
 console.log(`${cfg.eventName} — ${cfg.eventKind}, ${cfg.teamCount} teams, prize pool ${cfg.prizePool}, ended ${cfg.endedAt}`);
 console.log(`  roster slots: ${teams.length * 3}`);
@@ -284,9 +383,12 @@ if (fatal.length || unresolved.length) {
 }
 
 // --- write / verify -----------------------------------------------------
+const TABLE = STATS ? "seeded_player_stats" : "player_event_results";
+const ON_CONFLICT = STATS ? "event_id,discord_id" : "event_kind,event_id,discord_id";
+
 async function upsert(batch) {
   const res = await fetch(
-    `${SB}/rest/v1/player_event_results?on_conflict=event_kind,event_id,discord_id`,
+    `${SB}/rest/v1/${TABLE}?on_conflict=${ON_CONFLICT}`,
     {
       method: "POST",
       headers: { ...SB_HEADERS, Prefer: "resolution=merge-duplicates,return=minimal" },
@@ -294,6 +396,19 @@ async function upsert(batch) {
     },
   );
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+}
+
+if (VERIFY && STATS) {
+  const res = await fetch(
+    `${SB}/rest/v1/seeded_player_stats?event_id=eq.${cfg.eventId}&select=discord_id,display_name,games,goals,assists,saves,shots,score,demos,demoed&order=goals.desc`,
+    { headers: SB_HEADERS },
+  );
+  const stored = await res.json();
+  console.log(`\nstored rows: ${stored.length}`);
+  const sum = (f) => stored.reduce((n, r) => n + r[f], 0);
+  console.log(`stored totals: ${Object.keys(ZERO_STATS).map((f) => `${f}=${sum(f)}`).join(" ")}`);
+  console.log(stored.slice(0, 3));
+  process.exit(0);
 }
 
 if (VERIFY) {
@@ -311,15 +426,17 @@ if (VERIFY) {
   process.exit(0);
 }
 
+const pending = STATS ? statRows : rows;
+
 if (!CONFIRM) {
-  console.log(`\nDry run. ${rows.length} rows ready. Re-run with --confirm to write.`);
+  console.log(`\nDry run. ${pending.length} ${TABLE} rows ready. Re-run with --confirm to write.`);
   process.exit(0);
 }
 
-const toWrite = ONLY ? rows.filter((r) => r.discord_id === ONLY) : rows;
+const toWrite = ONLY ? pending.filter((r) => r.discord_id === ONLY) : pending;
 if (!toWrite.length) {
   console.error(`--only ${ONLY} matched no row`);
   process.exit(1);
 }
 for (let i = 0; i < toWrite.length; i += 100) await upsert(toWrite.slice(i, i + 100));
-console.log(`\nWrote ${toWrite.length} rows.`);
+console.log(`\nWrote ${toWrite.length} ${TABLE} rows.`);

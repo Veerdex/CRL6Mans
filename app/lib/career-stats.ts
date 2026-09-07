@@ -96,12 +96,50 @@ export async function rollUpCareerStats(): Promise<void> {
   await supabaseAdmin.from("player_game_stats").delete().in("player_id", playerIds);
 }
 
+type SeededRow = CareerTotals & { discord_id: string };
+
 /**
- * All-time totals per player: the rolled-up table plus whatever the live event
- * has produced so far, so All Time always includes the event in progress.
+ * Scoreboard totals for seasons that finished before the site existed, seeded by
+ * scripts/seed-past-season.mjs --stats and keyed on discord_id with no foreign
+ * key. Rows for players who have not joined resolve to nothing and simply wait.
+ */
+function fetchSeededRows() {
+  return fetchAllRows<SeededRow>((from, to) =>
+    supabaseAdmin
+      .from("seeded_player_stats")
+      .select("discord_id, games, goals, assists, saves, shots, score, demos, demoed")
+      .order("discord_id")
+      .range(from, to)
+  );
+}
+
+/**
+ * Approved only, matching what the stats page renders: a seeded row belonging to
+ * a banned account must not surface totals the rest of the page filters out.
+ */
+async function resolvePlayerIds(discordIds: string[]): Promise<Map<string, string>> {
+  const byDiscordId = new Map<string, string>();
+  for (let i = 0; i < discordIds.length; i += 200) {
+    const { data, error } = await supabaseAdmin
+      .from("players")
+      .select("id, discord_id")
+      .eq("status", "approved")
+      .in("discord_id", discordIds.slice(i, i + 200));
+    if (error) throw new Error(error.message);
+    for (const p of (data ?? []) as { id: string; discord_id: string | null }[]) {
+      if (p.discord_id) byDiscordId.set(p.discord_id, p.id);
+    }
+  }
+  return byDiscordId;
+}
+
+/**
+ * All-time totals per player: the rolled-up table, the seeded past seasons, and
+ * whatever the live event has produced so far, so All Time always includes the
+ * event in progress.
  */
 export async function fetchAllTimeTotals(): Promise<Map<string, CareerTotals>> {
-  const [career, live] = await Promise.all([
+  const [career, live, seeded] = await Promise.all([
     fetchAllRows<CareerRow>((from, to) =>
       supabaseAdmin
         .from("player_career_stats")
@@ -111,6 +149,7 @@ export async function fetchAllTimeTotals(): Promise<Map<string, CareerTotals>> {
         .range(from, to)
     ),
     fetchLiveRows(),
+    fetchSeededRows(),
   ]);
 
   const totals = new Map<string, CareerTotals>();
@@ -120,6 +159,25 @@ export async function fetchAllTimeTotals(): Promise<Map<string, CareerTotals>> {
       shots: c.shots, score: c.score, demos: c.demos, demoed: c.demoed,
     });
   }
+
+  if (seeded.length) {
+    const playerIds = await resolvePlayerIds([...new Set(seeded.map((s) => s.discord_id))]);
+    for (const s of seeded) {
+      const playerId = playerIds.get(s.discord_id);
+      if (!playerId) continue;
+      let t = totals.get(playerId);
+      if (!t) totals.set(playerId, (t = { ...ZERO }));
+      t.games += s.games;
+      t.goals += s.goals;
+      t.assists += s.assists;
+      t.saves += s.saves;
+      t.shots += s.shots;
+      t.score += s.score;
+      t.demos += s.demos;
+      t.demoed += s.demoed;
+    }
+  }
+
   for (const r of live) {
     let t = totals.get(r.player_id);
     if (!t) totals.set(r.player_id, (t = { ...ZERO }));
@@ -144,5 +202,13 @@ export async function hasAnyCareerStats(): Promise<boolean> {
     .select("*", { count: "exact", head: true })
     .not("player_id", "is", null)
     .limit(1);
-  return (count ?? 0) > 0;
+  if ((count ?? 0) > 0) return true;
+
+  // A seeded row only counts once its player has joined. Counting the rows
+  // themselves would show the Stats tab from the moment a past season was
+  // seeded, over a table that filters every one of those rows out.
+  const seeded = await fetchSeededRows();
+  if (!seeded.length) return false;
+  const resolved = await resolvePlayerIds([...new Set(seeded.map((s) => s.discord_id))]);
+  return resolved.size > 0;
 }
