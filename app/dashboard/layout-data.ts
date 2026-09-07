@@ -1,7 +1,6 @@
 import { getPlayerInfo, getStaffRole, hasMfaEnabled, type StaffRole } from "@/app/lib/players";
 import { getNavVisuals, type NavVisuals } from "@/app/lib/sponsors-public";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { hasAnyCareerStats } from "@/app/lib/career-stats";
 import { getNameDecorations } from "@/app/lib/patreon-entitlements";
 import { type NavTabOverrides } from "@/app/lib/nav-tabs";
 
@@ -57,7 +56,6 @@ export type DashboardChromeData = CoinGrants & {
   staffRole: StaffRole | null;
   mfaOk: boolean;
   hasTeams: boolean;
-  hasStatsContent: boolean;
   hasPodium: boolean;
   hasSponsors: boolean;
   decorations: Awaited<ReturnType<typeof getNameDecorations>>;
@@ -186,21 +184,6 @@ async function fetchHasTeams(activeTournamentId: string | null): Promise<boolean
   return (teamedCount ?? 0) > 0;
 }
 
-// player_game_stats only ever holds the live event (match_id cascades on the
-// delete resetSeason runs), so the all-time record lives in player_career_stats
-// and seeded_player_stats. The tab shows while a stats-tracking event is live,
-// and otherwise whenever either store has anything in it — including through the
-// gap between events.
-// An event with stats disabled contributes nothing, but past totals still do.
-async function fetchHasStatsContent(hasActiveTrackedContent: boolean): Promise<boolean> {
-  if (hasActiveTrackedContent) return true;
-  const [{ count: liveCount }, anyCareer] = await Promise.all([
-    supabaseAdmin.from("player_game_stats").select("*", { count: "exact", head: true }).limit(1),
-    hasAnyCareerStats(),
-  ]);
-  return (liveCount ?? 0) > 0 || anyCareer;
-}
-
 // Sponsors nav only shows when the page would have something on it — same
 // status filter as getPublicSponsors, so an all-inactive roster hides the tab.
 async function fetchHasSponsors(): Promise<boolean> {
@@ -221,9 +204,6 @@ async function fetchHasPodium(): Promise<boolean> {
     (rows ?? []).some((r) => !!(r.summary as { champion?: string | null } | null)?.champion);
   return anyChamp(podSeasons) || anyChamp(podTournaments);
 }
-
-const hasActiveContentOf = (s: Settings) => s.seasonActive || !!s.activeTournamentId;
-const hasTrackedContentOf = (s: Settings) => hasActiveContentOf(s) && s.statsEnabled;
 
 async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
   const t0 = perfNow();
@@ -250,9 +230,8 @@ async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
   ]);
   const tSettings = perfNow();
 
-  const [hasTeams, hasStatsContent, hasPodium, hasSponsors] = await Promise.all([
+  const [hasTeams, hasPodium, hasSponsors] = await Promise.all([
     fetchHasTeams(settings.activeTournamentId),
-    fetchHasStatsContent(hasTrackedContentOf(settings)),
     fetchHasPodium(),
     fetchHasSponsors(),
   ]);
@@ -271,7 +250,7 @@ async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
     );
   }
 
-  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasStatsContent, hasPodium, hasSponsors, decorations };
+  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasPodium, hasSponsors, decorations };
 }
 
 async function loadBulk(userId: string): Promise<DashboardChromeData> {
@@ -291,7 +270,6 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     staffRole,
     mfaOk,
     hasTeams,
-    hasStatsContent,
     hasPodium,
     hasSponsors,
     decorations,
@@ -304,7 +282,6 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     getStaffRole(userId),
     hasMfaEnabled(userId),
     settingsPromise.then((s) => fetchHasTeams(s.activeTournamentId)),
-    settingsPromise.then((s) => fetchHasStatsContent(hasTrackedContentOf(s))),
     fetchHasPodium(),
     fetchHasSponsors(),
     getNameDecorations(),
@@ -314,7 +291,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     console.log(`[layout timing] mode=bulk · total ${(perfNow() - t0).toFixed(0)}ms`);
   }
 
-  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasStatsContent, hasPodium, hasSponsors, decorations };
+  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasPodium, hasSponsors, decorations };
 }
 
 export function loadDashboardChrome(userId: string): Promise<DashboardChromeData> {

@@ -195,20 +195,3 @@ export async function isStatsTrackingEnabled(): Promise<boolean> {
   const { data } = await supabaseAdmin.from("league_settings").select("stats_enabled").single();
   return data?.stats_enabled ?? true;
 }
-
-export async function hasAnyCareerStats(): Promise<boolean> {
-  const { count } = await supabaseAdmin
-    .from("player_career_stats")
-    .select("*", { count: "exact", head: true })
-    .not("player_id", "is", null)
-    .limit(1);
-  if ((count ?? 0) > 0) return true;
-
-  // A seeded row only counts once its player has joined. Counting the rows
-  // themselves would show the Stats tab from the moment a past season was
-  // seeded, over a table that filters every one of those rows out.
-  const seeded = await fetchSeededRows();
-  if (!seeded.length) return false;
-  const resolved = await resolvePlayerIds([...new Set(seeded.map((s) => s.discord_id))]);
-  return resolved.size > 0;
-}

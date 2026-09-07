@@ -178,12 +178,6 @@ const fetchHasTeams = async (activeTournamentId) => {
   return true;
 };
 
-const fetchHasStatsContent = async (hasActiveContent) => {
-  if (hasActiveContent) return true;
-  await q(db.from("player_game_stats").select("*", { count: "exact", head: true }).limit(1));
-  return true;
-};
-
 const fetchHasPodium = async () => {
   await Promise.all([
     q(db.from("seasons").select("summary").eq("hidden_from_home", false).limit(20)),
@@ -222,8 +216,6 @@ const getNameDecorations = async () => {
   );
 };
 
-const hasActiveContentOf = (s) => s.seasonActive || !!s.activeTournamentId;
-
 // ── The two schedules ───────────────────────────────────────────────────────
 async function waterfall(userId) {
   const settingsPromise = fetchSettings();
@@ -244,7 +236,6 @@ async function waterfall(userId) {
   ]);
   await Promise.all([
     fetchHasTeams(settings.activeTournamentId),
-    fetchHasStatsContent(hasActiveContentOf(settings)),
     fetchHasPodium(),
   ]);
   await getNameDecorations();
@@ -262,7 +253,6 @@ async function bulk(userId) {
     getStaffRole(userId),
     hasMfaEnabled(userId),
     settingsPromise.then((s) => fetchHasTeams(s.activeTournamentId)),
-    settingsPromise.then((s) => fetchHasStatsContent(hasActiveContentOf(s))),
     fetchHasPodium(),
     getNameDecorations(),
   ]);

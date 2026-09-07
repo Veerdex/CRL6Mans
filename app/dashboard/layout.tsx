@@ -225,7 +225,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
     staffRole,
     mfaOk,
     hasTeams,
-    hasStatsContent,
     hasPodium,
     hasSponsors,
     decorations,
@@ -239,7 +238,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const admin = staffRole !== null && mfaOk;
   const needsMfa = staffRole !== null && !mfaOk;
   const { seasonActive, draftActive, activeTournamentId } = settings;
-  // Stats visible whenever there is live content (active season or active tournament)
   const hasActiveContent = seasonActive || !!activeTournamentId;
 
   const priorityHrefs: string[] = [];
@@ -251,7 +249,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // for non-approved players (see settings/page.tsx).
   const commonExtras = [
     ...(hasPlayers ? ["players"] : []),
-    ...(hasStatsContent ? ["stats"] : []),
+    "stats", // always visible — the All Time tab carries every past season
     ...(hasPodium ? ["podium"] : []),
     "media",
     "wagers", // always visible — Westside Wages standings persist between events
