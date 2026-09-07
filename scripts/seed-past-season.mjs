@@ -189,6 +189,14 @@ const departed = new Set(cfg.departed ?? []);
 // the opt-in that says "did not play" rather than "mistyped".
 const noStats = new Set(cfg.noStats ?? []);
 
+// A player who appears in the stats file on no roster: a substitute, or someone
+// who left mid-season. They really did play those games, so the scoreboard
+// totals are theirs, but they finished on no team and so earn no placement and
+// no career points — which is exactly what a seeded_player_stats row is, since
+// it carries no team. A null id is a sub we cannot key on yet; naming them here
+// still documents the row instead of leaving it to look like a mistyped roster.
+const substitutes = cfg.substitutes ?? {};
+
 const slots = [];
 const unresolved = [];
 
@@ -224,6 +232,10 @@ for (const k of archived) {
 for (const k of noStats) {
   if (!teams.some((t) => t.roster.includes(k))) fatal.push(`noStats entry "${k}" matches no roster slot`);
 }
+for (const [k, id] of Object.entries(substitutes)) {
+  if (teams.some((t) => t.roster.includes(k))) fatal.push(`substitute "${k}" is on a roster — resolve it as a slot, not a substitute`);
+  if (id !== null && !byId.has(id)) fatal.push(`substitute "${k}" -> ${id} is not in ${cfg.membersCsv}`);
+}
 for (const k of departed) {
   if (!manual[k]) fatal.push(`departed entry "${k}" has no id in manual`);
   if (archived.has(k)) fatal.push(`"${k}" is in both departed and archived`);
@@ -238,6 +250,12 @@ for (const s of slots) {
   const prev = seen.get(s.member.discord_id);
   if (prev) fatal.push(`discord_id ${s.member.discord_id} on two rosters: "${prev.name}" (${prev.team}) and "${s.name}" (${s.team})`);
   else seen.set(s.member.discord_id, s);
+}
+// The same id rostered and listed as a substitute is one person under two
+// spellings, and their scoreboard totals would be seeded twice.
+for (const [k, id] of Object.entries(substitutes)) {
+  const prev = id !== null && seen.get(id);
+  if (prev) fatal.push(`discord_id ${id} is both substitute "${k}" and roster slot "${prev.name}" (${prev.team})`);
 }
 
 // --- rows ---------------------------------------------------------------
@@ -340,32 +358,46 @@ if (STATS) {
       byName.delete(norm(s.name));
       matched.push({ slot: s, stats: hit.stats });
     }
+    const subKeyed = new Map(Object.entries(substitutes).map(([k, id]) => [norm(k), { name: k, id }]));
+    const subbed = [];
+    const subNoId = [];
     for (const leftover of byName.values()) {
       if (skipped.some((s) => norm(s.name) === norm(leftover.name))) continue;
-      fatal.push(`stats row "${leftover.name}" matches no roster slot`);
+      const sub = subKeyed.get(norm(leftover.name));
+      if (!sub) { fatal.push(`stats row "${leftover.name}" matches no roster slot`); continue; }
+      subKeyed.delete(norm(leftover.name));
+      if (sub.id === null) subNoId.push(sub.name);
+      else subbed.push({ name: leftover.name, id: sub.id, stats: leftover.stats });
+    }
+    for (const sub of subKeyed.values()) {
+      fatal.push(`substitute "${sub.name}" has no row in the stats file`);
     }
 
     // games is the divisor behind MVP and every per-game column. Seeding a row
     // with goals but no games would divide those goals by whatever games the
     // player later plays live, and the number would drift further every season.
-    const noGames = matched.filter(({ stats }) => !(stats.games > 0));
+    const credited = [
+      ...matched.map(({ slot, stats }) => ({ name: slot.name, id: slot.member.discord_id, stats })),
+      ...subbed,
+    ];
+    const noGames = credited.filter(({ stats }) => !(stats.games > 0));
     if (noGames.length) {
       fatal.push(
         `${noGames.length} row(s) have no games played — their goals would be divided by whatever games they later play live: ` +
-        noGames.map(({ slot }) => slot.name).join(", "),
+        noGames.map(({ name }) => name).join(", "),
       );
     }
 
-    statRows = matched.map(({ slot, stats }) => ({
+    statRows = credited.map(({ name, id, stats }) => ({
       event_id: cfg.eventId,
-      discord_id: slot.member.discord_id,
-      display_name: slot.name,
+      discord_id: id,
+      display_name: name,
       ...ZERO_STATS,
       ...stats,
       updated_at: new Date().toISOString(),
     }));
 
-    console.log(`stats file: ${parsed.length} rows -> ${matched.length} credited, ${skipped.length} skipped without an id (${skipped.map((s) => s.name).join(", ") || "none"}), ${didNotPlay.length} rostered but did not play (${didNotPlay.map((s) => s.name).join(", ") || "none"})`);
+    console.log(`stats file: ${parsed.length} rows -> ${credited.length} credited (${matched.length} rostered, ${subbed.length} substitute), ${skipped.length} skipped without an id (${skipped.map((s) => s.name).join(", ") || "none"}), ${subNoId.length} substitutes without an id (${subNoId.join(", ") || "none"}), ${didNotPlay.length} rostered but did not play (${didNotPlay.map((s) => s.name).join(", ") || "none"})`);
     console.log(`  columns: ${Object.keys(ZERO_STATS).filter((f) => f in (matched[0]?.stats ?? {})).join(", ")}`);
   }
 }
