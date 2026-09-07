@@ -374,7 +374,9 @@ function AccoladeEditor({
     let live = true;
     setSlots(null);
     setError(null);
-    getSeasonAccolades(seasonId).then((res) => live && apply(res, false));
+    getSeasonAccolades(seasonId)
+      .then((res) => live && apply(res, false))
+      .catch(() => live && setError("Could not load accolades."));
     return () => {
       live = false;
     };

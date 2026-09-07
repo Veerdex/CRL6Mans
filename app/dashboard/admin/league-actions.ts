@@ -716,19 +716,11 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     endedAt,
   });
 
-  // The prize columns are named the same on both tables, so the live season's
-  // accolade values carry onto the archive with a plain copy. They stay
-  // editable there afterwards — see app/dashboard/accolade-actions.ts.
-  const accoladePrizeColumns = Object.fromEntries(
-    ACCOLADE_PRIZE_COLUMNS.map((col) => [col, (settings as unknown as Record<string, unknown>)[col] ?? null]),
-  );
-
   const { data: archivedSeason, error: archiveError } = await supabaseAdmin.from("seasons").insert({
     name,
     year,
     season_format: settings.season_format ?? null,
     team_count: finalStandings.length,
-    ...accoladePrizeColumns,
     summary: {
       champion: finalStandings[0]?.name ?? null,
       runnerUp: finalStandings[1]?.name ?? null,
@@ -753,6 +745,19 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     } catch (e) {
       console.error("[completeSeason] failed to record player event results", e);
     }
+
+    // The prize columns are named the same on league_settings and
+    // event_accolade_prizes, so the live season's accolade values carry onto the
+    // archive with a plain copy. They stay editable afterwards — see
+    // app/dashboard/accolade-actions.ts. Keyed on the archived season's id
+    // because that is the event_id every accolade row and profile lookup uses.
+    const accoladePrizeColumns = Object.fromEntries(
+      ACCOLADE_PRIZE_COLUMNS.map((col) => [col, (settings as unknown as Record<string, unknown>)[col] ?? null]),
+    );
+    const { error: prizeError } = await supabaseAdmin
+      .from("event_accolade_prizes")
+      .upsert({ event_id: archivedSeason.id as string, ...accoladePrizeColumns }, { onConflict: "event_id" });
+    if (prizeError) console.error("[completeSeason] failed to record accolade prizes", prizeError);
   }
 
   // Only wipe once the archive is safely written.

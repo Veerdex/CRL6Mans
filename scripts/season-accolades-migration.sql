@@ -13,24 +13,35 @@ alter table league_settings add column if not exists accolade_prize_offensive in
 alter table league_settings add column if not exists accolade_prize_defensive integer;
 alter table league_settings add column if not exists accolade_prize_rookie integer;
 
--- Snapshotted onto the season at completion, and editable afterwards: the four
--- backfilled seasons were written by a script with no such field, so their
--- values can only ever be filled in after the fact.
-alter table seasons add column if not exists accolade_prize_mvp integer;
-alter table seasons add column if not exists accolade_prize_offensive integer;
-alter table seasons add column if not exists accolade_prize_defensive integer;
-alter table seasons add column if not exists accolade_prize_rookie integer;
+-- Keyed on event_id, not seasons(id), and with no foreign key — the same key
+-- space player_event_results uses. Every season that currently exists was
+-- backfilled by scripts/seed-past-season.mjs, which writes an event_id with no
+-- `seasons` row behind it on purpose: those events predate the site and have no
+-- matches or stats, so a hand-authored parent row would show up as an empty
+-- season on the home page, the podium and the admin season list, and
+-- /wipe clear_history would delete it. A foreign key here would make every one
+-- of them unawardable.
+create table if not exists event_accolade_prizes (
+  event_id uuid primary key,
+  accolade_prize_mvp integer,
+  accolade_prize_offensive integer,
+  accolade_prize_defensive integer,
+  accolade_prize_rookie integer
+);
 
+-- Written at completion from the live league_settings values, and editable
+-- afterwards: the backfilled seasons have nothing to snapshot from, so their
+-- values can only ever be filled in after the fact.
 create table if not exists season_accolades (
   id uuid primary key default gen_random_uuid(),
-  season_id uuid not null references seasons(id) on delete cascade,
+  event_id uuid not null,
   accolade text not null check (accolade in ('mvp', 'offensive', 'defensive', 'rookie')),
   discord_id text not null,
   awarded_by text,
   created_at timestamptz not null default now(),
   -- One holder per accolade per season. Awarding to someone new deletes the
   -- incumbent's row first rather than relying on this to arbitrate.
-  unique (season_id, accolade)
+  unique (event_id, accolade)
 );
 
 -- Profiles look accolades up by player, not by season.

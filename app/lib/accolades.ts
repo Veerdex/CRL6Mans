@@ -5,8 +5,9 @@
 // app/lib/game-stats.ts, which are computed from player_game_stats and shown on
 // tournament podiums — these are judgement calls with no statistical source.
 //
-// `prizeColumn` is the same column name on both `seasons` and `league_settings`,
-// which is what lets completeSeason snapshot the live values with a plain copy.
+// `prizeColumn` is the same column name on both `event_accolade_prizes` and
+// `league_settings`, which is what lets completeSeason snapshot the live values
+// with a plain copy.
 
 export const SEASON_ACCOLADES = [
   { key: "mvp", label: "MVP", short: "MVP", prizeColumn: "accolade_prize_mvp" },
@@ -43,7 +44,7 @@ export function byAccoladeOrder(a: AccoladeKey, b: AccoladeKey): number {
   return ACCOLADE_KEYS.indexOf(a) - ACCOLADE_KEYS.indexOf(b);
 }
 
-/** Read the four prize columns off a `seasons` or `league_settings` row. */
+/** Read the four prize columns off an `event_accolade_prizes` or `league_settings` row. */
 export function prizesFromRow(row: Record<string, unknown> | null | undefined): AccoladePrizes {
   const prizes = { ...NO_ACCOLADE_PRIZES };
   if (!row) return prizes;

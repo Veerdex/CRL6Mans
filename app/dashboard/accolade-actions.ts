@@ -42,18 +42,18 @@ async function directorId(): Promise<string | null> {
   return (await isDirectorVerified(session.userId)) ? session.userId : null;
 }
 
-async function readState(seasonId: string): Promise<AccoladeState> {
+async function readState(eventId: string): Promise<AccoladeState> {
   const [{ data: awardRows, error }, prizeMap] = await Promise.all([
     supabaseAdmin
       .from("season_accolades")
       .select("accolade, discord_id")
-      .eq("season_id", seasonId),
-    fetchAccoladePrizes([seasonId]),
+      .eq("event_id", eventId),
+    fetchAccoladePrizes([eventId]),
   ]);
   if (error) throw new Error(error.message);
 
   const awards = (awardRows ?? []) as { accolade: AccoladeKey; discord_id: string }[];
-  const prizes = prizeMap.get(seasonId);
+  const prizes = prizeMap.get(eventId);
 
   const holderIds = [...new Set(awards.map((a) => a.discord_id))];
   const holders = new Map<string, AccoladeHolder>();
@@ -95,9 +95,9 @@ async function readState(seasonId: string): Promise<AccoladeState> {
   };
 }
 
-export async function getSeasonAccolades(seasonId: string): Promise<AccoladeResult> {
+export async function getSeasonAccolades(eventId: string): Promise<AccoladeResult> {
   if (!(await directorId())) return { error: DENIED };
-  return readState(seasonId);
+  return readState(eventId);
 }
 
 /**
@@ -109,7 +109,7 @@ export async function getSeasonAccolades(seasonId: string): Promise<AccoladeResu
  * through must leave the accolade unassigned rather than duplicated.
  */
 export async function setSeasonAccolade(
-  seasonId: string,
+  eventId: string,
   accolade: string,
   discordId: string,
 ): Promise<AccoladeResult> {
@@ -118,12 +118,13 @@ export async function setSeasonAccolade(
   if (!isAccoladeKey(accolade)) return { error: "Unknown accolade." };
 
   // Seasons only, and only for a season the player actually played in — the
-  // client's dropdown is filtered, but the list is not the guard.
+  // client's dropdown is filtered, but the list is not the guard. This is also
+  // what stands in for a foreign key: event_id has no parent table to reference.
   const { data: participation } = await supabaseAdmin
     .from("player_event_results")
     .select("event_id")
     .eq("event_kind", "season")
-    .eq("event_id", seasonId)
+    .eq("event_id", eventId)
     .eq("discord_id", discordId)
     .maybeSingle();
   if (!participation) return { error: "That player did not play in this season." };
@@ -131,21 +132,21 @@ export async function setSeasonAccolade(
   const { data: existing } = await supabaseAdmin
     .from("season_accolades")
     .select("discord_id")
-    .eq("season_id", seasonId)
+    .eq("event_id", eventId)
     .eq("accolade", accolade)
     .maybeSingle();
 
   const { error: deleteError } = await supabaseAdmin
     .from("season_accolades")
     .delete()
-    .eq("season_id", seasonId)
+    .eq("event_id", eventId)
     .eq("accolade", accolade);
   if (deleteError) return { error: deleteError.message };
 
   const alreadyHeld = (existing as { discord_id: string } | null)?.discord_id === discordId;
   if (!alreadyHeld) {
     const { error: insertError } = await supabaseAdmin.from("season_accolades").insert({
-      season_id: seasonId,
+      event_id: eventId,
       accolade,
       discord_id: discordId,
       awarded_by: actor,
@@ -153,7 +154,7 @@ export async function setSeasonAccolade(
     if (insertError) return { error: insertError.message };
   }
 
-  return readState(seasonId);
+  return readState(eventId);
 }
 
 /**
@@ -163,7 +164,7 @@ export async function setSeasonAccolade(
  * corrected value corrects whoever holds the accolade.
  */
 export async function saveSeasonAccoladePrizes(
-  seasonId: string,
+  eventId: string,
   prizes: Record<string, number | null>,
 ): Promise<AccoladeResult> {
   if (!(await directorId())) return { error: DENIED };
@@ -181,8 +182,13 @@ export async function saveSeasonAccoladePrizes(
     update[accoladeMeta(key).prizeColumn] = raw === 0 ? null : raw;
   }
 
-  const { error } = await supabaseAdmin.from("seasons").update(update).eq("id", seasonId);
+  // Upsert, not update: most events have no prize row yet, and an update
+  // matching zero rows is not an error in PostgREST — it would report success
+  // and persist nothing.
+  const { error } = await supabaseAdmin
+    .from("event_accolade_prizes")
+    .upsert({ event_id: eventId, ...update }, { onConflict: "event_id" });
   if (error) return { error: error.message };
 
-  return readState(seasonId);
+  return readState(eventId);
 }
