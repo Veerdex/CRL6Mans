@@ -70,10 +70,47 @@ export async function approvePlayerWithEdits(
   if (!account?.discord_id) return { error: "Account not found." };
 
   // Tier 2 (pending_players) stays the source of truth for MMR/tracker going
-  // forward. sub_willing/tracker_confirmed_at are read back here so the new
-  // Tier 3 row can seed from them below; college_image_url is read so the
-  // proof can be purged once the approval is committed.
-  const { data: pending, error: pendingError } = await supabaseAdmin
+  // forward. sub_willing/tracker_confirmed_at are read here so the new Tier 3
+  // row can seed from them below; college_image_url is read so the proof can be
+  // purged once the approval is committed. Read before anything is written: an
+  // account with no Tier 2 row cannot be approved, and finding that out after
+  // the status flip would strand it approved with no roster row.
+  const { data: pending } = await supabaseAdmin
+    .from("pending_players")
+    .select("college_image_url, sub_willing, tracker_confirmed_at")
+    .eq("account_id", id)
+    .maybeSingle();
+  if (!pending) {
+    return { error: "This player has no registration data. They need to submit the registration form again." };
+  }
+
+  // Claim the transition first, the way rejectPlayer does. A second click, or a
+  // re-approval of someone already approved, must not reach the writes below —
+  // and PostgREST reports no error when an update matches zero rows, so the
+  // guard has to be a returned row count, not an absent error.
+  const { data: claimed, error: claimError } = await supabaseAdmin
+    .from("accounts")
+    .update({ username: editable.username, status: "approved", updated_at: now })
+    .eq("id", id)
+    .eq("status", "pending")
+    .select("id");
+  if (claimError) return { error: claimError.message };
+
+  if (!claimed?.length) {
+    // The one case that must stay re-runnable: a previous approval that flipped
+    // the status and then failed before creating the Tier 3 row. Without this
+    // the guard would lock that player out of the league permanently.
+    const { data: tier3 } = await supabaseAdmin.from("players").select("id").eq("id", id).maybeSingle();
+    if (tier3) return { error: "That registration is no longer pending." };
+
+    const { error: repairError } = await supabaseAdmin
+      .from("accounts")
+      .update({ username: editable.username, status: "approved", updated_at: now })
+      .eq("id", id);
+    if (repairError) return { error: repairError.message };
+  }
+
+  const { error: pendingError } = await supabaseAdmin
     .from("pending_players")
     .update({
       peak_3v3: editable.peak_3v3,
@@ -83,9 +120,7 @@ export async function approvePlayerWithEdits(
       tracker_url: editable.tracker_url,
       updated_at: now,
     })
-    .eq("account_id", id)
-    .select("college_image_url, sub_willing, tracker_confirmed_at")
-    .single();
+    .eq("account_id", id);
   if (pendingError) return { error: pendingError.message };
 
   // Tier 3 (players) is created here, id = account id. Many not-yet-migrated
@@ -104,26 +139,20 @@ export async function approvePlayerWithEdits(
       peak_2v2: editable.peak_2v2,
       current_2v2: editable.current_2v2,
       tracker_url: editable.tracker_url,
-      sub_willing: pending?.sub_willing ?? false,
-      tracker_confirmed_at: pending?.tracker_confirmed_at ?? null,
+      sub_willing: pending.sub_willing ?? false,
+      tracker_confirmed_at: pending.tracker_confirmed_at ?? null,
       updated_at: now,
     },
     { onConflict: "id" }
   );
   if (insertError) return { error: insertError.message };
 
-  const { error: statusError } = await supabaseAdmin
-    .from("accounts")
-    .update({ username: editable.username, status: "approved", updated_at: now })
-    .eq("id", id);
-  if (statusError) return { error: statusError.message };
-
   await addRegisteredRole(account.discord_id);
 
   // Enrollment proof is only kept until the registration is decided. Every step
   // that could still fail the approval has returned by now, so an admin never
   // loses a document they still need to review.
-  await deleteCollegeIdImage(pending?.college_image_url);
+  await deleteCollegeIdImage(pending.college_image_url);
   await supabaseAdmin
     .from("pending_players")
     .update({ college_image_url: "" })
