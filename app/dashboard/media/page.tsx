@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { MediaFeed, type Clip } from "@/app/dashboard/media/media-feed";
+import { MediaFeed, type Clip, type ClipGate } from "@/app/dashboard/media/media-feed";
 import { ClipOfWeek } from "@/app/dashboard/media/clip-of-week";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
@@ -45,11 +45,18 @@ function toClip(row: RawClipRow, avatarByDiscordId: Map<string, string | null>):
 export default async function MediaPage() {
   const session = await decrypt((await cookies()).get("session")?.value);
 
-  const [moderator, { data: player }, { data: clips }, { data: settings }] = await Promise.all([
+  const [moderator, { data: player }, { data: account }, { data: clips }, { data: settings }] = await Promise.all([
     session?.userId ? isModerator(session.userId) : Promise.resolve(false),
     session?.userId
       ? supabaseAdmin.from("players").select("id, status").eq("discord_id", session.userId).single()
       : Promise.resolve({ data: null as { id: string; status: string } | null }),
+    // players (Tier 3) only exists once someone is approved, so it can't say
+    // whether a viewer without a row has registered and is waiting, never
+    // registered, or is a guest who cannot. That distinction is what the
+    // submit panel tells them, and it lives on accounts (Tier 1).
+    session?.userId
+      ? supabaseAdmin.from("accounts").select("status, is_guest").eq("discord_id", session.userId).single()
+      : Promise.resolve({ data: null as { status: string; is_guest: boolean } | null }),
     supabaseAdmin
       .from("clips")
       .select(CLIP_SELECT)
@@ -59,6 +66,16 @@ export default async function MediaPage() {
   ]);
 
   const currentPlayerId: string | null = player?.status === "approved" ? player.id : null;
+
+  const gate: ClipGate = !session?.userId
+    ? "login"
+    : currentPlayerId
+      ? "approved"
+      : account?.is_guest
+        ? "guest"
+        : account?.status === "pending"
+          ? "pending"
+          : "register";
 
   const [{ data: clipOfWeekRow }, { data: likes }] = await Promise.all([
     settings?.clip_of_week_id
@@ -121,7 +138,7 @@ export default async function MediaPage() {
         <MediaFeed
           clips={feedRows.map((r) => toClip(r, avatarByDiscordId))}
           likedClipIds={likedClipIds}
-          canParticipate={currentPlayerId !== null}
+          gate={gate}
           isModerator={moderator}
           confirmationsEnabled={settings?.clip_confirmations_enabled ?? true}
         />

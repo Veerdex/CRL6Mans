@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import { submitClip, toggleClipLike, deleteClip, setClipOfWeek, toggleClipConfirmations } from "@/app/dashboard/media/actions";
 import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
@@ -32,6 +33,35 @@ const LINK_ONLY_LABELS: Record<string, string> = {
 };
 
 type SortMode = "chronological" | "likes_desc" | "likes_asc";
+
+// Why the submit form is closed to this viewer. Only "approved" opens it —
+// submitClip enforces the same rule server-side; this is what the panel says
+// instead of the form. Split out so someone who is signed in but not yet a
+// player isn't told to log in, which they already did.
+export type ClipGate = "approved" | "pending" | "register" | "guest" | "login";
+
+function GateNotice({ gate }: { gate: Exclude<ClipGate, "approved"> }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-1 text-center">
+      <h2 className="text-sm font-semibold text-white">Submit a clip</h2>
+      <p className="text-sm text-zinc-400">
+        {gate === "register" && (
+          <>
+            You need to be a registered player to submit a clip.{" "}
+            <Link href="/dashboard/register" className="text-amber-400 hover:underline">Register</Link> to join the league.
+          </>
+        )}
+        {gate === "pending" && "Your registration is waiting on admin approval — you'll be able to submit clips once it goes through."}
+        {gate === "guest" && "Guest accounts can watch and browse the feed. Submitting clips is for registered league players."}
+        {gate === "login" && (
+          <>
+            <a href="/login" className="text-amber-400 hover:underline">Log in</a> as an approved player to submit clips and like your favorites.
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
 
 function ClipCard({
   clip,
@@ -211,16 +241,17 @@ function ClipCard({
 export function MediaFeed({
   clips,
   likedClipIds,
-  canParticipate,
+  gate,
   isModerator,
   confirmationsEnabled,
 }: {
   clips: Clip[];
   likedClipIds: string[];
-  canParticipate: boolean;
+  gate: ClipGate;
   isModerator: boolean;
   confirmationsEnabled: boolean;
 }) {
+  const canParticipate = gate === "approved";
   const [sortMode, setSortMode] = useState<SortMode>("chronological");
   const [search, setSearch] = useState("");
   const [onlyLiked, setOnlyLiked] = useState(false);
@@ -305,7 +336,9 @@ export function MediaFeed({
 
   return (
     <div className="space-y-6">
-      {canParticipate ? (
+      {gate !== "approved" ? (
+        <GateNotice gate={gate} />
+      ) : (
         <form onSubmit={handleSubmit} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-white">Submit a clip</h2>
           <input
@@ -369,10 +402,6 @@ export function MediaFeed({
             {isPending ? "Submitting…" : "Submit clip"}
           </button>
         </form>
-      ) : (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 text-center text-sm text-zinc-400">
-          <a href="/login" className="text-amber-400 hover:underline">Log in</a> as an approved player to submit clips and like your favorites.
-        </div>
       )}
 
       <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
