@@ -144,20 +144,33 @@ function computeEffectiveStarts(raw: string[], follow: boolean[], durations: Sta
 // position, so Hybrid(12) → Hybrid(8) keeps every time and Group→SE → Group→Swiss→SE
 // keeps the group start. Without this, opening the Format dropdown on a published
 // tournament and saving writes stage_starts: null and blanks its whole schedule.
+//
+// Carried values come from the previous *effective* starts, not the raw inputs: a
+// "follow" stage's raw field is whatever it last held, while its effective start is
+// the time actually saved. Stage 0 falls back to the old first start when its key
+// has no counterpart (Group→Swiss→SE becoming DE-Qual→Swiss→SE), because the
+// tournament's start instant belongs to the tournament, not to whichever stage
+// happens to lead it - and every downstream "follow" stage chains off that root,
+// so leaving it blank silently blanks the entire schedule.
 function remapStageStarts(
   prevStages: StageScheduleEntry[],
   prevStarts: string[],
+  prevEffective: string[],
   prevFollow: boolean[],
   nextStages: StageScheduleEntry[],
 ): { starts: string[]; follow: boolean[] } {
   const byKey = new Map(
-    prevStages.map((s, i) => [s.key, { start: prevStarts[i] ?? "", follow: prevFollow[i] ?? false }]),
+    prevStages.map((s, i) => [
+      s.key,
+      { start: prevEffective[i] || prevStarts[i] || "", follow: prevFollow[i] ?? false },
+    ]),
   );
+  const rootStart = prevEffective[0] || prevStarts[0] || "";
   const starts: string[] = [];
   const follow: boolean[] = [];
   nextStages.forEach((s, i) => {
     const kept = byKey.get(s.key);
-    starts.push(kept?.start ?? "");
+    starts.push(kept?.start || (i === 0 ? rootStart : ""));
     follow.push(i > 0 && (kept ? kept.follow : true));
   });
   return { starts, follow };
@@ -525,7 +538,9 @@ export function TournamentManager({
                 const nextStages = computeStageSchedule(
                   p, parseInt(d.min) || 0, groupMaxAdvParsed, form.roundBestOf, groupRoundsParsed,
                 );
-                const carried = remapStageStarts(stages, form.stageStarts, form.stageFollow, nextStages);
+                const carried = remapStageStarts(
+                  stages, form.stageStarts, effectiveStageStarts, form.stageFollow, nextStages,
+                );
                 setForm(f => ({
                   ...f,
                   preset: p,
@@ -984,10 +999,13 @@ export function TournamentManager({
           <span className="text-zinc-300">{form.name.trim() || "Untitled"}</span>
           <span className="text-zinc-600">·</span>
           <span className="text-zinc-300">
-            {previewCount || "—"} teams, {form.joinMode === "players"
+            {teams || "—"} teams, {form.joinMode === "players"
               ? form.teamAssignment === "auto_balance" ? "auto-balanced" : "snake draft"
               : "pre-formed teams"}
           </span>
+          {previewCount !== teams && (
+            <span className="text-zinc-500">(times built for {previewCount})</span>
+          )}
           <span className="text-zinc-600">·</span>
           <span className="text-zinc-300">
             {PRESETS.find((p) => p.id === form.preset)?.name ?? form.preset}
