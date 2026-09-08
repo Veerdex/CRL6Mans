@@ -14,7 +14,6 @@ import type { TeamSignupView } from "./team-signup-data";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { LocalTime } from "./local-time";
 import { CountdownLabel } from "./countdown-label";
-import { PresetEmblemRow } from "./preset-emblem-row";
 import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import type { PublicSponsor } from "@/app/lib/sponsors-public";
 import { formatPromoDescription } from "@/app/lib/sponsor-promo";
@@ -25,8 +24,6 @@ export function TeamSignupPanel({
   tournamentName,
   timeline = [],
   countdown = null,
-  preset = null,
-  stageStarts = [],
   prize1st = null,
   prize2nd = null,
   prize3rd4th = null,
@@ -40,8 +37,6 @@ export function TeamSignupPanel({
   tournamentName?: string;
   timeline?: { label: string; iso: string }[];
   countdown?: { label: string; iso: string } | null;
-  preset?: string | null;
-  stageStarts?: { label: string; iso: string }[];
   prize1st?: number | null;
   prize2nd?: number | null;
   prize3rd4th?: number | null;
@@ -110,7 +105,7 @@ export function TeamSignupPanel({
                 />
               </div>
             )}
-            {tournamentName && <p className="text-3xl font-bold text-white truncate">{tournamentName}</p>}
+            {tournamentName && <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white leading-tight break-words">{tournamentName}</p>}
           </div>
           {sponsor?.promo_code && (
             <span className="inline-flex w-fit text-[13.5px] font-medium text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-0.5 mt-1">
@@ -269,27 +264,13 @@ export function TeamSignupPanel({
         <p className={`relative text-[21px] ${feedback.ok ? "text-emerald-400" : "text-red-400"}`}>{feedback.msg}</p>
       )}
 
-      {(timeline.length > 0 || preset || stageStarts.length > 0) && (
-        <div className="relative flex flex-col gap-1.5 pt-1 border-t border-indigo-800/40">
-          {timeline.length > 0 && (
-            <div className="flex flex-col gap-0.5">
-              {timeline.map(({ label, iso }) => (
-                <span key={label} className="text-[13.5px] text-zinc-500">
-                  {label}: <LocalTime iso={iso} className="text-zinc-400" />
-                </span>
-              ))}
-            </div>
-          )}
-          {preset && <PresetEmblemRow preset={preset} className="text-lg" />}
-          {stageStarts.length > 0 && (
-            <div className="flex flex-col gap-0.5">
-              {stageStarts.map(({ label, iso }) => (
-                <span key={label} className="text-[13.5px] text-zinc-500">
-                  {label} starts: <LocalTime iso={iso} className="text-zinc-400" />
-                </span>
-              ))}
-            </div>
-          )}
+      {timeline.length > 0 && (
+        <div className="relative flex flex-col gap-0.5 pt-1 border-t border-indigo-800/40">
+          {timeline.map(({ label, iso }) => (
+            <span key={label} className="text-[13.5px] text-zinc-500">
+              {label}: <LocalTime iso={iso} upcoming className="text-zinc-400" />
+            </span>
+          ))}
         </div>
       )}
       </div>

@@ -12,8 +12,10 @@ export function buildTimeline(t: TournamentRow, showOpen = false): { label: stri
   return [
     ...(showOpen && t.draft_open_at ? [{ label: "Sign-ups open", iso: t.draft_open_at }] : []),
     ...(t.draft_close_at ? [{ label: "Sign-ups close", iso: t.draft_close_at }] : []),
-    ...(t.join_mode === "players" && t.draft_start_at
-      ? [{ label: isAuto ? "Auto-balance executes" : "Draft starts", iso: t.draft_start_at }]
+    // Auto-balance runs itself the moment sign-ups close, so there is nothing a
+    // player needs to show up for and no reason to spend a line on it.
+    ...(t.join_mode === "players" && t.draft_start_at && !isAuto
+      ? [{ label: "Draft starts", iso: t.draft_start_at }]
       : []),
     ...(t.season_start_at ? [{ label: "Tournament starts", iso: t.season_start_at }] : []),
   ];

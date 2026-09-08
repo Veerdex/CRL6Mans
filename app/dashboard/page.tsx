@@ -20,7 +20,7 @@ import { CountdownLabel } from "./countdown-label";
 import { getPublicSponsors } from "@/app/lib/sponsors-public";
 import { getPublicDesigns } from "@/app/lib/designs-public";
 import { cropStyle } from "@/app/lib/media-crop";
-import { buildTimeline, buildStageStarts } from "@/app/lib/tournament-timeline";
+import { buildTimeline } from "@/app/lib/tournament-timeline";
 import { TournamentDetailView } from "./tournament-detail";
 import { SponsoredByLine } from "./sponsored-by-line";
 
@@ -386,11 +386,6 @@ export default async function DashboardPage({
           {openPlayerTs.map((t) => {
             const timeline = buildTimeline(t);
             const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
-            const preset = (t.season_format as { preset?: string } | null)?.preset ?? null;
-            const stageStarts = buildStageStarts(
-              (t as { stage_starts?: Record<string, string> | null }).stage_starts ?? null,
-              preset
-            );
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
             const designId = (t as { design_id?: string | null }).design_id ?? null;
@@ -405,8 +400,6 @@ export default async function DashboardPage({
                 teamAssignment={t.team_assignment as "snake_draft" | "auto_balance" | null}
                 timeline={timeline}
                 countdown={nextEvent}
-                preset={preset}
-                stageStarts={stageStarts}
                 prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}
                 prize2nd={(t as { prize_2nd?: number | null }).prize_2nd ?? null}
                 prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
@@ -423,11 +416,6 @@ export default async function DashboardPage({
             if (!teamViews[t.id]) return null;
             const timeline = buildTimeline(t);
             const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
-            const preset = (t.season_format as { preset?: string } | null)?.preset ?? null;
-            const stageStarts = buildStageStarts(
-              (t as { stage_starts?: Record<string, string> | null }).stage_starts ?? null,
-              preset
-            );
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
             const designId = (t as { design_id?: string | null }).design_id ?? null;
@@ -440,8 +428,6 @@ export default async function DashboardPage({
                 tournamentName={t.name}
                 timeline={timeline}
                 countdown={nextEvent}
-                preset={preset}
-                stageStarts={stageStarts}
                 prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}
                 prize2nd={(t as { prize_2nd?: number | null }).prize_2nd ?? null}
                 prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
@@ -462,11 +448,6 @@ export default async function DashboardPage({
           {upcomingTournaments.map((t) => {
             const items = buildTimeline(t, true);
             const nextEvent = items.find((i) => new Date(i.iso).getTime() > now) ?? items[items.length - 1] ?? null;
-            const preset = (t.season_format as { preset?: string } | null)?.preset ?? null;
-            const stageStarts = buildStageStarts(
-              (t as { stage_starts?: Record<string, string> | null }).stage_starts ?? null,
-              preset
-            );
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
             const designId = (t as { design_id?: string | null }).design_id ?? null;
@@ -510,24 +491,14 @@ export default async function DashboardPage({
                           />
                         </div>
                       )}
-                      <p className="text-4xl font-bold text-white truncate">{t.name}</p>
+                      <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-white leading-tight break-words">{t.name}</p>
                     </div>
                     {nextEvent && <CountdownLabel label={nextEvent.label} iso={nextEvent.iso} />}
                     {items.length > 0 && (
                       <div className="flex flex-col gap-0.5">
                         {items.map(({ label, iso }) => (
                           <span key={label} className="text-[13.5px] text-zinc-500">
-                            {label}: <LocalTime iso={iso} className="text-zinc-400" />
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {preset && <PresetEmblemRow preset={preset} className="text-lg" />}
-                    {stageStarts.length > 0 && (
-                      <div className="flex flex-col gap-0.5">
-                        {stageStarts.map(({ label, iso }) => (
-                          <span key={label} className="text-[13.5px] text-zinc-500">
-                            {label} starts: <LocalTime iso={iso} className="text-zinc-400" />
+                            {label}: <LocalTime iso={iso} upcoming className="text-zinc-400" />
                           </span>
                         ))}
                       </div>
