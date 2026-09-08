@@ -140,6 +140,29 @@ function computeEffectiveStarts(raw: string[], follow: boolean[], durations: Sta
   return out;
 }
 
+// Carries stage times across a preset change by matching on stage key rather than
+// position, so Hybrid(12) → Hybrid(8) keeps every time and Group→SE → Group→Swiss→SE
+// keeps the group start. Without this, opening the Format dropdown on a published
+// tournament and saving writes stage_starts: null and blanks its whole schedule.
+function remapStageStarts(
+  prevStages: StageScheduleEntry[],
+  prevStarts: string[],
+  prevFollow: boolean[],
+  nextStages: StageScheduleEntry[],
+): { starts: string[]; follow: boolean[] } {
+  const byKey = new Map(
+    prevStages.map((s, i) => [s.key, { start: prevStarts[i] ?? "", follow: prevFollow[i] ?? false }]),
+  );
+  const starts: string[] = [];
+  const follow: boolean[] = [];
+  nextStages.forEach((s, i) => {
+    const kept = byKey.get(s.key);
+    starts.push(kept?.start ?? "");
+    follow.push(i > 0 && (kept ? kept.follow : true));
+  });
+  return { starts, follow };
+}
+
 function fmtLocalDT(localValue: string): string {
   if (!localValue) return "";
   const d = new Date(localValue);
@@ -262,6 +285,18 @@ export function TournamentManager({
   // Durations come from displayStages (preview team count) so a "follow" stage's
   // computed start matches the estimate the admin is actually looking at.
   const effectiveStageStarts = computeEffectiveStarts(form.stageStarts, form.stageFollow, displayStages);
+
+  // What the admin is about to save, in one line: the same first-start and projected
+  // end the public tournament card will show, so the form can be checked without
+  // reassembling twenty scattered controls in your head.
+  const scheduleSummary = (() => {
+    if (stages.length === 0) return null;
+    const start = effectiveStageStarts[0];
+    const lastStart = effectiveStageStarts[stages.length - 1];
+    if (!start || !lastStart) return null;
+    const lastDuration = (displayStages[stages.length - 1] ?? stages[stages.length - 1]).estimatedMinutes;
+    return { start, end: addMinutesLocal(lastStart, lastDuration) };
+  })();
 
   const buildInput = (): TournamentInput => {
     const trimmedRoundBestOf: RoundBestOfConfig = {};
@@ -479,52 +514,66 @@ export function TournamentManager({
             />
           </div>
 
-          <div className="sm:col-span-2">
-            <div className="flex items-center justify-between bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2.5">
-              <div>
-                <p className="text-xs font-medium text-zinc-300">Test Tournament</p>
-                <p className="text-[11px] text-zinc-500 mt-0.5">
-                  {form.isTest
-                    ? "ON — discarded on completion, no records saved, no Westside Wages"
-                    : "OFF — real tournament, results archived and Westside Wages awarded"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, isTest: !form.isTest })}
-                className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 transition-colors duration-200 focus:outline-none ${
-                  form.isTest ? "bg-amber-600 border-amber-600" : "bg-zinc-700 border-zinc-700"
-                }`}
-                role="switch"
-                aria-checked={form.isTest}
-              >
-                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${form.isTest ? "translate-x-4" : "translate-x-0"}`} />
-              </button>
-            </div>
+          <div>
+            <label className={labelCls}>Format</label>
+            <select
+              className={inputCls}
+              value={form.preset}
+              onChange={(e) => {
+                const p = e.target.value;
+                const d = FORMAT_TEAM_DEFAULTS[p] ?? { min: "4" };
+                const nextStages = computeStageSchedule(
+                  p, parseInt(d.min) || 0, groupMaxAdvParsed, form.roundBestOf, groupRoundsParsed,
+                );
+                const carried = remapStageStarts(stages, form.stageStarts, form.stageFollow, nextStages);
+                setForm(f => ({
+                  ...f,
+                  preset: p,
+                  // Only fill in the format's default field size when the admin hasn't
+                  // set one of their own - the dropdown must not overwrite a typed value.
+                  minTeams:
+                    !f.minTeams || f.minTeams === (FORMAT_TEAM_DEFAULTS[f.preset]?.min ?? "4")
+                      ? d.min
+                      : f.minTeams,
+                  stageStarts: nextStages.length > 0 ? carried.starts : emptyStarts(p),
+                  stageFollow: nextStages.length > 0 ? carried.follow : emptyFollow(p),
+                  // Re-seed slots for the new preset, preserving values for slot
+                  // keys shared with the previous preset (e.g. "single_elimination").
+                  roundBestOf: { ...defaultRoundBestOfForPreset(p as PresetId), ...f.roundBestOf },
+                }));
+              }}
+            >
+              {PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
           </div>
 
-          <div className="sm:col-span-2">
-            <div className="flex items-center justify-between bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2.5">
-              <div>
-                <p className="text-xs font-medium text-zinc-300">Track Stats</p>
-                <p className="text-[11px] text-zinc-500 mt-0.5">
-                  {form.statsEnabled
-                    ? "ON \u2014 captains upload replays; Stats tab and podium stat leaders shown"
-                    : "OFF \u2014 captains just report the series score; no Stats tab, no stat leaders"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, statsEnabled: !form.statsEnabled })}
-                className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 transition-colors duration-200 focus:outline-none ${
-                  form.statsEnabled ? "bg-indigo-600 border-indigo-600" : "bg-zinc-700 border-zinc-700"
-                }`}
-                role="switch"
-                aria-checked={form.statsEnabled}
-              >
-                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${form.statsEnabled ? "translate-x-4" : "translate-x-0"}`} />
-              </button>
-            </div>
+          <div>
+            <label className={labelCls}>Min teams</label>
+            <input
+              type="number"
+              min={0}
+              className={inputCls}
+              value={form.minTeams ?? ""}
+              onChange={(e) => setForm({ ...form, minTeams: e.target.value })}
+              placeholder={FORMAT_TEAM_DEFAULTS[form.preset]?.min ?? "4"}
+            />
+            <p className="text-[11px] text-zinc-500 mt-1">
+              Also the field size the stage schedule below is built for.
+            </p>
+          </div>
+
+          <div>
+            <label className={labelCls}>Max teams (optional)</label>
+            <input
+              type="number"
+              min={0}
+              className={inputCls}
+              value={form.teamLimit}
+              onChange={(e) => setForm({ ...form, teamLimit: e.target.value })}
+              placeholder="No cap"
+            />
           </div>
 
           <div>
@@ -554,30 +603,6 @@ export function TournamentManager({
           )}
 
           <div>
-            <label className={labelCls}>Min teams</label>
-            <input
-              type="number"
-              min={0}
-              className={inputCls}
-              value={form.minTeams ?? ""}
-              onChange={(e) => setForm({ ...form, minTeams: e.target.value })}
-              placeholder={FORMAT_TEAM_DEFAULTS[form.preset]?.min ?? "4"}
-            />
-          </div>
-
-          <div>
-            <label className={labelCls}>Max teams (optional)</label>
-            <input
-              type="number"
-              min={0}
-              className={inputCls}
-              value={form.teamLimit}
-              onChange={(e) => setForm({ ...form, teamLimit: e.target.value })}
-              placeholder="No cap"
-            />
-          </div>
-
-          <div>
             <label className={labelCls}>Min 2v2 MMR requirement (optional)</label>
             <input
               type="number"
@@ -601,32 +626,6 @@ export function TournamentManager({
               onChange={(e) => setForm({ ...form, minMmr3v3: e.target.value })}
               placeholder="No minimum"
             />
-          </div>
-
-          <div>
-            <label className={labelCls}>Format</label>
-            <select
-              className={inputCls}
-              value={form.preset}
-              onChange={(e) => {
-                const p = e.target.value;
-                const d = FORMAT_TEAM_DEFAULTS[p] ?? { min: "4" };
-                setForm(f => ({
-                  ...f,
-                  preset: p,
-                  minTeams: d.min,
-                  stageStarts: emptyStarts(p),
-                  stageFollow: emptyFollow(p),
-                  // Re-seed slots for the new preset, preserving values for slot
-                  // keys shared with the previous preset (e.g. "single_elimination").
-                  roundBestOf: { ...defaultRoundBestOfForPreset(p as PresetId), ...f.roundBestOf },
-                }));
-              }}
-            >
-              {PRESETS.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
           </div>
 
           <div>
@@ -680,6 +679,54 @@ export function TournamentManager({
                 onChange={(e) => setForm({ ...form, draftStartAt: e.target.value })} />
             </div>
           )}
+
+          <div className="sm:col-span-2">
+            <div className="flex items-center justify-between bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2.5">
+              <div>
+                <p className="text-xs font-medium text-zinc-300">Test Tournament</p>
+                <p className="text-[11px] text-zinc-500 mt-0.5">
+                  {form.isTest
+                    ? "ON — discarded on completion, no records saved, no Westside Wages"
+                    : "OFF — real tournament, results archived and Westside Wages awarded"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, isTest: !form.isTest })}
+                className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 transition-colors duration-200 focus:outline-none ${
+                  form.isTest ? "bg-amber-600 border-amber-600" : "bg-zinc-700 border-zinc-700"
+                }`}
+                role="switch"
+                aria-checked={form.isTest}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${form.isTest ? "translate-x-4" : "translate-x-0"}`} />
+              </button>
+            </div>
+          </div>
+
+          <div className="sm:col-span-2">
+            <div className="flex items-center justify-between bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2.5">
+              <div>
+                <p className="text-xs font-medium text-zinc-300">Track Stats</p>
+                <p className="text-[11px] text-zinc-500 mt-0.5">
+                  {form.statsEnabled
+                    ? "ON — captains upload replays; Stats tab and podium stat leaders shown"
+                    : "OFF — captains just report the series score; no Stats tab, no stat leaders"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, statsEnabled: !form.statsEnabled })}
+                className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 transition-colors duration-200 focus:outline-none ${
+                  form.statsEnabled ? "bg-indigo-600 border-indigo-600" : "bg-zinc-700 border-zinc-700"
+                }`}
+                role="switch"
+                aria-checked={form.statsEnabled}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${form.statsEnabled ? "translate-x-4" : "translate-x-0"}`} />
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Group stage settings */}
@@ -845,7 +892,7 @@ export function TournamentManager({
             <div className="flex items-center justify-between gap-4">
               <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Stage Schedule</p>
               <div className="flex items-center gap-2">
-                <label className="text-xs text-zinc-500 shrink-0">Preview teams</label>
+                <label className="text-xs text-zinc-500 shrink-0">Build schedule for</label>
                 <input
                   type="number"
                   min={2}
@@ -854,6 +901,7 @@ export function TournamentManager({
                   placeholder={String(previewCount || "—")}
                   className="w-20 bg-zinc-700 border border-zinc-600 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 [appearance:textfield]"
                 />
+                <span className="text-xs text-zinc-500 shrink-0">teams</span>
               </div>
             </div>
             <div className="space-y-2">
@@ -923,10 +971,39 @@ export function TournamentManager({
               })}
             </div>
             <p className="text-[11px] text-zinc-600">
-              Durations are estimates based on BO settings and preview team count. Leave blank for no scheduled times.
+              Durations are estimated from the Best Of settings at this team count, and a
+              &ldquo;Follow&rdquo; stage is <em>saved</em> at the time computed here &mdash; so this number
+              changes the schedule you write, not just the preview. Defaults to Min teams.
+              Leave a start blank for no scheduled time.
             </p>
           </div>
         )}
+
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2 text-xs">
+          <span className="text-zinc-500 uppercase tracking-wider font-semibold">Summary</span>
+          <span className="text-zinc-300">{form.name.trim() || "Untitled"}</span>
+          <span className="text-zinc-600">·</span>
+          <span className="text-zinc-300">
+            {previewCount || "—"} teams, {form.joinMode === "players"
+              ? form.teamAssignment === "auto_balance" ? "auto-balanced" : "snake draft"
+              : "pre-formed teams"}
+          </span>
+          <span className="text-zinc-600">·</span>
+          <span className="text-zinc-300">
+            {PRESETS.find((p) => p.id === form.preset)?.name ?? form.preset}
+          </span>
+          <span className="text-zinc-600">·</span>
+          {scheduleSummary ? (
+            <span className="text-zinc-300">
+              {fmtLocalDT(scheduleSummary.start)} → {fmtLocalDT(scheduleSummary.end)}{" "}
+              <span className="text-zinc-500">(est.)</span>
+            </span>
+          ) : (
+            <span className="text-amber-400">No stage times set</span>
+          )}
+          {form.isTest && <span className="text-amber-400">· Test</span>}
+          {!form.statsEnabled && <span className="text-zinc-500">· No stats</span>}
+        </div>
 
         <div className="flex items-center gap-3">
           <button
