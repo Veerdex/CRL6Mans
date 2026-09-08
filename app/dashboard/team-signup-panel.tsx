@@ -14,6 +14,7 @@ import type { TeamSignupView } from "./team-signup-data";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { LocalTime } from "./local-time";
 import { CountdownLabel } from "./countdown-label";
+import { PresetEmblemRow } from "./preset-emblem-row";
 import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import type { PublicSponsor } from "@/app/lib/sponsors-public";
 import { formatPromoDescription } from "@/app/lib/sponsor-promo";
@@ -24,6 +25,8 @@ export function TeamSignupPanel({
   tournamentName,
   timeline = [],
   countdown = null,
+  preset = null,
+  stageStarts = [],
   prize1st = null,
   prize2nd = null,
   prize3rd4th = null,
@@ -37,6 +40,8 @@ export function TeamSignupPanel({
   tournamentName?: string;
   timeline?: { label: string; iso: string }[];
   countdown?: { label: string; iso: string } | null;
+  preset?: string | null;
+  stageStarts?: { label: string; iso: string }[];
   prize1st?: number | null;
   prize2nd?: number | null;
   prize3rd4th?: number | null;
@@ -119,11 +124,11 @@ export function TeamSignupPanel({
           </p>
           {countdown && <div className="mt-1"><CountdownLabel label={countdown.label} iso={countdown.iso} /></div>}
         </div>
-        <div className="shrink-0 flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-3 py-1.5 min-w-[100px]">
-          <p className="text-[13.5px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
-          <p className="text-[21px] font-bold text-amber-400 tabular-nums">${totalPrizePool.toLocaleString()}</p>
+        <div className="shrink-0 flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-4 py-2 min-w-[120px]">
+          <p className="text-[15px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
+          <p className="text-[27px] font-bold text-amber-400 tabular-nums">${totalPrizePool.toLocaleString()}</p>
           {totalPrizePool > 0 && (
-            <div className="mt-1 text-[15px] text-zinc-400 space-y-0.5">
+            <div className="mt-1 text-[16.5px] text-zinc-400 space-y-0.5">
               <p>1st: <span className="text-zinc-200">${(prize1st ?? 0).toLocaleString()}</span></p>
               <p>2nd: <span className="text-zinc-200">${(prize2nd ?? 0).toLocaleString()}</span></p>
               <p>3rd-4th: <span className="text-zinc-200">${(prize3rd4th ?? 0).toLocaleString()}</span></p>
@@ -264,13 +269,27 @@ export function TeamSignupPanel({
         <p className={`relative text-[21px] ${feedback.ok ? "text-emerald-400" : "text-red-400"}`}>{feedback.msg}</p>
       )}
 
-      {timeline.length > 0 && (
-        <div className="relative flex flex-col gap-0.5 pt-1 border-t border-indigo-800/40">
-          {timeline.map(({ label, iso }) => (
-            <span key={label} className="text-[13.5px] text-zinc-500">
-              {label}: <LocalTime iso={iso} className="text-zinc-400" />
-            </span>
-          ))}
+      {(timeline.length > 0 || preset || stageStarts.length > 0) && (
+        <div className="relative flex flex-col gap-1.5 pt-1 border-t border-indigo-800/40">
+          {timeline.length > 0 && (
+            <div className="flex flex-col gap-0.5">
+              {timeline.map(({ label, iso }) => (
+                <span key={label} className="text-[13.5px] text-zinc-500">
+                  {label}: <LocalTime iso={iso} className="text-zinc-400" />
+                </span>
+              ))}
+            </div>
+          )}
+          {preset && <PresetEmblemRow preset={preset} className="text-lg" />}
+          {stageStarts.length > 0 && (
+            <div className="flex flex-col gap-0.5">
+              {stageStarts.map(({ label, iso }) => (
+                <span key={label} className="text-[13.5px] text-zinc-500">
+                  {label} starts: <LocalTime iso={iso} className="text-zinc-400" />
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
       </div>

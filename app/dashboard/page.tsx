@@ -386,6 +386,11 @@ export default async function DashboardPage({
           {openPlayerTs.map((t) => {
             const timeline = buildTimeline(t);
             const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
+            const preset = (t.season_format as { preset?: string } | null)?.preset ?? null;
+            const stageStarts = buildStageStarts(
+              (t as { stage_starts?: Record<string, string> | null }).stage_starts ?? null,
+              preset
+            );
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
             const designId = (t as { design_id?: string | null }).design_id ?? null;
@@ -400,6 +405,8 @@ export default async function DashboardPage({
                 teamAssignment={t.team_assignment as "snake_draft" | "auto_balance" | null}
                 timeline={timeline}
                 countdown={nextEvent}
+                preset={preset}
+                stageStarts={stageStarts}
                 prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}
                 prize2nd={(t as { prize_2nd?: number | null }).prize_2nd ?? null}
                 prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
@@ -416,6 +423,11 @@ export default async function DashboardPage({
             if (!teamViews[t.id]) return null;
             const timeline = buildTimeline(t);
             const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
+            const preset = (t.season_format as { preset?: string } | null)?.preset ?? null;
+            const stageStarts = buildStageStarts(
+              (t as { stage_starts?: Record<string, string> | null }).stage_starts ?? null,
+              preset
+            );
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
             const designId = (t as { design_id?: string | null }).design_id ?? null;
@@ -428,6 +440,8 @@ export default async function DashboardPage({
                 tournamentName={t.name}
                 timeline={timeline}
                 countdown={nextEvent}
+                preset={preset}
+                stageStarts={stageStarts}
                 prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}
                 prize2nd={(t as { prize_2nd?: number | null }).prize_2nd ?? null}
                 prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
