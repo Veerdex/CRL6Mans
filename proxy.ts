@@ -98,8 +98,13 @@ export const config = {
     // replay-analyzer.html is a standalone static tool (public/) with its
     // own inline <script> and no server templating to carry a CSP nonce
     // into, so it's excluded here the same way favicon.ico is.
+    // Everything else in the list after it is the rest of public/ plus the
+    // generated manifest: files under public/ are NOT covered by the
+    // _next/static exclusions, so without naming them every emblem, avatar
+    // border and logo request was paying for a JWT verify, a UUID and a CSP
+    // build it has no use for. Keep this in sync with public/.
     {
-      source: "/((?!api|_next/static|_next/image|favicon.ico|replay-analyzer.html).*)",
+      source: "/((?!api|_next/static|_next/image|favicon.ico|replay-analyzer.html|sw.js|manifest.webmanifest|avatar-borders/|format-emblems/|crl-logo.png|crl-logo-tile.png|supporter-badge.png|file.svg|globe.svg|next.svg|vercel.svg|window.svg).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },
