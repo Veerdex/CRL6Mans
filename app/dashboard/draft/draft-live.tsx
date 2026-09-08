@@ -41,8 +41,33 @@ export function DraftLive({
   const router = useRouter();
   const secondsLeft = useCountdown(pickDeadline);
 
+  // Poll a tiny endpoint and only re-render when the draft actually moved.
+  // The comparison is against the last pulse rather than against props so a
+  // refresh that is still in flight can't queue a second one behind it.
+  const lastPulseRef = useRef(`${currentPick}:${pickDeadline}`);
   useEffect(() => {
-    const id = setInterval(() => router.refresh(), 5000);
+    let cancelled = false;
+    const id = setInterval(async () => {
+      try {
+        const res = await fetch("/api/draft/pulse", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const pulse = await res.json();
+        const key = `${pulse.currentPick}:${pulse.pickDeadline}`;
+        if (lastPulseRef.current === key) return;
+        lastPulseRef.current = key;
+        router.refresh();
+      } catch {
+        // Transient; the next tick retries and the fallback below self-heals.
+      }
+    }, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [router]);
+
+  // Safety net: if the pulse endpoint is failing, the poll above would never
+  // fire a refresh and the page would freeze for the whole draft. Still ~12x
+  // cheaper than the old 5s blind refresh.
+  useEffect(() => {
+    const id = setInterval(() => router.refresh(), 60000);
     return () => clearInterval(id);
   }, [router]);
 
@@ -50,18 +75,31 @@ export function DraftLive({
   const firedRef = useRef<string | null>(null);
   useEffect(() => { deadlineRef.current = pickDeadline; }, [pickDeadline]);
 
+  const onClockTeam = teams.find(t => t.isOnClock);
+
+  // Everyone with the page open used to fire triggerAutoPick() the instant a
+  // deadline passed - one server action per viewer per pick. execAutoPick
+  // claims the pick with a compare-and-swap so the extras were harmless, but
+  // they weren't free. The team actually on the clock (and admins) still fire
+  // immediately; everyone else waits a jittered few seconds, by which point
+  // the pulse poll has pulled in the new deadline and they bail. The cron
+  // remains the backstop for when nobody has the page open at all.
+  const autoPickDelayRef = useRef(0);
+  const viewerIsOnClock = viewerTeamId !== null && onClockTeam?.id === viewerTeamId;
+  useEffect(() => {
+    autoPickDelayRef.current = viewerIsOnClock || userIsAdmin ? 0 : 4000 + Math.random() * 3000;
+  }, [viewerIsOnClock, userIsAdmin]);
+
   useEffect(() => {
     const id = setInterval(() => {
       const dl = deadlineRef.current;
       if (!dl || firedRef.current === dl) return;
-      if (new Date(dl).getTime() - Date.now() > 0) return;
+      if (Date.now() - new Date(dl).getTime() < autoPickDelayRef.current) return;
       firedRef.current = dl;
       triggerAutoPick().then(res => console.log("[autopick] triggered, done=", res.done));
     }, 500);
     return () => clearInterval(id);
   }, []);
-
-  const onClockTeam = teams.find(t => t.isOnClock);
   const sortedTeams = [...teams].sort((a, b) => {
     const na = parseInt(a.name.replace("Team ", ""));
     const nb = parseInt(b.name.replace("Team ", ""));
