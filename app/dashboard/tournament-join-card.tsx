@@ -89,11 +89,11 @@ export function TournamentJoinCard({
     <div
       onClick={linkHref ? () => router.push(linkHref) : undefined}
       className={`relative aspect-video overflow-hidden rounded-xl border transition-all duration-200 ${linkHref ? "cursor-pointer hover:-translate-y-1 hover:shadow-[0_10px_28px_-8px_rgba(232,138,36,0.4)]" : ""} ${
-        backgroundUrl
-          ? "border-zinc-700/50"
-          : joined
-            ? `bg-emerald-950/30 border-emerald-700/40 ${linkHref ? "hover:border-emerald-500/60" : ""}`
-            : `bg-zinc-900 border-zinc-700/50 ${linkHref ? "hover:border-amber-500/50" : ""}`
+        backgroundUrl ? "" : "bg-zinc-900"
+      } ${
+        joined
+          ? `border-emerald-500/70 ${linkHref ? "hover:border-emerald-400" : ""}`
+          : `border-zinc-700/50 ${linkHref ? "hover:border-amber-500/50" : ""}`
       }`}
     >
       {backgroundUrl && (
