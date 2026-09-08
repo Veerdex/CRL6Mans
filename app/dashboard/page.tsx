@@ -20,7 +20,8 @@ import { CountdownLabel } from "./countdown-label";
 import { getPublicSponsors } from "@/app/lib/sponsors-public";
 import { getPublicDesigns } from "@/app/lib/designs-public";
 import { cropStyle } from "@/app/lib/media-crop";
-import { buildTimeline } from "@/app/lib/tournament-timeline";
+import { buildTimeline, projectedTeamCount, projectedEndIso } from "@/app/lib/tournament-timeline";
+import type { SeasonFormatConfig } from "@/app/dashboard/season/format-constants";
 import { TournamentDetailView } from "./tournament-detail";
 import { SponsoredByLine } from "./sponsored-by-line";
 
@@ -53,7 +54,7 @@ export default async function DashboardPage({
       .order("draft_entered_at", { ascending: true, nullsFirst: false }),
     supabaseAdmin
       .from("tournaments")
-      .select("id, name, status, signups_open, signups_closed, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th")
+      .select("id, name, status, signups_open, signups_closed, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, min_teams, team_limit, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th")
       .in("status", ["scheduled", "active", "completed"])
       .order("created_at", { ascending: false }),
     supabaseAdmin
@@ -232,6 +233,42 @@ export default async function DashboardPage({
   // Team-signup views per open team tournament.
   const teamViews: Record<string, TeamSignupView> = Object.fromEntries(teamViewEntries);
 
+  // Sign-up counts for every team-mode card, which is what the projected end
+  // time is sized against. teamViews only covers open tournaments and only from
+  // the viewer's perspective, so this is a separate count.
+  const cardTournaments = [...openTournaments, ...upcomingTournaments];
+  const teamModeIds = cardTournaments.filter((t) => t.join_mode === "teams").map((t) => t.id);
+  const teamSignupCounts: Record<string, number> = {};
+  if (teamModeIds.length) {
+    const { data: signupCountRows } = await supabaseAdmin
+      .from("team_signups")
+      .select("tournament_id")
+      .in("tournament_id", teamModeIds);
+    for (const r of (signupCountRows ?? []) as { tournament_id: string }[]) {
+      teamSignupCounts[r.tournament_id] = (teamSignupCounts[r.tournament_id] ?? 0) + 1;
+    }
+  }
+
+  // Before anyone signs up there is no field to size the schedule against, so
+  // fall back to the team count the tournament was configured for - the same
+  // number the admin's own stage-schedule preview uses.
+  const endIsoFor = (t: (typeof cardTournaments)[number]) => {
+    const row = t as unknown as {
+      stage_starts?: Record<string, string> | null;
+      season_format?: SeasonFormatConfig | null;
+      min_teams?: number | null;
+      team_limit?: number | null;
+    };
+    const projected = projectedTeamCount(
+      t.join_mode,
+      poolCounts[t.id] ?? 0,
+      teamSignupCounts[t.id] ?? 0,
+      row.team_limit
+    );
+    const teams = projected >= 2 ? projected : row.min_teams ?? 0;
+    return projectedEndIso(row.stage_starts ?? null, row.season_format ?? null, teams);
+  };
+
   const draftCount = draftQueue.length;
   const signupsOpen = (settings?.draft_open ?? false) && !(settings?.draft_active ?? false) && !(settings?.season_active ?? false);
   const inDraft = player?.draft_entered ?? false;
@@ -384,7 +421,7 @@ export default async function DashboardPage({
         <div className="space-y-3">
           <h2 className="text-[21px] font-semibold text-zinc-300">Open Tournaments</h2>
           {openPlayerTs.map((t) => {
-            const timeline = buildTimeline(t);
+            const timeline = buildTimeline(t, false, endIsoFor(t));
             const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
@@ -414,7 +451,7 @@ export default async function DashboardPage({
           })}
           {openTeamTs.map((t) => {
             if (!teamViews[t.id]) return null;
-            const timeline = buildTimeline(t);
+            const timeline = buildTimeline(t, false, endIsoFor(t));
             const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
@@ -446,7 +483,7 @@ export default async function DashboardPage({
         <div className="space-y-3">
           <h2 className="text-[21px] font-semibold text-zinc-300">Upcoming Tournaments</h2>
           {upcomingTournaments.map((t) => {
-            const items = buildTimeline(t, true);
+            const items = buildTimeline(t, true, endIsoFor(t));
             const nextEvent = items.find((i) => new Date(i.iso).getTime() > now) ?? items[items.length - 1] ?? null;
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;

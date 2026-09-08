@@ -21,8 +21,6 @@ import { addBulkTournamentTestUsers } from "./league-actions";
 import { ExportCompletedPdfButton, ExportAndCompletePdfButton } from "./export-pdf-button";
 import { DownloadArchiveButton } from "./download-archive-button";
 import {
-  type RoundTier,
-  type BestOf,
   type SeasonFormatConfig,
   type PresetId,
   type StageSlotDef,
@@ -39,6 +37,7 @@ import {
   defaultStageBestOf,
   defaultRoundBestOfForPreset,
 } from "@/app/dashboard/season/format-editor";
+import { computeStageSchedule, type StageScheduleEntry } from "@/app/dashboard/season/format-constants";
 
 // STAGE_SLOTS_BY_PRESET is keyed by the strict PresetId union; form.preset/sf.preset
 // are plain strings from DB rows, so every lookup goes through this guarded helper.
@@ -71,148 +70,12 @@ const FORMAT_TEAM_DEFAULTS: Record<string, { min: string }> = {
   de_swiss_single_elimination:    { min: "32" },
 };
 
-// ── Stage schedule helpers ───────────────────────────────────────────────────
-
-type StageScheduleEntry = {
-  key: string;
-  label: string;
-  estimatedMinutes: number;
-};
-
-// Per-match spacing: 8 minutes per game in the series, rounded up to the next 5.
-function gapMin(bo: BestOf): number {
-  return Math.ceil((8 * bo) / 5) * 5;
-}
-
 function fmtDuration(minutes: number): string {
   if (minutes <= 0) return "—";
   if (minutes < 60) return `~${minutes}m`;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m === 0 ? `~${h}h` : `~${h}h ${m}m`;
-}
-
-const log2ceil = (n: number) => Math.max(1, Math.ceil(Math.log2(Math.max(2, n))));
-
-// Sum the spacing for a sequence of single-elimination rounds, mapping the final
-// rounds to the QF/SF/Final tiers (matches getSeedOrder/SE bracket structure).
-function seRoundsDuration(totalRounds: number, bof: Record<RoundTier, BestOf>): number {
-  let dur = 0;
-  for (let r = 0; r < totalRounds; r++) {
-    const rem = totalRounds - r;
-    if (rem === 1) dur += gapMin(bof.finals);
-    else if (rem === 2) dur += gapMin(bof.semifinals);
-    else if (rem === 3) dur += gapMin(bof.quarterfinals);
-    else dur += gapMin(bof.standard);
-  }
-  return dur;
-}
-
-// All groups play (minGroupSize - 1) * 2 rounds. The smallest group gets a full
-// double RR; larger groups exhaust single-RR then fill remaining rounds from pass 2.
-function groupStageRounds(teams: number): number {
-  const ng = getNumGroups(teams);
-  const minSize = Math.floor(teams / ng); // smallest group (floor of even split)
-  return (minSize - 1) * 2;
-}
-
-// Double-elimination wall-clock rounds: WB = log2(size), LB = 2·(log2(size)−1),
-// plus the grand final. LB is the critical path for size ≥ 4. (bracket.ts)
-function deRounds(teams: number): number {
-  if (teams <= 2) return 1;
-  const wb = log2ceil(teams);
-  const lb = 2 * (wb - 1);
-  return Math.max(wb, lb) + 1;
-}
-
-// Swiss runs until every team reaches 3 wins or 3 losses → at most 5 rounds, all standard.
-const SWISS_ROUNDS = 5;
-
-function slotFlatBO(config: RoundBestOfConfig, key: "group" | "swiss"): BestOf {
-  const c = config[key];
-  return c?.mode === "flat" ? c.value : 3;
-}
-function slotTiers(config: RoundBestOfConfig, key: "single_elimination" | "double_elimination" | "se_qualifier" | "de_qualifier" | "hybrid"): Record<RoundTier, BestOf> {
-  const c = config[key];
-  return c?.mode === "tiered" ? c.tiers : DEFAULT_BEST_OF;
-}
-
-function computeStageSchedule(
-  preset: string,
-  teams: number,
-  groupMaxAdvancing: number | null,
-  config: RoundBestOfConfig,
-  groupRounds: number | null = null,
-): StageScheduleEntry[] {
-  if (teams < 2) return [];
-
-  const groupStd = gapMin(slotFlatBO(config, "group"));
-  const swissStd = gapMin(slotFlatBO(config, "swiss"));
-
-  const groups = { key: "groups", label: "Groups", estimatedMinutes: (groupRounds ?? groupStageRounds(teams)) * groupStd };
-  const swiss  = { key: "swiss", label: "Swiss", estimatedMinutes: SWISS_ROUNDS * swissStd };
-  const se8    = { key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(3, slotTiers(config, "single_elimination")) }; // 8→1: QF+SF+Final
-
-  switch (preset) {
-    case "single_elimination":
-      return [{ key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(log2ceil(teams), slotTiers(config, "single_elimination")) }];
-
-    case "double_elimination":
-      return [{ key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(deRounds(teams), slotTiers(config, "double_elimination")) }];
-
-    case "group_single_elimination": {
-      const adv = groupMaxAdvancing ?? getDefaultGroupAdvancing(teams);
-      return [
-        groups,
-        { key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(log2ceil(adv), slotTiers(config, "single_elimination")) },
-      ];
-    }
-
-    case "group_swiss_single_elimination":
-      return [groups, swiss, se8];
-
-    case "group_swiss_hybrid":
-      // 5 wall-clock rounds: (UB QF ‖ LB R1), LB R2, LB QF, SF, GF — mapped to
-      // standard/standard/quarterfinals/semifinals/finals tiers, same as an SE bracket.
-      return [
-        groups,
-        swiss,
-        { key: "hybrid", label: "Hybrid(12)", estimatedMinutes: seRoundsDuration(5, slotTiers(config, "hybrid")) },
-      ];
-
-    case "group_swiss_hybrid_8":
-      // 4 wall-clock rounds: (UB QF ‖ LB R1), LB QF, SF, GF — mapped to
-      // standard/quarterfinals/semifinals/finals tiers, same as an SE bracket.
-      return [
-        groups,
-        swiss,
-        { key: "hybrid", label: "Hybrid(8)", estimatedMinutes: seRoundsDuration(4, slotTiers(config, "hybrid")) },
-      ];
-
-    case "se_swiss_single_elimination": {
-      // SE qualifier narrows N → 16: log2(N) − log2(16) rounds.
-      const qualRounds = Math.max(1, log2ceil(teams) - 4);
-      return [
-        { key: "se_qualifier", label: "SE Qualifier", estimatedMinutes: seRoundsDuration(qualRounds, slotTiers(config, "se_qualifier")) },
-        swiss,
-        se8,
-      ];
-    }
-
-    case "de_swiss_single_elimination": {
-      // DE qualifier narrows N → 16: WB k = log2(size/8), LB = 2·(k−1), run in parallel.
-      const k = Math.max(1, log2ceil(teams) - 3);
-      const qualRounds = Math.max(k, 2 * (k - 1));
-      return [
-        { key: "de_qualifier", label: "DE Qualifier", estimatedMinutes: seRoundsDuration(qualRounds, slotTiers(config, "de_qualifier")) },
-        swiss,
-        se8,
-      ];
-    }
-
-    default:
-      return [];
-  }
 }
 
 function emptyStarts(preset: string): string[] {
