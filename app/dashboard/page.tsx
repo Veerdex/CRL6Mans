@@ -20,7 +20,7 @@ import { CountdownLabel } from "./countdown-label";
 import { getPublicSponsors } from "@/app/lib/sponsors-public";
 import { getPublicDesigns } from "@/app/lib/designs-public";
 import { cropStyle } from "@/app/lib/media-crop";
-import { buildTimeline, projectedTeamCount, projectedEndIso } from "@/app/lib/tournament-timeline";
+import { buildTimeline, nextTimelineEvent, projectedTeamCount, projectedEndIso } from "@/app/lib/tournament-timeline";
 import type { SeasonFormatConfig } from "@/app/dashboard/season/format-constants";
 import { TournamentDetailView } from "./tournament-detail";
 import { SponsoredByLine } from "./sponsored-by-line";
@@ -249,9 +249,9 @@ export default async function DashboardPage({
     }
   }
 
-  // Before anyone signs up there is no field to size the schedule against, so
-  // fall back to the team count the tournament was configured for - the same
-  // number the admin's own stage-schedule preview uses.
+  // An under-subscribed pool is not the field the tournament will run with - it
+  // needs min_teams to run at all - so the estimate never drops below that. It
+  // also keeps the projected end from jumping backwards as sign-ups arrive.
   const endIsoFor = (t: (typeof cardTournaments)[number]) => {
     const row = t as unknown as {
       stage_starts?: Record<string, string> | null;
@@ -265,7 +265,7 @@ export default async function DashboardPage({
       teamSignupCounts[t.id] ?? 0,
       row.team_limit
     );
-    const teams = projected >= 2 ? projected : row.min_teams ?? 0;
+    const teams = Math.max(projected, row.min_teams ?? 0);
     return projectedEndIso(row.stage_starts ?? null, row.season_format ?? null, teams);
   };
 
@@ -422,7 +422,7 @@ export default async function DashboardPage({
           <h2 className="text-[21px] font-semibold text-zinc-300">Open Tournaments</h2>
           {openPlayerTs.map((t) => {
             const timeline = buildTimeline(t, false, endIsoFor(t));
-            const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
+            const nextEvent = nextTimelineEvent(timeline, now);
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
             const designId = (t as { design_id?: string | null }).design_id ?? null;
@@ -452,7 +452,7 @@ export default async function DashboardPage({
           {openTeamTs.map((t) => {
             if (!teamViews[t.id]) return null;
             const timeline = buildTimeline(t, false, endIsoFor(t));
-            const nextEvent = timeline.find((i) => new Date(i.iso).getTime() > now) ?? timeline[timeline.length - 1] ?? null;
+            const nextEvent = nextTimelineEvent(timeline, now);
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
             const designId = (t as { design_id?: string | null }).design_id ?? null;
@@ -484,7 +484,7 @@ export default async function DashboardPage({
           <h2 className="text-[21px] font-semibold text-zinc-300">Upcoming Tournaments</h2>
           {upcomingTournaments.map((t) => {
             const items = buildTimeline(t, true, endIsoFor(t));
-            const nextEvent = items.find((i) => new Date(i.iso).getTime() > now) ?? items[items.length - 1] ?? null;
+            const nextEvent = nextTimelineEvent(items, now);
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
             const designId = (t as { design_id?: string | null }).design_id ?? null;

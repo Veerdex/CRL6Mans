@@ -24,8 +24,20 @@ export function buildTimeline(
       ? [{ label: "Draft starts", iso: t.draft_start_at }]
       : []),
     ...(t.season_start_at ? [{ label: "Tournament starts", iso: t.season_start_at }] : []),
-    ...(endIso ? [{ label: "Tournament ends", iso: endIso }] : []),
+    ...(endIso ? [{ label: TOURNAMENT_END_LABEL, iso: endIso }] : []),
   ];
+}
+
+export const TOURNAMENT_END_LABEL = "Tournament ends";
+
+// The end is projected, not scheduled, so it never drives a countdown - once the
+// real start has passed a card would otherwise start ticking down to an estimate.
+export function nextTimelineEvent(
+  timeline: { label: string; iso: string }[],
+  now: number
+): { label: string; iso: string } | null {
+  const scheduled = timeline.filter((i) => i.label !== TOURNAMENT_END_LABEL);
+  return scheduled.find((i) => new Date(i.iso).getTime() > now) ?? scheduled[scheduled.length - 1] ?? null;
 }
 
 export const STAGE_KEY_LABELS: Record<string, string> = {
