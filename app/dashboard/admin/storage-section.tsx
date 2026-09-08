@@ -1,6 +1,8 @@
+import { unstable_cache } from "next/cache";
 import { list } from "@vercel/blob";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { AdminSubSection } from "./admin-sub-section";
+import { LocalTime } from "@/app/dashboard/local-time";
 
 const HOBBY_STORAGE_LIMIT_BYTES = 5 * 1024 * 1024 * 1024;
 const SUPABASE_STORAGE_FREE_LIMIT_BYTES = 1 * 1024 * 1024 * 1024;
@@ -33,7 +35,7 @@ async function fetchAllBlobs() {
   let cursor: string | undefined;
   for (let page = 0; page < 10; page++) {
     const result = await list({ cursor, limit: 1000 });
-    blobs.push(...result.blobs);
+    blobs.push(...result.blobs.map((b) => ({ pathname: b.pathname, size: b.size })));
     if (!result.hasMore) break;
     cursor = result.cursor;
   }
@@ -100,6 +102,42 @@ async function fetchDatabaseSizeBytes(): Promise<number> {
   const { data, error } = await supabaseAdmin.rpc("get_database_size_bytes");
   if (error) throw new Error(error.message);
   return Number(data);
+}
+
+// This panel is an async server component handed to AdminSubSection as
+// children, and AdminSubSection is a client component - so the server has
+// already run all three measurements by the time the client decides the
+// Storage tab isn't open and returns null. Every /dashboard/admin render paid
+// for them, including the ~30 router.refresh() calls scattered through the
+// admin actions, which is how blob list() (a billed advanced operation) went
+// 128% over the 2,000/month free-tier cap in a single heavy admin session.
+// list() is capped at ~24 calls/day by this window; the Supabase bucket walk
+// (one storage list per match pseudo-folder) collapses with it. Storage totals
+// move on the order of days, so an hour of staleness costs nothing - the
+// measurement time is shown so nobody reads a cached number as live.
+const MEASUREMENT_TTL_SECONDS = 3600;
+
+type Measured<T> = { value: T; measuredAt: string };
+
+function measured<T>(key: string, fetcher: () => Promise<T>) {
+  return unstable_cache(
+    async (): Promise<Measured<T>> => ({ value: await fetcher(), measuredAt: new Date().toISOString() }),
+    ["admin-storage", key],
+    { revalidate: MEASUREMENT_TTL_SECONDS, tags: ["admin-storage-usage"] },
+  );
+}
+
+const measuredBlobs = measured("blobs", fetchAllBlobs);
+const measuredBuckets = measured("buckets", fetchSupabaseBuckets);
+const measuredDatabaseSize = measured("database-size", fetchDatabaseSizeBytes);
+
+function MeasuredAt({ iso }: { iso: string | null }) {
+  if (!iso) return null;
+  return (
+    <p className="text-xs text-zinc-600 mt-2">
+      Measured <LocalTime iso={iso} className="text-zinc-500" /> · refreshes hourly
+    </p>
+  );
 }
 
 function UsageStats({
@@ -194,24 +232,27 @@ function LargestFiles({ files }: { files: { path: string; size: number }[] }) {
 export async function StorageUsageSection() {
   let blobs: { pathname: string; size: number }[] = [];
   let blobError: string | null = null;
+  let blobMeasuredAt: string | null = null;
   try {
-    blobs = await fetchAllBlobs();
+    ({ value: blobs, measuredAt: blobMeasuredAt } = await measuredBlobs());
   } catch (e) {
     blobError = e instanceof Error ? e.message : "Failed to load Blob storage usage.";
   }
 
   let buckets: BucketUsage[] = [];
   let bucketError: string | null = null;
+  let bucketMeasuredAt: string | null = null;
   try {
-    buckets = await fetchSupabaseBuckets();
+    ({ value: buckets, measuredAt: bucketMeasuredAt } = await measuredBuckets());
   } catch (e) {
     bucketError = e instanceof Error ? e.message : "Failed to load Supabase storage usage.";
   }
 
   let dbSizeBytes = 0;
   let dbError: string | null = null;
+  let dbMeasuredAt: string | null = null;
   try {
-    dbSizeBytes = await fetchDatabaseSizeBytes();
+    ({ value: dbSizeBytes, measuredAt: dbMeasuredAt } = await measuredDatabaseSize());
   } catch (e) {
     dbError = e instanceof Error
       ? e.message
@@ -249,6 +290,7 @@ export async function StorageUsageSection() {
                 extraStat={{ label: "Files", value: blobs.length }}
               />
               <LargestFiles files={blobs.map((b) => ({ path: b.pathname, size: b.size }))} />
+              <MeasuredAt iso={blobMeasuredAt} />
             </div>
           )}
         </div>
@@ -279,6 +321,7 @@ export async function StorageUsageSection() {
               )}
               <BucketBreakdown buckets={buckets} />
               <LargestFiles files={bucketFiles} />
+              <MeasuredAt iso={bucketMeasuredAt} />
             </div>
           )}
         </div>
@@ -288,12 +331,15 @@ export async function StorageUsageSection() {
           {dbError ? (
             <p className="text-sm text-red-400">{dbError}</p>
           ) : (
-            <UsageStats
-              usedLabel="Database Size"
-              used={dbSizeBytes}
-              cap={SUPABASE_DB_FREE_LIMIT_BYTES}
-              capLabel="500 MB cap (free tier)"
-            />
+            <div>
+              <UsageStats
+                usedLabel="Database Size"
+                used={dbSizeBytes}
+                cap={SUPABASE_DB_FREE_LIMIT_BYTES}
+                capLabel="500 MB cap (free tier)"
+              />
+              <MeasuredAt iso={dbMeasuredAt} />
+            </div>
           )}
         </div>
       </div>
