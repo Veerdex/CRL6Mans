@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { joinTournament, leaveTournament } from "./tournament-join-actions";
 import { LocalTime } from "./local-time";
+import type { TimelineItem } from "@/app/lib/tournament-timeline";
 import { TrackerConfirmModal } from "./tracker-confirm-modal";
 import { CountdownLabel } from "./countdown-label";
 import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
@@ -33,7 +34,7 @@ export function TournamentJoinCard({
   poolCount: number;
   joined: boolean;
   teamAssignment: "snake_draft" | "auto_balance" | null;
-  timeline?: { label: string; iso: string }[];
+  timeline?: TimelineItem[];
   countdown?: { label: string; iso: string } | null;
   prize1st?: number | null;
   prize2nd?: number | null;
@@ -163,9 +164,9 @@ export function TournamentJoinCard({
       </div>
       {timeline.length > 0 && (
         <div className="relative flex flex-col gap-0.5 pt-1 border-t border-zinc-700/40">
-          {timeline.map(({ label, iso }) => (
+          {timeline.map(({ label, iso, est }) => (
             <span key={label} className="text-[13.5px] text-zinc-500">
-              {label}: <LocalTime iso={iso} upcoming className="text-zinc-400" />
+              {label}: <LocalTime iso={iso} upcoming suffix={est ? " (est.)" : undefined} className="text-zinc-400" />
             </span>
           ))}
         </div>

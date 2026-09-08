@@ -533,9 +533,9 @@ export default async function DashboardPage({
                     {nextEvent && <CountdownLabel label={nextEvent.label} iso={nextEvent.iso} />}
                     {items.length > 0 && (
                       <div className="flex flex-col gap-0.5">
-                        {items.map(({ label, iso }) => (
+                        {items.map(({ label, iso, est }) => (
                           <span key={label} className="text-[13.5px] text-zinc-500">
-                            {label}: <LocalTime iso={iso} upcoming className="text-zinc-400" />
+                            {label}: <LocalTime iso={iso} upcoming suffix={est ? " (est.)" : undefined} className="text-zinc-400" />
                           </span>
                         ))}
                       </div>

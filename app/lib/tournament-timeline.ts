@@ -9,11 +9,14 @@ export type TournamentRow = {
   season_start_at: string | null;
 };
 
+// `est` marks a time that was derived rather than scheduled, so a card can say so.
+export type TimelineItem = { label: string; iso: string; est?: boolean };
+
 export function buildTimeline(
   t: TournamentRow,
   showOpen = false,
   endIso: string | null = null
-): { label: string; iso: string }[] {
+): TimelineItem[] {
   const isAuto = t.team_assignment === "auto_balance";
   return [
     ...(showOpen && t.draft_open_at ? [{ label: "Sign-ups open", iso: t.draft_open_at }] : []),
@@ -24,7 +27,7 @@ export function buildTimeline(
       ? [{ label: "Draft starts", iso: t.draft_start_at }]
       : []),
     ...(t.season_start_at ? [{ label: "Tournament starts", iso: t.season_start_at }] : []),
-    ...(endIso ? [{ label: TOURNAMENT_END_LABEL, iso: endIso }] : []),
+    ...(endIso ? [{ label: TOURNAMENT_END_LABEL, iso: endIso, est: true }] : []),
   ];
 }
 
@@ -33,9 +36,9 @@ export const TOURNAMENT_END_LABEL = "Tournament ends";
 // The end is projected, not scheduled, so it never drives a countdown - once the
 // real start has passed a card would otherwise start ticking down to an estimate.
 export function nextTimelineEvent(
-  timeline: { label: string; iso: string }[],
+  timeline: TimelineItem[],
   now: number
-): { label: string; iso: string } | null {
+): TimelineItem | null {
   const scheduled = timeline.filter((i) => i.label !== TOURNAMENT_END_LABEL);
   return scheduled.find((i) => new Date(i.iso).getTime() > now) ?? scheduled[scheduled.length - 1] ?? null;
 }

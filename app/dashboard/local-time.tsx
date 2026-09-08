@@ -53,11 +53,13 @@ export function LocalTime({
   className,
   dateOnly = false,
   upcoming = false,
+  suffix,
 }: {
   iso: string | null | undefined;
   className?: string;
   dateOnly?: boolean;
   upcoming?: boolean;
+  suffix?: string;
 }) {
   const [formatted, setFormatted] = useState<string | null>(null);
 
@@ -65,8 +67,8 @@ export function LocalTime({
     if (!iso) return;
     const d = new Date(iso);
     if (isNaN(d.getTime())) return;
-    setFormatted(format(d, dateOnly, upcoming));
-  }, [iso, dateOnly, upcoming]);
+    setFormatted(format(d, dateOnly, upcoming) + (suffix ?? ""));
+  }, [iso, dateOnly, upcoming, suffix]);
 
   if (!iso) return <span className={className}>—</span>;
   return (

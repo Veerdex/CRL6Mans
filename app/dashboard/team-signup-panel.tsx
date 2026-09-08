@@ -13,6 +13,7 @@ import {
 import type { TeamSignupView } from "./team-signup-data";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { LocalTime } from "./local-time";
+import type { TimelineItem } from "@/app/lib/tournament-timeline";
 import { CountdownLabel } from "./countdown-label";
 import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import type { PublicSponsor } from "@/app/lib/sponsors-public";
@@ -35,7 +36,7 @@ export function TeamSignupPanel({
   view: TeamSignupView;
   tournamentId: string;
   tournamentName?: string;
-  timeline?: { label: string; iso: string }[];
+  timeline?: TimelineItem[];
   countdown?: { label: string; iso: string } | null;
   prize1st?: number | null;
   prize2nd?: number | null;
@@ -266,9 +267,9 @@ export function TeamSignupPanel({
 
       {timeline.length > 0 && (
         <div className="relative flex flex-col gap-0.5 pt-1 border-t border-indigo-800/40">
-          {timeline.map(({ label, iso }) => (
+          {timeline.map(({ label, iso, est }) => (
             <span key={label} className="text-[13.5px] text-zinc-500">
-              {label}: <LocalTime iso={iso} upcoming className="text-zinc-400" />
+              {label}: <LocalTime iso={iso} upcoming suffix={est ? " (est.)" : undefined} className="text-zinc-400" />
             </span>
           ))}
         </div>
