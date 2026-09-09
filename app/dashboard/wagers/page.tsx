@@ -54,7 +54,7 @@ export default async function WagersPage() {
       .single(),
     supabaseAdmin
       .from("accounts")
-      .select("username, display_name, crl_coins")
+      .select("username, display_name, discord_id, crl_coins")
       .in("status", ["unregistered", "pending", "approved"])
       .not("discord_id", "like", "test_%")
       .order("crl_coins", { ascending: false }),
@@ -73,6 +73,7 @@ export default async function WagersPage() {
   const leaderboard = (leaderboardData ?? []).map((p) => ({
     username: p.username,
     display_name: p.display_name,
+    discord_id: p.discord_id,
     crl_coins: p.crl_coins ?? 0,
   }));
 
@@ -395,17 +396,20 @@ export default async function WagersPage() {
       : Promise.resolve({ data: [] as { id: string; amount: number }[] }),
   ]);
 
-  const playersById: Record<string, { name: string; rating: number }> = {};
+  // Username rides along with the display name so the roster lists can render a
+  // PlayerName — the decoration map is keyed on username, so flattening to one
+  // display string here would silently drop every supporter colour and badge.
+  const playersById: Record<string, { username: string; displayName: string | null; rating: number }> = {};
   for (const p of rosterPlayers ?? []) {
-    playersById[p.id] = { name: p.display_name ?? p.username, rating: playerRatingOf(p) };
+    playersById[p.id] = { username: p.username, displayName: p.display_name, rating: playerRatingOf(p) };
   }
   for (const p of subInPlayersRaw ?? []) {
-    playersById[p.id] = { name: p.display_name ?? p.username, rating: playerRatingOf(p) };
+    playersById[p.id] = { username: p.username, displayName: p.display_name, rating: playerRatingOf(p) };
   }
 
-  const matchRosters: Record<string, Record<string, { name: string; rating: number; isSub: boolean }[]>> = {};
+  const matchRosters: Record<string, Record<string, { username: string; displayName: string | null; rating: number; isSub: boolean }[]>> = {};
   for (const m of matches) {
-    const perTeam: Record<string, { name: string; rating: number; isSub: boolean }[]> = {};
+    const perTeam: Record<string, { username: string; displayName: string | null; rating: number; isSub: boolean }[]> = {};
     for (const teamId of [m.home_team_id, m.away_team_id]) {
       const approvedSubs = (approvedSubsRaw ?? []).filter((r) => r.match_id === m.id && r.team_id === teamId);
       const outIds = new Set(approvedSubs.map((r) => r.player_out_id));

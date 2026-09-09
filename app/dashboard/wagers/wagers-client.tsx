@@ -5,6 +5,7 @@ import { placeBets, placeParlayBet, type BetInput, type ParlayLegInput, type Bet
 import { getOULines, getTotalSlots, HOUSE_VIG, type MatchPrediction } from "./prediction";
 import { LeaderboardView, type LeaderboardEntry } from "./leaderboard-view";
 import { MatchOverviewGrid, type OverviewMatch } from "./overview-grid";
+import { PlayerName } from "@/app/dashboard/player-name";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -241,7 +242,7 @@ export function WagersClient({
   gridWagerTotals: Record<string, { home: number; away: number }>;
   betTypeTotals: Record<string, Record<string, number>>;
   teamStandings: Record<string, number>;
-  matchRosters: Record<string, Record<string, { name: string; rating: number; isSub: boolean }[]>>;
+  matchRosters: Record<string, Record<string, { username: string; displayName: string | null; rating: number; isSub: boolean }[]>>;
   myWagers: MyWager[];
   myParlays: MyParlay[];
   tickerWagers: TickerWager[];
@@ -758,7 +759,7 @@ function MatchMarketView({
   pred: MatchPrediction;
   betTypeTotals: Record<string, Record<string, number>>;
   teamStandings: Record<string, number>;
-  roster?: Record<string, { name: string; rating: number; isSub: boolean }[]>;
+  roster?: Record<string, { username: string; displayName: string | null; rating: number; isSub: boolean }[]>;
   localWagers: MyWager[];
   selections: Record<string, { betType: string; amount: string }>;
   onSideClick: (matchId: string, sk: string, side: string) => void;
@@ -824,8 +825,9 @@ function MatchMarketView({
             {roster?.[match.home_team_id] && (
               <ul className="mt-1 space-y-0.5">
                 {roster[match.home_team_id].map((p, i) => (
-                  <li key={i} className="text-[11px] text-zinc-500 tabular-nums truncate">
-                    {p.name}{p.isSub ? " (sub)" : ""} · {Math.round(p.rating)}
+                  <li key={i} className="flex items-center justify-center gap-1 text-[11px] text-zinc-500 tabular-nums min-w-0">
+                    <PlayerName displayName={p.displayName} username={p.username} className="text-zinc-500" />
+                    <span className="shrink-0">{p.isSub ? "(sub) " : ""}· {Math.round(p.rating)}</span>
                   </li>
                 ))}
               </ul>
@@ -843,8 +845,9 @@ function MatchMarketView({
             {roster?.[match.away_team_id] && (
               <ul className="mt-1 space-y-0.5">
                 {roster[match.away_team_id].map((p, i) => (
-                  <li key={i} className="text-[11px] text-zinc-500 tabular-nums truncate">
-                    {p.name}{p.isSub ? " (sub)" : ""} · {Math.round(p.rating)}
+                  <li key={i} className="flex items-center justify-center gap-1 text-[11px] text-zinc-500 tabular-nums min-w-0">
+                    <PlayerName displayName={p.displayName} username={p.username} className="text-zinc-500" />
+                    <span className="shrink-0">{p.isSub ? "(sub) " : ""}· {Math.round(p.rating)}</span>
                   </li>
                 ))}
               </ul>

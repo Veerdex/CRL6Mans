@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { PlayerName } from "@/app/dashboard/player-name";
 
-export type LeaderboardEntry = { username: string; display_name: string | null; crl_coins: number };
+export type LeaderboardEntry = { username: string; display_name: string | null; discord_id: string | null; crl_coins: number };
 
 export function LeaderboardView({
   entries,
@@ -61,7 +62,6 @@ export function LeaderboardView({
           {filtered.map((entry, i) => {
             const globalRank = entries.indexOf(entry) + 1;
             const isMe = entry.username === currentUsername;
-            const name = entry.display_name ?? entry.username;
             const rankColor =
               globalRank === 1
                 ? "text-amber-400"
@@ -85,10 +85,18 @@ export function LeaderboardView({
                   {globalRank}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-semibold truncate ${isMe ? "text-amber-300" : "text-white"}`}>
-                    {name}
-                    {isMe && <span className="ml-2 text-[10px] font-bold text-amber-500 uppercase tracking-widest">You</span>}
-                  </p>
+                  {/* PlayerName carries its own truncate and applies the supporter
+                      colour as an inline style, so the amber "you" tint stays a
+                      fallback for players with no decoration. */}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <PlayerName
+                      displayName={entry.display_name}
+                      username={entry.username}
+                      discordId={entry.discord_id}
+                      className={`text-sm font-semibold ${isMe ? "text-amber-300" : "text-white"}`}
+                    />
+                    {isMe && <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest shrink-0">You</span>}
+                  </div>
                   {entry.display_name && (
                     <p className="text-[11px] text-zinc-500 truncate">@{entry.username}</p>
                   )}
