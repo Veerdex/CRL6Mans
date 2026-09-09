@@ -309,7 +309,7 @@ function EventHistory({
                 )}
 
                 <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                  <Meta label="Prize Pool" value={`${e.prize_pool.toLocaleString()} coins`} />
+                  <Meta label="Prize Pool" value={`$${e.prize_pool.toLocaleString()}`} />
                   <Meta label="Teams" value={String(e.team_count)} />
                   <Meta label="Players" value={String(e.participant_count)} />
                 </dl>
