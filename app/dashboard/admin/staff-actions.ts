@@ -170,9 +170,18 @@ export async function transferCEO(
   await grantTierRoles(id, "ceo", roleIds);
 
   // Downgrade current CEO to Director only after new CEO is confirmed.
-  await supabaseAdmin.from("staff_roles").update({ role: "director" }).eq("discord_id", session.userId);
-  await grantTierRoles(session.userId, "director", roleIds); // self-heals moderator/director if missing
-  if (roleIds.ceo) await removeRoleById(session.userId, roleIds.ceo);
+  // Skipped when the actor's CEO access came from the developer override rather
+  // than a stored ceo row, which would otherwise rewrite their real title.
+  const { data: actorRow } = await supabaseAdmin
+    .from("staff_roles")
+    .select("role")
+    .eq("discord_id", session.userId)
+    .single();
+  if (actorRow?.role === "ceo") {
+    await supabaseAdmin.from("staff_roles").update({ role: "director" }).eq("discord_id", session.userId);
+    await grantTierRoles(session.userId, "director", roleIds); // self-heals moderator/director if missing
+    if (roleIds.ceo) await removeRoleById(session.userId, roleIds.ceo);
+  }
 
   revalidatePath("/dashboard/admin");
   return { ok: true };
