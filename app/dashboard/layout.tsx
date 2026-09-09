@@ -275,7 +275,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
       ...(hasTeams ? ["teams"] : []),
       ...(draftActive ? ["draft"] : []),
       ...(seasonActive ? ["season"] : []),
-      ...(hasActiveContent ? ["schedule"] : []),
+      // Manual seasons only — tournaments have no round scheduling, so the tab
+      // would open on an empty page. season_active is true for both, since a
+      // tournament runs through the same season machinery.
+      ...(seasonActive && !activeTournamentId ? ["schedule"] : []),
       ...commonExtras,
     ];
   } else {
