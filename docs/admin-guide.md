@@ -74,7 +74,7 @@ These are the panels you'll return to on a recurring basis:
 - **Sub Requests** (Match Ops tab) — approve/deny substitute requests a team escalated to admin review (usually because the opposing team didn't respond in time).
 - **Schedule Approvals** (Match Ops tab) — approve out-of-window match times both teams agreed to.
 - **Identity Discrepancies** (Players & Staff tab) — only relevant if platform-account identity enforcement is on; flags replays where the account played doesn't match the expected roster.
-- **Profile Change Requests** (Approvals tab) — players requesting to update their tracker URL or MMR; nothing changes until you approve.
+- **Profile Change Requests** (Approvals tab) — players requesting to update their tracker URL; the link doesn't change until you approve. MMR edits bypass this entirely and apply the moment the player saves them.
 - **Players** (Players & Staff tab) — the full roster; kick or ban players here (subject to the staff hierarchy — moderators can only act on non-staff, directors on moderators too, CEOs on anyone), or reverse a ban.
 - **Wagers** (Wagers tab) — view/adjust "Westside Wages" (`crl_coins`) balances, individually or in bulk. Fully separate from kicks/bans and from `/admin wipe`.
 

@@ -7,18 +7,8 @@ import { approvePlayerEditRequest, rejectPlayerEditRequest } from "./player-edit
 export type PlayerEditRequestCardData = {
   id: string;
   username: string;
-  // requested (new) values
   trackerUrl: string;
-  peak3v3: string;
-  current3v3: string;
-  peak2v2: string;
-  current2v2: string;
-  // current live values
   liveTrackerUrl: string;
-  livePeak3v3: string;
-  liveCurrent3v3: string;
-  livePeak2v2: string;
-  liveCurrent2v2: string;
   createdAt: string;
 };
 
@@ -121,10 +111,6 @@ export function PlayerEditRequestCard({ request }: { request: PlayerEditRequestC
           </thead>
           <tbody>
             <DiffRow label="Tracker URL" from={request.liveTrackerUrl} to={request.trackerUrl} isLink />
-            <DiffRow label="Peak 3v3"    from={request.livePeak3v3}    to={request.peak3v3} />
-            <DiffRow label="Current 3v3" from={request.liveCurrent3v3} to={request.current3v3} />
-            <DiffRow label="Peak 2v2"    from={request.livePeak2v2}    to={request.peak2v2} />
-            <DiffRow label="Current 2v2" from={request.liveCurrent2v2} to={request.current2v2} />
           </tbody>
         </table>
       </div>

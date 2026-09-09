@@ -82,7 +82,7 @@ export default async function SettingsPage({
 
   // Non-approved players (unregistered/pending/rejected) get a reduced settings
   // view — account preferences only. Platform account claims and MMR/tracker
-  // edit requests require an approved roster spot.
+  // edits require an approved roster spot.
   const isApproved = account?.status === "approved";
 
   let pending: PendingRequest | null = null;
@@ -101,7 +101,7 @@ export default async function SettingsPage({
     const [{ data: pendingRow }, { data: rejectedRow }, { data: platformAccountRows }, needsClaim] = await Promise.all([
       supabaseAdmin
         .from("player_edit_requests")
-        .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at")
+        .select("id, tracker_url, created_at")
         .eq("player_id", player.id)
         .eq("status", "pending")
         .maybeSingle(),
@@ -127,10 +127,6 @@ export default async function SettingsPage({
       ? {
           id:          pendingRow.id,
           tracker_url: pendingRow.tracker_url,
-          peak_3v3:    pendingRow.peak_3v3,
-          current_3v3: pendingRow.current_3v3,
-          peak_2v2:    pendingRow.peak_2v2,
-          current_2v2: pendingRow.current_2v2,
           created_at:  pendingRow.created_at,
         }
       : null;
@@ -156,7 +152,7 @@ export default async function SettingsPage({
       <h1 className="text-2xl font-bold text-white mb-1">Settings</h1>
       <p className="text-zinc-400 text-sm mb-8">
         {isApproved
-          ? "MMR and tracker changes require admin approval. Substitute availability is applied instantly."
+          ? "MMR and substitute availability are applied instantly. Tracker URL changes require admin approval."
           : "Notifications, nickname, platform account claims, and MMR/tracker edits unlock once your registration is approved."}
       </p>
       <Link

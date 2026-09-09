@@ -205,7 +205,7 @@ export default async function AdminPage() {
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
     supabaseAdmin.from("sub_requests").select("id, team_id, player_out_id, sub_player_id, sub_player_ids, reason, admin_note, requested_by_discord_id, created_at").eq("status", "escalated").order("created_at", { ascending: true }),
-    supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at").eq("status", "pending").order("created_at", { ascending: true }),
+    supabaseAdmin.from("player_edit_requests").select("id, player_id, username, tracker_url, created_at").eq("status", "pending").order("created_at", { ascending: true }),
     supabaseAdmin.from("tournaments").select("*").order("created_at", { ascending: false }),
     supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
     supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar, status, ban_reason, kick_reason, kicked_until, created_at, is_guest").order("username"),
@@ -732,7 +732,7 @@ export default async function AdminPage() {
     subOutIds.length       ? supabaseAdmin.from("players").select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3").in("id", subOutIds) : Promise.resolve({ data: [] as { id: string; discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] }),
     subInIds.length        ? supabaseAdmin.from("players").select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3").in("id", subInIds) : Promise.resolve({ data: [] as { id: string; discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] }),
     subRequesterIds.length ? supabaseAdmin.from("players").select("discord_id, username, display_name").in("discord_id", subRequesterIds) : Promise.resolve({ data: [] as { discord_id: string; username: string; display_name: string | null }[] }),
-    editPlayerIds.length   ? supabaseAdmin.from("players").select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2").in("id", editPlayerIds) : Promise.resolve({ data: [] as { id: string; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null }[] }),
+    editPlayerIds.length   ? supabaseAdmin.from("players").select("id, tracker_url").in("id", editPlayerIds) : Promise.resolve({ data: [] as { id: string; tracker_url: string | null }[] }),
   ]);
 
   const subTeamMap      = Object.fromEntries((subTeams      ?? []).map(t => [t.id, t.name]));
@@ -780,15 +780,7 @@ export default async function AdminPage() {
       id:              req.id,
       username:        req.username,
       trackerUrl:      req.tracker_url,
-      peak3v3:         req.peak_3v3,
-      current3v3:      req.current_3v3,
-      peak2v2:         req.peak_2v2,
-      current2v2:      req.current_2v2,
       liveTrackerUrl:  live?.tracker_url  ?? "",
-      livePeak3v3:     live?.peak_3v3     ?? "",
-      liveCurrent3v3:  live?.current_3v3  ?? "",
-      livePeak2v2:     live?.peak_2v2     ?? "",
-      liveCurrent2v2:  live?.current_2v2  ?? "",
       createdAt:       req.created_at,
     };
   });

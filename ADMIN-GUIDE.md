@@ -877,12 +877,12 @@ home instead of seeing an empty version of this page.
     admin has to verify a claim before it counts toward match-identity
     checks — see the Approvals tab and Identity Discrepancies tool in the
     Admin Dashboard section.
-  - **Profile Change Request** — resubmitting the tracker link and/or any
-    of the six MMR numbers for admin approval; any changed field is
-    visually flagged against its current live value, and a pending or
+  - **Profile & MMR** — the four MMR numbers and substitute-availability
+    save instantly with no approval step. Only the tracker link still goes
+    to an admin: submitting a new one opens a request, and a pending or
     rejected request shows its own status banner (with a "Cancel request"
-    or "Dismiss" option). Substitute-availability, by contrast, applies
-    instantly with no approval needed.
+    or "Dismiss" option). A player's MMR keeps changing freely while a
+    tracker request sits in the queue.
 - **Game** (`/dashboard/game`) — a small, unrelated Flappy-Bird-style
   minigame ("a little something for the waiting room") with its own
   leaderboard, mostly just for fun. Click or press Space to flap; difficulty
@@ -1133,10 +1133,10 @@ closed by default until you click to open it.
     Verify/Reject buttons. Rejecting with a cooldown set also removes the
     player from active play for that duration.
 - **Profile Change Requests** — a current-value-versus-requested-value
-  comparison for the tracker link and all six MMR fields, changed values
-  highlighted, plus a note field and Approve/Reject buttons. Approving
-  copies the new values onto the player's record and, if they're currently
-  on a team, recalculates that team's overall rating.
+  comparison for the tracker link, plus a note field and Approve/Reject
+  buttons. Approving copies the new link onto the player's record and marks
+  their tracker re-confirmed. MMR is no longer part of this queue — players
+  edit it themselves and it applies immediately.
 - **Verified Platform Accounts** — a history of everyone whose game-platform
   account has already been verified: verification method, verification
   date, and the date the account became valid from. Two actions are

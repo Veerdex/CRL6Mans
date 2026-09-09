@@ -47,7 +47,7 @@ app/
     game/                 # Flappy Bird minigame with leaderboard
     my-team/              # Player's own team, schedule, sub requests, series replays
     season/               # Standings, bracket, Swiss view, simulate controls
-    settings/             # Profile edits (pending admin approval), theme toggle
+    settings/             # Profile edits (MMR instant, tracker URL needs approval), theme toggle
     teams/                # All teams grid + admin team editor
     players/              # Full player list
     stats/                # Career leaderboard from player_game_stats (sortable table, MVP rating)
@@ -113,7 +113,7 @@ unregistered → (submits register form) → pending → (admin approves) → ap
 ```
 
 - Only `approved` players can enter the draft, join teams, or access most pages.
-- Profile change requests (MMR, tracker URL) go through a separate `player_edit_requests` table and require admin approval.
+- Tracker URL changes go through a separate `player_edit_requests` table and require admin approval. MMR is self-service — `requestProfileChange` writes it straight to Tier 2 + Tier 3 and propagates the RV delta to the player's team. The request table's MMR columns are `not null` legacy baggage: a request carries the live values and approval ignores them.
 - Kicked players get a `Kicked` Discord role and a timeout. Banned players are server-banned and must re-register from scratch on unban.
 - `removeFromActivePlay(playerId)` — shared helper that clears `team_id`, `is_captain`, `draft_entered`, and `in_active_draft` in one update. Used by kick and ban.
 
@@ -244,7 +244,7 @@ so deletes go Tier 3 → Tier 1 (which then cascades Tier 2).
 | `seasons` | Archive of completed manual seasons (name with year, summary champion/runner-up/standings, format, team_count, dates) — mirrors `tournaments.summary` |
 | `tournament_entries` | Player sign-ups for player-mode tournaments |
 | `team_signup_members` | Player membership in team-mode sign-up groups |
-| `player_edit_requests` | Pending MMR/tracker change requests awaiting admin approval |
+| `player_edit_requests` | Pending tracker URL change requests awaiting admin approval (MMR columns are vestigial) |
 | `matches` | Season/tournament match results |
 | `sub_requests` | Substitute player requests |
 | `series` | Best-of series between teams |

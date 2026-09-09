@@ -109,7 +109,7 @@ const SECTIONS: Section[] = [
     items: [
       {
         q: "How do I change my MMR or tracker link?",
-        a: <>Use the Profile Change Request form in <Link href="/dashboard/settings" className="text-indigo-400 underline">Settings</Link>. Changes need admin approval before they apply to your live record.</>,
+        a: <>Both live in the form on <Link href="/dashboard/settings" className="text-indigo-400 underline">Settings</Link>. MMR edits save straight away; a new tracker link needs admin approval before it applies to your live record.</>,
       },
       {
         q: "How do I link my Steam/Epic/PlayStation/Xbox/Switch account?",

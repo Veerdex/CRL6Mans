@@ -15,10 +15,6 @@ export type PlayerSettings = {
 export type PendingRequest = {
   id: string;
   tracker_url: string;
-  peak_3v3: string;
-  current_3v3: string;
-  peak_2v2: string;
-  current_2v2: string;
   created_at: string;
 };
 
@@ -40,9 +36,9 @@ export function SettingsForm({
   const [cancelling, startCancel] = useTransition();
   const [dismissing, startDismiss] = useTransition();
 
-  // Pre-fill with pending values if a request is waiting — lets the player
-  // see and edit what they submitted before the admin reviews it.
-  const fill = pending ?? current;
+  // Only the tracker URL can be waiting on review, so it's the only field
+  // pre-filled from the request rather than from the live row.
+  const trackerFill = pending?.tracker_url ?? current.tracker_url;
 
   function handleCancel() {
     if (!pending) return;
@@ -64,10 +60,10 @@ export function SettingsForm({
       {pending && (
         <div className="flex items-start justify-between gap-4 bg-amber-950/40 border border-amber-700/50 rounded-xl px-4 py-3">
           <div className="space-y-0.5">
-            <p className="text-sm font-semibold text-amber-300">Change request pending admin approval</p>
+            <p className="text-sm font-semibold text-amber-300">Tracker URL change pending admin approval</p>
             <p className="text-xs text-amber-500">
-              Submitted {new Date(pending.created_at).toLocaleDateString()}. Your current live
-              values are unchanged until an admin approves this.
+              Submitted {new Date(pending.created_at).toLocaleDateString()}. Your live tracker URL
+              is unchanged until an admin approves this. MMR edits are not affected.
             </p>
           </div>
           <button
@@ -90,17 +86,18 @@ export function SettingsForm({
             name="tracker_url"
             type="url"
             required
-            defaultValue={fill.tracker_url}
+            defaultValue={trackerFill}
             placeholder="https://rocketleague.tracker.network/rocket-league/profile/..."
             className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-500"
           />
+          <p className="text-xs text-zinc-500">Changing this needs admin approval.</p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <MMRInput name="peak_2v2"    label="All Time Peak 2v2" defaultValue={fill.peak_2v2}    current={current.peak_2v2}    isPending={!!pending} />
-          <MMRInput name="current_2v2" label="Season Peak 2v2"   defaultValue={fill.current_2v2} current={current.current_2v2} isPending={!!pending} />
-          <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={fill.peak_3v3}    current={current.peak_3v3}    isPending={!!pending} />
-          <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={fill.current_3v3} current={current.current_3v3} isPending={!!pending} />
+          <MMRInput name="peak_2v2"    label="All Time Peak 2v2" defaultValue={current.peak_2v2} />
+          <MMRInput name="current_2v2" label="Season Peak 2v2"   defaultValue={current.current_2v2} />
+          <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={current.peak_3v3} />
+          <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={current.current_3v3} />
         </div>
 
         <div className="flex items-center justify-between p-4 bg-zinc-800 border border-zinc-700 rounded-lg">
@@ -117,9 +114,13 @@ export function SettingsForm({
         </div>
 
         {state?.error && <p className="text-sm text-red-400">{state.error}</p>}
-        {state?.ok && (
+        {(state?.applied || state?.requested) && (
           <p className="text-sm text-emerald-400">
-            Change request submitted — an admin will review it shortly.
+            {state.applied && state.requested
+              ? "MMR saved. Your tracker URL change was submitted — an admin will review it shortly."
+              : state.requested
+                ? "Tracker URL change submitted — an admin will review it shortly."
+                : "Changes saved."}
           </p>
         )}
 
@@ -128,7 +129,7 @@ export function SettingsForm({
           disabled={submitting}
           className="py-2.5 px-6 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded-lg transition-colors text-sm"
         >
-          {submitting ? "Submitting…" : pending ? "Update Request" : "Request Changes"}
+          {submitting ? "Saving…" : "Save Changes"}
         </button>
       </form>
 
@@ -156,27 +157,17 @@ export function SettingsForm({
 }
 
 function MMRInput({
-  name, label, defaultValue, current, isPending,
+  name, label, defaultValue,
 }: {
   name: string;
   label: string;
   defaultValue: string;
-  current: string;
-  isPending: boolean;
 }) {
-  const changed = isPending && defaultValue !== current;
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between gap-2">
-        <label htmlFor={name} className="block text-sm font-medium text-zinc-300">
-          {label}
-        </label>
-        {changed && (
-          <span className="text-[10px] text-amber-400 font-medium">
-            live: {current}
-          </span>
-        )}
-      </div>
+      <label htmlFor={name} className="block text-sm font-medium text-zinc-300">
+        {label}
+      </label>
       <input
         id={name}
         name={name}
@@ -186,9 +177,7 @@ function MMRInput({
         required
         defaultValue={defaultValue}
         placeholder="e.g. 1420"
-        className={`w-full bg-zinc-800 border text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-500 ${
-          changed ? "border-amber-600/60" : "border-zinc-700"
-        }`}
+        className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-500"
       />
     </div>
   );
