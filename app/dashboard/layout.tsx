@@ -19,6 +19,7 @@ import { ProfileViewerProvider } from "./profile-viewer";
 import { PwaDesktopHint } from "./pwa-desktop-hint";
 import { CoinGrantToast } from "./coin-grant-toast";
 import { TeamCutToast } from "./team-cut-toast";
+import { NotificationPrompt } from "./notification-prompt";
 import { LogoutButton } from "./logout-button";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
@@ -376,6 +377,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </main>
         <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
         <TeamCutToast message={teamSignupMessage} />
+        {status === "approved" && !isGuest && <NotificationPrompt />}
 
         {/* Bottom bar — desktop only */}
         <footer className="app-bottombar hidden md:flex items-center justify-between gap-4 px-4 h-12 bg-zinc-900 border-t border-zinc-800 shrink-0">
@@ -507,6 +509,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </main>
       <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
       <TeamCutToast message={teamSignupMessage} />
+      {status === "approved" && !isGuest && <NotificationPrompt />}
 
       <MobileNav items={navItems} username={session?.username ?? "Unknown"} displayName={playerInfo.displayName} avatarDiscordId={session?.userId ?? null} avatarHash={session?.avatar ?? null} avatarBorder={ownBorder} status={status} priorityHrefs={priorityHrefs} />
     </div>

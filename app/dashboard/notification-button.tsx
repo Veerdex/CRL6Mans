@@ -11,6 +11,30 @@ function urlBase64ToUint8Array(base64: string): ArrayBuffer {
   return buf.buffer;
 }
 
+/** Requests permission, subscribes, and registers the endpoint. Shared with the
+ *  onboarding prompt so both paths hand the server the same VAPID subscription. */
+export async function subscribeToPush(): Promise<boolean> {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(
+        process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!
+      ),
+    });
+    const json = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } };
+    await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
+    });
+    return true;
+  } catch {
+    // permission denied or push not supported
+    return false;
+  }
+}
+
 export function NotificationButton() {
   const [ready, setReady] = useState(false);
   const [subscribed, setSubscribed] = useState(false);
@@ -27,24 +51,7 @@ export function NotificationButton() {
 
   async function subscribe() {
     setLoading(true);
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(
-          process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!
-        ),
-      });
-      const json = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } };
-      await fetch("/api/push/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
-      });
-      setSubscribed(true);
-    } catch {
-      // permission denied or push not supported
-    }
+    if (await subscribeToPush()) setSubscribed(true);
     setLoading(false);
   }
 
