@@ -3,11 +3,6 @@
 import { useState, useEffect } from "react";
 import { subscribeToPush } from "./notification-button";
 
-/** TEMPORARY: shows the prompt even after it has been answered on this device.
- *  Set to false (or delete, along with its uses below) to restore the real rule:
- *  once per device, never again after confirm or deny. */
-const PREVIEW_ALWAYS_SHOW = true;
-
 const DISMISS_KEY = "notify_prompt_answered";
 
 function answered(): boolean {
@@ -33,7 +28,7 @@ export function NotificationPrompt() {
     // A denied permission can't be re-prompted by the browser, so the confirm
     // button would silently do nothing.
     if (Notification.permission === "denied") return;
-    if (!PREVIEW_ALWAYS_SHOW && answered()) return;
+    if (answered()) return;
 
     let cancelled = false;
     navigator.serviceWorker.ready
