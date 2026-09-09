@@ -270,7 +270,9 @@ export default async function DashboardPage({
   };
 
   const draftCount = draftQueue.length;
-  const signupsOpen = (settings?.draft_open ?? false) && !(settings?.draft_active ?? false) && !(settings?.season_active ?? false);
+  const draftOpen = settings?.draft_open ?? false;
+  const draftActive = settings?.draft_active ?? false;
+  const signupsOpen = draftOpen && !draftActive && !(settings?.season_active ?? false);
   const inDraft = player?.draft_entered ?? false;
 
   // Compute current season stage label from active matches.
@@ -401,15 +403,17 @@ export default async function DashboardPage({
         </div>
       )}
 
-      {/* Season draft block — only when no season is active yet (the active-event card above covers it once it is). */}
-      {isApproved && activeTournament?.join_mode !== "teams" && !seasonActive && (
+      {/* Season draft block — only when no season is active yet (the active-event card above
+          covers it once it is), and only while the draft is actually something you can act on.
+          With signups closed and no draft running it was a dead card and an empty pool count. */}
+      {isApproved && activeTournament?.join_mode !== "teams" && !seasonActive && (draftOpen || draftActive) && (
         <div className="space-y-3">
           <h2 className="text-[21px] font-semibold text-zinc-300">Season</h2>
           <DraftCard
             inDraft={inDraft}
             draftCount={draftCount}
             signupsOpen={signupsOpen}
-            draftActive={settings?.draft_active ?? false}
+            draftActive={draftActive}
             seasonActive={false}
           />
           <Stat label="Draft pool" value={draftCount} />
