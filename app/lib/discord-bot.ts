@@ -1589,7 +1589,11 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
       // day of lead time before the first matches. Unclaimed by then and it's
       // dropped — the point is to make people open the site during the event, not
       // to bank coins. Completing the event also clears the flag (resetSeason).
-      const anchor = scheduledStartAt ? new Date(scheduledStartAt).getTime() : Date.now();
+      // Never anchor in the past: a manual start has no scheduled time at all, and a
+      // cron-started event can be days late, which would issue a grant that expires
+      // before anyone can claim it.
+      const scheduled = scheduledStartAt ? new Date(scheduledStartAt).getTime() : 0;
+      const anchor = Math.max(scheduled, Date.now());
       const expiresAt = new Date(anchor - 24 * 60 * 60 * 1000 + 7 * 24 * 60 * 60 * 1000).toISOString();
       await Promise.all([
         // Flagged on accounts (Tier 1), not players, so unregistered/pending guests

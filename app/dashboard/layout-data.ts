@@ -140,14 +140,17 @@ async function claimGrants(
     const registerAmount = pendingRegister ? REGISTRATION_BONUS : 0;
     const total = startAmount + weeklyAmount + registerAmount;
 
+    // Only the crediting case writes crl_coins. Sweeping an expired flag must not
+    // write back the balance this render read, or a bet settling in between gets
+    // clobbered with a stale value.
+    const clearFlags = {
+      coin_grant_pending_start: false,
+      coin_grant_pending_weekly: false,
+      coin_grant_pending_register: false,
+    };
     await supabaseAdmin
       .from("accounts")
-      .update({
-        crl_coins: (accountCoins.crl_coins ?? 0) + total,
-        coin_grant_pending_start: false,
-        coin_grant_pending_weekly: false,
-        coin_grant_pending_register: false,
-      })
+      .update(total > 0 ? { crl_coins: (accountCoins.crl_coins ?? 0) + total, ...clearFlags } : clearFlags)
       .eq("id", accountCoins.id);
     grants.coinGrantStart = startAmount;
     grants.coinGrantWeekly = weeklyAmount;
