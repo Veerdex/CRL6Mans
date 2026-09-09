@@ -187,6 +187,7 @@ function fmtLocalDT(localValue: string): string {
 
 type FormState = {
   name: string;
+  overview: string;
   joinMode: JoinMode;
   teamAssignment: TeamAssignment;
   minTeams: string;
@@ -215,6 +216,7 @@ type FormState = {
 
 const EMPTY_FORM: FormState = {
   name: "",
+  overview: "",
   joinMode: "players",
   teamAssignment: "snake_draft",
   minTeams: FORMAT_TEAM_DEFAULTS.single_elimination.min,
@@ -340,6 +342,7 @@ export function TournamentManager({
 
     return {
       name: form.name,
+      overview: form.overview,
       min_teams: parseInt(form.minTeams) || 0,
       team_limit: form.teamLimit ? parseInt(form.teamLimit) || null : null,
       join_mode: form.joinMode,
@@ -450,6 +453,7 @@ export function TournamentManager({
 
     setForm({
       name: t.name,
+      overview: t.overview ?? "",
       joinMode: t.join_mode,
       teamAssignment: t.team_assignment ?? "snake_draft",
       minTeams: t.min_teams ? String(t.min_teams) : "",
@@ -524,6 +528,17 @@ export function TournamentManager({
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Summer League 2026"
+            />
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className={labelCls}>Overview</label>
+            <textarea
+              rows={6}
+              className={`${inputCls} font-mono leading-relaxed resize-y`}
+              value={form.overview}
+              onChange={(e) => setForm({ ...form, overview: e.target.value })}
+              placeholder={"Markdown. Shows at the top of the tournament's Overview tab.\n\n## Welcome\n\n- **Entry:** free\n- **Prize pool:** 3000 coins"}
             />
           </div>
 

@@ -19,6 +19,7 @@ export type TeamAssignment = "snake_draft" | "auto_balance";
 
 export type TournamentInput = {
   name: string;
+  overview: string | null;
   min_teams: number;
   team_limit: number | null;
   join_mode: JoinMode;
@@ -159,6 +160,7 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
   return {
     value: {
       name,
+      overview: input.overview?.trim() || null,
       min_teams: minTeams,
       team_limit: teamLimit || null,
       join_mode: input.join_mode,
@@ -208,6 +210,7 @@ export async function createTournament(input: TournamentInput) {
   if (dbError) return { error: dbError.message };
 
   revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard");
   return { ok: true, message: `Tournament "${value!.name}" scheduled.` };
 }
 
@@ -228,7 +231,10 @@ export async function updateTournament(id: string, input: TournamentInput) {
     .eq("id", id);
   if (dbError) return { error: dbError.message };
 
+  // The public detail view is a search param on /dashboard, not its own route,
+  // so without this an edited overview stays stale on the Overview tab.
   revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard");
   return { ok: true, message: "Tournament updated." };
 }
 

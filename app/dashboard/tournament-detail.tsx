@@ -1,4 +1,6 @@
 import Link from "next/link";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { getTeamSignupView } from "./team-signup-data";
 import { TeamSignupPanel } from "./team-signup-panel";
@@ -40,6 +42,30 @@ const LEGACY_STAGE_KEY: Partial<Record<StageSlotKey, string>> = {
   double_elimination: "bracket",
 };
 
+// Trimmed from the rules page's map: same typography, without the blockquote
+// styled as a red rules warning, which would be surprising in a blurb.
+const overviewMarkdown: Components = {
+  h1: ({ children }) => <h1 className="text-xl font-bold text-white mt-6 first:mt-0 mb-2">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-lg font-bold text-white mt-6 first:mt-0 mb-2">{children}</h2>,
+  h3: ({ children }) => <h3 className="font-semibold text-white mt-4 first:mt-0 mb-1">{children}</h3>,
+  p: ({ children }) => <p className="leading-relaxed mb-3 last:mb-0">{children}</p>,
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">{children}</a>
+  ),
+  ul: ({ children }) => <ul className="list-disc list-inside space-y-1 mb-3 last:mb-0">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 mb-3 last:mb-0">{children}</ol>,
+  strong: ({ children }) => <strong className="text-white">{children}</strong>,
+  code: ({ children }) => <code className="bg-zinc-800 px-1 rounded">{children}</code>,
+  hr: () => <hr className="border-zinc-800 my-4" />,
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-zinc-700 pl-3 text-zinc-400 mb-3 last:mb-0 [&>p]:mb-0">{children}</blockquote>
+  ),
+  table: ({ children }) => <table className="w-full text-sm border-collapse mb-3 last:mb-0">{children}</table>,
+  tr: ({ children }) => <tr className="border-b border-zinc-800">{children}</tr>,
+  th: ({ children }) => <th className="py-2 pr-4 text-left font-medium text-zinc-400">{children}</th>,
+  td: ({ children }) => <td className="py-2 pr-4 text-zinc-300">{children}</td>,
+};
+
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "rules", label: "Rules" },
@@ -72,7 +98,7 @@ export async function TournamentDetailView({
     supabaseAdmin
       .from("tournaments")
       .select(
-        "id, name, status, join_mode, team_assignment, signups_open, signups_closed, draft_open_at, draft_close_at, draft_start_at, season_start_at, season_format, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, min_mmr_2v2, min_mmr_3v3, summary"
+        "id, name, overview, status, join_mode, team_assignment, signups_open, signups_closed, draft_open_at, draft_close_at, draft_start_at, season_start_at, season_format, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, min_mmr_2v2, min_mmr_3v3, summary"
       )
       .eq("id", tournamentId)
       .maybeSingle(),
@@ -195,6 +221,14 @@ export async function TournamentDetailView({
 
       {tab === "overview" && (
         <div className="space-y-4">
+          {t.overview?.trim() && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 text-[15px] text-zinc-300">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={overviewMarkdown}>
+                {t.overview}
+              </ReactMarkdown>
+            </div>
+          )}
+
           {isCurrentActive && (
             <div className="bg-gradient-to-tr from-[#744512] to-[#1c1b56] border border-indigo-800/40 rounded-xl p-5 space-y-2">
               <div className="flex items-center gap-2">
