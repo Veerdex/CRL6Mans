@@ -5,9 +5,10 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LogoutButton } from "./logout-button";
 import { NavLeafContent, PodiumGlowIcon, PODIUM_HREF, podiumTabClass, podiumLabelClass } from "./podium-glow";
+import { NavAlertBadge } from "./nav-alert-badge";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
-type Item = { href: string; label: string; icon: React.ReactNode };
+type Item = { href: string; label: string; icon: React.ReactNode; alert?: boolean };
 
 type Props = {
   items: Item[];
@@ -71,7 +72,10 @@ export default function MobileNav({ items, username, displayName, avatarDiscordI
               }`}
             >
               {podium ? <PodiumGlowIcon>{item.icon}</PodiumGlowIcon> : item.icon}
-              <span className={`truncate max-w-full px-1 ${podium ? podiumLabelClass : ""}`}>{item.label}</span>
+              <span className="flex items-center justify-center gap-1 max-w-full min-w-0 px-1">
+                <span className={`truncate ${podium ? podiumLabelClass : ""}`}>{item.label}</span>
+                {item.alert && <NavAlertBadge size="sm" />}
+              </span>
             </Link>
           );
         })}
@@ -91,7 +95,13 @@ export default function MobileNav({ items, username, displayName, avatarDiscordI
               <line x1="3" y1="6" x2="21" y2="6" />
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
-            <span>More</span>
+            <span className="flex items-center gap-1">
+              More
+              {/* Settings is last in the nav order, so its badge is almost always
+                  inside this sheet — the button has to carry it or the alert is
+                  invisible on the surface most players use. */}
+              {overflow.some((i) => i.alert) && <NavAlertBadge size="sm" />}
+            </span>
           </button>
         )}
       </nav>

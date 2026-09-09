@@ -3,6 +3,7 @@ import { getNavVisuals, type NavVisuals } from "@/app/lib/sponsors-public";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { getNameDecorations } from "@/app/lib/patreon-entitlements";
 import { type NavTabOverrides } from "@/app/lib/nav-tabs";
+import { needsPlatformAccountClaim } from "@/app/lib/platform-account-gate";
 
 // ── The switch ────────────────────────────────────────────────────────────────
 // How the dashboard chrome fetches its data. Change it here, in code — there is
@@ -58,6 +59,7 @@ export type DashboardChromeData = CoinGrants & {
   hasTeams: boolean;
   hasPodium: boolean;
   hasSponsors: boolean;
+  needsPlatformClaim: boolean;
   decorations: Awaited<ReturnType<typeof getNameDecorations>>;
 };
 
@@ -194,6 +196,22 @@ async function fetchHasSponsors(): Promise<boolean> {
   return (count ?? 0) > 0;
 }
 
+// Drives the red badge on the Settings tab. Only approved players can claim a
+// platform account at all, so nobody else is ever nagged about one.
+async function fetchNeedsPlatformClaim(
+  userId: string,
+  playerInfo: Awaited<ReturnType<typeof getPlayerInfo>>,
+): Promise<boolean> {
+  if (playerInfo.status !== "approved" || playerInfo.isGuest) return false;
+  const { data: player } = await supabaseAdmin
+    .from("players")
+    .select("id")
+    .eq("discord_id", userId)
+    .single();
+  if (!player) return false;
+  return needsPlatformAccountClaim(player.id, new Date());
+}
+
 // Podium nav only shows when there's a non-hidden completed event with a champion.
 async function fetchHasPodium(): Promise<boolean> {
   const [{ data: podSeasons }, { data: podTournaments }] = await Promise.all([
@@ -230,10 +248,11 @@ async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
   ]);
   const tSettings = perfNow();
 
-  const [hasTeams, hasPodium, hasSponsors] = await Promise.all([
+  const [hasTeams, hasPodium, hasSponsors, needsPlatformClaim] = await Promise.all([
     fetchHasTeams(settings.activeTournamentId),
     fetchHasPodium(),
     fetchHasSponsors(),
+    fetchNeedsPlatformClaim(userId, playerInfo),
   ]);
   const tNav = perfNow();
 
@@ -250,7 +269,7 @@ async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
     );
   }
 
-  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasPodium, hasSponsors, decorations };
+  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasPodium, hasSponsors, needsPlatformClaim, decorations };
 }
 
 async function loadBulk(userId: string): Promise<DashboardChromeData> {
@@ -272,6 +291,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     hasTeams,
     hasPodium,
     hasSponsors,
+    needsPlatformClaim,
     decorations,
   ] = await Promise.all([
     playerInfoPromise,
@@ -284,6 +304,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     settingsPromise.then((s) => fetchHasTeams(s.activeTournamentId)),
     fetchHasPodium(),
     fetchHasSponsors(),
+    playerInfoPromise.then((info) => fetchNeedsPlatformClaim(userId, info)),
     getNameDecorations(),
   ]);
 
@@ -291,7 +312,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     console.log(`[layout timing] mode=bulk · total ${(perfNow() - t0).toFixed(0)}ms`);
   }
 
-  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasPodium, hasSponsors, decorations };
+  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasPodium, hasSponsors, needsPlatformClaim, decorations };
 }
 
 export function loadDashboardChrome(userId: string): Promise<DashboardChromeData> {

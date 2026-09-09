@@ -10,6 +10,7 @@ import { NotificationButton } from "@/app/dashboard/notification-button";
 import { NotificationPrefsForm } from "./notification-prefs-form";
 import { DisplayNameForm } from "./display-name-form";
 import { PlatformAccountsSection, type ClaimablePlatform, type PlatformAccountRecord } from "./platform-accounts-form";
+import { needsPlatformAccountClaim } from "@/app/lib/platform-account-gate";
 import { PatreonConnectCard, type PatreonInfo, type PatreonBenefitRow } from "./patreon-connect-card";
 import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
 import { normalizeGlintColors } from "@/app/lib/name-glint";
@@ -94,8 +95,10 @@ export default async function SettingsPage({
     switch: null,
   };
 
+  let claimAlert = false;
+
   if (isApproved && player) {
-    const [{ data: pendingRow }, { data: rejectedRow }, { data: platformAccountRows }] = await Promise.all([
+    const [{ data: pendingRow }, { data: rejectedRow }, { data: platformAccountRows }, needsClaim] = await Promise.all([
       supabaseAdmin
         .from("player_edit_requests")
         .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, created_at")
@@ -115,7 +118,10 @@ export default async function SettingsPage({
         .select("id, platform, platform_account_id, claimed_display_name, claimed_tracker_url, verification_status, admin_note")
         .eq("player_id", player.id)
         .order("created_at", { ascending: false }),
+      needsPlatformAccountClaim(player.id, new Date()),
     ]);
+
+    claimAlert = needsClaim;
 
     pending = pendingRow
       ? {
@@ -215,7 +221,7 @@ export default async function SettingsPage({
 
       {isApproved && player && (
         <>
-          <PlatformAccountsSection accounts={platformAccounts} />
+          <PlatformAccountsSection accounts={platformAccounts} alert={claimAlert} />
 
           <SettingsForm
             current={{

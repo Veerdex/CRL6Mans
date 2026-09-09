@@ -7,6 +7,7 @@ import NavLink from "./nav-link";
 import { TopNav, type TopNavEntry } from "./top-nav";
 import { SidebarNavGroup } from "./sidebar-nav-group";
 import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
+import { NavAlertBadge } from "./nav-alert-badge";
 import { applyNavTabOverrides } from "@/app/lib/nav-tabs";
 import { AppTitle } from "./app-title";
 import MobileNav from "./mobile-nav";
@@ -23,7 +24,7 @@ import { NotificationPrompt } from "./notification-prompt";
 import { LogoutButton } from "./logout-button";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
-type NavItem = { href: string; label: string; icon: React.ReactNode };
+type NavItem = { href: string; label: string; icon: React.ReactNode; alert?: boolean };
 
 const icon = (d: string, key: string) => (
   <svg key={key} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -228,6 +229,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     hasTeams,
     hasPodium,
     hasSponsors,
+    needsPlatformClaim,
     decorations,
   } = await loadDashboardChrome(userId);
   // The bundle resolves before this runs, so a banned account pays for a few
@@ -293,9 +295,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // While a tournament is running, the "Season" tab stands in for it —
   // no separate tournament nav entry, just a relabel driven by the same
   // global flag that distinguishes a tournament-run season from a manual one.
-  const navMap: Record<string, NavItem> = activeTournamentId
-    ? { ...ALL_NAV, season: { ...ALL_NAV.season, label: "Tournament" } }
-    : ALL_NAV;
+  const navMap: Record<string, NavItem> = {
+    ...ALL_NAV,
+    ...(activeTournamentId ? { season: { ...ALL_NAV.season, label: "Tournament" } } : {}),
+    // Settings is where the claim form lives, so the badge rides its tab.
+    ...(needsPlatformClaim ? { settings: { ...ALL_NAV.settings, alert: true } } : {}),
+  };
 
   const BOTTOM_KEYS = new Set(["settings", "admin", "testreplay"]);
   const mainNavKeys = navKeys.filter((k) => !BOTTOM_KEYS.has(k));
@@ -367,6 +372,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <NavLink key={item.href} href={item.href}>
                 {item.icon}
                 {item.label}
+                {item.alert && <NavAlertBadge />}
               </NavLink>
             ))}
           </div>
@@ -473,6 +479,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <NavLink key={item.href} href={item.href}>
                 {item.icon}
                 {item.label}
+                {item.alert && <NavAlertBadge />}
               </NavLink>
             ))}
           </div>

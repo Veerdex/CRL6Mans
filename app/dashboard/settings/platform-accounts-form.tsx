@@ -36,15 +36,19 @@ const REPLAY_PLATFORM_LABELS: Record<string, string> = {
 
 export function PlatformAccountsSection({
   accounts,
+  alert = false,
 }: {
   accounts: Record<ClaimablePlatform, PlatformAccountRecord | null>;
+  alert?: boolean;
 }) {
   return (
     <div className="mb-6 space-y-3">
       <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Platform Accounts</p>
       <p className="text-xs text-zinc-500">
-        Claim the platform account you play on. An admin verifies each claim before it counts toward
-        match identity checks — a claim alone does not certify anything.
+        Claiming ties the name you appear under in replays to your profile — that&apos;s how your
+        scoreboard stats get credited to you, and a verified account is required before you can join
+        a draft, a tournament, or a team. An admin reviews every claim, so submitting one isn&apos;t
+        the last step.
       </p>
 
       <div className="space-y-1.5">
@@ -53,7 +57,7 @@ export function PlatformAccountsSection({
         ))}
       </div>
 
-      <UnifiedClaimCard />
+      <UnifiedClaimCard alert={alert} />
     </div>
   );
 }
@@ -133,7 +137,7 @@ function PlatformStatusRow({
   );
 }
 
-function UnifiedClaimCard() {
+function UnifiedClaimCard({ alert }: { alert: boolean }) {
   const router = useRouter();
   const [candidates, setCandidates] = useState<ClaimReplayCandidate[] | null>(null);
   const [replayPath, setReplayPath] = useState<string | null>(null);
@@ -194,7 +198,11 @@ function UnifiedClaimCard() {
   }
 
   return (
-    <div className="p-4 bg-zinc-800 border border-zinc-700 rounded-lg space-y-3">
+    <div
+      className={`p-4 bg-zinc-800 border rounded-lg space-y-3 ${
+        alert ? "claim-alert-glow border-red-700" : "border-zinc-700"
+      }`}
+    >
       <p className="text-sm font-semibold text-zinc-200">Claim a Platform Account</p>
       <p className="text-xs text-zinc-500">
         Upload a .replay file from a match you played, then pick your name from the scoreboard below.
