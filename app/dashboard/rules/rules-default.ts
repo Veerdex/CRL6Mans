@@ -5,7 +5,6 @@ export const DEFAULT_RULES_MARKDOWN = `# Section 1 — Basic Information
 | **Default Server** | US West (Central requires all 6 players + admin approval) |
 | **Gamemode** | 3v3 |
 | **Allowed Maps** | Any standard map |
-| **Streamed Match Maps** | Boostfield Mall, Salty Shores (all variants), Aquadome, Beckwith Park, Estadio Vida |
 
 Match count, best-of length, and the season schedule vary by tournament — see that tournament's Format tab. Every time on the site is shown in your own local timezone.
 
