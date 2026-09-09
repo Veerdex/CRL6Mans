@@ -257,7 +257,7 @@ function UnifiedClaimCard() {
 
           <div className="space-y-1">
             <label htmlFor="claim_tracker_url" className="block text-xs font-medium text-zinc-400">
-              Tracker URL
+              Tracker URL for this account
             </label>
             <input
               id="claim_tracker_url"
