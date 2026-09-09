@@ -22,7 +22,7 @@ import { CoinGrantToast } from "./coin-grant-toast";
 import { TeamCutToast } from "./team-cut-toast";
 import { NotificationPrompt } from "./notification-prompt";
 import { LogoutButton } from "./logout-button";
-import { PlayerAvatar } from "@/app/dashboard/player-avatar";
+import { OwnProfileButton } from "./own-profile-button";
 
 type NavItem = { href: string; label: string; icon: React.ReactNode; alert?: boolean };
 
@@ -391,9 +391,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {/* Bottom bar — desktop only */}
         <footer className="app-bottombar hidden md:flex items-center justify-between gap-4 px-4 h-12 bg-zinc-900 border-t border-zinc-800 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <PlayerAvatar discordId={session?.userId ?? null} avatar={session?.avatar ?? null} border={ownBorder} className="w-7 h-7" alt="avatar" />
-            <span className="text-sm text-zinc-300 truncate">{playerInfo.displayName ?? session?.username ?? "Unknown"}</span>
+            <OwnProfileButton
+              discordId={session?.userId ?? null}
+              avatar={session?.avatar ?? null}
+              border={ownBorder}
+              name={playerInfo.displayName ?? session?.username ?? "Unknown"}
+              className="flex items-center gap-2 min-w-0"
+              avatarClassName="w-7 h-7"
+              decorations={nameDecorations}
+              clickable={status === "approved" && !isGuest}
+            />
             <LogoutButton className="shrink-0" />
           </div>
           <p className="hidden lg:block flex-1 text-center text-[9px] text-zinc-600 truncate px-2">
@@ -486,11 +493,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
         )}
 
         <div className="p-3 border-t border-zinc-800 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3 min-w-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <PlayerAvatar discordId={session?.userId ?? null} avatar={session?.avatar ?? null} border={ownBorder} className="w-8 h-8" alt="avatar" />
-            <span className="text-sm text-zinc-300 truncate">{playerInfo.displayName ?? session?.username ?? "Unknown"}</span>
-          </div>
+          <OwnProfileButton
+            discordId={session?.userId ?? null}
+            avatar={session?.avatar ?? null}
+            border={ownBorder}
+            name={playerInfo.displayName ?? session?.username ?? "Unknown"}
+            className="flex items-center gap-3 min-w-0"
+            avatarClassName="w-8 h-8"
+            decorations={nameDecorations}
+            clickable={status === "approved" && !isGuest}
+          />
           <LogoutButton className="shrink-0" />
         </div>
 
