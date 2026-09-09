@@ -220,6 +220,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     playerInfo,
     coinGrantStart,
     coinGrantWeekly,
+    coinGrantRegister,
     teamSignupMessage,
     settings,
     hasPlayers,
@@ -384,7 +385,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             {content}
           </div>
         </main>
-        <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
+        <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} registerAmount={coinGrantRegister} />
         <TeamCutToast message={teamSignupMessage} />
         {status === "approved" && !isGuest && <NotificationPrompt />}
 
@@ -529,7 +530,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           {content}
         </div>
       </main>
-      <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} />
+      <CoinGrantToast startAmount={coinGrantStart} weeklyAmount={coinGrantWeekly} registerAmount={coinGrantRegister} />
       <TeamCutToast message={teamSignupMessage} />
       {status === "approved" && !isGuest && <NotificationPrompt />}
 

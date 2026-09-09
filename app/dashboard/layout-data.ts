@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { getNameDecorations } from "@/app/lib/patreon-entitlements";
 import { type NavTabOverrides } from "@/app/lib/nav-tabs";
 import { needsPlatformAccountClaim } from "@/app/lib/platform-account-gate";
+import { REGISTRATION_BONUS, WEEKLY_GRANT } from "@/app/lib/coins";
 
 // ── The switch ────────────────────────────────────────────────────────────────
 // How the dashboard chrome fetches its data. Change it here, in code — there is
@@ -46,6 +47,7 @@ type Settings = {
 type CoinGrants = {
   coinGrantStart: number;
   coinGrantWeekly: number;
+  coinGrantRegister: number;
   teamSignupMessage: string | null;
 };
 
@@ -102,7 +104,7 @@ async function claimGrants(
   userId: string,
   playerInfo: Awaited<ReturnType<typeof getPlayerInfo>>,
 ): Promise<CoinGrants> {
-  const blank: CoinGrants = { coinGrantStart: 0, coinGrantWeekly: 0, teamSignupMessage: null };
+  const blank: CoinGrants = { coinGrantStart: 0, coinGrantWeekly: 0, coinGrantRegister: 0, teamSignupMessage: null };
   if (playerInfo.status === "rejected" || playerInfo.status === "banned" || playerInfo.isGuest) {
     return blank;
   }
@@ -111,35 +113,45 @@ async function claimGrants(
 
   const { data: accountCoins } = await supabaseAdmin
     .from("accounts")
-    .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly")
+    .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly, coin_grant_pending_register")
     .eq("discord_id", userId)
     .single();
 
   const pendingStart = accountCoins?.coin_grant_pending_start ?? false;
   const pendingWeekly = accountCoins?.coin_grant_pending_weekly ?? false;
+  const pendingRegister = accountCoins?.coin_grant_pending_register ?? false;
 
-  if ((pendingStart || pendingWeekly) && accountCoins) {
+  if ((pendingStart || pendingWeekly || pendingRegister) && accountCoins) {
     const { data: ls } = await supabaseAdmin
       .from("league_settings")
-      .select("pending_start_coin_amount")
+      .select("pending_start_coin_amount, start_grant_expires_at, weekly_grant_expires_at")
       .single();
 
-    const startAmount = pendingStart ? ((ls?.pending_start_coin_amount as number | null) ?? 0) : 0;
-    const weeklyAmount = pendingWeekly ? 250 : 0;
-    const total = startAmount + weeklyAmount;
+    // An expired flag is cleared without crediting rather than left set: a stale
+    // flag is indistinguishable from the next event's grant, and the whole point
+    // of the window is that missing it costs you the coins.
+    const now = Date.now();
+    const expired = (at: unknown) => !!at && new Date(at as string).getTime() <= now;
 
-    if (total > 0) {
-      await supabaseAdmin
-        .from("accounts")
-        .update({
-          crl_coins: (accountCoins.crl_coins ?? 0) + total,
-          coin_grant_pending_start: false,
-          coin_grant_pending_weekly: false,
-        })
-        .eq("id", accountCoins.id);
-      grants.coinGrantStart = startAmount;
-      grants.coinGrantWeekly = weeklyAmount;
-    }
+    const startAmount = pendingStart && !expired(ls?.start_grant_expires_at)
+      ? ((ls?.pending_start_coin_amount as number | null) ?? 0)
+      : 0;
+    const weeklyAmount = pendingWeekly && !expired(ls?.weekly_grant_expires_at) ? WEEKLY_GRANT : 0;
+    const registerAmount = pendingRegister ? REGISTRATION_BONUS : 0;
+    const total = startAmount + weeklyAmount + registerAmount;
+
+    await supabaseAdmin
+      .from("accounts")
+      .update({
+        crl_coins: (accountCoins.crl_coins ?? 0) + total,
+        coin_grant_pending_start: false,
+        coin_grant_pending_weekly: false,
+        coin_grant_pending_register: false,
+      })
+      .eq("id", accountCoins.id);
+    grants.coinGrantStart = startAmount;
+    grants.coinGrantWeekly = weeklyAmount;
+    grants.coinGrantRegister = registerAmount;
   }
 
   if (playerInfo.status === "approved") {

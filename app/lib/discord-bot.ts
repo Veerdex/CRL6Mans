@@ -1561,12 +1561,23 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   // Discord /confirm command, since all three call this same function.
   const activeTournamentId = settings?.active_tournament_id as string | null;
   let isTestRun = !!settings?.is_test_season;
+  let adminMinTeams = 0;
+  let scheduledStartAt: string | null = null;
   if (activeTournamentId) {
     const { data: t } = await supabaseAdmin
-      .from("tournaments").select("is_test").eq("id", activeTournamentId).single();
+      .from("tournaments").select("is_test, min_teams, season_start_at").eq("id", activeTournamentId).single();
     isTestRun = !!t?.is_test;
+    adminMinTeams = (t?.min_teams as number | null) ?? 0;
+    scheduledStartAt = (t?.season_start_at as string | null) ?? null;
   }
-  if (!isTestRun) {
+
+  // An under-filled event gets no start grant. The preset minimum above already
+  // blocks the season outright, but the admin's own tournaments.min_teams is only
+  // enforced by the Activate button (activateTournament) — the cron activates via
+  // activateTournamentRuntime and skips that check — so a short tournament can
+  // reach here and must not pay out.
+  const grantMinTeams = Math.max(min, adminMinTeams);
+  if (!isTestRun && numTeams >= grantMinTeams) {
     try {
       const { count: participantCount } = await supabaseAdmin
         .from("players")
@@ -1574,13 +1585,23 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
         .eq("status", "approved")
         .not("team_id", "is", null);
       const grant = (participantCount ?? 0) * 100;
+      // Claim window: a week from 24h before the event starts, so players have a
+      // day of lead time before the first matches. Unclaimed by then and it's
+      // dropped — the point is to make people open the site during the event, not
+      // to bank coins. Completing the event also clears the flag (resetSeason).
+      const anchor = scheduledStartAt ? new Date(scheduledStartAt).getTime() : Date.now();
+      const expiresAt = new Date(anchor - 24 * 60 * 60 * 1000 + 7 * 24 * 60 * 60 * 1000).toISOString();
       await Promise.all([
         // Flagged on accounts (Tier 1), not players, so unregistered/pending guests
         // get the start grant too — only "rejected" is excluded, matching the
         // wagering gate (accounts.status !== "rejected").
         supabaseAdmin.from("accounts").update({ coin_grant_pending_start: true }).in("status", ["unregistered", "pending", "approved"]),
         supabaseAdmin.from("league_settings")
-          .update({ pending_start_coin_amount: grant, last_coin_grant_at: new Date().toISOString() })
+          .update({
+            pending_start_coin_amount: grant,
+            start_grant_expires_at: expiresAt,
+            last_coin_grant_at: new Date().toISOString(),
+          })
           .not("id", "is", null),
       ]);
     } catch { /* best-effort */ }
@@ -1897,7 +1918,9 @@ async function adminWipe(userId: string, confirm: string, clearHistory: boolean)
     draft_open: false, draft_signups_closed: false, draft_active: false, season_active: false,
     is_test_season: false, num_teams: 0, current_pick: 0, draft_phase: null,
     nominated_player_id: null, current_bid: null, current_bid_team_id: null, current_bid_time: null,
-    pick_deadline: null, pending_start_coin_amount: 0, updated_at: new Date().toISOString(),
+    pick_deadline: null, pending_start_coin_amount: 0,
+    start_grant_expires_at: null, weekly_grant_expires_at: null,
+    updated_at: new Date().toISOString(),
   }).not("id", "is", null);
 
   if (clearHistory) await supabaseAdmin.from("seasons").delete().not("id", "is", null);

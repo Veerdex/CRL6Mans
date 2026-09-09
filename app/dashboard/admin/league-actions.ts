@@ -617,6 +617,8 @@ export async function resetSeason() {
     current_bid_time: null,
     pick_deadline: null,
     pending_start_coin_amount: 0,
+    start_grant_expires_at: null,
+    weekly_grant_expires_at: null,
     updated_at: new Date().toISOString(),
   }).not("id", "is", null);
 

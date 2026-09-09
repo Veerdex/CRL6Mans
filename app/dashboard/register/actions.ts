@@ -68,7 +68,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
   // existing Tier 2 registration image
   const { data: account } = await supabaseAdmin
     .from("accounts")
-    .select("id, status, kick_reason, kicked_until")
+    .select("id, status, kick_reason, kicked_until, registration_bonus_granted")
     .eq("discord_id", session.userId)
     .single();
 
@@ -156,9 +156,22 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     await deleteCollegeIdImage(existingPending?.college_image_url);
   }
 
+  // Registering is worth REGISTRATION_BONUS on top of the signup balance, once
+  // ever — a rejected player can re-submit this form, so the permanent flag is
+  // what stops it being farmed. The pending flag hands the credit to claimGrants
+  // on the next dashboard render (which is where this form redirects), so the
+  // player sees the same toast every other grant uses.
+  const firstRegistration = !account.registration_bonus_granted;
+
   const { error: statusError } = await supabaseAdmin
     .from("accounts")
-    .update({ status: "pending", updated_at: new Date().toISOString() })
+    .update({
+      status: "pending",
+      ...(firstRegistration
+        ? { registration_bonus_granted: true, coin_grant_pending_register: true }
+        : {}),
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", account.id);
 
   if (statusError) {

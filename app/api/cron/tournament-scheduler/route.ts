@@ -105,7 +105,7 @@ export async function GET(request: Request) {
     }
   }
 
-  // Weekly 1000-coin pending grant during a manual season (no active tournament).
+  // Weekly 250-coin pending grant during a manual season (no active tournament).
   // Tournaments only get the one-time start grant — no weekly coins.
   // Skipped entirely for test seasons.
   if (settings?.season_active && !activeId && !settings?.is_test_season) {
@@ -119,9 +119,16 @@ export async function GET(request: Request) {
           .from("accounts")
           .update({ coin_grant_pending_weekly: true })
           .in("status", ["unregistered", "pending", "approved"]);
+        // Expires when the next weekly is due, so a week away is a week missed
+        // rather than a week banked. No 24h anchor here — that offset exists to
+        // give lead time before an event's first matches, which is a start-grant
+        // concern only.
         await supabaseAdmin
           .from("league_settings")
-          .update({ last_coin_grant_at: new Date().toISOString() })
+          .update({
+            last_coin_grant_at: new Date().toISOString(),
+            weekly_grant_expires_at: new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          })
           .not("id", "is", null);
         fired.push("weekly_coins_pending");
       } catch { /* best-effort */ }
