@@ -133,7 +133,7 @@ unregistered → (submits register form) → pending → (admin approves) → ap
 
 **Team size** (`tournaments.team_size`, 1–3; seasons are always 3):
 - Every consumer reads `league_settings.team_size` through `app/lib/team-size.ts` (`normalizeTeamSize` / `resolveTeamSize`) — never a local `?? 3`. `activateTournamentRuntime` mirrors it in, and every tournament teardown resets it to `DEFAULT_TEAM_SIZE` so a 1v1 can't size the next season's draft.
-- Captains are seated before pick 0, so a draft is `num_teams × (team_size - 1)` picks. `getTeamNumberForPick` is pure snake math; pick order is set by which team number each captain is assigned.
+- Pick order lives in `app/lib/draft-order.ts` — a pure leaf module with no Supabase import, so `node --test` can load it (`npm run test:draft-order`). Captains are seated before pick 0, so a draft is `totalDraftPicks` = `num_teams × (team_size - 1)`. `getTeamNumberForPick` is fixed snake math; the order is really decided by `captainSeatOrder`, which maps RV rank onto team slots.
 - 3v3 has two pick rounds and the snake balances them, so the highest-RV captain picks first. 2v2 has a single round with nothing to reverse against, so the order flips and the **worst** captain picks first.
 - **1v1 has no draft at all** — a team is its own captain. Both `sanitize()` in `admin/tournament-actions.ts` and `execStartDraft` reject it.
 

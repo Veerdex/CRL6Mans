@@ -4,14 +4,9 @@ import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { normalizeTeamSize } from "@/app/lib/team-size";
+import { getTeamNumberForPick, totalDraftPicks } from "@/app/lib/draft-order";
 import { DraftLive } from "./draft-live";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
-
-function getTeamNumberForPick(pickIndex: number, numTeams: number): number {
-  const pickInRound = pickIndex % numTeams;
-  const roundIndex = Math.floor(pickIndex / numTeams);
-  return roundIndex % 2 === 0 ? numTeams - pickInRound : pickInRound + 1;
-}
 
 const rankValue = playerRatingFromRow;
 
@@ -36,8 +31,7 @@ export default async function DraftPage() {
   const numTeams: number = settings.num_teams ?? 0;
   const teamSize = normalizeTeamSize(settings.team_size);
   const currentPick: number = settings.current_pick ?? 0;
-  // Captains are seated before pick 0, so each team has team_size - 1 left to fill.
-  const totalPicks = numTeams * (teamSize - 1);
+  const totalPicks = totalDraftPicks(numTeams, teamSize);
   const callerId = session?.userId ?? "";
 
   const [{ data: teamsRaw }, { data: drafted }, { data: available }, { data: vp }, userIsAdmin] = await Promise.all([

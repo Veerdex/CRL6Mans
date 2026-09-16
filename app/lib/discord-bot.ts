@@ -18,6 +18,7 @@ import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "./team-size";
+import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft-order";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "./solo-team";
 import { notifyMatchChannel } from "./match-notifications";
 import { createClip } from "./clip-submit";
@@ -754,12 +755,6 @@ export async function deleteMatchChannels(): Promise<number> {
   return deleted;
 }
 
-// Snake draft: picks go N, N-1, ..., 1, 1, 2, ..., N, ...
-function getTeamNumberForPick(pickIndex: number, numTeams: number): number {
-  const pickInRound = pickIndex % numTeams;
-  const roundIndex = Math.floor(pickIndex / numTeams);
-  return roundIndex % 2 === 0 ? numTeams - pickInRound : pickInRound + 1;
-}
 
 // ── Season rating calculator ──────────────────────────────────────────────────
 // Model: crl-final-rating-v1. Pure math lives in app/lib/rating.ts (shared
@@ -968,14 +963,8 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   // can't prevent draft_active from being set.
 
   // Pick order is set here, by which team number a captain lands on —
-  // getTeamNumberForPick is pure snake math and never changes.
-  //
-  // Multi-round (3v3): highest-RV captain takes the highest team number, so they
-  // pick first in round 1 and last in round 2, which is what balances the snake.
-  // Single-round (2v2): there is no reversal round to balance against, so the
-  // order runs the other way and the *worst* captain picks first — they take the
-  // lowest team number's opposite end, Team N, which is pick 0.
-  const captainTeams = pickRounds > 1 ? [...teamsToUse].reverse() : [...teamsToUse];
+  // getTeamNumberForPick is pure snake math and never changes. See draft-order.ts.
+  const captainTeams = captainSeatOrder(teamsToUse, pickRounds);
 
   // Build captain assignments before any awaits
   const captainLines: string[] = [];
@@ -1422,9 +1411,7 @@ export async function execEndDraft(): Promise<{ ok: boolean; message: string }> 
 type PickSettings = { num_teams: number; team_size: number; current_pick: number; draft_channel_id: string | null };
 
 async function completePick(s: PickSettings, teamId: string, playerId: string): Promise<{ ok: boolean; message: string }> {
-  // Every captain is seated before the first pick, so a team only has
-  // team_size - 1 slots left to fill.
-  const totalPicks = s.num_teams * (normalizeTeamSize(s.team_size) - 1);
+  const totalPicks = totalDraftPicks(s.num_teams, normalizeTeamSize(s.team_size));
 
   const [{ data: player }, { data: team }] = await Promise.all([
     supabaseAdmin.from("players").select("id, username, discord_id").eq("id", playerId).single(),
@@ -1493,7 +1480,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
   const teamSize = normalizeTeamSize(settings.team_size);
   const currentPick: number = settings.current_pick ?? 0;
   const channelId: string | null = settings.draft_channel_id ?? null;
-  const totalPicks = numTeams * (teamSize - 1);
+  const totalPicks = totalDraftPicks(numTeams, teamSize);
 
   if (currentPick >= totalPicks) {
     await supabaseAdmin.from("league_settings").update({
@@ -1783,7 +1770,7 @@ async function pickPlayer(userId: string, playerUsername: string) {
   const numTeams: number = settings.num_teams;
   const teamSize = normalizeTeamSize(settings.team_size);
   const currentPick: number = settings.current_pick ?? 0;
-  if (currentPick >= numTeams * (teamSize - 1)) return reply("✅ Draft is already complete.");
+  if (currentPick >= totalDraftPicks(numTeams, teamSize)) return reply("✅ Draft is already complete.");
 
   const currentTeamNum = getTeamNumberForPick(currentPick, numTeams);
 
