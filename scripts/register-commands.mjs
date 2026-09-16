@@ -109,7 +109,7 @@ const commands = [
       {
         type: SUB_COMMAND,
         name: "settournamentid",
-        description: "Set the shared role given to every player in a 1v1 tournament",
+        description: "Set the shared role given to every player in the running event",
         options: [{ name: "role", description: "The tournament role", type: ROLE, required: true }],
       },
       {

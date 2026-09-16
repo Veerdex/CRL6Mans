@@ -136,9 +136,9 @@ async function setRegisteredRoleId(userId: string, roleId: string) {
   );
 }
 
-// Stores the single role every 1v1 participant holds, in place of the per-team
-// role a 1v1 would need one of per player. Until this is set the bot resolves a
-// role named "Tournament" by name, creating it during a 1v1 if it's missing.
+// Stores the single role every player in the running event holds, whatever the
+// team size. Until this is set the bot resolves a role named "Tournament" by
+// name, creating it if it's missing.
 async function setTournamentRoleId(userId: string, roleId: string) {
   const denied = await directorGuard(userId);
   if (denied) return denied;
@@ -148,7 +148,7 @@ async function setTournamentRoleId(userId: string, roleId: string) {
     .not("id", "is", null);
   if (error) return ephemeralReply(`❌ Failed to save: ${error.message}`);
   return ephemeralReply(
-    `✅ Tournament role set to <@&${roleId}>. Everyone in a 1v1 tournament gets it when teams are formed, ` +
+    `✅ Tournament role set to <@&${roleId}>. Everyone on a team gets it when teams are formed — 1v1, 2v2 and 3v3 alike — ` +
     `and loses it when the event ends. Rename it whenever you like — it's linked by ID.\n` +
     `Make sure the bot's own role is **above** it in the server's role list, or Discord will reject the assignment.`
   );
@@ -1024,6 +1024,9 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
 
   // Rename team roles and assign captain roles in parallel
   const roleMap = await ensureRoles(["Drafted", "Captain"]);
+  // Captains are seated here rather than by execSyncRoles, so the shared role
+  // has to be granted here too or they'd go without it until the next sync.
+  const tournamentRole = await resolveTournamentRole({ create: true });
   await Promise.all([
     ...teamsToUse.filter(t => t.discord_role_id).map(t =>
       editRole(t.discord_role_id!, { name: `Team ${t.num}` })
@@ -1034,6 +1037,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
         roleMap["Drafted"] ? addRoleById(discordId, roleMap["Drafted"]) : Promise.resolve(),
         teamRoleId        ? addRoleById(discordId, teamRoleId)          : Promise.resolve(),
         roleMap["Captain"] ? addRoleById(discordId, roleMap["Captain"]) : Promise.resolve(),
+        tournamentRole    ? addRoleById(discordId, tournamentRole.id)   : Promise.resolve(),
         removeRole(discordId, "EnteredDraft"),
       ]);
     }),
@@ -1426,6 +1430,9 @@ async function completePick(s: PickSettings, teamId: string, playerId: string): 
     if (roleMap["Drafted"]) await addRoleById(player.discord_id, roleMap["Drafted"]);
     if (team.discord_role_id) await addRoleById(player.discord_id, team.discord_role_id);
     else await addRole(player.discord_id, team.name);
+    // Picked players join the event here, not via execSyncRoles.
+    const tournamentRole = await resolveTournamentRole({ create: true });
+    if (tournamentRole) await addRoleById(player.discord_id, tournamentRole.id);
     await removeRole(player.discord_id, "EnteredDraft");
   }
 
@@ -2492,7 +2499,7 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
   const registeredRoleId = syncRegistered ? (settings?.registered_role_id as string | null) : null;
 
   // A 1v1 team is one player, so per-team roles would mean one role per
-  // participant. They share a single role saying they're in the running event.
+  // participant — at that size the shared role stands in for them entirely.
   const solo = normalizeTeamSize(settings?.team_size) === 1;
 
   // Only auto-create Drafted and Captain — team roles are pre-created manually
@@ -2500,12 +2507,11 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
   if (!roleMap["Drafted"] || !roleMap["Captain"]) {
     warnings.push(`Failed to create Drafted/Captain roles — check bot permissions`);
   }
-  // Outside 1v1 the shared role is only looked up, never created: a league that
-  // has never run one shouldn't grow a stray role. It's stripped either way, or
-  // its holders would keep it into the next event.
-  const tournamentRole = await resolveTournamentRole({ create: solo });
+  // Everyone on a team holds this, at every size, so it's auto-created like
+  // Drafted and Captain rather than only when a 1v1 forces the issue.
+  const tournamentRole = await resolveTournamentRole({ create: true });
   const tournamentStripIds = await tournamentRoleIdsToStrip();
-  if (solo && !tournamentRole) {
+  if (!tournamentRole) {
     warnings.push(
       "Couldn't resolve the tournament role — point `/admin settournamentid` at one, " +
       "or check bot permissions if it still has to be created."
@@ -2560,11 +2566,10 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
       if (team) {
         assigned++;
         if (roleMap["Drafted"]) promises.push(addRoleById(discordId, roleMap["Drafted"]));
-        if (solo) {
-          if (tournamentRole) promises.push(addRoleById(discordId, tournamentRole.id));
-        } else if (team.roleId) {
-          promises.push(addRoleById(discordId, team.roleId));
-        }
+        // Additive above 1v1: the shared role says "in the running event", the
+        // team role says which team. At 1v1 there is no team role to add.
+        if (tournamentRole) promises.push(addRoleById(discordId, tournamentRole.id));
+        if (!solo && team.roleId) promises.push(addRoleById(discordId, team.roleId));
         if (player.is_captain && roleMap["Captain"])
           promises.push(addRoleById(discordId, roleMap["Captain"]));
       }
@@ -2574,18 +2579,20 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
   );
 
   // At 1v1 the team names are player names, so listing them back as "roles"
-  // would be noise — the one shared role is the whole story.
+  // would be noise — the one shared role is the whole story there.
   const roleNames = [
     ...(registeredRoleId ? ["Registered"] : []),
     "Drafted", "Captain",
-    ...(solo ? (tournamentRole ? [tournamentRole.name] : []) : (teams ?? []).map(t => t.name)),
+    ...(tournamentRole ? [tournamentRole.name] : []),
+    ...(solo ? [] : (teams ?? []).map(t => t.name)),
   ];
   const roleIds = [
     ...(registeredRoleId ? [{ label: "Registered", id: registeredRoleId }] : []),
     ...(roleMap["Drafted"] ? [{ label: "Drafted", id: roleMap["Drafted"] }] : []),
     ...(roleMap["Captain"] ? [{ label: "Captain", id: roleMap["Captain"] }] : []),
+    ...(tournamentRole ? [{ label: tournamentRole.name, id: tournamentRole.id }] : []),
     ...(solo
-      ? (tournamentRole ? [{ label: tournamentRole.name, id: tournamentRole.id }] : [])
+      ? []
       : Object.entries(teamById)
           .filter(([, t]) => t.roleId)
           .map(([, t]) => ({ label: t.name, id: t.roleId as string }))),

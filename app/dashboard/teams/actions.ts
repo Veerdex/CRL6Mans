@@ -168,8 +168,9 @@ export async function swapPlayersBetweenTeams(playerAId: string, playerBId: stri
     supabaseAdmin.from("teams").select("discord_role_id").eq("id", teamBId).single(),
   ]);
 
-  // At 1v1 nobody holds a per-team role — both players keep the one shared
-  // tournament role, so only the teams' derived identities need to follow them.
+  // Both players stay in the event, so the shared tournament role is untouched
+  // either way. At 1v1 there is no per-team role either, leaving only the teams'
+  // derived identities to follow them.
   const teamSize = await resolveTeamSize();
 
   if (a.discord_id) {
@@ -224,12 +225,11 @@ export async function swapRosterPlayerWithBenchPlayer(rosterPlayerId: string, be
 
   const { data: team } = await supabaseAdmin.from("teams").select("discord_role_id").eq("id", teamId).single();
 
-  // This one really does move somebody out of the event and somebody in, so at
-  // 1v1 the shared tournament role has to follow. Only 1v1 participants should
-  // ever hold it, hence the size gate on the add but not on the remove.
+  // This one really does move somebody out of the event and somebody in, so the
+  // shared tournament role has to follow them at every team size.
   const teamSize = await resolveTeamSize();
   const tournamentStripIds = roster.discord_id ? await tournamentRoleIdsToStrip() : [];
-  const tournamentRole = teamSize === 1 && bench.discord_id
+  const tournamentRole = bench.discord_id
     ? await resolveTournamentRole({ create: true })
     : null;
 

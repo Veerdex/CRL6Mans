@@ -3,9 +3,10 @@ import { avatarSrc } from "@/app/lib/avatar-url";
 import { resolveTeamSize } from "@/app/lib/team-size";
 import { getGuildRoles, ensureRoles } from "@/app/lib/discord-api";
 
-// In a 1v1 tournament every participant would otherwise need their own Discord
-// role, which means one role per player created and torn down per event. They
-// all get this one instead — it says nothing more than "in the current event".
+// The one role every player on a team holds, at every team size — it says
+// nothing more than "in the current event". At 1v1 it also stands in for the
+// per-team role, which would otherwise mean one Discord role per player created
+// and torn down per event; at 2v2/3v3 players hold it *and* their team's role.
 //
 // This is only the name the bot falls back to before an admin has run
 // /admin settournamentid. Once an ID is stored the role can be called anything.
@@ -22,7 +23,7 @@ async function storedTournamentRoleId(): Promise<string | null> {
 }
 
 /**
- * The role every 1v1 participant holds. Prefers the ID set by
+ * The role every player in the running event holds. Prefers the ID set by
  * /admin settournamentid; falls back to a role named TOURNAMENT_ROLE_NAME so the
  * feature works before an admin ever runs the command. Returns the role's *live*
  * name so callers label it with whatever it's actually called in Discord.
@@ -48,7 +49,7 @@ export async function resolveTournamentRole(opts?: { create?: boolean }): Promis
 /**
  * Every role ID that counts as "the tournament role" for teardown purposes — the
  * configured one *and* anything still named TOURNAMENT_ROLE_NAME. Setting an ID
- * after a 1v1 has already run would otherwise orphan the auto-created role on
+ * after an event has already run would otherwise orphan the auto-created role on
  * everyone holding it, since nothing else ever strips it. Over-inclusion is free
  * here: removeRoleById no-ops on a role the member doesn't have.
  */
