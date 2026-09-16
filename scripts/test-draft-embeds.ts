@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { getTeamNumberForPick } from "../app/lib/draft-order";
 import {
   draftLabel, draftStartEmbed, onTheClockEmbed,
-  pickEmbed, autoPickEmbed, draftCompleteEmbed,
+  pickEmbed, draftCompleteEmbed,
   type CaptainSeat,
 } from "../app/lib/draft-embeds";
 
@@ -94,7 +94,7 @@ test("no embed carries a mention, since mentions inside embeds never notify", ()
     draftStartEmbed({ teamSize: 3, numTeams: 4, entered: 12, undrafted: 2, captains: seats(4) }),
     onTheClockEmbed(3),
     pickEmbed({ teamName: "Team 4", playerName: "someone", pickNumber: 1, totalPicks: 8 }),
-    autoPickEmbed(2, "someone"),
+    pickEmbed({ teamName: "Team 2", playerName: "someone", pickNumber: 2, totalPicks: 8, auto: true }),
     draftCompleteEmbed({ teamSize: 3, numTeams: 4, totalPicks: 8 }),
   ];
   for (const e of all) {
@@ -102,6 +102,19 @@ test("no embed carries a mention, since mentions inside embeds never notify", ()
     assert.ok(!/<@|@everyone|@here/.test(text), `embed "${e.title}" contains a mention`);
     assert.ok(e.color, `embed "${e.title}" has no colour`);
   }
+});
+
+test("a timed-out pick still reads as a pick, just an amber one", () => {
+  const manual = pickEmbed({ teamName: "Team 4", playerName: "Aerose.", pickNumber: 1, totalPicks: 8 });
+  const auto = pickEmbed({ teamName: "Team 4", playerName: "Aerose.", pickNumber: 1, totalPicks: 8, auto: true });
+
+  // Both name the player, because both are the message the pick ends up as.
+  for (const e of [manual, auto]) {
+    assert.match(e.title!, /Aerose\./);
+    assert.equal(e.footer!.text, "Pick 1 of 8");
+  }
+  assert.notEqual(manual.color, auto.color, "a timeout should be visually distinct from a normal pick");
+  assert.match(auto.title!, /ran out of time/);
 });
 
 test("the start embed reports the undrafted overflow only when there is some", () => {

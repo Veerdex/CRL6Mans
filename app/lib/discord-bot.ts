@@ -4,7 +4,7 @@ import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfaEnabled, type StaffRole } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
-import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView } from "./discord-api";
+import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -19,7 +19,7 @@ import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDel
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "./team-size";
 import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft-order";
-import { draftLabel, draftStartEmbed, onTheClockEmbed, pickEmbed, autoPickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
+import { draftLabel, draftStartEmbed, onTheClockEmbed, pickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "./solo-team";
 import { notifyMatchChannel } from "./match-notifications";
 import { createClip } from "./clip-submit";
@@ -901,6 +901,12 @@ async function getCaptainPing(teamNum: number): Promise<string> {
 export async function setDraftChannelVisibility(
   open: boolean,
 ): Promise<{ ok: boolean; reason?: string }> {
+  // A stale pick-message ID is the one failure the edit fallback can't catch:
+  // the PATCH succeeds and rewrites a message in the previous draft's history.
+  // Closing the channel is the one thing every ending path already does, so the
+  // ID is dropped here rather than at seven separate call sites.
+  if (!open) await rememberPickMessage(null);
+
   const { data: settings } = await supabaseAdmin
     .from("league_settings").select("draft_channel_id").single();
   const channelId = settings?.draft_channel_id as string | null;
@@ -1096,7 +1102,8 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   await sendChannelMessage(settings.draft_channel_id, "", [
     draftStartEmbed({ teamSize, numTeams, entered: sorted.length, undrafted, captains: captainSeats }),
   ]);
-  await sendChannelMessage(settings.draft_channel_id, firstCaptainPing, [onTheClockEmbed(firstTeamNum)]);
+  const firstMessage = await sendChannelMessage(settings.draft_channel_id, firstCaptainPing, [onTheClockEmbed(firstTeamNum)]);
+  await rememberPickMessage(firstMessage);
 
   return {
     ok: true,
@@ -1458,9 +1465,30 @@ export async function execEndDraft(): Promise<{ ok: boolean; message: string }> 
   };
 }
 
-type PickSettings = { num_teams: number; team_size: number; current_pick: number; draft_channel_id: string | null };
+type PickSettings = {
+  num_teams: number;
+  team_size: number;
+  current_pick: number;
+  draft_channel_id: string | null;
+  // `undefined` means the column isn't there yet, which is how this degrades to
+  // posting a separate message per pick until the migration is run.
+  draft_pick_message_id?: string | null;
+};
 
-async function completePick(s: PickSettings, teamId: string, playerId: string): Promise<{ ok: boolean; message: string }> {
+/**
+ * Points league_settings at the message the current pick is being announced in,
+ * so the next pick can edit it instead of posting under it.
+ *
+ * Best-effort on purpose: the column arrives in a hand-run migration, so until
+ * that lands every write here 400s and the draft has to carry on regardless.
+ */
+async function rememberPickMessage(messageId: string | null): Promise<void> {
+  const { error } = await supabaseAdmin.from("league_settings")
+    .update({ draft_pick_message_id: messageId }).not("id", "is", null);
+  if (error) console.error("[rememberPickMessage]", error.message);
+}
+
+async function completePick(s: PickSettings, teamId: string, playerId: string, viaAutoPick = false): Promise<{ ok: boolean; message: string }> {
   const teamSize = normalizeTeamSize(s.team_size);
   const totalPicks = totalDraftPicks(s.num_teams, teamSize);
 
@@ -1486,18 +1514,36 @@ async function completePick(s: PickSettings, teamId: string, playerId: string): 
   const newPick = s.current_pick + 1;
   const isDone = newPick >= totalPicks;
 
+  // Present-but-null means the column exists and nothing is stored yet; absent
+  // means the migration hasn't run.
+  const tracksPickMessage = s.draft_pick_message_id !== undefined;
+
   await supabaseAdmin.from("league_settings").update({
     draft_phase: isDone ? null : "picking",
     current_pick: newPick,
     pick_deadline: isDone ? null : new Date(Date.now() + 45 * 1000).toISOString(),
+    // Released in the same write that advances the pick, so a racing autopick
+    // that reads afterwards finds no message to edit and posts its own instead
+    // of overwriting this one's announcement.
+    ...(tracksPickMessage ? { draft_pick_message_id: null } : {}),
     ...(isDone ? { draft_active: false } : {}),
     updated_at: new Date().toISOString(),
   }).not("id", "is", null);
 
   if (s.draft_channel_id) {
-    await sendChannelMessage(s.draft_channel_id, "", [
-      pickEmbed({ teamName: team.name, playerName: player.username, pickNumber: newPick, totalPicks }),
-    ]);
+    const result = pickEmbed({
+      teamName: team.name, playerName: player.username,
+      pickNumber: newPick, totalPicks, auto: viaAutoPick,
+    });
+
+    // The on-the-clock message becomes the result. If it's gone — deleted by
+    // hand, or never recorded — post the result instead, so the channel is never
+    // left without an announcement.
+    const edited = s.draft_pick_message_id
+      ? await editChannelMessage(s.draft_channel_id, s.draft_pick_message_id, "", [result])
+      : false;
+    if (!edited) await sendChannelMessage(s.draft_channel_id, "", [result]);
+
     if (isDone) {
       await sendChannelMessage(s.draft_channel_id, "", [
         draftCompleteEmbed({ teamSize, numTeams: s.num_teams, totalPicks }),
@@ -1506,7 +1552,8 @@ async function completePick(s: PickSettings, teamId: string, playerId: string): 
     } else {
       const nextTeamNum = getTeamNumberForPick(newPick, s.num_teams);
       const nextPing = await getCaptainPing(nextTeamNum);
-      await sendChannelMessage(s.draft_channel_id, nextPing, [onTheClockEmbed(nextTeamNum)]);
+      const posted = await sendChannelMessage(s.draft_channel_id, nextPing, [onTheClockEmbed(nextTeamNum)]);
+      await rememberPickMessage(posted);
     }
   }
 
@@ -1565,14 +1612,17 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
     return { done: true };
   }
 
+  // No separate "ran out of time" post any more — completePick folds the reason
+  // into the result it writes over the on-the-clock message. A pick that then
+  // fails therefore leaves that message reading as still on the clock.
   const best = [...available].sort((a, b) => playerRating(b) - playerRating(a))[0];
-  if (channelId) {
-    await sendChannelMessage(channelId, "", [autoPickEmbed(currentTeamNum, best.username)]);
-  }
-
   const result = await completePick(
-    { num_teams: numTeams, team_size: teamSize, current_pick: currentPick, draft_channel_id: channelId },
-    teamRow.id, best.id,
+    {
+      num_teams: numTeams, team_size: teamSize, current_pick: currentPick,
+      draft_channel_id: channelId,
+      draft_pick_message_id: settings.draft_pick_message_id as string | null | undefined,
+    },
+    teamRow.id, best.id, true,
   );
   console.log("[execAutoPick] auto-pick:", result.message);
   return { done: false };
@@ -1846,7 +1896,11 @@ async function pickPlayer(userId: string, playerUsername: string) {
   if (!target) return reply(`❌ "${playerUsername}" is not in the draft pool.`);
 
   const result = await completePick(
-    { num_teams: numTeams, team_size: teamSize, current_pick: currentPick, draft_channel_id: settings.draft_channel_id as string | null },
+    {
+      num_teams: numTeams, team_size: teamSize, current_pick: currentPick,
+      draft_channel_id: settings.draft_channel_id as string | null,
+      draft_pick_message_id: settings.draft_pick_message_id as string | null | undefined,
+    },
     currentTeam.id, target.id,
   );
   return reply(result.message);

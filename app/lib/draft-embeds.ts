@@ -97,25 +97,32 @@ export function onTheClockEmbed(teamNum: number): DiscordEmbed {
   };
 }
 
+/**
+ * The finished state of a pick. This replaces the on-the-clock message in place
+ * rather than being posted under it, so one pick is one message that changes.
+ *
+ * A timed-out pick is the same message in amber instead of a separate "ran out
+ * of time" post — the result and the reason for it belong together.
+ */
 export function pickEmbed(opts: {
   teamName: string;
   playerName: string;
   pickNumber: number;
   totalPicks: number;
+  auto?: boolean;
 }): DiscordEmbed {
-  return {
-    color: BRAND_BLUE,
-    title: `✅ ${opts.teamName} picks ${opts.playerName}`,
-    footer: { text: `Pick ${opts.pickNumber} of ${opts.totalPicks}` },
-  };
-}
-
-export function autoPickEmbed(teamNum: number, playerName: string): DiscordEmbed {
-  return {
-    color: WARN_AMBER,
-    title: `⏰ Team ${teamNum} ran out of time`,
-    description: `Auto-picking **${playerName}** — the highest Rank Value left in the pool.`,
-  };
+  return opts.auto
+    ? {
+        color: WARN_AMBER,
+        title: `⏰ ${opts.teamName} ran out of time — ${opts.playerName}`,
+        description: "Auto-picked: the highest Rank Value left in the pool.",
+        footer: { text: `Pick ${opts.pickNumber} of ${opts.totalPicks}` },
+      }
+    : {
+        color: BRAND_BLUE,
+        title: `✅ ${opts.teamName} picks ${opts.playerName}`,
+        footer: { text: `Pick ${opts.pickNumber} of ${opts.totalPicks}` },
+      };
 }
 
 export function draftCompleteEmbed(opts: {

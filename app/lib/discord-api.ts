@@ -444,15 +444,17 @@ export type DiscordEmbed = {
 // "@everyone" pings the server through the bot.
 export type AllowedMentions = { parse: Array<"roles" | "users" | "everyone">; users?: string[]; roles?: string[] };
 
-// Returns whether the message actually landed, so a caller that told a user
-// "posted" can tell the truth. Most callers are fire-and-forget and ignore it.
+// Returns the new message's ID, or null if it didn't land — so a caller that
+// told a user "posted" can tell the truth, and one that will edit the message
+// later has the handle to do it. Most callers are fire-and-forget and ignore it;
+// an ID is truthy and null is falsy, so a boolean check still reads correctly.
 export async function sendChannelMessage(
   channelId: string,
   content: string,
   embeds?: DiscordEmbed[],
   allowedMentions?: AllowedMentions
-): Promise<boolean> {
-  if (!BOT_TOKEN) return false;
+): Promise<string | null> {
+  if (!BOT_TOKEN) return null;
   const res = await fetch(`${API}/channels/${channelId}/messages`, {
     method: "POST",
     headers: botHeaders(true),
@@ -466,6 +468,34 @@ export async function sendChannelMessage(
   });
   if (!res.ok) {
     console.error(`[sendChannelMessage] channel=${channelId} status=${res.status}`, await res.text());
+    return null;
+  }
+  const body = await res.json().catch(() => null);
+  return (body?.id as string | undefined) ?? null;
+}
+
+/**
+ * Rewrites a message the bot already posted. Unlike the POST above, `content` is
+ * always sent: an edit that omits it would leave the old text in place, and the
+ * callers here are replacing a ping with a result and want the ping gone.
+ *
+ * Editing never re-notifies, so a mention that has already fired cannot fire
+ * twice by being edited around.
+ */
+export async function editChannelMessage(
+  channelId: string,
+  messageId: string,
+  content: string,
+  embeds?: DiscordEmbed[],
+): Promise<boolean> {
+  if (!BOT_TOKEN) return false;
+  const res = await fetch(`${API}/channels/${channelId}/messages/${messageId}`, {
+    method: "PATCH",
+    headers: botHeaders(true),
+    body: JSON.stringify({ content, ...(embeds ? { embeds } : {}) }),
+  });
+  if (!res.ok) {
+    console.error(`[editChannelMessage] channel=${channelId} message=${messageId} status=${res.status}`, await res.text());
     return false;
   }
   return true;

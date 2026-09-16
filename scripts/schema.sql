@@ -239,6 +239,7 @@ create table if not exists league_settings (
   pick_deadline         timestamptz,
 
   draft_channel_id      text,
+  draft_pick_message_id text,
   match_category_id     text,
   rules_channel_id      text,
   match_deadline_day    integer     check (match_deadline_day between 0 and 6),
@@ -273,6 +274,8 @@ alter table league_settings add column if not exists current_bid_team_id   uuid 
 alter table league_settings add column if not exists current_bid_time      timestamptz;
 alter table league_settings add column if not exists pick_deadline         timestamptz;
 alter table league_settings add column if not exists draft_channel_id      text;
+-- The draft message currently on the clock, so the next pick edits it in place.
+alter table league_settings add column if not exists draft_pick_message_id text;
 alter table league_settings add column if not exists match_category_id     text;
 alter table league_settings add column if not exists rules_channel_id      text;
 alter table league_settings add column if not exists match_deadline_day    integer;
