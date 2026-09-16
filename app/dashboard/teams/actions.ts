@@ -11,7 +11,7 @@ import { validateImageUpload } from "@/app/lib/uploads";
 import { applyPlayerRVChangeToTeamRating, execDisqualifyTeam } from "@/app/lib/discord-bot";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { resolveTeamSize } from "@/app/lib/team-size";
-import { TOURNAMENT_ROLE_NAME, syncSoloTeamIdentity } from "@/app/lib/solo-team";
+import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "@/app/lib/solo-team";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -225,18 +225,23 @@ export async function swapRosterPlayerWithBenchPlayer(rosterPlayerId: string, be
   const { data: team } = await supabaseAdmin.from("teams").select("discord_role_id").eq("id", teamId).single();
 
   // This one really does move somebody out of the event and somebody in, so at
-  // 1v1 the shared tournament role has to follow. addRole creates the role when
-  // it's missing, hence the size gate on the add but not on the remove.
+  // 1v1 the shared tournament role has to follow. Only 1v1 participants should
+  // ever hold it, hence the size gate on the add but not on the remove.
   const teamSize = await resolveTeamSize();
+  const tournamentStripIds = roster.discord_id ? await tournamentRoleIdsToStrip() : [];
+  const tournamentRole = teamSize === 1 && bench.discord_id
+    ? await resolveTournamentRole({ create: true })
+    : null;
 
   if (roster.discord_id) {
-    if (teamSize > 1 && team?.discord_role_id) removeRoleById(roster.discord_id, team.discord_role_id).catch(() => {});
-    if (roster.is_captain) removeRole(roster.discord_id, "Captain").catch(() => {});
-    removeRole(roster.discord_id, TOURNAMENT_ROLE_NAME).catch(() => {});
+    const out = roster.discord_id;
+    if (teamSize > 1 && team?.discord_role_id) removeRoleById(out, team.discord_role_id).catch(() => {});
+    if (roster.is_captain) removeRole(out, "Captain").catch(() => {});
+    tournamentStripIds.forEach(id => removeRoleById(out, id).catch(() => {}));
   }
   if (bench.discord_id) {
     if (teamSize > 1 && team?.discord_role_id) addRoleById(bench.discord_id, team.discord_role_id).catch(() => {});
-    if (teamSize === 1) addRole(bench.discord_id, TOURNAMENT_ROLE_NAME).catch(() => {});
+    if (tournamentRole) addRoleById(bench.discord_id, tournamentRole.id).catch(() => {});
   }
 
   await syncSoloTeamIdentity(teamId, teamSize);

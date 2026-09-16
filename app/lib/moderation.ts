@@ -5,7 +5,7 @@ import { deleteCollegeIdImage } from "./college-ids";
 import { revokedPatronFields } from "./patreon-sync";
 import { syncDiscordSupporterRole } from "./patreon-discord-role";
 import { addRole, removeRole, removeRoleById, timeoutMember, banMember } from "./discord-api";
-import { TOURNAMENT_ROLE_NAME } from "./solo-team";
+import { tournamentRoleIdsToStrip } from "./solo-team";
 
 // The kick/ban rules themselves, with no session in sight, so the Discord bot
 // and the admin panel's server actions can share one implementation instead of
@@ -90,9 +90,9 @@ export async function kickAccount(
     const teamId = player?.team_id ?? null;
     const roleRemovals: Promise<unknown>[] = [
       removeRole(discordId, "Captain"),
-      // Unconditional: removeRole is a no-op when the role doesn't exist, and
-      // this is the 1v1 stand-in for the per-team role removed just below.
-      removeRole(discordId, TOURNAMENT_ROLE_NAME),
+      // Unconditional: removeRoleById is a no-op when the member doesn't hold it,
+      // and this is the 1v1 stand-in for the per-team role removed just below.
+      ...(await tournamentRoleIdsToStrip()).map(id => removeRoleById(discordId, id)),
     ];
     if (teamId) {
       const { data: team } = await supabaseAdmin.from("teams").select("discord_role_id").eq("id", teamId).single();
@@ -182,7 +182,7 @@ export async function banAccount(
       removeRegisteredRole(discordId),
       removeRole(discordId, "Captain"),
       removeRole(discordId, "Kicked"),
-      removeRole(discordId, TOURNAMENT_ROLE_NAME),
+      ...(await tournamentRoleIdsToStrip()).map(id => removeRoleById(discordId, id)),
       // banMember below removes them from the guild outright, which takes the
       // supporter role with it — this is the belt for the case where the ban
       // call fails and they stay in the server.

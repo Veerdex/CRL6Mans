@@ -108,6 +108,13 @@ Stores the **Discord role ID** granted to players when their registration is app
 |--------|-------------|
 | `role` | The Discord role to grant on registration approval |
 
+#### `/settournamentid <role>`
+Stores the **Discord role ID** every player in a **1v1** tournament holds. A 1v1 "team" is one player, so per-team roles would mean one role per entrant; they share this one instead. It's granted when teams are formed and stripped when the event ends. If not set, the bot falls back to resolving a role named `Tournament` by name (creating it during a 1v1 if it doesn't exist). Storing the role ID means the role can be renamed in Discord without the bot minting a duplicate. Has no effect on 2v2/3v3 events, which use per-team roles.
+
+| Option | Description |
+|--------|-------------|
+| `role` | The shared role for 1v1 tournament participants |
+
 #### `/setsupporterrole <role>`
 Stores the **Discord role ID** granted to Patreon supporters (the "Discord role" tier benefit). This command only identifies which role to use — it does not itself grant or remove the role from anyone.
 
@@ -126,6 +133,7 @@ The "bot" is the league's Discord application. It has **no always-on gateway con
 **Roles**
 - **Status roles — auto-created and managed by the bot:** `Registered` (on approval), `EnteredDraft` (on joining the draft pool), `Drafted` and `Captain` (on draft/team assignment — the highest-RV player gets `Captain`), and `Kicked`. The bot creates any of these that don't exist, then adds/removes them from members as their status changes. `/syncroles` is authoritative for `Registered` — use `/setregisteredrole` to configure which Discord role to use, then run `/syncroles` to apply it retroactively to all approved players.
 - **Team roles — you set these up:** each team has a `discord_role_id` you assign in the **Admin → Team Slots** panel. Create a Discord role per team (so you control its name, color, and hierarchy position) and paste its **role ID** into that team's slot. The bot then assigns/removes that role as players join, move, or leave the team, and **renames the Discord role** when a team is renamed. If a team has no role ID linked, `/syncroles` will fall back to creating a role by the team's name.
+- **The 1v1 tournament role:** at `team_size = 1` a team is one player, so per-team roles would mean one role per entrant. Everyone in the event shares a single role instead — link it with `/settournamentid`, or let the bot auto-create one named `Tournament`. It's added when teams are formed and stripped when the event ends.
 - Edits role names/colors, assigns/removes roles from members, strips team roles on a season reset, and `/syncroles` reconciles every player's roles to the database (adds correct ones, removes stale ones).
 
 **Channels & messages**
@@ -177,6 +185,7 @@ No **privileged gateway intents** are required — interactions arrive as signed
 - [ ] Set the registration status role: `/setregisteredrole` (create a Discord role for `Registered` first, then link it), then run `/syncroles`.
 - [ ] Run `/syncroles`, then `/setdraftchannel` and `/setruleschannel` inside their target channels.
 - [ ] **Set up team roles:** create a Discord role for each team and paste its role ID into the team's slot under **Admin → Team Slots** (slots show "⚠ no role ID set" until linked). Make sure each team role sits **below** the bot's role. (Status roles like `Captain`/`Drafted` are auto-created — only team roles need linking.)
+- [ ] If you run **1v1** tournaments: create a Discord role for entrants and link it with `/admin settournamentid` (optional — the bot auto-creates one named `Tournament` otherwise).
 - [ ] If using the Patreon "Discord role" tier benefit: create a Discord role for supporters, then link it with `/admin setsupporterrole`.
 
 > Moving an already-running league to a different Discord server is a different job — see [SERVER-TRANSFER.md](SERVER-TRANSFER.md).

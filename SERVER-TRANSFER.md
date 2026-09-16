@@ -133,6 +133,7 @@ are subcommands of `/admin`:
 - `/admin setmatchcategoryanchor` — sets where match categories get created
 - `/admin setmoderatorid`, `/admin setdirectorid`, `/admin setceoid` — staff ping roles
 - `/admin setregisteredrole` — create the `Registered` role first, then link it
+- `/admin settournamentid` — only if you run 1v1 tournaments: the one role every entrant gets
 - `/admin setsupporterrole role:@<role> tier:<n>` — once per paid Patreon tier
 
 Then, in the website's **Admin → Team Slots** panel:

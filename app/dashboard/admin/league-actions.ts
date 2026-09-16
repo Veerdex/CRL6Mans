@@ -16,7 +16,7 @@ import { computeFullArchive } from "./tournament-archive";
 import { recordEventResults } from "@/app/lib/event-results";
 import { ACCOLADE_PRIZE_COLUMNS, SEASON_ACCOLADES } from "@/app/lib/accolades";
 import { normalizeTeamSize, resolveTeamSize } from "@/app/lib/team-size";
-import { TOURNAMENT_ROLE_NAME, syncSoloTeamIdentity } from "@/app/lib/solo-team";
+import { tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "@/app/lib/solo-team";
 
 const TEAM_ROLE_COLOR = 0x3498db; // blue
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -227,14 +227,15 @@ export async function generateTestTeams() {
 
   if (realDiscordIds.length > 0) {
     const guildRoles = await getGuildRoles();
-    const roleIdsToStrip = [
+    const roleIdsToStrip = [...new Set([
       ...guildRoles
-        .filter(r => r.name === "Drafted" || r.name === "Captain" || r.name === TOURNAMENT_ROLE_NAME)
+        .filter(r => r.name === "Drafted" || r.name === "Captain")
         .map(r => r.id),
+      ...(await tournamentRoleIdsToStrip(guildRoles)),
       ...(allTeams ?? [])
         .map(t => t.discord_role_id)
         .filter((id): id is string => !!id),
-    ];
+    ])];
     if (roleIdsToStrip.length > 0) {
       // Process 5 users at a time; all roles for each user are parallel within the batch
       const BATCH = 5;
@@ -980,8 +981,9 @@ async function stripTeamRolesFromPlayers(): Promise<{
   );
   const roleIds = new Set<string>([
     ...guildRoles.filter(r =>
-      r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft" || r.name === TOURNAMENT_ROLE_NAME
+      r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft"
     ).map(r => r.id),
+    ...(await tournamentRoleIdsToStrip(guildRoles)),
     ...(allTeams ?? []).map(t => t.discord_role_id).filter((id): id is string => !!id),
     ...guildRoles.filter(r => teamNames.has(r.name) || /^Team \d+$/.test(r.name)).map(r => r.id),
   ]);

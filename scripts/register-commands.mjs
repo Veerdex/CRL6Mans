@@ -108,6 +108,12 @@ const commands = [
       },
       {
         type: SUB_COMMAND,
+        name: "settournamentid",
+        description: "Set the shared role given to every player in a 1v1 tournament",
+        options: [{ name: "role", description: "The tournament role", type: ROLE, required: true }],
+      },
+      {
+        type: SUB_COMMAND,
         name: "setsupporterrole",
         description: "Connect a Discord role to a supporter tier",
         options: [

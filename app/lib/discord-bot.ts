@@ -18,7 +18,7 @@ import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "./team-size";
-import { TOURNAMENT_ROLE_NAME, syncSoloTeamIdentity } from "./solo-team";
+import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "./solo-team";
 import { notifyMatchChannel } from "./match-notifications";
 import { createClip } from "./clip-submit";
 import { kickAccount, banAccount, findAccountByDiscordId, DEFAULT_KICK_TIMEOUT_MS, type RevokedPatron } from "./moderation";
@@ -131,6 +131,24 @@ async function setRegisteredRoleId(userId: string, roleId: string) {
   if (error) return ephemeralReply(`❌ Failed to save: ${error.message}`);
   return ephemeralReply(
     `✅ Registered role set to <@&${roleId}>. Players will get it when their registration is approved.\n` +
+    `Make sure the bot's own role is **above** it in the server's role list, or Discord will reject the assignment.`
+  );
+}
+
+// Stores the single role every 1v1 participant holds, in place of the per-team
+// role a 1v1 would need one of per player. Until this is set the bot resolves a
+// role named "Tournament" by name, creating it during a 1v1 if it's missing.
+async function setTournamentRoleId(userId: string, roleId: string) {
+  const denied = await directorGuard(userId);
+  if (denied) return denied;
+  if (!roleId) return ephemeralReply("❌ You must specify a role.");
+  const { error } = await supabaseAdmin.from("league_settings")
+    .update({ tournament_role_id: roleId, updated_at: new Date().toISOString() })
+    .not("id", "is", null);
+  if (error) return ephemeralReply(`❌ Failed to save: ${error.message}`);
+  return ephemeralReply(
+    `✅ Tournament role set to <@&${roleId}>. Everyone in a 1v1 tournament gets it when teams are formed, ` +
+    `and loses it when the event ends. Rename it whenever you like — it's linked by ID.\n` +
     `Make sure the bot's own role is **above** it in the server's role list, or Discord will reject the assignment.`
   );
 }
@@ -1895,7 +1913,7 @@ async function adminDisconnect(userId: string, confirm: string) {
       rules_channel_id: null, announcement_channel_id: null, match_category_anchor_id: null,
       match_category_id: null, draft_channel_id: null, clips_channel_id: null,
       moderator_role_id: null, director_role_id: null, ceo_role_id: null,
-      registered_role_id: null, supporter_role_id: null,
+      registered_role_id: null, supporter_role_id: null, tournament_role_id: null,
       updated_at: new Date().toISOString(),
     }).not("id", "is", null),
     supabaseAdmin.from("teams").delete().not("id", "is", null),
@@ -1945,12 +1963,13 @@ async function adminWipe(userId: string, confirm: string, clearHistory: boolean)
     .filter(id => id && !id.startsWith("test_"));
   const { data: allTeams } = await supabaseAdmin.from("teams").select("discord_role_id");
   const guildRoles = await getGuildRoles();
-  const roleIdsToStrip = [
+  const roleIdsToStrip = [...new Set([
     ...guildRoles.filter(r =>
-      r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft" || r.name === TOURNAMENT_ROLE_NAME
+      r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft"
     ).map(r => r.id),
+    ...(await tournamentRoleIdsToStrip(guildRoles)),
     ...(allTeams ?? []).map(t => t.discord_role_id).filter((id): id is string => !!id),
-  ];
+  ])];
   await stripRoleIdsFromMembers(realDiscordIds, roleIdsToStrip);
 
   await Promise.all([
@@ -2490,18 +2509,20 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
   const solo = normalizeTeamSize(settings?.team_size) === 1;
 
   // Only auto-create Drafted and Captain — team roles are pre-created manually
-  const roleMap = await ensureRoles(solo ? ["Drafted", "Captain", TOURNAMENT_ROLE_NAME] : ["Drafted", "Captain"]);
+  const roleMap = await ensureRoles(["Drafted", "Captain"]);
   if (!roleMap["Drafted"] || !roleMap["Captain"]) {
     warnings.push(`Failed to create Drafted/Captain roles — check bot permissions`);
   }
   // Outside 1v1 the shared role is only looked up, never created: a league that
-  // has never run one shouldn't grow a stray role. It still has to be stripped,
-  // or its holders would keep it into the next event.
-  const tournamentRoleId = solo
-    ? roleMap[TOURNAMENT_ROLE_NAME] ?? null
-    : (await getGuildRoles()).find(r => r.name === TOURNAMENT_ROLE_NAME)?.id ?? null;
-  if (solo && !tournamentRoleId) {
-    warnings.push(`Failed to create the ${TOURNAMENT_ROLE_NAME} role — check bot permissions`);
+  // has never run one shouldn't grow a stray role. It's stripped either way, or
+  // its holders would keep it into the next event.
+  const tournamentRole = await resolveTournamentRole({ create: solo });
+  const tournamentStripIds = await tournamentRoleIdsToStrip();
+  if (solo && !tournamentRole) {
+    warnings.push(
+      "Couldn't resolve the tournament role — point `/admin settournamentid` at one, " +
+      "or check bot permissions if it still has to be created."
+    );
   }
 
   // For teams without a stored role ID, fall back to creating by name. Never at
@@ -2519,11 +2540,12 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
 
   // Every role this sync owns — used to strip stale assignments before re-adding.
   // Includes registered role so it gets stripped from non-approved players.
-  const managedRoleIds = [
+  const managedRoleIds = [...new Set([
     registeredRoleId,
-    roleMap["Drafted"], roleMap["Captain"], tournamentRoleId,
+    roleMap["Drafted"], roleMap["Captain"],
+    tournamentRole?.id ?? null, ...tournamentStripIds,
     ...Object.values(teamById).map(t => t.roleId),
-  ].filter((id): id is string => !!id);
+  ].filter((id): id is string => !!id))];
 
   // Skip test users (fake IDs like "test_...") — they don't exist in Discord
   const realPlayers = (allPlayers ?? []).filter(p => {
@@ -2552,7 +2574,7 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
         assigned++;
         if (roleMap["Drafted"]) promises.push(addRoleById(discordId, roleMap["Drafted"]));
         if (solo) {
-          if (tournamentRoleId) promises.push(addRoleById(discordId, tournamentRoleId));
+          if (tournamentRole) promises.push(addRoleById(discordId, tournamentRole.id));
         } else if (team.roleId) {
           promises.push(addRoleById(discordId, team.roleId));
         }
@@ -2569,14 +2591,14 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
   const roleNames = [
     ...(registeredRoleId ? ["Registered"] : []),
     "Drafted", "Captain",
-    ...(solo ? [TOURNAMENT_ROLE_NAME] : (teams ?? []).map(t => t.name)),
+    ...(solo ? (tournamentRole ? [tournamentRole.name] : []) : (teams ?? []).map(t => t.name)),
   ];
   const roleIds = [
     ...(registeredRoleId ? [{ label: "Registered", id: registeredRoleId }] : []),
     ...(roleMap["Drafted"] ? [{ label: "Drafted", id: roleMap["Drafted"] }] : []),
     ...(roleMap["Captain"] ? [{ label: "Captain", id: roleMap["Captain"] }] : []),
     ...(solo
-      ? (tournamentRoleId ? [{ label: TOURNAMENT_ROLE_NAME, id: tournamentRoleId }] : [])
+      ? (tournamentRole ? [{ label: tournamentRole.name, id: tournamentRole.id }] : [])
       : Object.entries(teamById)
           .filter(([, t]) => t.roleId)
           .map(([, t]) => ({ label: t.name, id: t.roleId as string }))),
@@ -3702,6 +3724,7 @@ export async function handleCommand(interaction: Interaction) {
       case "setdirectorid":     return setStaffRoleId(userId, String(sOpt("role")), "director");
       case "setceoid":          return setStaffRoleId(userId, String(sOpt("role")), "ceo");
       case "setregisteredrole": return setRegisteredRoleId(userId, String(sOpt("role")));
+      case "settournamentid":   return setTournamentRoleId(userId, String(sOpt("role")));
       case "setsupporterrole":  return setSupporterRoleId(userId, String(sOpt("role")), Number(sOpt("tier")));
       case "assignrole":        return assignRole(userId, String(sOpt("user")), String(sOpt("role")));
       case "removerole":        return removeRoleCmd(userId, String(sOpt("user")), String(sOpt("role")));
