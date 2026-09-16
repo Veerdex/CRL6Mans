@@ -11,6 +11,7 @@ import { validateImageUpload } from "@/app/lib/uploads";
 import { applyPlayerRVChangeToTeamRating, execDisqualifyTeam } from "@/app/lib/discord-bot";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { resolveTeamSize } from "@/app/lib/team-size";
+import { TOURNAMENT_ROLE_NAME, syncSoloTeamIdentity } from "@/app/lib/solo-team";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -22,6 +23,11 @@ export async function updateTeamInfo(formData: FormData) {
   if (!session?.userId) redirect("/login");
 
   const teamId = formData.get("teamId") as string;
+  // A 1v1 "team" is a player: its name and logo are their name and avatar, and
+  // are rewritten on every formation run, so there is nothing to customize.
+  if ((await resolveTeamSize()) === 1)
+    return { error: "Teams can't be customized in a 1v1 event." };
+
   const name = (formData.get("name") as string)?.trim();
   if (name && name.length > 30) return { error: "Team name must be 30 characters or fewer." };
   if (name && /@everyone|@here|<@/i.test(name)) return { error: "Team name cannot contain Discord mentions." };
@@ -162,16 +168,25 @@ export async function swapPlayersBetweenTeams(playerAId: string, playerBId: stri
     supabaseAdmin.from("teams").select("discord_role_id").eq("id", teamBId).single(),
   ]);
 
+  // At 1v1 nobody holds a per-team role — both players keep the one shared
+  // tournament role, so only the teams' derived identities need to follow them.
+  const teamSize = await resolveTeamSize();
+
   if (a.discord_id) {
-    if (teamAId && teamA?.discord_role_id) removeRoleById(a.discord_id, teamA.discord_role_id).catch(() => {});
+    if (teamSize > 1 && teamA?.discord_role_id) removeRoleById(a.discord_id, teamA.discord_role_id).catch(() => {});
     if (a.is_captain) removeRole(a.discord_id, "Captain").catch(() => {});
-    if (teamB?.discord_role_id) addRoleById(a.discord_id, teamB.discord_role_id).catch(() => {});
+    if (teamSize > 1 && teamB?.discord_role_id) addRoleById(a.discord_id, teamB.discord_role_id).catch(() => {});
   }
   if (b.discord_id) {
-    if (teamBId && teamB?.discord_role_id) removeRoleById(b.discord_id, teamB.discord_role_id).catch(() => {});
+    if (teamSize > 1 && teamB?.discord_role_id) removeRoleById(b.discord_id, teamB.discord_role_id).catch(() => {});
     if (b.is_captain) removeRole(b.discord_id, "Captain").catch(() => {});
-    if (teamA?.discord_role_id) addRoleById(b.discord_id, teamA.discord_role_id).catch(() => {});
+    if (teamSize > 1 && teamA?.discord_role_id) addRoleById(b.discord_id, teamA.discord_role_id).catch(() => {});
   }
+
+  await Promise.all([
+    syncSoloTeamIdentity(teamAId, teamSize),
+    syncSoloTeamIdentity(teamBId, teamSize),
+  ]);
 
   await Promise.all([assignCaptainIfMissing(teamAId), assignCaptainIfMissing(teamBId)]);
 
@@ -209,11 +224,22 @@ export async function swapRosterPlayerWithBenchPlayer(rosterPlayerId: string, be
 
   const { data: team } = await supabaseAdmin.from("teams").select("discord_role_id").eq("id", teamId).single();
 
+  // This one really does move somebody out of the event and somebody in, so at
+  // 1v1 the shared tournament role has to follow. addRole creates the role when
+  // it's missing, hence the size gate on the add but not on the remove.
+  const teamSize = await resolveTeamSize();
+
   if (roster.discord_id) {
-    if (team?.discord_role_id) removeRoleById(roster.discord_id, team.discord_role_id).catch(() => {});
+    if (teamSize > 1 && team?.discord_role_id) removeRoleById(roster.discord_id, team.discord_role_id).catch(() => {});
     if (roster.is_captain) removeRole(roster.discord_id, "Captain").catch(() => {});
+    removeRole(roster.discord_id, TOURNAMENT_ROLE_NAME).catch(() => {});
   }
-  if (bench.discord_id && team?.discord_role_id) addRoleById(bench.discord_id, team.discord_role_id).catch(() => {});
+  if (bench.discord_id) {
+    if (teamSize > 1 && team?.discord_role_id) addRoleById(bench.discord_id, team.discord_role_id).catch(() => {});
+    if (teamSize === 1) addRole(bench.discord_id, TOURNAMENT_ROLE_NAME).catch(() => {});
+  }
+
+  await syncSoloTeamIdentity(teamId, teamSize);
 
   await assignCaptainIfMissing(teamId);
 

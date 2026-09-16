@@ -3,6 +3,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { playerRatingFromRow } from "@/app/lib/rating";
+import { normalizeTeamSize } from "@/app/lib/team-size";
 import { AdminTeamsManager } from "./admin-teams-manager";
 import { TeamsGrid } from "./teams-grid";
 import { BackButton } from "./back-button";
@@ -27,10 +28,11 @@ export default async function TeamsPage({
       .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, tracker_url, is_captain, team_id")
       .eq("status", "approved")
       .not("team_id", "is", null),
-    supabaseAdmin.from("league_settings").select("active_tournament_id, season_active").single(),
+    supabaseAdmin.from("league_settings").select("active_tournament_id, season_active, team_size").single(),
   ]);
 
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
+  const teamSize = normalizeTeamSize(settings?.team_size);
 
   // All approved players not currently on a team — passed to AdminTeamsManager as the
   // bench swap pool, regardless of whether they entered the active tournament/draft.
@@ -135,6 +137,7 @@ export default async function TeamsPage({
             availablePlayers={availablePlayers}
             initialQuery={initialSearch ?? ""}
             joinMode={joinMode}
+            teamSize={teamSize}
           />
         ) : (
           <TeamsGrid

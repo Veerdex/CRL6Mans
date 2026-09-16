@@ -9,8 +9,10 @@ import { playerRatingFromRow } from "@/app/lib/rating";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 // Isolated per-card toggle so state can never bleed across cards.
-function TeamEditToggleInline({ team }: { team: { id: string; name: string; logo_url: string | null; logo_offset_x: number | null; logo_offset_y: number | null; is_locked: boolean | null } }) {
+function TeamEditToggleInline({ team, teamSize }: { team: { id: string; name: string; logo_url: string | null; logo_offset_x: number | null; logo_offset_y: number | null; is_locked: boolean | null }; teamSize: number }) {
   const [open, setOpen] = useState(false);
+  // A 1v1 team's name and logo are its player's, so there's nothing behind this.
+  if (teamSize === 1) return null;
   return (
     <div className="border-t border-zinc-800">
       <button
@@ -25,6 +27,7 @@ function TeamEditToggleInline({ team }: { team: { id: string; name: string; logo
             team={{ ...team, logo_offset_x: team.logo_offset_x ?? 50, logo_offset_y: team.logo_offset_y ?? 50, is_locked: team.is_locked ?? false }}
             isAdmin={true}
             label={team.name}
+            teamSize={teamSize}
           />
         </div>
       )}
@@ -56,6 +59,7 @@ interface Props {
   availablePlayers?: AvailablePlayer[];
   initialQuery?: string;
   joinMode?: "players" | "teams";
+  teamSize?: number;
 }
 
 const gradients = [
@@ -89,7 +93,7 @@ function isValidTarget(source: SwapSelection, candidate: SwapSelection): boolean
   return true;
 }
 
-export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = [], initialQuery = "", joinMode = "players" }: Props) {
+export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = [], initialQuery = "", joinMode = "players", teamSize = 3 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmDqTeamId, setConfirmDqTeamId] = useState<string | null>(null);
@@ -344,7 +348,7 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
             </div>
 
             {/* Edit team info toggle — per-card state, isolated from other cards */}
-            <TeamEditToggleInline team={team} />
+            <TeamEditToggleInline team={team} teamSize={teamSize} />
           </div>
         );
       })}

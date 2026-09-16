@@ -18,6 +18,7 @@ import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "./team-size";
+import { TOURNAMENT_ROLE_NAME, syncSoloTeamIdentity } from "./solo-team";
 import { notifyMatchChannel } from "./match-notifications";
 import { createClip } from "./clip-submit";
 import { kickAccount, banAccount, findAccountByDiscordId, DEFAULT_KICK_TIMEOUT_MS, type RevokedPatron } from "./moderation";
@@ -1110,7 +1111,8 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
     return { ok: false, message: `Need ${numTeams * teamSize} players to fill ${numTeams} teams (have ${entered.length}).` };
 
   const teamsToUse = numberedTeams.slice(0, numTeams);
-  const missingRoleIds = teamsToUse.filter(t => !t.discord_role_id).map(t => `Team ${t.num}`);
+  // 1v1 doesn't use the per-slot roles at all — everyone shares one role.
+  const missingRoleIds = teamSize === 1 ? [] : teamsToUse.filter(t => !t.discord_role_id).map(t => `Team ${t.num}`);
   if (missingRoleIds.length > 0)
     return { ok: false, message: `Missing Discord role IDs for: ${missingRoleIds.join(", ")}.` };
 
@@ -1194,6 +1196,8 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
   ]);
   if (captainIds.length)
     await supabaseAdmin.from("players").update({ is_captain: true }).in("id", captainIds);
+
+  await Promise.all(teamsToUse.map(t => syncSoloTeamIdentity(t.id, teamSize)));
 
   await supabaseAdmin.from("league_settings").update({
     draft_open: false, draft_active: false, draft_phase: null,
@@ -1356,6 +1360,8 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
     )
   );
 
+  await Promise.all(teamsToUse.map(t => syncSoloTeamIdentity(t.id, teamSize)));
+
   await supabaseAdmin.from("league_settings")
     .update({ num_teams: kept.length, draft_open: false, updated_at: new Date().toISOString() })
     .not("id", "is", null);
@@ -1366,9 +1372,13 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
   // ── Discord ──
   await deleteMatchChannels();
   await execSyncRoles();
-  const { data: renameTeams } = await supabaseAdmin
-    .from("teams").select("name, discord_role_id").not("discord_role_id", "is", null);
-  for (const t of renameTeams ?? []) await editRole(t.discord_role_id!, { name: t.name });
+  // At 1v1 the slot roles go unused and the team names are player names — there
+  // is nothing to rename them after.
+  if (teamSize > 1) {
+    const { data: renameTeams } = await supabaseAdmin
+      .from("teams").select("name, discord_role_id").not("discord_role_id", "is", null);
+    for (const t of renameTeams ?? []) await editRole(t.discord_role_id!, { name: t.name });
+  }
 
   return { ok: true, message: `Finalized ${kept.length} team(s) from sign-ups.` };
 }
@@ -1524,11 +1534,12 @@ const GROUP_PRESETS = new Set(["group_single_elimination", "group_swiss_single_e
 export async function execStartSeason(): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("season_format, num_teams, draft_active, season_active, active_tournament_id, is_test_season")
+    .select("season_format, num_teams, team_size, draft_active, season_active, active_tournament_id, is_test_season")
     .single();
 
   const format = settings?.season_format as { preset?: string } | null;
   const numTeams: number = settings?.num_teams ?? 0;
+  const teamSize = normalizeTeamSize(settings?.team_size);
 
   if (!format?.preset) {
     return { ok: false, message: "❌ No season format selected. Set one in the admin panel first." };
@@ -1567,10 +1578,13 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   }
 
   // Rename each Discord role to match the team's current name (set by captains pre-season).
-  const { data: teamsToRename } = await supabaseAdmin
-    .from("teams").select("name, discord_role_id").not("discord_role_id", "is", null);
-  for (const team of teamsToRename ?? []) {
-    await editRole(team.discord_role_id!, { name: team.name });
+  // At 1v1 the slot roles are unused and the names are players', so leave them be.
+  if (teamSize > 1) {
+    const { data: teamsToRename } = await supabaseAdmin
+      .from("teams").select("name, discord_role_id").not("discord_role_id", "is", null);
+    for (const team of teamsToRename ?? []) {
+      await editRole(team.discord_role_id!, { name: team.name });
+    }
   }
 
   // Lock all team info now that the season is live; admins can unlock individual teams later.
@@ -1929,7 +1943,9 @@ async function adminWipe(userId: string, confirm: string, clearHistory: boolean)
   const { data: allTeams } = await supabaseAdmin.from("teams").select("discord_role_id");
   const guildRoles = await getGuildRoles();
   const roleIdsToStrip = [
-    ...guildRoles.filter(r => r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft").map(r => r.id),
+    ...guildRoles.filter(r =>
+      r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft" || r.name === TOURNAMENT_ROLE_NAME
+    ).map(r => r.id),
     ...(allTeams ?? []).map(t => t.discord_role_id).filter((id): id is string => !!id),
   ];
   await stripRoleIdsFromMembers(realDiscordIds, roleIdsToStrip);
@@ -2457,7 +2473,7 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
       .select("discord_id")
       .not("discord_id", "is", null),
     supabaseAdmin.from("league_settings")
-      .select("registered_role_id")
+      .select("registered_role_id, team_size")
       .single(),
   ]);
 
@@ -2466,14 +2482,29 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
   // `if (registeredRoleId)` re-add check below skips it too.
   const registeredRoleId = syncRegistered ? (settings?.registered_role_id as string | null) : null;
 
+  // A 1v1 team is one player, so per-team roles would mean one role per
+  // participant. They share a single role saying they're in the running event.
+  const solo = normalizeTeamSize(settings?.team_size) === 1;
+
   // Only auto-create Drafted and Captain — team roles are pre-created manually
-  const roleMap = await ensureRoles(["Drafted", "Captain"]);
+  const roleMap = await ensureRoles(solo ? ["Drafted", "Captain", TOURNAMENT_ROLE_NAME] : ["Drafted", "Captain"]);
   if (!roleMap["Drafted"] || !roleMap["Captain"]) {
     warnings.push(`Failed to create Drafted/Captain roles — check bot permissions`);
   }
+  // Outside 1v1 the shared role is only looked up, never created: a league that
+  // has never run one shouldn't grow a stray role. It still has to be stripped,
+  // or its holders would keep it into the next event.
+  const tournamentRoleId = solo
+    ? roleMap[TOURNAMENT_ROLE_NAME] ?? null
+    : (await getGuildRoles()).find(r => r.name === TOURNAMENT_ROLE_NAME)?.id ?? null;
+  if (solo && !tournamentRoleId) {
+    warnings.push(`Failed to create the ${TOURNAMENT_ROLE_NAME} role — check bot permissions`);
+  }
 
-  // For teams without a stored role ID, fall back to creating by name
-  const teamsNeedingFallback = (teams ?? []).filter(t => !t.discord_role_id);
+  // For teams without a stored role ID, fall back to creating by name. Never at
+  // 1v1 — the team names are player names there, so this would mint one role
+  // per entrant, which is the thing the shared role exists to avoid.
+  const teamsNeedingFallback = solo ? [] : (teams ?? []).filter(t => !t.discord_role_id);
   const fallbackMap = teamsNeedingFallback.length > 0
     ? await ensureRoles(teamsNeedingFallback.map(t => t.name))
     : {};
@@ -2487,7 +2518,7 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
   // Includes registered role so it gets stripped from non-approved players.
   const managedRoleIds = [
     registeredRoleId,
-    roleMap["Drafted"], roleMap["Captain"],
+    roleMap["Drafted"], roleMap["Captain"], tournamentRoleId,
     ...Object.values(teamById).map(t => t.roleId),
   ].filter((id): id is string => !!id);
 
@@ -2517,7 +2548,11 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
       if (team) {
         assigned++;
         if (roleMap["Drafted"]) promises.push(addRoleById(discordId, roleMap["Drafted"]));
-        if (team.roleId)        promises.push(addRoleById(discordId, team.roleId));
+        if (solo) {
+          if (tournamentRoleId) promises.push(addRoleById(discordId, tournamentRoleId));
+        } else if (team.roleId) {
+          promises.push(addRoleById(discordId, team.roleId));
+        }
         if (player.is_captain && roleMap["Captain"])
           promises.push(addRoleById(discordId, roleMap["Captain"]));
       }
@@ -2526,17 +2561,22 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
     })
   );
 
+  // At 1v1 the team names are player names, so listing them back as "roles"
+  // would be noise — the one shared role is the whole story.
   const roleNames = [
     ...(registeredRoleId ? ["Registered"] : []),
-    "Drafted", "Captain", ...(teams ?? []).map(t => t.name),
+    "Drafted", "Captain",
+    ...(solo ? [TOURNAMENT_ROLE_NAME] : (teams ?? []).map(t => t.name)),
   ];
   const roleIds = [
     ...(registeredRoleId ? [{ label: "Registered", id: registeredRoleId }] : []),
     ...(roleMap["Drafted"] ? [{ label: "Drafted", id: roleMap["Drafted"] }] : []),
     ...(roleMap["Captain"] ? [{ label: "Captain", id: roleMap["Captain"] }] : []),
-    ...Object.entries(teamById)
-      .filter(([, t]) => t.roleId)
-      .map(([, t]) => ({ label: t.name, id: t.roleId as string })),
+    ...(solo
+      ? (tournamentRoleId ? [{ label: TOURNAMENT_ROLE_NAME, id: tournamentRoleId }] : [])
+      : Object.entries(teamById)
+          .filter(([, t]) => t.roleId)
+          .map(([, t]) => ({ label: t.name, id: t.roleId as string }))),
   ];
   return { assigned, roleNames, roleIds, warnings };
 }

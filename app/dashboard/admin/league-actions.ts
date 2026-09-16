@@ -16,6 +16,7 @@ import { computeFullArchive } from "./tournament-archive";
 import { recordEventResults } from "@/app/lib/event-results";
 import { ACCOLADE_PRIZE_COLUMNS, SEASON_ACCOLADES } from "@/app/lib/accolades";
 import { normalizeTeamSize, resolveTeamSize } from "@/app/lib/team-size";
+import { TOURNAMENT_ROLE_NAME, syncSoloTeamIdentity } from "@/app/lib/solo-team";
 
 const TEAM_ROLE_COLOR = 0x3498db; // blue
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -201,12 +202,15 @@ export async function generateTestTeams() {
     }).eq("id", team.id)
   ));
 
-  // Rename Discord roles in parallel (editRole self-throttles on rate limits)
-  await Promise.all(
-    teamsToUse
-      .filter(t => t.discord_role_id)
-      .map(t => editRole(t.discord_role_id!, { name: `Team ${t.num}` }))
-  );
+  // Rename Discord roles in parallel (editRole self-throttles on rate limits).
+  // 1v1 doesn't use the slot roles — everyone shares one tournament role instead.
+  if (teamSize > 1) {
+    await Promise.all(
+      teamsToUse
+        .filter(t => t.discord_role_id)
+        .map(t => editRole(t.discord_role_id!, { name: `Team ${t.num}` }))
+    );
+  }
 
   // Strip all team / Drafted / Captain roles from every real (non-test) approved player
   // so no one ends up with roles from a previous draft after reassignment.
@@ -225,7 +229,7 @@ export async function generateTestTeams() {
     const guildRoles = await getGuildRoles();
     const roleIdsToStrip = [
       ...guildRoles
-        .filter(r => r.name === "Drafted" || r.name === "Captain")
+        .filter(r => r.name === "Drafted" || r.name === "Captain" || r.name === TOURNAMENT_ROLE_NAME)
         .map(r => r.id),
       ...(allTeams ?? [])
         .map(t => t.discord_role_id)
@@ -267,6 +271,8 @@ export async function generateTestTeams() {
     updated_at: new Date().toISOString(),
   }).not("id", "is", null);
 
+  await Promise.all(teamsToUse.map(t => syncSoloTeamIdentity(t.id, teamSize)));
+
   revalidatePath("/dashboard/teams");
   revalidatePath("/dashboard/players");
 
@@ -275,7 +281,7 @@ export async function generateTestTeams() {
 
   const assigned = numTeams * teamSize;
   const skipped = players.length - assigned;
-  const missingRoleIds = teamsToUse.filter(t => !t.discord_role_id).length;
+  const missingRoleIds = teamSize === 1 ? 0 : teamsToUse.filter(t => !t.discord_role_id).length;
   const roleWarning = missingRoleIds > 0 ? ` ⚠ ${missingRoleIds} team${missingRoleIds > 1 ? "s" : ""} missing role ID — Discord roles not assigned for those.` : "";
   return { ok: true, message: `Generated ${numTeams} teams (${assigned} players assigned${skipped > 0 ? `, ${skipped} unassigned` : ""}).${roleWarning}` };
 }
@@ -965,11 +971,17 @@ async function stripTeamRolesFromPlayers(): Promise<{
 
   const { data: allTeams } = await supabaseAdmin.from("teams").select("name, discord_role_id");
   const guildRoles = await getGuildRoles();
+  // At 1v1 a team's name is its player's name, so matching guild roles by team
+  // name would strip whatever unrelated role happens to share it.
   const teamNames = new Set(
-    (allTeams ?? []).map(t => (t.name as string | null) ?? "").filter(Boolean)
+    (await resolveTeamSize()) === 1
+      ? []
+      : (allTeams ?? []).map(t => (t.name as string | null) ?? "").filter(Boolean)
   );
   const roleIds = new Set<string>([
-    ...guildRoles.filter(r => r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft").map(r => r.id),
+    ...guildRoles.filter(r =>
+      r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft" || r.name === TOURNAMENT_ROLE_NAME
+    ).map(r => r.id),
     ...(allTeams ?? []).map(t => t.discord_role_id).filter((id): id is string => !!id),
     ...guildRoles.filter(r => teamNames.has(r.name) || /^Team \d+$/.test(r.name)).map(r => r.id),
   ]);

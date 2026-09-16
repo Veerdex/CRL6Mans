@@ -18,11 +18,13 @@ export function MyTeamEditor({
   isAdmin,
   seasonActive = false,
   label = "My Team",
+  teamSize = 3,
 }: {
   team: Team;
   isAdmin: boolean;
   seasonActive?: boolean;
   label?: string;
+  teamSize?: number;
 }) {
   const router = useRouter();
   const [name, setName] = useState(team.name);
@@ -98,6 +100,10 @@ export function MyTeamEditor({
 
   // Locked-and-not-admin: hide the section entirely rather than showing an inert card.
   if (!canEdit) return null;
+
+  // At 1v1 a team is one player: the name is their name and the logo their
+  // avatar, both rewritten whenever teams are formed. Nothing to edit.
+  if (teamSize === 1) return null;
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">

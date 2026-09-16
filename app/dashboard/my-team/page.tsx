@@ -5,6 +5,7 @@ import { isModeratorVerified } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { playerRatingFromRow } from "@/app/lib/rating";
+import { normalizeTeamSize } from "@/app/lib/team-size";
 import {
   getRoundName, getMatchLabel,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -236,7 +237,7 @@ export default async function MyTeamPage() {
       .eq("team_id", teamId).eq("status", "approved"),
     supabaseAdmin.from("teams").select("id, name, logo_url, logo_offset_x, logo_offset_y"),
     supabaseAdmin.from("league_settings")
-      .select("season_active, season_format, num_teams, active_tournament_id, subs_enabled, stats_enabled, replay_analysis_mode").single(),
+      .select("season_active, season_format, num_teams, team_size, active_tournament_id, subs_enabled, stats_enabled, replay_analysis_mode").single(),
     supabaseAdmin.from("sub_requests")
       .select("id, match_id, player_out_id, sub_player_id, sub_player_ids, reason, status, admin_note, created_at")
       .eq("team_id", teamId).order("created_at", { ascending: false }),
@@ -249,6 +250,7 @@ export default async function MyTeamPage() {
   const statsEnabled = settings?.stats_enabled ?? true;
   const replayAnalysisMode = settings?.replay_analysis_mode === "strict" ? "strict" as const : "loose" as const;
   const seasonActive = settings?.season_active ?? false;
+  const teamSize     = normalizeTeamSize(settings?.team_size);
   const preset       = (settings?.season_format as { preset?: string })?.preset ?? "single_elimination";
   // isDE covers all formats that use a double-elimination bracket (full or qualifier)
   const isDE         = preset === "double_elimination" || preset === "de_swiss_single_elimination";
@@ -861,6 +863,7 @@ export default async function MyTeamPage() {
             isAdmin={userIsAdmin}
             seasonActive={seasonActive}
             label="Team Settings"
+            teamSize={teamSize}
           />
 
           {/* Next Match */}
