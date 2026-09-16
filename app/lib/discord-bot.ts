@@ -905,12 +905,23 @@ export async function setDraftChannelVisibility(
   const channelId = settings?.draft_channel_id as string | null;
   if (!channelId) return { ok: false, reason: "No draft channel is set (`/admin setdraftchannel`)." };
 
-  const role = await resolveTournamentRole({ create: open });
-  if (!role)
-    return { ok: false, reason: "Couldn't resolve the event role — check `/admin settournamentid`." };
+  if (open) {
+    const role = await resolveTournamentRole({ create: true });
+    if (!role)
+      return { ok: false, reason: "Couldn't resolve the event role — check `/admin settournamentid`." };
+    const res = await setChannelRoleView(channelId, role.id, true);
+    return res.ok ? { ok: true } : { ok: false, reason: res.message };
+  }
 
-  const res = await setChannelRoleView(channelId, role.id, open);
-  return res.ok ? { ok: true } : { ok: false, reason: res.message };
+  // Close over every ID that counts as the event role, not just the one resolving
+  // right now: relinking with /admin settournamentid mid-draft would otherwise
+  // leave the role the channel was actually opened to open forever.
+  const roleIds = await tournamentRoleIdsToStrip();
+  if (!roleIds.length)
+    return { ok: false, reason: "Couldn't resolve the event role — check `/admin settournamentid`." };
+  const results = await Promise.all(roleIds.map(id => setChannelRoleView(channelId, id, false)));
+  const failed = results.find(r => !r.ok);
+  return failed ? { ok: false, reason: failed.message } : { ok: true };
 }
 
 export async function execStartDraft(maxTeams?: number | "max" | null): Promise<{ ok: boolean; message: string }> {
