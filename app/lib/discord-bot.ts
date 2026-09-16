@@ -1346,7 +1346,10 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
   await supabaseAdmin.from("matches").delete().not("id", "is", null);
   await Promise.all([
     ...teamsToUse.map((t, i) =>
-      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: kept[i].name, is_disqualified: false, disqualified_at: null }).eq("id", t.id)
+      // logo_url is cleared like the other two formation paths do: a sign-up
+      // carries no logo, so anything on the slot belongs to a previous event's
+      // roster — after a 1v1 that's some player's Discord avatar.
+      supabaseAdmin.from("teams").update({ wins: 0, losses: 0, name: kept[i].name, logo_url: null, is_disqualified: false, disqualified_at: null }).eq("id", t.id)
     ),
     ...teamsToUse.map((t, i) =>
       supabaseAdmin.from("players")
