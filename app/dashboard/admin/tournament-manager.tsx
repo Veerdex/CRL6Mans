@@ -190,6 +190,7 @@ type FormState = {
   overview: string;
   joinMode: JoinMode;
   teamAssignment: TeamAssignment;
+  teamSize: string;
   minTeams: string;
   teamLimit: string;
   minMmr2v2: string;
@@ -219,6 +220,7 @@ const EMPTY_FORM: FormState = {
   overview: "",
   joinMode: "players",
   teamAssignment: "snake_draft",
+  teamSize: "3",
   minTeams: FORMAT_TEAM_DEFAULTS.single_elimination.min,
   teamLimit: "",
   minMmr2v2: "",
@@ -345,6 +347,7 @@ export function TournamentManager({
       overview: form.overview,
       min_teams: parseInt(form.minTeams) || 0,
       team_limit: form.teamLimit ? parseInt(form.teamLimit) || null : null,
+      team_size: parseInt(form.teamSize) || 3,
       join_mode: form.joinMode,
       team_assignment: isPlayers ? form.teamAssignment : null,
       draft_open_at: localInputToIso(form.draftOpenAt),
@@ -456,6 +459,7 @@ export function TournamentManager({
       overview: t.overview ?? "",
       joinMode: t.join_mode,
       teamAssignment: t.team_assignment ?? "snake_draft",
+      teamSize: String(t.team_size ?? 3),
       minTeams: t.min_teams ? String(t.min_teams) : "",
       teamLimit: t.team_limit ? String(t.team_limit) : "",
       preset,
@@ -607,6 +611,29 @@ export function TournamentManager({
           </div>
 
           <div>
+            <label className={labelCls}>Team size</label>
+            <select
+              className={inputCls}
+              value={form.teamSize}
+              onChange={(e) => {
+                const size = e.target.value;
+                // A 1v1 team is its own captain, so there is nothing left to
+                // pick — the server rejects the combination, and leaving it
+                // selected would render the dropdown blank.
+                setForm({
+                  ...form,
+                  teamSize: size,
+                  teamAssignment: size === "1" ? "auto_balance" : form.teamAssignment,
+                });
+              }}
+            >
+              <option value="3">3v3</option>
+              <option value="2">2v2</option>
+              <option value="1">1v1</option>
+            </select>
+          </div>
+
+          <div>
             <label className={labelCls}>Who signs up?</label>
             <select
               className={inputCls}
@@ -626,7 +653,7 @@ export function TournamentManager({
                 value={form.teamAssignment}
                 onChange={(e) => setForm({ ...form, teamAssignment: e.target.value as TeamAssignment })}
               >
-                <option value="snake_draft">Snake draft (captains pick)</option>
+                {form.teamSize !== "1" && <option value="snake_draft">Snake draft (captains pick)</option>}
                 <option value="auto_balance">Auto-balance by MMR</option>
               </select>
             </div>
@@ -1014,7 +1041,7 @@ export function TournamentManager({
           <span className="text-zinc-300">{form.name.trim() || "Untitled"}</span>
           <span className="text-zinc-600">·</span>
           <span className="text-zinc-300">
-            {teams || "—"} teams, {form.joinMode === "players"
+            {teams || "—"} teams of {form.teamSize}, {form.joinMode === "players"
               ? form.teamAssignment === "auto_balance" ? "auto-balanced" : "snake draft"
               : "pre-formed teams"}
           </span>
@@ -1100,6 +1127,7 @@ export function TournamentManager({
                     : t.team_assignment === "auto_balance"
                     ? "Player sign-ups · auto-balance"
                     : "Player sign-ups · snake draft"}
+                  {` · ${t.team_size ?? 3}v${t.team_size ?? 3}`}
                   {t.min_teams > 0 && ` · min ${t.min_teams} teams`}
                   {t.team_limit ? ` · max ${t.team_limit} teams` : ""}
                 </p>

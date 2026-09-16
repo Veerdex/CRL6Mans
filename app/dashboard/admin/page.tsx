@@ -4,6 +4,7 @@ import Link from "next/link";
 import { decrypt } from "@/app/lib/session";
 import { getAllPendingPlayers, isModeratorVerified, isDirector, isCEO, isCurrentlyKicked, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { normalizeTeamSize } from "@/app/lib/team-size";
 import { collegeIdSignedUrl } from "@/app/lib/college-ids";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { SEASON_ACCOLADES } from "@/app/lib/accolades";
@@ -200,7 +201,7 @@ export default async function AdminPage() {
 
   const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors, publicDesigns] = await Promise.all([
     getAllPendingPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, accolade_prize_mvp, accolade_prize_offensive, accolade_prize_defensive, accolade_prize_rookie, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, season_design_id, replay_analysis_mode, join_gate_enabled").maybeSingle(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, team_size, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, accolade_prize_mvp, accolade_prize_offensive, accolade_prize_defensive, accolade_prize_rookie, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, season_design_id, replay_analysis_mode, join_gate_enabled").maybeSingle(),
     supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
@@ -820,9 +821,10 @@ export default async function AdminPage() {
   // Predict all format stages + their round counts so the scheduler shows every
   // stage up front, before its bracket is generated. Real matches take precedence.
   const sf = settings?.season_format as { preset?: string; groupMaxAdvancing?: number | null } | null;
+  const runtimeTeamSize = normalizeTeamSize(settings?.team_size);
   const schedulingTeams = settings?.num_teams
     ? (settings.num_teams as number)
-    : Math.floor((enteredCount ?? 0) / 3);
+    : Math.floor((enteredCount ?? 0) / runtimeTeamSize);
   if (sf?.preset) {
     for (const { stage, rounds } of expectedStageRounds(sf.preset, schedulingTeams, sf.groupMaxAdvancing ?? null)) {
       if (rounds <= 0) continue;
@@ -910,14 +912,14 @@ export default async function AdminPage() {
   const seasonParticipants = (settings?.season_participants as number) ?? 16;
   const actualTeams: number = settings?.num_teams
     ? (settings.num_teams as number)
-    : Math.floor((enteredCount ?? 0) / 3);
+    : Math.floor((enteredCount ?? 0) / runtimeTeamSize);
 
   // Number of pre-created team slots — caps how many teams the draft can actually
   // build regardless of player pool size.
   const teamSlotCount = (teamSlots ?? []).filter((t) => t.slot_number != null).length;
   // Actual feasible max teams from the player pool alone (slot count is a separate concern).
   // Shown in the top-right of the Start Draft / Auto Draft cards.
-  const draftCurrentMax = Math.floor((enteredCount ?? 0) / 3);
+  const draftCurrentMax = Math.floor((enteredCount ?? 0) / runtimeTeamSize);
 
   // The selected format's team ceiling (e.g. 32 for hybrid, 64 for group, null for SE/DE).
   // Shown as the blank-input default in the max-teams field.

@@ -1,5 +1,6 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
+import { normalizeTeamSize } from "./team-size";
 
 /**
  * Make a tournament the single live/active one and bridge its joiners into the
@@ -60,6 +61,8 @@ export async function activateTournamentRuntime(
     );
   }
 
+  const teamSize = normalizeTeamSize(t.team_size);
+
   // Derive team count from actual sign-ups, capped by team_limit if set.
   let numTeams = 0;
   if (t.join_mode === "players") {
@@ -67,7 +70,7 @@ export async function activateTournamentRuntime(
       .from("tournament_entries")
       .select("*", { count: "exact", head: true })
       .eq("tournament_id", tournamentId);
-    numTeams = Math.floor((count ?? 0) / 3);
+    numTeams = Math.floor((count ?? 0) / teamSize);
   } else {
     const { count } = await supabaseAdmin
       .from("team_signups")
@@ -81,6 +84,7 @@ export async function activateTournamentRuntime(
   await supabaseAdmin.from("league_settings").update({
     active_tournament_id: tournamentId,
     num_teams: numTeams,
+    team_size: teamSize,
     stats_enabled: t.stats_enabled ?? true,
     season_format: t.season_format ?? null,
     match_deadline_day: t.match_deadline_day,

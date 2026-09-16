@@ -131,6 +131,12 @@ unregistered → (submits register form) → pending → (admin approves) → ap
 - `snake_draft` — live draft picks shown in `/dashboard/draft`.
 - `auto_balance` — server auto-assigns players to balanced teams.
 
+**Team size** (`tournaments.team_size`, 1–3; seasons are always 3):
+- Every consumer reads `league_settings.team_size` through `app/lib/team-size.ts` (`normalizeTeamSize` / `resolveTeamSize`) — never a local `?? 3`. `activateTournamentRuntime` mirrors it in, and every tournament teardown resets it to `DEFAULT_TEAM_SIZE` so a 1v1 can't size the next season's draft.
+- Captains are seated before pick 0, so a draft is `num_teams × (team_size - 1)` picks. `getTeamNumberForPick` is pure snake math; pick order is set by which team number each captain is assigned.
+- 3v3 has two pick rounds and the snake balances them, so the highest-RV captain picks first. 2v2 has a single round with nothing to reverse against, so the order flips and the **worst** captain picks first.
+- **1v1 has no draft at all** — a team is its own captain. Both `sanitize()` in `admin/tournament-actions.ts` and `execStartDraft` reject it.
+
 **Activating a tournament** (`activateTournamentRuntime` in `lib/tournament-runtime.ts`):
 - Copies `tournament_entries` → `players.draft_entered` to bridge the player pool into the legacy runtime.
 - Mirrors tournament config into `league_settings` (single source of truth for the draft/season machinery).
@@ -153,10 +159,10 @@ Every call site should go through `playerRatingFromRow()` (player rating from a 
 ## Captain rules
 
 - Captain is the **highest-RV player** on the team.
-- A team with **≤2 players has no captain** — that is not a full roster.
+- A team **below its full roster size has no captain** — that is not a full roster. Roster size is `league_settings.team_size` (see `app/lib/team-size.ts`), which is 3 for seasons and mirrors the active tournament's `team_size` for tournaments.
 - Captain is **stable for the season** — MMR changes do not trigger reassignment.
 - When the captain is **removed or moved off the team**, the team becomes captainless. No automatic promotion.
-- When a player is **added to a captainless team** with 3+ members, `assignCaptainIfMissing` (in `app/dashboard/teams/actions.ts`) assigns the highest-MMR player as captain.
+- When a player is **added to a captainless team** that is now at full roster size, `assignCaptainIfMissing` (in `app/dashboard/teams/actions.ts`) assigns the highest-MMR player as captain.
 - `removeFromActivePlay` always clears `is_captain: false` so kick/ban never leaves stale captain state in the DB.
 
 ---

@@ -15,6 +15,7 @@ import { fetchAllRows } from "@/app/lib/paginate";
 import { computeFullArchive } from "./tournament-archive";
 import { recordEventResults } from "@/app/lib/event-results";
 import { ACCOLADE_PRIZE_COLUMNS, SEASON_ACCOLADES } from "@/app/lib/accolades";
+import { normalizeTeamSize, resolveTeamSize } from "@/app/lib/team-size";
 
 const TEAM_ROLE_COLOR = 0x3498db; // blue
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -160,21 +161,22 @@ export async function generateTestTeams() {
   // Honor the admin's configured team count. Only fall back to the physical max
   // (slots / players) when the admin hasn't set a value yet.
   const { data: settings } = await supabaseAdmin
-    .from("league_settings").select("num_teams").single();
+    .from("league_settings").select("num_teams, team_size").single();
   const configured = (settings?.num_teams as number) ?? 0;
-  const maxFeasible = Math.min(sortedTeams.length, Math.floor(players.length / 3));
+  const teamSize = normalizeTeamSize(settings?.team_size);
+  const maxFeasible = Math.min(sortedTeams.length, Math.floor(players.length / teamSize));
 
   let numTeams: number;
   if (configured > 0) {
     if (configured > sortedTeams.length)
       return { error: `Configured for ${configured} teams but only ${sortedTeams.length} team slot${sortedTeams.length === 1 ? "" : "s"} exist. Add more slots or lower the team count.` };
-    if (configured * 3 > players.length)
-      return { error: `${configured} teams requires ${configured * 3} players in the draft pool (currently ${players.length}).` };
+    if (configured * teamSize > players.length)
+      return { error: `${configured} teams requires ${configured * teamSize} players in the draft pool (currently ${players.length}).` };
     numTeams = configured;
   } else {
     numTeams = maxFeasible;
   }
-  if (numTeams < 1) return { error: "Need at least 3 players in the draft pool." };
+  if (numTeams < 1) return { error: `Need at least ${teamSize} player${teamSize === 1 ? "" : "s"} in the draft pool.` };
 
   const teamsToUse = sortedTeams.slice(0, numTeams);
 
@@ -242,8 +244,8 @@ export async function generateTestTeams() {
     }
   }
 
-  // Assign exactly numTeams * 3 players round-robin so every team gets exactly 3
-  const toAssign = players.slice(0, numTeams * 3);
+  // Assign exactly numTeams * teamSize players round-robin so every team fills up
+  const toAssign = players.slice(0, numTeams * teamSize);
   const byTeam = teamsToUse.map((team, i) => ({
     teamId: team.id,
     ids: toAssign.filter((_, j) => j % numTeams === i).map(p => p.id),
@@ -271,7 +273,7 @@ export async function generateTestTeams() {
   // Assign Discord roles using stored role IDs
   await execSyncRoles();
 
-  const assigned = numTeams * 3;
+  const assigned = numTeams * teamSize;
   const skipped = players.length - assigned;
   const missingRoleIds = teamsToUse.filter(t => !t.discord_role_id).length;
   const roleWarning = missingRoleIds > 0 ? ` ⚠ ${missingRoleIds} team${missingRoleIds > 1 ? "s" : ""} missing role ID — Discord roles not assigned for those.` : "";
@@ -1073,16 +1075,17 @@ export async function adminSetNumTeams(count: string) {
     .eq("status", "approved")
     .eq("draft_entered", true);
   const entered = enteredCount ?? 0;
+  const teamSize = await resolveTeamSize();
 
   let numTeams: number;
   if (count.toLowerCase() === "max") {
-    numTeams = Math.floor(entered / 3);
+    numTeams = Math.floor(entered / teamSize);
     if (numTeams < 1)
-      return { error: `Need at least 3 players in the draft pool to create teams (currently ${entered}).` };
+      return { error: `Need at least ${teamSize} player${teamSize === 1 ? "" : "s"} in the draft pool to create teams (currently ${entered}).` };
   } else {
     numTeams = parseInt(count);
     if (isNaN(numTeams) || numTeams < 1) return { error: "Enter a valid number or 'max'." };
-    const required = numTeams * 3;
+    const required = numTeams * teamSize;
     if (entered < required)
       return { error: `${numTeams} teams requires ${required} players in the draft pool (currently ${entered}).` };
   }

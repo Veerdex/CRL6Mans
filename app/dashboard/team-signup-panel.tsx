@@ -23,6 +23,7 @@ export function TeamSignupPanel({
   view,
   tournamentId,
   tournamentName,
+  teamSize = 3,
   timeline = [],
   countdown = null,
   prize1st = null,
@@ -36,6 +37,7 @@ export function TeamSignupPanel({
   view: TeamSignupView;
   tournamentId: string;
   tournamentName?: string;
+  teamSize?: number;
   timeline?: TimelineItem[];
   countdown?: { label: string; iso: string } | null;
   prize1st?: number | null;
@@ -115,7 +117,7 @@ export function TeamSignupPanel({
           )}
           <p className="text-[21px] text-zinc-400 mt-1">
             {registrationOpen || incomingInvites.some((i) => i.canAccept)
-              ? "Form a team of 3 (plus an optional 4th as substitute)."
+              ? `Form a team of ${teamSize} (plus an optional extra as substitute).`
               : "Registration is closed."}
           </p>
           {countdown && <div className="mt-1"><CountdownLabel label={countdown.label} iso={countdown.iso} /></div>}
@@ -139,7 +141,7 @@ export function TeamSignupPanel({
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <span className="text-2xl font-bold text-white">{myTeam.name}</span>
-            <span className="text-lg text-zinc-500">{acceptedCount}/3 starters{acceptedCount > 3 ? " +sub" : ""}</span>
+            <span className="text-lg text-zinc-500">{acceptedCount}/{teamSize} starters{acceptedCount > teamSize ? " +sub" : ""}</span>
           </div>
 
           <ul className="space-y-1.5">

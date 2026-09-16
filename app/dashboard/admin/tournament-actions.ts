@@ -13,6 +13,7 @@ import { computeFullArchive } from "./tournament-archive";
 import { recordEventResults } from "@/app/lib/event-results";
 import { resetSeason } from "./league-actions";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
+import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "@/app/lib/team-size";
 
 export type JoinMode = "teams" | "players";
 export type TeamAssignment = "snake_draft" | "auto_balance";
@@ -22,6 +23,7 @@ export type TournamentInput = {
   overview: string | null;
   min_teams: number;
   team_limit: number | null;
+  team_size: number;
   join_mode: JoinMode;
   team_assignment: TeamAssignment | null;
   draft_open_at: string | null;
@@ -122,11 +124,16 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
   if (input.join_mode !== "teams" && input.join_mode !== "players")
     return { error: "Invalid join mode." };
 
+  const teamSize = normalizeTeamSize(input.team_size);
+
   // team_assignment only applies to player-signup tournaments
   let teamAssignment: TeamAssignment | null = null;
   if (input.join_mode === "players") {
     if (input.team_assignment !== "snake_draft" && input.team_assignment !== "auto_balance")
       return { error: "Choose snake draft or auto-balance for player sign-ups." };
+    // A 1v1 team is its own captain, so there is nothing left to pick.
+    if (teamSize === 1 && input.team_assignment === "snake_draft")
+      return { error: "1v1 tournaments can't use a draft — choose auto-balance." };
     teamAssignment = input.team_assignment;
   }
 
@@ -163,6 +170,7 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
       overview: input.overview?.trim() || null,
       min_teams: minTeams,
       team_limit: teamLimit || null,
+      team_size: teamSize,
       join_mode: input.join_mode,
       team_assignment: teamAssignment,
       draft_open_at: input.draft_open_at || null,
@@ -254,7 +262,7 @@ export async function cancelTournament(id: string) {
     if ((settings?.active_tournament_id as string | null) === id) {
       await resetSeason();
       await supabaseAdmin.from("league_settings")
-        .update({ active_tournament_id: null, stats_enabled: true, updated_at: new Date().toISOString() })
+        .update({ active_tournament_id: null, stats_enabled: true, team_size: DEFAULT_TEAM_SIZE, updated_at: new Date().toISOString() })
         .not("id", "is", null);
     }
   }
@@ -373,7 +381,7 @@ export async function activateTournament(id: string) {
   await verifyAdmin();
 
   const { data: t } = await supabaseAdmin
-    .from("tournaments").select("status, join_mode, name, min_teams, team_limit").eq("id", id).single();
+    .from("tournaments").select("status, join_mode, name, min_teams, team_limit, team_size").eq("id", id).single();
   if (!t) return { error: "Tournament not found." };
   if (t.status !== "scheduled") return { error: "Only scheduled tournaments can be activated." };
 
@@ -388,7 +396,7 @@ export async function activateTournament(id: string) {
         .select("*", { count: "exact", head: true })
         .eq("tournament_id", id);
       const playerCount = count ?? 0;
-      actualCount = Math.floor(playerCount / 3);
+      actualCount = Math.floor(playerCount / normalizeTeamSize((t as { team_size?: number }).team_size));
       unit = `teams (${playerCount} players → ${actualCount} teams)`;
     } else {
       const { count } = await supabaseAdmin
@@ -565,10 +573,11 @@ export async function completeTournament() {
   // Reuse the existing season-reset (wipes matches, unassigns players, strips roles).
   await resetSeason();
 
-  // Clear the live pointer (resetSeason doesn't know about it). Stats go back
-  // on by default — only a tournament can turn them off, and this one is over.
+  // Clear the live pointer (resetSeason doesn't know about it). Stats and team
+  // size go back to their defaults — only a tournament can change them, and this
+  // one is over; a stale 1v1 here would silently size the next season's draft.
   await supabaseAdmin.from("league_settings")
-    .update({ active_tournament_id: null, stats_enabled: true, updated_at: new Date().toISOString() })
+    .update({ active_tournament_id: null, stats_enabled: true, team_size: DEFAULT_TEAM_SIZE, updated_at: new Date().toISOString() })
     .not("id", "is", null);
 
   revalidatePath("/dashboard/admin");

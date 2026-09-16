@@ -58,15 +58,17 @@ export function stageStartLabel(key: string, preset: string | null): string {
 
 // The number of teams a tournament will actually run with, using the same rule
 // activateTournamentRuntime applies when it forms them: a player pool makes one
-// team per three sign-ups, a team pool is the sign-ups themselves, and either is
-// capped by team_limit. Before sign-ups close this moves as people join.
+// team per teamSize sign-ups, a team pool is the sign-ups themselves, and either
+// is capped by team_limit. Before sign-ups close this moves as people join.
 export function projectedTeamCount(
   joinMode: string,
   poolCount: number,
   teamSignupCount: number,
-  teamLimit: number | null | undefined
+  teamLimit: number | null | undefined,
+  teamSize: number = 3
 ): number {
-  const teams = joinMode === "players" ? Math.floor(poolCount / 3) : teamSignupCount;
+  const size = teamSize > 0 ? teamSize : 3;
+  const teams = joinMode === "players" ? Math.floor(poolCount / size) : teamSignupCount;
   return teamLimit && teamLimit > 0 ? Math.min(teams, teamLimit) : teams;
 }
 

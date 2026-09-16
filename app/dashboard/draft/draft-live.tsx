@@ -11,6 +11,7 @@ type Player = { id: string; discord_id: string | null; username: string; display
 interface DraftLiveProps {
   numTeams: number;
   currentPick: number;
+  teamSize: number;
   totalPicks: number;
   pickDeadline: string | null;
   teams: Team[];
@@ -35,7 +36,7 @@ function useCountdown(deadline: string | null) {
 }
 
 export function DraftLive({
-  numTeams, currentPick, totalPicks,
+  numTeams, teamSize, currentPick, totalPicks,
   pickDeadline, teams, availablePlayers, pickQueue, viewerTeamId, userIsAdmin, sponsoredByLine,
 }: DraftLiveProps) {
   const router = useRouter();
@@ -207,7 +208,7 @@ export function DraftLive({
                         {isViewer && <span className="text-[10px] text-indigo-400 ml-1.5 font-normal">you</span>}
                         {team.isOnClock && <span className="text-[10px] text-blue-400 ml-1.5 font-normal">on clock</span>}
                       </span>
-                      <span className="text-xs text-zinc-400">{team.rosterSize}/3</span>
+                      <span className="text-xs text-zinc-400">{team.rosterSize}/{teamSize}</span>
                     </div>
                   </div>
                 );

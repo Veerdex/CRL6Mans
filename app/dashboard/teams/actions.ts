@@ -10,6 +10,7 @@ import { editRole, addRole, addRoleById, removeRoleById, removeRole } from "@/ap
 import { validateImageUpload } from "@/app/lib/uploads";
 import { applyPlayerRVChangeToTeamRating, execDisqualifyTeam } from "@/app/lib/discord-bot";
 import { playerRatingFromRow } from "@/app/lib/rating";
+import { resolveTeamSize } from "@/app/lib/team-size";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -98,7 +99,8 @@ async function assignCaptainIfMissing(teamId: string): Promise<void> {
     .select("id, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, is_captain")
     .eq("team_id", teamId);
 
-  if (!members?.length || members.length <= 2) return;
+  // A roster below full size isn't a team yet, so it has no captain.
+  if (!members?.length || members.length < (await resolveTeamSize())) return;
   if (members.some((m) => m.is_captain)) return;
 
   const ratingOf = playerRatingFromRow;

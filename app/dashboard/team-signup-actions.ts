@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
+import { normalizeTeamSize } from "@/app/lib/team-size";
 import {
   hasEarlySignupAccess,
   playerHasEarlySignupAccess,
@@ -12,8 +13,9 @@ import {
   type SignupWindowRow,
 } from "@/app/lib/signup-window";
 
-const ROSTER_MAX = 4; // 3 starters + 1 substitute
-const TEAM_MIN = 3;
+// A roster is the tournament's team size plus one substitute, so both move with
+// it: a 3v3 still allows 4, a 2v2 allows 3, a 1v1 allows 2.
+const rosterMax = (teamSize: number) => teamSize + 1;
 
 // The window is carried raw rather than collapsed into a single
 // registrationOpen boolean because Early Signup Access is not always the
@@ -23,6 +25,7 @@ type Ctx = {
   playerId: string;
   discordId: string;
   tournamentId: string;
+  teamSize: number;
   window: SignupWindowRow;
 };
 
@@ -42,14 +45,20 @@ async function getContext(tournamentId: string): Promise<{ ctx?: Ctx; error?: st
 
   const { data: t } = await supabaseAdmin
     .from("tournaments")
-    .select("join_mode, signups_open, signups_closed, status, draft_open_at, draft_close_at")
+    .select("join_mode, signups_open, signups_closed, status, draft_open_at, draft_close_at, team_size")
     .eq("id", tournamentId)
     .single();
   if (!t) return { error: "Tournament not found." };
   if (t.join_mode !== "teams") return { error: "This tournament does not use team sign-ups." };
 
   return {
-    ctx: { playerId: player.id, discordId: session.userId, tournamentId, window: t as SignupWindowRow },
+    ctx: {
+      playerId: player.id,
+      discordId: session.userId,
+      tournamentId,
+      teamSize: normalizeTeamSize((t as { team_size?: number }).team_size),
+      window: t as SignupWindowRow,
+    },
   };
 }
 
@@ -129,8 +138,20 @@ export async function createTeam(tournamentId: string, name: string) {
     responded_at: new Date().toISOString(),
   });
 
+  // In a 1v1 the creator alone is already a full roster, and respondInvite —
+  // the only other place formed_at gets set — never runs for a solo team.
+  if (ctx.teamSize <= 1)
+    await supabaseAdmin
+      .from("team_signups")
+      .update({ formed_at: new Date().toISOString() })
+      .eq("id", team.id);
+
+  const invites = rosterMax(ctx.teamSize) - 1;
   refresh();
-  return { ok: true, message: `Team "${trimmed}" created. Invite up to ${ROSTER_MAX - 1} players.` };
+  return {
+    ok: true,
+    message: `Team "${trimmed}" created. Invite up to ${invites} player${invites === 1 ? "" : "s"}.`,
+  };
 }
 
 export async function invitePlayer(tournamentId: string, targetPlayerId: string) {
@@ -149,8 +170,9 @@ export async function invitePlayer(tournamentId: string, targetPlayerId: string)
   if (targetPlayerId === ctx.playerId) return { error: "You're already on the team." };
 
   const members = team.team_signup_members as { player_id: string; status: string }[];
-  if (members.length >= ROSTER_MAX)
-    return { error: `Roster is full (max ${ROSTER_MAX} including pending invites).` };
+  const max = rosterMax(ctx.teamSize);
+  if (members.length >= max)
+    return { error: `Roster is full (max ${max} including pending invites).` };
   if (members.some((m) => m.player_id === targetPlayerId))
     return { error: "That player is already invited or on the team." };
 
@@ -247,7 +269,7 @@ export async function respondInvite(memberId: string, accept: boolean) {
     .select("*", { count: "exact", head: true })
     .eq("team_signup_id", member.team_signup_id)
     .eq("status", "accepted");
-  if ((count ?? 0) >= TEAM_MIN) {
+  if ((count ?? 0) >= ctx.teamSize) {
     const { data: tsRow } = await supabaseAdmin
       .from("team_signups").select("formed_at").eq("id", member.team_signup_id).single();
     if (!tsRow?.formed_at)
@@ -281,7 +303,7 @@ export async function leaveTeam(tournamentId: string) {
     .select("*", { count: "exact", head: true })
     .eq("team_signup_id", team.id)
     .eq("status", "accepted");
-  if ((count ?? 0) < TEAM_MIN)
+  if ((count ?? 0) < ctx.teamSize)
     await supabaseAdmin.from("team_signups").update({ formed_at: null }).eq("id", team.id);
 
   refresh();

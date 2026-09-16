@@ -17,6 +17,7 @@ import {
 import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
+import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "./team-size";
 import { notifyMatchChannel } from "./match-notifications";
 import { createClip } from "./clip-submit";
 import { kickAccount, banAccount, findAccountByDiscordId, DEFAULT_KICK_TIMEOUT_MS, type RevokedPatron } from "./moderation";
@@ -878,6 +879,12 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   if (settings.season_active)
     return { ok: false, message: "❌ A season is currently active. End the season before starting a new draft." };
 
+  const teamSize = normalizeTeamSize(settings.team_size);
+  // A 1v1 team is its own captain, so there is nothing to pick. The form blocks
+  // this, but a cron tick or a direct /admin call can still land here.
+  if (teamSize === 1)
+    return { ok: false, message: "❌ 1v1 has no draft — use auto-balance to form teams." };
+
   const enteredAll = await fetchAllRows((from, to) =>
     supabaseAdmin
       .from("players")
@@ -903,9 +910,9 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   // slot count: slots are validated separately below and surface an explicit
   // "add more slots" error instead of silently shrinking the team count.
   //  • a positive number caps the team count (admin-specified max),
-  //  • "max" builds as many teams as the pool supports (3 players per team),
+  //  • "max" builds as many teams as the pool supports (teamSize players per team),
   //  • null/undefined (cron/tournament) respects the configured num_teams, else max.
-  const feasibleByPlayers = Math.floor(enteredAll.length / 3);
+  const feasibleByPlayers = Math.floor(enteredAll.length / teamSize);
   const storedNum = (settings?.num_teams as number | null) ?? 0;
   const numTeams: number =
     typeof maxTeams === "number" && maxTeams > 0 ? Math.min(maxTeams, feasibleByPlayers)
@@ -913,13 +920,13 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
     : storedNum > 0                              ? Math.min(storedNum, feasibleByPlayers)
     :                                              feasibleByPlayers;
   if (numTeams < 2)
-    return { ok: false, message: "Not enough players to form teams (need at least 6 in the pool)." };
+    return { ok: false, message: `Not enough players to form teams (need at least ${teamSize * 2} in the pool).` };
 
   if (numberedTeams.length < numTeams)
     return { ok: false, message: `Need ${numTeams} team slots but only ${numberedTeams.length} exist. Add them in the admin panel first.` };
 
-  // Apply cutoff: first numTeams × 3 by sign-up time
-  const entered = enteredAll.slice(0, numTeams * 3);
+  // Apply cutoff: first numTeams × teamSize by sign-up time
+  const entered = enteredAll.slice(0, numTeams * teamSize);
   if (entered.length < numTeams)
     return { ok: false, message: `Need at least ${numTeams} players in the draft pool (have ${entered.length} after cutoff, need ${numTeams}).` };
 
@@ -933,16 +940,23 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
     return { ok: false, message: `Missing Discord role IDs for: ${missingRoleIds.join(", ")}. Set them in the Team Slots section of the admin panel.` };
 
   const sorted = [...entered].sort((a, b) => playerRating(b) - playerRating(a));
-  const drafted = numTeams * 3;
+  const drafted = numTeams * teamSize;
   const undrafted = sorted.length - drafted;
+  const pickRounds = teamSize - 1;
 
   // ── Phase 1: all database writes ─────────────────────────────────────────
   // Do this before any Discord calls so a slow/rate-limited Discord API
   // can't prevent draft_active from being set.
 
-  // Highest-RV captain gets the highest team number, which picks first in round 1
-  // of the snake draft (getTeamNumberForPick returns numTeams for pick 0).
-  const captainTeams = [...teamsToUse].reverse();
+  // Pick order is set here, by which team number a captain lands on —
+  // getTeamNumberForPick is pure snake math and never changes.
+  //
+  // Multi-round (3v3): highest-RV captain takes the highest team number, so they
+  // pick first in round 1 and last in round 2, which is what balances the snake.
+  // Single-round (2v2): there is no reversal round to balance against, so the
+  // order runs the other way and the *worst* captain picks first — they take the
+  // lowest team number's opposite end, Team N, which is pick 0.
+  const captainTeams = pickRounds > 1 ? [...teamsToUse].reverse() : [...teamsToUse];
 
   // Build captain assignments before any awaits
   const captainLines: string[] = [];
@@ -1019,19 +1033,23 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
 
   const round1 = Array.from({ length: numTeams }, (_, i) => numTeams - i).join(", ");
   const round2 = Array.from({ length: numTeams }, (_, i) => i + 1).join(", ");
-  const sizeNote = `3 per team${undrafted > 0 ? ` · ${undrafted} not drafted` : ""}`;
+  const sizeNote = `${teamSize} per team${undrafted > 0 ? ` · ${undrafted} not drafted` : ""}`;
+  const draftName = pickRounds > 1 ? "Snake Draft" : `${teamSize}v${teamSize} Draft`;
+  const orderLine = pickRounds > 1
+    ? `**Pick order (snake):** ${round1}, ${round2}, …`
+    : `**Pick order (lowest Rank Value picks first):** ${round1}`;
   const firstTeamNum = getTeamNumberForPick(0, numTeams);
   const firstCaptainPing = await getCaptainPing(firstTeamNum);
 
   const startMsg =
-    `🚀 **Snake Draft has started!**\n` +
+    `🚀 **${draftName} has started!**\n` +
     `${numTeams} teams · ${sorted.length} entered · ${sizeNote}\n\n` +
     `**Captains (auto-assigned by Rank Value):**\n${captainLines.join("\n")}\n\n` +
-    `**Pick order (snake):** ${round1}, ${round2}, …\n\n` +
+    `${orderLine}\n\n` +
     `⏭️ ${firstCaptainPing} (**Team ${firstTeamNum}**), you're on the clock! Use \`/pick <player>\` *(45 sec)*`;
 
   await sendChannelMessage(settings.draft_channel_id, startMsg);
-  return { ok: true, message: `Snake draft started! Check <#${settings.draft_channel_id}>.` };
+  return { ok: true, message: `${draftName} started! Check <#${settings.draft_channel_id}>.` };
 }
 
 /**
@@ -1044,6 +1062,8 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
     return { ok: false, message: "❌ A draft is in progress. End it before auto-balancing." };
   if (settings.season_active)
     return { ok: false, message: "❌ A season is active. End it before forming new teams." };
+
+  const teamSize = normalizeTeamSize(settings.team_size);
 
   const enteredAll = await fetchAllRows((from, to) =>
     supabaseAdmin
@@ -1070,9 +1090,9 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
   // slot count: slots are validated separately below and surface an explicit
   // "add more slots" error instead of silently shrinking the team count.
   //  • a positive number caps the team count (admin-specified max),
-  //  • "max" builds as many teams as the pool supports (3 players per team),
+  //  • "max" builds as many teams as the pool supports (teamSize players per team),
   //  • null/undefined (cron/tournament) respects the configured num_teams, else max.
-  const feasibleByPlayers = Math.floor(enteredAll.length / 3);
+  const feasibleByPlayers = Math.floor(enteredAll.length / teamSize);
   const storedNum = (settings?.num_teams as number | null) ?? 0;
   const numTeams: number =
     typeof maxTeams === "number" && maxTeams > 0 ? Math.min(maxTeams, feasibleByPlayers)
@@ -1080,14 +1100,14 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
     : storedNum > 0                              ? Math.min(storedNum, feasibleByPlayers)
     :                                              feasibleByPlayers;
   if (numTeams < 2)
-    return { ok: false, message: "Not enough players to form teams (need at least 6 in the pool)." };
+    return { ok: false, message: `Not enough players to form teams (need at least ${teamSize * 2} in the pool).` };
 
   if (numberedTeams.length < numTeams)
     return { ok: false, message: `Need ${numTeams} team slots but only ${numberedTeams.length} exist.` };
 
-  const entered = enteredAll.slice(0, numTeams * 3);
-  if (entered.length < numTeams * 3)
-    return { ok: false, message: `Need ${numTeams * 3} players to fill ${numTeams} teams (have ${entered.length}).` };
+  const entered = enteredAll.slice(0, numTeams * teamSize);
+  if (entered.length < numTeams * teamSize)
+    return { ok: false, message: `Need ${numTeams * teamSize} players to fill ${numTeams} teams (have ${entered.length}).` };
 
   const teamsToUse = numberedTeams.slice(0, numTeams);
   const missingRoleIds = teamsToUse.filter(t => !t.discord_role_id).map(t => `Team ${t.num}`);
@@ -1102,22 +1122,25 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
   // initialTeamRating (the same power-mean + carry-gap formula the predictor
   // scores matches with) rather than a raw average, so teams come out equal
   // in the eyes of the win-probability model, not just in average player rating.
+  //
+  // At teamSize 1 a swap only permutes which player sits in which slot, so the
+  // spread of team ratings is fixed and the loop has nothing to find.
   const shuffled = [...entered].sort(() => Math.random() - 0.5);
   const teamPlayerIds: string[][] = Array.from({ length: numTeams }, (_, i) =>
-    shuffled.slice(i * 3, (i + 1) * 3).map(p => p.id)
+    shuffled.slice(i * teamSize, (i + 1) * teamSize).map(p => p.id)
   );
   const teamRatingOf = (ids: string[]) => initialTeamRating(ids.map(id => rvById.get(id)!));
   const teamRatings = teamPlayerIds.map(teamRatingOf);
   let sumRatings = teamRatings.reduce((s, r) => s + r, 0);
   let sumSqRatings = teamRatings.reduce((s, r) => s + r * r, 0);
 
-  for (let iter = 0; iter < 10000; iter++) {
+  for (let iter = 0; teamSize > 1 && iter < 10000; iter++) {
     const gi = Math.floor(Math.random() * numTeams);
     let gj = Math.floor(Math.random() * numTeams);
     while (gj === gi) gj = Math.floor(Math.random() * numTeams);
 
-    const pi = Math.floor(Math.random() * 3);
-    const pj = Math.floor(Math.random() * 3);
+    const pi = Math.floor(Math.random() * teamSize);
+    const pj = Math.floor(Math.random() * teamSize);
 
     const idA = teamPlayerIds[gi][pi];
     const idB = teamPlayerIds[gj][pj];
@@ -1148,7 +1171,7 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
   // Captain = highest-RV player per team (recomputed after swaps may have
   // changed the ordering within each team's list).
   const captainIds = teamPlayerIds
-    .filter(ids => ids.length > 2)
+    .filter(ids => ids.length >= teamSize)
     .map(ids => ids.reduce((best, id) => (rvById.get(id) ?? 0) > (rvById.get(best) ?? 0) ? id : best))
     .filter(Boolean);
 
@@ -1191,12 +1214,13 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
 export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("active_tournament_id, num_teams, season_active, season_format")
+    .select("active_tournament_id, num_teams, team_size, season_active, season_format")
     .single();
   if (settings?.season_active) return { ok: false, message: "❌ Season already active." };
   const tid = settings?.active_tournament_id as string | null | undefined;
   if (!tid) return { ok: false, message: "❌ No active tournament." };
   const teamLimit: number = settings?.num_teams ?? 0;
+  const teamSize = normalizeTeamSize(settings?.team_size);
   const format = settings?.season_format as { preset?: string } | null;
   const minTeams = PRESET_MIN_TEAMS[format?.preset ?? ""] ?? 4;
 
@@ -1221,9 +1245,9 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
     };
   });
 
-  // Valid = 3+ accepted; ordered by when they first reached the minimum (then creation).
+  // Valid = a full roster accepted; ordered by when they first reached the minimum (then creation).
   const valid = signupTeams
-    .filter((t) => t.memberIds.length >= 3)
+    .filter((t) => t.memberIds.length >= teamSize)
     .sort((a, b) => {
       const fa = a.formed_at ? new Date(a.formed_at).getTime() : Infinity;
       const fb = b.formed_at ? new Date(b.formed_at).getTime() : Infinity;
@@ -1231,9 +1255,9 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     });
 
-  // Teams that never reached the 3-player minimum — never entered, regardless of
+  // Teams that never reached the roster minimum — never entered, regardless of
   // whether the tournament as a whole proceeds or gets cancelled below.
-  const tooFew = signupTeams.filter((t) => t.memberIds.length > 0 && t.memberIds.length < 3);
+  const tooFew = signupTeams.filter((t) => t.memberIds.length > 0 && t.memberIds.length < teamSize);
   if (tooFew.length) {
     const tooFewPlayerIds = tooFew.flatMap((t) => t.memberIds);
     await supabaseAdmin.from("players").update({ team_signup_too_few_players: true }).in("id", tooFewPlayerIds);
@@ -1241,7 +1265,7 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
       .from("players").select("discord_id").in("id", tooFewPlayerIds);
     pushToDiscordIds((tooFewPlayers ?? []).map((p) => p.discord_id as string).filter(Boolean), {
       title: "Team Incomplete",
-      body: "Your team didn't reach the 3-player minimum by the sign-up deadline, so it wasn't entered.",
+      body: `Your team didn't reach the ${teamSize}-player minimum by the sign-up deadline, so it wasn't entered.`,
       url: "/dashboard",
       tag: "team-signup-too-few",
     }).catch(() => {});
@@ -1269,7 +1293,7 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
     }).eq("id", tid);
     await supabaseAdmin.from("team_signups").delete().eq("tournament_id", tid);
     await supabaseAdmin.from("league_settings")
-      .update({ active_tournament_id: null, updated_at: new Date().toISOString() })
+      .update({ active_tournament_id: null, team_size: DEFAULT_TEAM_SIZE, updated_at: new Date().toISOString() })
       .not("id", "is", null);
 
     const message = `Only ${kept.length} valid team(s) signed up (need ${minTeams}+). Tournament cancelled.`;
@@ -1364,10 +1388,12 @@ export async function execEndDraft(): Promise<{ ok: boolean; message: string }> 
   return { ok: true, message: "🔒 **Draft has ended.** Rosters are now locked." };
 }
 
-type PickSettings = { num_teams: number; current_pick: number; draft_channel_id: string | null };
+type PickSettings = { num_teams: number; team_size: number; current_pick: number; draft_channel_id: string | null };
 
 async function completePick(s: PickSettings, teamId: string, playerId: string): Promise<{ ok: boolean; message: string }> {
-  const totalPicks = s.num_teams * 2;
+  // Every captain is seated before the first pick, so a team only has
+  // team_size - 1 slots left to fill.
+  const totalPicks = s.num_teams * (normalizeTeamSize(s.team_size) - 1);
 
   const [{ data: player }, { data: team }] = await Promise.all([
     supabaseAdmin.from("players").select("id, username, discord_id").eq("id", playerId).single(),
@@ -1433,9 +1459,10 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
   if (!claimed?.length) return { done: true };
 
   const numTeams: number = settings.num_teams;
+  const teamSize = normalizeTeamSize(settings.team_size);
   const currentPick: number = settings.current_pick ?? 0;
   const channelId: string | null = settings.draft_channel_id ?? null;
-  const totalPicks = numTeams * 2;
+  const totalPicks = numTeams * (teamSize - 1);
 
   if (currentPick >= totalPicks) {
     await supabaseAdmin.from("league_settings").update({
@@ -1471,7 +1498,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
   }
 
   const result = await completePick(
-    { num_teams: numTeams, current_pick: currentPick, draft_channel_id: channelId },
+    { num_teams: numTeams, team_size: teamSize, current_pick: currentPick, draft_channel_id: channelId },
     teamRow.id, best.id,
   );
   console.log("[execAutoPick] auto-pick:", result.message);
@@ -1719,8 +1746,9 @@ async function pickPlayer(userId: string, playerUsername: string) {
   if (settings.draft_phase !== "picking") return reply("❌ Not in picking phase.");
 
   const numTeams: number = settings.num_teams;
+  const teamSize = normalizeTeamSize(settings.team_size);
   const currentPick: number = settings.current_pick ?? 0;
-  if (currentPick >= numTeams * 2) return reply("✅ Draft is already complete.");
+  if (currentPick >= numTeams * (teamSize - 1)) return reply("✅ Draft is already complete.");
 
   const currentTeamNum = getTeamNumberForPick(currentPick, numTeams);
 
@@ -1741,7 +1769,7 @@ async function pickPlayer(userId: string, playerUsername: string) {
   if (!target) return reply(`❌ "${playerUsername}" is not in the draft pool.`);
 
   const result = await completePick(
-    { num_teams: numTeams, current_pick: currentPick, draft_channel_id: settings.draft_channel_id as string | null },
+    { num_teams: numTeams, team_size: teamSize, current_pick: currentPick, draft_channel_id: settings.draft_channel_id as string | null },
     currentTeam.id, target.id,
   );
   return reply(result.message);

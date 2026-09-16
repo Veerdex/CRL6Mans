@@ -15,6 +15,7 @@ import { PastEvents, presetLabel, type PastEvent } from "./past-events";
 import { PresetEmblemRow } from "./preset-emblem-row";
 import { LocalTime } from "./local-time";
 import { TrackerUpdateBanner } from "./tracker-update-banner";
+import { normalizeTeamSize } from "@/app/lib/team-size";
 import { AnnouncementBanner } from "./announcement-banner";
 import { CountdownLabel } from "./countdown-label";
 import { getPublicSponsors } from "@/app/lib/sponsors-public";
@@ -45,7 +46,7 @@ export default async function DashboardPage({
       .select("id, status, draft_entered, display_name, must_update_tracker")
       .eq("discord_id", session.userId)
       .single(),
-    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, num_teams, season_format, announcement_text, announcement_destination, clip_of_week_id").single(),
+    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, num_teams, team_size, season_format, announcement_text, announcement_destination, clip_of_week_id").single(),
     supabaseAdmin
       .from("players")
       .select("id")
@@ -54,7 +55,7 @@ export default async function DashboardPage({
       .order("draft_entered_at", { ascending: true, nullsFirst: false }),
     supabaseAdmin
       .from("tournaments")
-      .select("id, name, status, signups_open, signups_closed, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, min_teams, team_limit, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th")
+      .select("id, name, status, signups_open, signups_closed, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, min_teams, team_limit, team_size, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th")
       .in("status", ["scheduled", "active", "completed"])
       .order("created_at", { ascending: false }),
     supabaseAdmin
@@ -258,12 +259,14 @@ export default async function DashboardPage({
       season_format?: SeasonFormatConfig | null;
       min_teams?: number | null;
       team_limit?: number | null;
+      team_size?: number | null;
     };
     const projected = projectedTeamCount(
       t.join_mode,
       poolCounts[t.id] ?? 0,
       teamSignupCounts[t.id] ?? 0,
-      row.team_limit
+      row.team_limit,
+      normalizeTeamSize(row.team_size)
     );
     const teams = Math.max(projected, row.min_teams ?? 0);
     return projectedEndIso(row.stage_starts ?? null, row.season_format ?? null, teams);
@@ -415,6 +418,7 @@ export default async function DashboardPage({
             signupsOpen={signupsOpen}
             draftActive={draftActive}
             seasonActive={false}
+            teamSize={normalizeTeamSize(settings?.team_size)}
           />
           <Stat label="Draft pool" value={draftCount} />
         </div>
@@ -467,6 +471,7 @@ export default async function DashboardPage({
                 view={teamViews[t.id]}
                 tournamentId={t.id}
                 tournamentName={t.name}
+                teamSize={normalizeTeamSize((t as { team_size?: number | null }).team_size)}
                 timeline={timeline}
                 countdown={nextEvent}
                 prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}

@@ -3,6 +3,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { playerRatingFromRow } from "@/app/lib/rating";
+import { normalizeTeamSize } from "@/app/lib/team-size";
 import { DraftLive } from "./draft-live";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
@@ -33,8 +34,10 @@ export default async function DraftPage() {
   }
 
   const numTeams: number = settings.num_teams ?? 0;
+  const teamSize = normalizeTeamSize(settings.team_size);
   const currentPick: number = settings.current_pick ?? 0;
-  const totalPicks = numTeams * 2;
+  // Captains are seated before pick 0, so each team has team_size - 1 left to fill.
+  const totalPicks = numTeams * (teamSize - 1);
   const callerId = session?.userId ?? "";
 
   const [{ data: teamsRaw }, { data: drafted }, { data: available }, { data: vp }, userIsAdmin] = await Promise.all([
@@ -72,6 +75,7 @@ export default async function DraftPage() {
   return (
     <DraftLive
       numTeams={numTeams}
+      teamSize={teamSize}
       currentPick={currentPick}
       totalPicks={totalPicks}
       pickDeadline={settings.pick_deadline as string | null}

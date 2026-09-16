@@ -18,6 +18,7 @@ import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import { buildTimeline, buildStageStarts } from "@/app/lib/tournament-timeline";
 import { stageEmblem } from "@/app/lib/format-emblems";
 import { playerRatingFromRow, initialTeamRating } from "@/app/lib/rating";
+import { normalizeTeamSize, teamSizeLabel } from "@/app/lib/team-size";
 import { isDirectorVerified } from "@/app/lib/players";
 import { TeamRatingList, type TeamRatingRow } from "./team-rating-list";
 import { PlayerName } from "./player-name";
@@ -98,7 +99,7 @@ export async function TournamentDetailView({
     supabaseAdmin
       .from("tournaments")
       .select(
-        "id, name, overview, status, join_mode, team_assignment, signups_open, signups_closed, draft_open_at, draft_close_at, draft_start_at, season_start_at, season_format, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, min_mmr_2v2, min_mmr_3v3, summary"
+        "id, name, overview, status, join_mode, team_assignment, team_size, signups_open, signups_closed, draft_open_at, draft_close_at, draft_start_at, season_start_at, season_format, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, min_mmr_2v2, min_mmr_3v3, summary"
       )
       .eq("id", tournamentId)
       .maybeSingle(),
@@ -263,6 +264,7 @@ export async function TournamentDetailView({
               <TeamsRegistration
                 tournamentId={tournamentId}
                 tournamentName={t.name}
+                teamSize={normalizeTeamSize(t.team_size)}
                 playerId={playerId}
                 discordId={discordId}
                 signupWindow={signupWindow}
@@ -331,6 +333,7 @@ export async function TournamentDetailView({
               <p className="text-[12.5px] uppercase tracking-wide text-zinc-500">Team Assignment</p>
               <p className="text-white mt-0.5">
                 {t.join_mode === "teams" ? "Pre-formed teams" : t.team_assignment === "auto_balance" ? "Auto-balanced" : "Snake draft"}
+                <span className="text-zinc-400"> · {teamSizeLabel(normalizeTeamSize(t.team_size))}</span>
               </p>
             </div>
           </div>
@@ -630,6 +633,7 @@ async function PlayersDraftPool({ tournamentId }: { tournamentId: string }) {
 async function TeamsRegistration({
   tournamentId,
   tournamentName,
+  teamSize,
   playerId,
   discordId,
   signupWindow,
@@ -644,6 +648,7 @@ async function TeamsRegistration({
 }: {
   tournamentId: string;
   tournamentName: string;
+  teamSize: number;
   playerId: string | null;
   discordId: string;
   signupWindow: SignupWindowRow;
@@ -663,6 +668,7 @@ async function TeamsRegistration({
       view={view}
       tournamentId={tournamentId}
       tournamentName={tournamentName}
+      teamSize={teamSize}
       timeline={timeline}
       countdown={nextEvent}
       prize1st={prize1st}

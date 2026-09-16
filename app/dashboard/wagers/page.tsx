@@ -4,6 +4,7 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
+import { normalizeTeamSize } from "@/app/lib/team-size";
 import { computeMatchPredictionFromRating, type MatchPrediction } from "./prediction";
 import { WagersClient } from "./wagers-client";
 import { WagesLeaderboardOnly } from "./leaderboard-view";
@@ -45,7 +46,7 @@ export default async function WagersPage() {
   const [{ data: ls }, { data: accountRow }, { data: leaderboardData }] = await Promise.all([
     supabaseAdmin
       .from("league_settings")
-      .select("active_tournament_id, season_active, season_format, betting_mode")
+      .select("active_tournament_id, season_active, season_format, betting_mode, team_size")
       .single(),
     supabaseAdmin
       .from("accounts")
@@ -69,6 +70,7 @@ export default async function WagersPage() {
   const seasonActive = ls?.season_active ?? false;
   const hasActiveContent = seasonActive || !!activeTournamentId;
   const globalBettingMode: "fixed" | "pool" = ls?.betting_mode === "pool" ? "pool" : "fixed";
+  const teamSize = normalizeTeamSize(ls?.team_size);
 
   const leaderboard = (leaderboardData ?? []).map((p) => ({
     username: p.username,
@@ -420,9 +422,9 @@ export default async function WagersPage() {
         .flatMap(subInIdsFor)
         .filter((id) => playersById[id])
         .map((id) => ({ ...playersById[id], isSub: true }));
-      // A team may carry more than 3 approved players (bench depth); only the top
-      // 3 by rating are the ones actually participating in this match.
-      perTeam[teamId] = [...roster, ...subsIn].sort((a, b) => b.rating - a.rating).slice(0, 3);
+      // A team may carry more players than it fields (bench depth); only the top
+      // team_size by rating are the ones actually participating in this match.
+      perTeam[teamId] = [...roster, ...subsIn].sort((a, b) => b.rating - a.rating).slice(0, teamSize);
     }
     matchRosters[m.id] = perTeam;
   }

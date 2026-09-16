@@ -10,10 +10,11 @@ interface DraftCardProps {
   signupsOpen: boolean;
   draftActive: boolean;
   seasonActive: boolean;
+  teamSize: number;
 }
 
 export default function DraftCard({
-  inDraft, draftCount, signupsOpen, draftActive, seasonActive,
+  inDraft, draftCount, signupsOpen, draftActive, seasonActive, teamSize,
 }: DraftCardProps) {
   const [entered, setEntered] = useState(inDraft);
   const [localCount, setLocalCount] = useState(draftCount);
@@ -80,8 +81,8 @@ export default function DraftCard({
         </div>
         <span className="text-xs text-zinc-400 ml-4">
           {localCount} player{localCount !== 1 ? "s" : ""} in the pool
-          {localCount >= 3 && (
-            <> · {Math.floor(localCount / 3)} team{Math.floor(localCount / 3) !== 1 ? "s" : ""} possible</>
+          {localCount >= teamSize && (
+            <> · {Math.floor(localCount / teamSize)} team{Math.floor(localCount / teamSize) !== 1 ? "s" : ""} possible</>
           )}
         </span>
         {error && <span className="text-xs text-red-400 ml-4 mt-1">{error}</span>}

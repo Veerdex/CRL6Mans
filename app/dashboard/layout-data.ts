@@ -168,7 +168,9 @@ async function claimGrants(
       grants.teamSignupMessage = "Your team didn't make the cutoff for the last tournament you signed up for.";
       await supabaseAdmin.from("players").update({ team_signup_not_selected: false }).eq("id", playerFlags.id);
     } else if (playerFlags?.team_signup_too_few_players) {
-      grants.teamSignupMessage = "Your team didn't reach the 3-player minimum in time, so it wasn't entered in the last tournament.";
+      // No roster size here: the flag is read after the tournament is over, by
+      // which point league_settings has already reset to the league default.
+      grants.teamSignupMessage = "Your team didn't reach the required roster size in time, so it wasn't entered in the last tournament.";
       await supabaseAdmin.from("players").update({ team_signup_too_few_players: false }).eq("id", playerFlags.id);
     }
   }
