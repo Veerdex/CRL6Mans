@@ -59,6 +59,8 @@ Looks up a player's full registration info — peak/current 2v2 and 3v3 MMR, ran
 #### `/setdraftchannel`
 Sets the channel where draft announcements and picks are posted. Run this command inside the target channel.
 
+The bot opens this channel to the event role (`/admin settournamentid`) when a draft starts and closes it again when the draft ends, so only the current event's players can watch it while it runs. Deny `@everyone` **View Channel** on it for that to mean anything — the bot only ever touches the event role's own overwrite.
+
 #### `/pick <player>`
 Picks a player for your team during the snake draft. Only usable by the captain whose turn it is.
 
@@ -185,7 +187,7 @@ No **privileged gateway intents** are required — interactions arrive as signed
 - [ ] Set the registration status role: `/setregisteredrole` (create a Discord role for `Registered` first, then link it), then run `/syncroles`.
 - [ ] Run `/syncroles`, then `/setdraftchannel` and `/setruleschannel` inside their target channels.
 - [ ] **Set up team roles:** create a Discord role for each team and paste its role ID into the team's slot under **Admin → Team Slots** (slots show "⚠ no role ID set" until linked). Make sure each team role sits **below** the bot's role. (Status roles like `Captain`/`Drafted` are auto-created — only team roles need linking.)
-- [ ] Create a Discord role for event participants and link it with `/admin settournamentid` (optional — the bot auto-creates one named `Tournament` otherwise). Everyone on a team gets it for the duration of the event.
+- [ ] Create a Discord role for event participants and link it with `/admin settournamentid` (optional — the bot auto-creates one named `Tournament` otherwise). Everyone on a team gets it for the duration of the event, and it is what the draft channel opens to while a draft is running.
 - [ ] If using the Patreon "Discord role" tier benefit: create a Discord role for supporters, then link it with `/admin setsupporterrole`.
 
 > Moving an already-running league to a different Discord server is a different job — see [SERVER-TRANSFER.md](SERVER-TRANSFER.md).

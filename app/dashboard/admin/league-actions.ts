@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
-import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, deleteMatchChannels, execSyncRoles, voidAllPendingWagers } from "@/app/lib/discord-bot";
+import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, deleteMatchChannels, execSyncRoles, voidAllPendingWagers, setDraftChannelVisibility } from "@/app/lib/discord-bot";
 import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app/lib/discord-api";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 import { APP_NAME } from "@/app/lib/constants";
@@ -631,6 +631,10 @@ export async function resetSeason() {
     updated_at: new Date().toISOString(),
   }).not("id", "is", null);
 
+  // The channel overwrite outlives the roles stripped above — leaving it open
+  // would show the draft channel to whoever holds the event role next.
+  await setDraftChannelVisibility(false);
+
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/teams");
@@ -906,6 +910,7 @@ export async function forceResetDraftState(): Promise<{ ok?: boolean; error?: st
   ]);
   if (settingsErr) return { error: settingsErr.message };
   if (playersErr) return { error: playersErr.message };
+  await setDraftChannelVisibility(false);
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/draft");
   revalidatePath("/dashboard");

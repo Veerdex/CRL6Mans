@@ -217,6 +217,49 @@ export async function createTextChannel(
   return { id: channel.id };
 }
 
+/**
+ * Grants or revokes one role's view access on an existing channel, by replacing
+ * that role's permission overwrite. Revoking writes an explicit deny rather than
+ * deleting the overwrite, so the channel's permission list keeps looking the way
+ * an admin set it up by hand instead of losing a row.
+ *
+ * VIEW_CHANNEL(1024) | READ_MESSAGE_HISTORY(65536) = 66560 — view alone can leave
+ * the channel visible but empty if history isn't inherited from @everyone.
+ */
+export async function setChannelRoleView(
+  channelId: string,
+  roleId: string,
+  canView: boolean,
+): Promise<{ ok: boolean; status: number; message?: string }> {
+  if (!BOT_TOKEN) return { ok: false, status: 0, message: "Bot token not configured." };
+  const VIEW_AND_HISTORY = "66560";
+  const VIEW = "1024";
+  try {
+    const res = await fetch(`${API}/channels/${channelId}/permissions/${roleId}`, {
+      method: "PUT",
+      headers: botHeaders(true),
+      body: JSON.stringify({
+        type: 0,
+        allow: canView ? VIEW_AND_HISTORY : "0",
+        deny: canView ? "0" : VIEW,
+      }),
+    });
+    if (res.ok) return { ok: true, status: res.status };
+    const text = await res.text();
+    console.error(`[setChannelRoleView] HTTP ${res.status}`, text);
+    let message = `Discord API error ${res.status}`;
+    try {
+      const json = JSON.parse(text);
+      if (json.code === 50013) message = "Bot is missing Manage Roles on that channel.";
+      else if (json.code === 10003) message = "That channel no longer exists.";
+      else if (json.message) message = json.message;
+    } catch { /* keep the status-only message */ }
+    return { ok: false, status: res.status, message };
+  } catch (err) {
+    return { ok: false, status: 0, message: err instanceof Error ? err.message : "network error" };
+  }
+}
+
 // Fetch guild roles once, then remove all matching roles from every given user.
 export async function stripRolesFromUsers(userIds: string[], roleNames: string[]): Promise<void> {
   if (!GUILD_ID || !BOT_TOKEN || !userIds.length || !roleNames.length) return;

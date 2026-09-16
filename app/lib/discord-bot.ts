@@ -4,7 +4,7 @@ import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfaEnabled, type StaffRole } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
-import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember } from "./discord-api";
+import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -884,6 +884,35 @@ async function getCaptainPing(teamNum: number): Promise<string> {
 
 // ─── Exported core execution functions (no admin check, used from web admin too) ─
 
+/**
+ * Opens or closes the draft channel to the shared event role. @everyone is denied
+ * view on that channel, so granting the role view makes participants — and only
+ * participants — able to watch the draft while it runs.
+ *
+ * Every path that ends a draft has to close it again: the overwrite lives in
+ * Discord, not in league_settings, so one missed close leaves the channel open to
+ * whoever holds the role next, which since the role went league-wide is the entire
+ * following roster. Closing is idempotent, so over-calling it is free.
+ *
+ * Returns a reason on failure instead of only logging — the permission change *is*
+ * the feature here, and a silent 403 means a draft nobody can see.
+ */
+export async function setDraftChannelVisibility(
+  open: boolean,
+): Promise<{ ok: boolean; reason?: string }> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("draft_channel_id").single();
+  const channelId = settings?.draft_channel_id as string | null;
+  if (!channelId) return { ok: false, reason: "No draft channel is set (`/admin setdraftchannel`)." };
+
+  const role = await resolveTournamentRole({ create: open });
+  if (!role)
+    return { ok: false, reason: "Couldn't resolve the event role — check `/admin settournamentid`." };
+
+  const res = await setChannelRoleView(channelId, role.id, open);
+  return res.ok ? { ok: true } : { ok: false, reason: res.message };
+}
+
 export async function execStartDraft(maxTeams?: number | "max" | null): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
   if (!settings?.draft_channel_id)
@@ -1060,8 +1089,17 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
     `${orderLine}\n\n` +
     `⏭️ ${firstCaptainPing} (**Team ${firstTeamNum}**), you're on the clock! Use \`/pick <player>\` *(45 sec)*`;
 
+  // Before the message, not after: Discord drops the notification for a mention in
+  // a channel the member can't see yet, and that message is the first captain's
+  // on-the-clock ping.
+  const opened = await setDraftChannelVisibility(true);
+
   await sendChannelMessage(settings.draft_channel_id, startMsg);
-  return { ok: true, message: `${draftName} started! Check <#${settings.draft_channel_id}>.` };
+  return {
+    ok: true,
+    message: `${draftName} started! Check <#${settings.draft_channel_id}>.`
+      + (opened.ok ? "" : `\n⚠️ Couldn't open the draft channel to participants — ${opened.reason}`),
+  };
 }
 
 /**
@@ -1409,7 +1447,12 @@ export async function execEndDraft(): Promise<{ ok: boolean; message: string }> 
     }).not("id", "is", null),
     supabaseAdmin.from("players").update({ in_active_draft: false }).eq("status", "approved"),
   ]);
-  return { ok: true, message: "🔒 **Draft has ended.** Rosters are now locked." };
+  const closed = await setDraftChannelVisibility(false);
+  return {
+    ok: true,
+    message: "🔒 **Draft has ended.** Rosters are now locked."
+      + (closed.ok ? "" : `\n⚠️ Couldn't hide the draft channel again — ${closed.reason}`),
+  };
 }
 
 type PickSettings = { num_teams: number; team_size: number; current_pick: number; draft_channel_id: string | null };
@@ -1453,6 +1496,7 @@ async function completePick(s: PickSettings, teamId: string, playerId: string): 
     );
     if (isDone) {
       await sendChannelMessage(s.draft_channel_id, "🏁 **Snake draft complete! Rosters are locked.**");
+      await setDraftChannelVisibility(false);
     } else {
       const nextTeamNum = getTeamNumberForPick(newPick, s.num_teams);
       const nextPing = await getCaptainPing(nextTeamNum);
@@ -1493,6 +1537,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
     await supabaseAdmin.from("league_settings").update({
       draft_active: false, draft_phase: null, pick_deadline: null, updated_at: new Date().toISOString(),
     }).not("id", "is", null);
+    await setDraftChannelVisibility(false);
     return { done: true };
   }
 
@@ -1512,6 +1557,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
     await supabaseAdmin.from("league_settings").update({
       draft_active: false, draft_phase: null, pick_deadline: null, updated_at: new Date().toISOString(),
     }).not("id", "is", null);
+    await setDraftChannelVisibility(false);
     return { done: true };
   }
 
@@ -1986,6 +2032,8 @@ async function adminWipe(userId: string, confirm: string, clearHistory: boolean)
     start_grant_expires_at: null, weekly_grant_expires_at: null,
     updated_at: new Date().toISOString(),
   }).not("id", "is", null);
+
+  await setDraftChannelVisibility(false);
 
   if (clearHistory) await supabaseAdmin.from("seasons").delete().not("id", "is", null);
 

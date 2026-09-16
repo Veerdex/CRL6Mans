@@ -137,6 +137,8 @@ unregistered → (submits register form) → pending → (admin approves) → ap
 - 3v3 has two pick rounds and the snake balances them, so the highest-RV captain picks first. 2v2 has a single round with nothing to reverse against, so the order flips and the **worst** captain picks first.
 - **1v1 has no draft at all** — a team is its own captain. Both `sanitize()` in `admin/tournament-actions.ts` and `execStartDraft` reject it.
 
+**Draft channel visibility**: `setDraftChannelVisibility(open)` in `discord-bot.ts` flips the event role's VIEW_CHANNEL overwrite on `draft_channel_id` (`setChannelRoleView` in `discord-api.ts`, `PUT /channels/{id}/permissions/{roleId}`). Open in `execStartDraft` **before** the start message, since Discord drops a mention's notification in a channel the member can't see yet. Close on every path that ends a draft — `execEndDraft`, `completePick` on the last pick, both of `execAutoPick`'s terminal guards, `adminWipe`, `resetSeason`, `forceResetDraftState`. The overwrite lives in Discord, not the DB, so a missed close leaves the channel open to whoever holds the event role next. Closing writes an explicit deny rather than deleting the overwrite, so the channel's permission list keeps the shape an admin set up by hand.
+
 **Activating a tournament** (`activateTournamentRuntime` in `lib/tournament-runtime.ts`):
 - Copies `tournament_entries` → `players.draft_entered` to bridge the player pool into the legacy runtime.
 - Mirrors tournament config into `league_settings` (single source of truth for the draft/season machinery).
