@@ -19,6 +19,7 @@ import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDel
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "./team-size";
 import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft-order";
+import { draftLabel, draftStartEmbed, onTheClockEmbed, pickEmbed, autoPickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "./solo-team";
 import { notifyMatchChannel } from "./match-notifications";
 import { createClip } from "./clip-submit";
@@ -1007,10 +1008,10 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   const captainTeams = captainSeatOrder(teamsToUse, pickRounds);
 
   // Build captain assignments before any awaits
-  const captainLines: string[] = [];
+  const captainSeats: CaptainSeat[] = [];
   const captains: Array<{ discordId: string | null; teamRoleId?: string }> = [];
   for (let i = 0; i < numTeams; i++) {
-    captainLines.push(`Team ${captainTeams[i].num}: **${sorted[i].username}** (RV: ${playerRating(sorted[i]).toFixed(0)})`);
+    captainSeats.push({ teamNum: captainTeams[i].num, name: sorted[i].username, rv: playerRating(sorted[i]) });
     captains.push({ discordId: sorted[i].discord_id ?? null, teamRoleId: captainTeams[i].discord_role_id ?? undefined });
   }
 
@@ -1083,29 +1084,20 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
     }),
   ]);
 
-  const round1 = Array.from({ length: numTeams }, (_, i) => numTeams - i).join(", ");
-  const round2 = Array.from({ length: numTeams }, (_, i) => i + 1).join(", ");
-  const sizeNote = `${teamSize} per team${undrafted > 0 ? ` · ${undrafted} not drafted` : ""}`;
-  const draftName = pickRounds > 1 ? "Snake Draft" : `${teamSize}v${teamSize} Draft`;
-  const orderLine = pickRounds > 1
-    ? `**Pick order (snake):** ${round1}, ${round2}, …`
-    : `**Pick order (lowest Rank Value picks first):** ${round1}`;
+  const draftName = draftLabel(teamSize);
   const firstTeamNum = getTeamNumberForPick(0, numTeams);
   const firstCaptainPing = await getCaptainPing(firstTeamNum);
 
-  const startMsg =
-    `🚀 **${draftName} has started!**\n` +
-    `${numTeams} teams · ${sorted.length} entered · ${sizeNote}\n\n` +
-    `**Captains (auto-assigned by Rank Value):**\n${captainLines.join("\n")}\n\n` +
-    `${orderLine}\n\n` +
-    `⏭️ ${firstCaptainPing} (**Team ${firstTeamNum}**), you're on the clock! Use \`/pick <player>\` *(45 sec)*`;
-
-  // Before the message, not after: Discord drops the notification for a mention in
-  // a channel the member can't see yet, and that message is the first captain's
-  // on-the-clock ping.
+  // Before the messages, not after: Discord drops the notification for a mention
+  // in a channel the member can't see yet, and the second of these carries the
+  // first captain's on-the-clock ping.
   const opened = await setDraftChannelVisibility(true);
 
-  await sendChannelMessage(settings.draft_channel_id, startMsg);
+  await sendChannelMessage(settings.draft_channel_id, "", [
+    draftStartEmbed({ teamSize, numTeams, entered: sorted.length, undrafted, captains: captainSeats }),
+  ]);
+  await sendChannelMessage(settings.draft_channel_id, firstCaptainPing, [onTheClockEmbed(firstTeamNum)]);
+
   return {
     ok: true,
     message: `${draftName} started! Check <#${settings.draft_channel_id}>.`
@@ -1502,18 +1494,19 @@ async function completePick(s: PickSettings, teamId: string, playerId: string): 
   }).not("id", "is", null);
 
   if (s.draft_channel_id) {
-    await sendChannelMessage(s.draft_channel_id,
-      `✅ **${team.name}** picks **${player.username}**!\n\n${"—".repeat(32)}`
-    );
+    const teamSize = normalizeTeamSize(s.team_size);
+    await sendChannelMessage(s.draft_channel_id, "", [
+      pickEmbed({ teamName: team.name, playerName: player.username, pickNumber: newPick, totalPicks }),
+    ]);
     if (isDone) {
-      await sendChannelMessage(s.draft_channel_id, "🏁 **Snake draft complete! Rosters are locked.**");
+      await sendChannelMessage(s.draft_channel_id, "", [
+        draftCompleteEmbed({ teamSize, numTeams: s.num_teams, totalPicks }),
+      ]);
       await setDraftChannelVisibility(false);
     } else {
       const nextTeamNum = getTeamNumberForPick(newPick, s.num_teams);
       const nextPing = await getCaptainPing(nextTeamNum);
-      await sendChannelMessage(s.draft_channel_id,
-        `⏭️ ${nextPing} (**Team ${nextTeamNum}**), you're on the clock! Use \`/pick <player>\` *(45 sec)*`
-      );
+      await sendChannelMessage(s.draft_channel_id, nextPing, [onTheClockEmbed(nextTeamNum)]);
     }
   }
 
@@ -1574,9 +1567,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
 
   const best = [...available].sort((a, b) => playerRating(b) - playerRating(a))[0];
   if (channelId) {
-    await sendChannelMessage(channelId,
-      `⏰ **Team ${currentTeamNum}** ran out of time! Auto-picking **${best.username}**…`
-    );
+    await sendChannelMessage(channelId, "", [autoPickEmbed(currentTeamNum, best.username)]);
   }
 
   const result = await completePick(

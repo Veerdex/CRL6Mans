@@ -457,7 +457,9 @@ export async function sendChannelMessage(
     method: "POST",
     headers: botHeaders(true),
     body: JSON.stringify({
-      content,
+      // Omitted rather than sent empty, so an embed-only message is a valid
+      // payload instead of one carrying a blank content field.
+      ...(content ? { content } : {}),
       ...(embeds ? { embeds } : {}),
       ...(allowedMentions ? { allowed_mentions: allowedMentions } : {}),
     }),
