@@ -1461,7 +1461,8 @@ export async function execEndDraft(): Promise<{ ok: boolean; message: string }> 
 type PickSettings = { num_teams: number; team_size: number; current_pick: number; draft_channel_id: string | null };
 
 async function completePick(s: PickSettings, teamId: string, playerId: string): Promise<{ ok: boolean; message: string }> {
-  const totalPicks = totalDraftPicks(s.num_teams, normalizeTeamSize(s.team_size));
+  const teamSize = normalizeTeamSize(s.team_size);
+  const totalPicks = totalDraftPicks(s.num_teams, teamSize);
 
   const [{ data: player }, { data: team }] = await Promise.all([
     supabaseAdmin.from("players").select("id, username, discord_id").eq("id", playerId).single(),
@@ -1494,7 +1495,6 @@ async function completePick(s: PickSettings, teamId: string, playerId: string): 
   }).not("id", "is", null);
 
   if (s.draft_channel_id) {
-    const teamSize = normalizeTeamSize(s.team_size);
     await sendChannelMessage(s.draft_channel_id, "", [
       pickEmbed({ teamName: team.name, playerName: player.username, pickNumber: newPick, totalPicks }),
     ]);
