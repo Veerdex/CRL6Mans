@@ -129,7 +129,7 @@ export function DraftLive({
         </div>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold bg-blue-900/30 border-blue-700/50 text-blue-300">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-          Snake Draft
+          {teamSize > 2 ? "Snake Draft" : `${teamSize}v${teamSize} Draft`}
         </div>
       </div>
 
