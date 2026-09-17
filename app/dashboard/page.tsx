@@ -443,6 +443,7 @@ export default async function DashboardPage({
                 poolCount={poolCounts[t.id] ?? 0}
                 joined={myEntryIds.has(t.id)}
                 teamAssignment={t.team_assignment as "snake_draft" | "auto_balance" | null}
+                teamSize={normalizeTeamSize((t as { team_size?: number | null }).team_size)}
                 timeline={timeline}
                 countdown={nextEvent}
                 prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}

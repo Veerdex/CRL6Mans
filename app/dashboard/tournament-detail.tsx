@@ -281,6 +281,7 @@ export async function TournamentDetailView({
               <PlayersRegistration
                 tournamentId={tournamentId}
                 teamAssignment={t.team_assignment as "snake_draft" | "auto_balance" | null}
+                teamSize={normalizeTeamSize(t.team_size)}
                 playerId={playerId}
                 isApproved={isApproved}
                 registrationOpen={registrationOpen}
@@ -522,6 +523,7 @@ export async function TournamentDetailView({
 async function PlayersRegistration({
   tournamentId,
   teamAssignment,
+  teamSize,
   playerId,
   isApproved,
   registrationOpen,
@@ -539,6 +541,7 @@ async function PlayersRegistration({
 }: {
   tournamentId: string;
   teamAssignment: "snake_draft" | "auto_balance" | null;
+  teamSize: number;
   playerId: string | null;
   isApproved: boolean;
   registrationOpen: boolean;
@@ -568,6 +571,7 @@ async function PlayersRegistration({
       poolCount={entryIds.length}
       joined={joined}
       teamAssignment={teamAssignment}
+      teamSize={teamSize}
       timeline={timeline}
       countdown={nextEvent}
       prize1st={prize1st}

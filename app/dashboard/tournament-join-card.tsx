@@ -17,6 +17,7 @@ export function TournamentJoinCard({
   poolCount,
   joined: initialJoined,
   teamAssignment,
+  teamSize,
   timeline = [],
   countdown = null,
   prize1st = null,
@@ -34,6 +35,9 @@ export function TournamentJoinCard({
   poolCount: number;
   joined: boolean;
   teamAssignment: "snake_draft" | "auto_balance" | null;
+  // Already normalized by the caller — teamSizeLabel lives beside supabaseAdmin,
+  // so the label is spelled out here instead of dragging that module client-side.
+  teamSize: number;
   timeline?: TimelineItem[];
   countdown?: { label: string; iso: string } | null;
   prize1st?: number | null;
@@ -140,6 +144,9 @@ export function TournamentJoinCard({
         {error && <span className="text-lg text-red-400">{error}</span>}
       </div>
       <div className="shrink-0 flex flex-col items-center gap-2">
+        <span className="px-2 py-0.5 rounded-md bg-zinc-800/70 border border-zinc-600/50 text-[13.5px] font-semibold tracking-wide text-zinc-300 tabular-nums">
+          {teamSize}v{teamSize}
+        </span>
         <button
           onClick={(e) => { e.stopPropagation(); toggle(); }}
           disabled={isPending}
