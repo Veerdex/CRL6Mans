@@ -144,8 +144,10 @@ export function TournamentJoinCard({
         {error && <span className="text-lg text-red-400">{error}</span>}
       </div>
       <div className="shrink-0 flex flex-col items-center gap-2">
-        <div className="flex items-center gap-2">
-          <span className="px-2 py-0.5 rounded-md bg-zinc-800/70 border border-zinc-600/50 text-[13.5px] font-semibold tracking-wide text-zinc-300 tabular-nums">
+        {/* Out of flow so the size can sit beside the button without widening the
+            column, which would otherwise shift the button and the prize tile. */}
+        <div className="relative">
+          <span className="absolute right-full top-1/2 -translate-y-1/2 mr-2 px-2 py-0.5 rounded-md bg-zinc-800/70 border border-zinc-600/50 text-[13.5px] font-semibold tracking-wide text-zinc-300 tabular-nums whitespace-nowrap">
             {teamSize}v{teamSize}
           </span>
           <button
