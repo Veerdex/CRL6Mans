@@ -34,6 +34,22 @@ async function followUp(token: string, content: string) {
   });
 }
 
+// Removes the ephemeral "thinking…" placeholder outright, for a handler that
+// returned no content because its real output is already visible in a channel.
+// If Discord refuses the delete the placeholder is edited instead — a redundant
+// confirmation is worse than nothing, but a spinner that never resolves is worse
+// than both.
+async function discardDeferred(token: string) {
+  const appId = process.env.DISCORD_CLIENT_ID;
+  if (!appId) { console.error("[discardDeferred] DISCORD_CLIENT_ID is not set"); return; }
+  const res = await fetch(`https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original`, {
+    method: "DELETE",
+  });
+  if (res.ok) return;
+  console.error(`[discardDeferred] status=${res.status}`, await res.text());
+  await followUp(token, "✅ Posted.");
+}
+
 export async function POST(req: NextRequest) {
   const signature = req.headers.get("x-signature-ed25519") ?? "";
   const timestamp = req.headers.get("x-signature-timestamp") ?? "";
@@ -109,7 +125,8 @@ export async function POST(req: NextRequest) {
         try {
           const result = await handleCommand(interaction);
           const content = (result as { data?: { content?: string } }).data?.content ?? "✅ Done.";
-          await followUp(token, content);
+          if (content) await followUp(token, content);
+          else await discardDeferred(token);
         } catch (err) {
           console.error("[discord deferred error]", err);
           await followUp(token, "❌ Internal error — check server logs.");

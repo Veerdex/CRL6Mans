@@ -57,6 +57,12 @@ const reply = (content: string) => ({ type: 4, data: { content } });
 // Visible only to the invoking user — used for every /admin subcommand so staff-only
 // output (role IDs, checklist gaps, disconnect/wipe results) never leaks into the channel.
 const ephemeralReply = (content: string) => ({ type: 4, data: { content, flags: 64 } });
+// For a deferred command whose real output is a message the channel can already
+// see, so a private echo of it is just noise. Empty content tells the route to
+// delete the "thinking…" placeholder instead of editing it. Deferred commands
+// only — returning this from a direct reply would send an empty message, which
+// Discord rejects.
+const silentReply = () => ({ type: 4, data: { content: "", flags: 64 } });
 
 // Pace Discord channel/category create & delete operations so bulk work (season
 // start, /openround, and especially match simulation) stays under Discord's
@@ -1825,7 +1831,9 @@ async function postClip(userId: string, url: string, title: string, underSixtySe
   if (!posted) {
     return ephemeralReply(`⚠️ Added **${clip.title}** to the Media tab, but the message in <#${channelId}> failed to send.`);
   }
-  return ephemeralReply(`✅ Posted **${clip.title}** in <#${channelId}> and on the Media tab.`);
+  // The post in the clips channel is the confirmation, so nothing is said back.
+  // Failures above still reply, since those leave nothing visible to see.
+  return silentReply();
 }
 
 async function totalPlayers() {
