@@ -7,7 +7,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { isGuildMember } from "@/app/lib/discord-api";
 import { isTrackerStale } from "@/app/lib/tracker";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
-import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
+import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { isCurrentlyKicked } from "@/app/lib/players";
 import { hasEarlySignupAccess, signupWindowOpen } from "@/app/lib/signup-window";
 
@@ -32,12 +32,9 @@ export async function joinTournament(tournamentId: string, confirmTrackerSame = 
   const inServer = await isGuildMember(player.userId);
   if (!inServer) return { inviteRequired: true };
 
-  if ((await isJoinGateEnabled()) && !(await hasActiveVerifiedPlatformAccount(player.id, new Date())))
-    return { error: "You need a verified platform account before joining. Add one in Settings → Platform Accounts." };
-
   const { data: t } = await supabaseAdmin
     .from("tournaments")
-    .select("status, join_mode, signups_open, signups_closed, draft_open_at, draft_close_at, min_mmr_2v2, min_mmr_3v3")
+    .select("status, join_mode, signups_open, signups_closed, draft_open_at, draft_close_at, min_mmr_2v2, min_mmr_3v3, stats_enabled")
     .eq("id", tournamentId)
     .single();
   if (!t) return { error: "Tournament not found." };
@@ -45,6 +42,11 @@ export async function joinTournament(tournamentId: string, confirmTrackerSame = 
   if ((t as { signups_closed?: boolean }).signups_closed) return { error: "Sign-ups are closed." };
   if (!signupWindowOpen(t, await hasEarlySignupAccess(player.userId)))
     return { error: "Sign-ups are not open." };
+
+  // Below the fetch, since the gate turns on this tournament's own stats setting.
+  if ((await joinGateApplies((t as { stats_enabled?: boolean | null }).stats_enabled ?? true))
+    && !(await hasActiveVerifiedPlatformAccount(player.id, new Date())))
+    return { error: "You need a verified platform account before joining. Add one in Settings → Platform Accounts." };
 
   const min2v2 = (t.min_mmr_2v2 as number | null) ?? null;
   const min3v3 = (t.min_mmr_3v3 as number | null) ?? null;

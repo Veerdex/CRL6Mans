@@ -23,6 +23,19 @@ export async function isJoinGateEnabled(): Promise<boolean> {
   return !!data?.join_gate_enabled;
 }
 
+// A verified account exists to resolve a replay's players back to rows — that is
+// its only reader. An event not tracking stats takes no replays at all (the
+// score-only flow in series-replay-panel), so the account it would demand is
+// never looked at, and the gate is friction with nothing behind it.
+//
+// statsEnabled belongs to the event being joined, not to league_settings, which
+// mirrors whichever event is live — a player signing up for next month's
+// tournament would otherwise be judged against this month's.
+export async function joinGateApplies(statsEnabled: boolean): Promise<boolean> {
+  if (!statsEnabled) return false;
+  return isJoinGateEnabled();
+}
+
 // Whether to point a player at the claim form in red. Only their own inaction
 // counts: no claim at all, or one an admin turned down. A claim that is merely
 // awaiting review is deliberately not an alert — they have done their part, and

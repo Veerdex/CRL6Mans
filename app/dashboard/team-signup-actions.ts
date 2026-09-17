@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
+import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import {
   hasEarlySignupAccess,
@@ -26,6 +26,7 @@ type Ctx = {
   discordId: string;
   tournamentId: string;
   teamSize: number;
+  statsEnabled: boolean;
   window: SignupWindowRow;
 };
 
@@ -45,7 +46,7 @@ async function getContext(tournamentId: string): Promise<{ ctx?: Ctx; error?: st
 
   const { data: t } = await supabaseAdmin
     .from("tournaments")
-    .select("join_mode, signups_open, signups_closed, status, draft_open_at, draft_close_at, team_size")
+    .select("join_mode, signups_open, signups_closed, status, draft_open_at, draft_close_at, team_size, stats_enabled")
     .eq("id", tournamentId)
     .single();
   if (!t) return { error: "Tournament not found." };
@@ -57,6 +58,7 @@ async function getContext(tournamentId: string): Promise<{ ctx?: Ctx; error?: st
       discordId: session.userId,
       tournamentId,
       teamSize: normalizeTeamSize((t as { team_size?: number }).team_size),
+      statsEnabled: (t as { stats_enabled?: boolean | null }).stats_enabled ?? true,
       window: t as SignupWindowRow,
     },
   };
@@ -89,8 +91,8 @@ async function signupForMember(
   return { tournamentId: ts.tournament_id as string, creatorPlayerId: ts.creator_player_id as string };
 }
 
-async function checkJoinGate(playerId: string): Promise<string | null> {
-  if (!(await isJoinGateEnabled())) return null;
+async function checkJoinGate(playerId: string, statsEnabled: boolean): Promise<string | null> {
+  if (!(await joinGateApplies(statsEnabled))) return null;
   if (await hasActiveVerifiedPlatformAccount(playerId, new Date())) return null;
   return "You need a verified platform account before joining a team. Add one in Settings → Platform Accounts.";
 }
@@ -113,7 +115,7 @@ export async function createTeam(tournamentId: string, name: string) {
   const existing = await findMyTeam(ctx.playerId, ctx.tournamentId);
   if (existing) return { error: "You're already on a team." };
 
-  const gateError = await checkJoinGate(ctx.playerId);
+  const gateError = await checkJoinGate(ctx.playerId, ctx.statsEnabled);
   if (gateError) return { error: gateError };
 
   const { data: dup } = await supabaseAdmin
@@ -243,7 +245,7 @@ export async function respondInvite(memberId: string, accept: boolean) {
   const existing = await findMyTeam(ctx.playerId, ctx.tournamentId);
   if (existing) return { error: "You're already on a team." };
 
-  const gateError = await checkJoinGate(ctx.playerId);
+  const gateError = await checkJoinGate(ctx.playerId, ctx.statsEnabled);
   if (gateError) return { error: gateError };
 
   await supabaseAdmin

@@ -14,7 +14,7 @@ export function JoinGateToggle({ initialEnabled }: { initialEnabled: boolean }) 
         <p className="text-sm font-medium text-white">Verified Account Join Gate</p>
         <p className="text-xs text-zinc-500 mt-0.5">
           {enabled
-            ? "ON — joining a draft, tournament, or team requires an active verified platform account"
+            ? "ON — joining a draft, tournament, or team requires an active verified platform account. Events not tracking stats are exempt: they take no replays, so nothing ever reads the account."
             : "OFF — anyone approved can join regardless of platform account verification"}
         </p>
         {error && <p className="text-xs text-red-400 mt-1">{error}</p>}

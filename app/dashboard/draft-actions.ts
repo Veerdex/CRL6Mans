@@ -9,7 +9,7 @@ import { execAutoPick } from "@/app/lib/discord-bot";
 import { isGuildMember } from "@/app/lib/discord-api";
 import { isTrackerStale } from "@/app/lib/tracker";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
-import { hasActiveVerifiedPlatformAccount, isJoinGateEnabled } from "@/app/lib/platform-account-gate";
+import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { isCurrentlyKicked } from "@/app/lib/players";
 
 export async function triggerAutoPick(): Promise<{ done: boolean }> {
@@ -43,12 +43,14 @@ export async function enterDraft(confirmTrackerSame = false): Promise<{ error?: 
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("draft_open, min_mmr_2v2, min_mmr_3v3")
+    .select("draft_open, min_mmr_2v2, min_mmr_3v3, stats_enabled")
     .single();
 
   if (!settings?.draft_open) return { error: "Draft signups are not currently open." };
 
-  if ((await isJoinGateEnabled()) && !(await hasActiveVerifiedPlatformAccount(player.id, new Date())))
+  // The season draft has no tournament of its own, so the runtime mirror is the
+  // event being joined.
+  if ((await joinGateApplies(settings.stats_enabled ?? true)) && !(await hasActiveVerifiedPlatformAccount(player.id, new Date())))
     return { error: "You need a verified platform account before joining the draft. Add one in Settings → Platform Accounts." };
 
   // Minimum MMR gate — qualifies by meeting either the 2v2 or 3v3 threshold.
