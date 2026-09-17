@@ -40,9 +40,21 @@ const INSTAGRAM_HOSTS = new Set(["instagram.com", "www.instagram.com"]);
 // Medal's player lives at the singular /clip/ path - the same URL Medal's own
 // oEmbed response hands out. The plural /clips/<id> is the full clip *page*,
 // which answers with x-frame-options: SAMEORIGIN and so renders as an empty box
-// when framed. The game slug is not validated (any value resolves the same
-// clip), so it is fixed here rather than stored per clip.
-const medalEmbedUrl = (id: string) => `https://medal.tv/games/rocket-league/clip/${id}`;
+// when framed. The game slug is not validated (a Valorant clip resolves the same
+// under /rocket-league/ and under a slug for no game at all), so it is fixed here
+// rather than stored per clip.
+//
+// This path is also the only Medal shape that sends no x-frame-options at all,
+// which is what makes it framable - and what makes Medal's own 404 page render
+// inside the frame when a clip won't resolve, instead of being blocked. See
+// api/clips/medal-health for how that is caught.
+export const medalEmbedUrl = (id: string) => `https://medal.tv/games/rocket-league/clip/${id}`;
+
+// Recovers the clip ID from a stored embed_url. MEDAL_ID_PATTERN covers both the
+// current /games/<slug>/clip/<id> shape and the legacy /clips/<id>/embed one.
+export function medalClipId(embedUrl: string): string | null {
+  return embedUrl.match(MEDAL_ID_PATTERN)?.[1] ?? null;
+}
 
 // Clips submitted before that was corrected still hold the dead
 // /clips/<id>/embed URL, which 301s to the SAMEORIGIN page. Repaired at render

@@ -6,7 +6,8 @@ import { submitClip, toggleClipLike, deleteClip, setClipOfWeek, toggleClipConfir
 import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { isLinkOnlyPlatform, resolveClipEmbedUrl, type ClipPlatform } from "@/app/lib/clip-embed";
+import { ClipFrame } from "@/app/dashboard/media/clip-frame";
+import { isLinkOnlyPlatform, type ClipPlatform } from "@/app/lib/clip-embed";
 
 const INITIAL_BATCH = 20;
 const BATCH_SIZE = 10;
@@ -164,7 +165,7 @@ function ClipCard({
               also means a clip nobody reaches never loads a player at all -
               stronger than the autoplay flag, which only stops playback. Clip of
               the Week stays eager: it is above the fold on both Home and here. */}
-          <iframe src={resolveClipEmbedUrl(clip, host)} className="w-full h-full" loading="lazy" allowFullScreen />
+          <ClipFrame clip={clip} host={host} />
         </div>
       )}
       <p className="text-white font-medium">{clip.title}</p>

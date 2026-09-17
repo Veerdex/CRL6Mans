@@ -5,7 +5,7 @@ import { clearClipOfWeek, toggleClipLike } from "@/app/dashboard/media/actions";
 import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { resolveClipEmbedUrl } from "@/app/lib/clip-embed";
+import { ClipFrame } from "@/app/dashboard/media/clip-frame";
 import type { Clip } from "@/app/dashboard/media/media-feed";
 
 type CardProps = { isModerator: boolean; liked: boolean; canParticipate: boolean };
@@ -82,7 +82,7 @@ function ClipOfWeekCard({ clip, isModerator, liked, canParticipate }: { clip: Cl
         )}
       </div>
       <div className="aspect-video w-full overflow-hidden rounded-xl border border-zinc-800 bg-black">
-        <iframe src={resolveClipEmbedUrl(clip, host)} className="w-full h-full" allowFullScreen />
+        <ClipFrame clip={clip} host={host} eager />
       </div>
       <p className="text-white font-medium">{clip.title}</p>
       <p className="text-sm text-zinc-500">
