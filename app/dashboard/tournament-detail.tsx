@@ -189,7 +189,12 @@ export async function TournamentDetailView({
             </div>
           )}
           <div>
-            <h1 className="text-2xl font-bold text-white">{t.name}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-2xl font-bold text-white">{t.name}</h1>
+              <span className="px-2 py-0.5 rounded-md bg-zinc-800/70 border border-zinc-600/50 text-[13.5px] font-semibold tracking-wide text-zinc-300 tabular-nums">
+                {teamSizeLabel(normalizeTeamSize(t.team_size))}
+              </span>
+            </div>
             <span
               className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
                 t.status === "active"
