@@ -1791,7 +1791,11 @@ function site() {
 // invalid link leaves no row and posts no message. The clips channel message
 // is plain content with the URL last, so Discord renders its own player;
 // the Clip of the Week cron deliberately uses an embed instead.
-async function postClip(userId: string, url: string, title: string, underSixtySeconds: boolean, appropriate: boolean) {
+//
+// The 60-second and conduct confirmations are a Media tab feature only — here
+// they are a line in the command's description, since a tick-box a player
+// always ticks to proceed was a step rather than a check.
+async function postClip(userId: string, url: string, title: string) {
   const { data: player } = await supabaseAdmin
     .from("players")
     .select("id, status")
@@ -1803,13 +1807,8 @@ async function postClip(userId: string, url: string, title: string, underSixtySe
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("clip_confirmations_enabled, clips_channel_id")
+    .select("clips_channel_id")
     .single();
-
-  if (settings?.clip_confirmations_enabled ?? true) {
-    if (!underSixtySeconds) return ephemeralReply("❌ Set `under_60s:True` to confirm the clip is 60 seconds or shorter.");
-    if (!appropriate) return ephemeralReply("❌ Set `appropriate:True` to confirm the clip is appropriate for the league community.");
-  }
 
   const channelId = settings?.clips_channel_id as string | null;
   if (!channelId) {
@@ -3861,8 +3860,6 @@ export async function handleCommand(interaction: Interaction) {
       userId,
       String(opt(interaction, "url")),
       String(opt(interaction, "title")),
-      opt(interaction, "under_60s") === true,
-      opt(interaction, "appropriate") === true,
     );
     case "openround": {
       const w = opt(interaction, "round");

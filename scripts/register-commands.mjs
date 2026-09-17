@@ -195,14 +195,12 @@ const commands = [
   },
   {
     name: "postclip",
-    description: "Post a clip to the clips channel and the website's Media tab",
+    // The length and conduct rules are a note here rather than confirmation
+    // options, since the tick-boxes only ever restated what this line says.
+    description: "Post a clip to the clips channel and Media tab — keep it under 60s and appropriate",
     options: [
       { name: "url", description: "YouTube, medal.tv, Streamable, Twitch, TikTok, X, or Instagram link", type: STRING, required: true },
       { name: "title", description: "Title shown on the clip", type: STRING, required: true },
-      // Optional because Discord options can't be conditionally required — the
-      // handler enforces them only while clip_confirmations_enabled is on.
-      { name: "under_60s", description: "Confirm the clip is 60 seconds or shorter", type: BOOLEAN, required: false },
-      { name: "appropriate", description: "Confirm the clip is appropriate for the league community", type: BOOLEAN, required: false },
     ],
   },
   {
