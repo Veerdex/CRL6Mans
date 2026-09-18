@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { updatePlayerData } from "./player-actions";
 import type { Player } from "@/app/lib/players";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
+import { playerRatingFromRow } from "@/app/lib/rating";
 
 interface Props {
   players: Player[];
@@ -87,7 +88,10 @@ function PlayerRow({ player }: { player: Player }) {
         <PlayerAvatar discordId={player.discord_id} avatar={player.avatar} username={username} className="w-7 h-7" />
         <span className="flex-1 text-sm font-medium text-zinc-200 truncate">{username}</span>
         <span className="text-xs text-zinc-500 shrink-0 tabular-nums hidden sm:block">
-          {Math.round((Number(peak2v2) + Number(curr2v2)) * 0.3 + (Number(peak3v3) + Number(curr3v3)) * 0.2).toLocaleString()} RV
+          {Math.round(playerRatingFromRow({
+            peak_2v2: peak2v2, current_2v2: curr2v2,
+            peak_3v3: peak3v3, current_3v3: curr3v3,
+          })).toLocaleString()} RV
         </span>
         {saved && <span className="text-xs text-emerald-400 shrink-0">Saved</span>}
         <button

@@ -10,6 +10,7 @@ import { adminUpdatePlatformAccountId, adminDeletePlatformAccount } from "./plat
 import type { StaffRole } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
+import { playerRatingFromRow } from "@/app/lib/rating";
 
 export type PlatformAccountSummary = {
   id: string;
@@ -200,7 +201,12 @@ function PlayerRow({
   const [curr2v2, setCurr2v2]       = useState(player.current_2v2);
 
   const isBanned = player.status === "banned";
-  const peakMmr  = (Number(peak2v2) + Number(curr2v2)) * 0.3 + (Number(peak3v3) + Number(curr3v3)) * 0.2;
+  // Reads the local edit state, not player.*, so the figure tracks the MMR
+  // fields while they are being typed rather than only after a save.
+  const rv = playerRatingFromRow({
+    peak_2v2: peak2v2, current_2v2: curr2v2,
+    peak_3v3: peak3v3, current_3v3: curr3v3,
+  });
   const canModerate = canActOn(actorRole, player.staffRole);
 
   function handleSave() {
@@ -292,7 +298,7 @@ function PlayerRow({
           ) : null}
 
           <span className="text-xs text-zinc-500 tabular-nums hidden sm:block">
-            {Math.round(peakMmr).toLocaleString()} RV
+            {Math.round(rv).toLocaleString()} RV
           </span>
 
           {saved && <span className="text-xs text-emerald-400">Saved</span>}
