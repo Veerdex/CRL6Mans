@@ -6,10 +6,11 @@ import { MediaFeed, type Clip, type ClipGate } from "@/app/dashboard/media/media
 import { ClipOfWeek } from "@/app/dashboard/media/clip-of-week";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
-const CLIP_SELECT = "id, title, url, embed_url, thumbnail_url, platform, likes_count, created_at, players!clips_player_id_fkey(discord_id, username, display_name)";
+const CLIP_SELECT = "id, title, url, embed_url, thumbnail_url, platform, likes_count, created_at, player_id, players!clips_player_id_fkey(discord_id, username, display_name)";
 
 type RawClipRow = {
   id: string;
+  player_id: string;
   title: string;
   url: string;
   embed_url: string;
@@ -25,7 +26,14 @@ type RawClipRow = {
 // submitter's old picture forever. Passed in as a map rather than joined because
 // the Clip of the Week row is fetched separately and its author is not
 // necessarily anywhere in the feed.
-function toClip(row: RawClipRow, avatarByDiscordId: Map<string, string | null>): Clip {
+// Ownership is keyed on player_id, the FK the row is actually stored under —
+// not on the joined discord_id, which would look equivalent and is one Tier
+// away from the thing deleteClip checks against.
+function toClip(
+  row: RawClipRow,
+  avatarByDiscordId: Map<string, string | null>,
+  currentPlayerId: string | null,
+): Clip {
   return {
     id: row.id,
     title: row.title,
@@ -39,6 +47,7 @@ function toClip(row: RawClipRow, avatarByDiscordId: Map<string, string | null>):
     submitted_by_display_name: row.players?.display_name ?? null,
     submitted_by_discord_id: row.players?.discord_id ?? null,
     submitted_by_avatar: row.players?.discord_id ? avatarByDiscordId.get(row.players.discord_id) ?? null : null,
+    is_own: currentPlayerId !== null && row.player_id === currentPlayerId,
   };
 }
 
@@ -114,7 +123,7 @@ export default async function MediaPage() {
     (authorAccounts ?? []).map((a) => [a.discord_id as string, (a.avatar as string | null) ?? null]),
   );
 
-  const clipOfWeek = cowRow ? toClip(cowRow, avatarByDiscordId) : null;
+  const clipOfWeek = cowRow ? toClip(cowRow, avatarByDiscordId, currentPlayerId) : null;
   const likedClipIds: string[] = (likes ?? []).map((l) => l.clip_id as string);
 
   return (
@@ -136,7 +145,7 @@ export default async function MediaPage() {
         />
 
         <MediaFeed
-          clips={feedRows.map((r) => toClip(r, avatarByDiscordId))}
+          clips={feedRows.map((r) => toClip(r, avatarByDiscordId, currentPlayerId))}
           likedClipIds={likedClipIds}
           gate={gate}
           isModerator={moderator}

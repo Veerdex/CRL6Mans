@@ -25,6 +25,12 @@ export type Clip = {
   submitted_by_display_name: string | null;
   submitted_by_discord_id: string | null;
   submitted_by_avatar: string | null;
+  // Drives the My Clips filter and the owner's own delete button. Optional
+  // because the Clip of the Week card never needs it — its trash clears the
+  // crown rather than deleting anything — and absent means "not mine", so a
+  // surface that omits it simply shows no delete button. deleteClip re-checks
+  // ownership against the row regardless; this only decides what is drawn.
+  is_own?: boolean;
 };
 
 const LINK_ONLY_LABELS: Record<string, string> = {
@@ -200,9 +206,9 @@ function ClipCard({
           </svg>
           {optimisticLike.likes_count}
         </button>
-        {isModerator && (
+        {(isModerator || clip.is_own) && (
           <div className="flex items-center gap-3">
-            {!isLinkOnlyPlatform(clip.platform) && (
+            {isModerator && !isLinkOnlyPlatform(clip.platform) && (
               <button
                 onClick={handleSetClipOfWeek}
                 disabled={isPending}
@@ -256,6 +262,7 @@ export function MediaFeed({
   const [sortMode, setSortMode] = useState<SortMode>("chronological");
   const [search, setSearch] = useState("");
   const [onlyLiked, setOnlyLiked] = useState(false);
+  const [onlyMine, setOnlyMine] = useState(false);
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [durationConfirmed, setDurationConfirmed] = useState(false);
@@ -280,12 +287,13 @@ export function MediaFeed({
       ? clips.filter((c) => c.title.toLowerCase().includes(search.trim().toLowerCase()))
       : clips;
     if (onlyLiked) filtered = filtered.filter((c) => likedSet.has(c.id));
+    if (onlyMine) filtered = filtered.filter((c) => c.is_own);
     const sorted = [...filtered];
     if (sortMode === "likes_desc") sorted.sort((a, b) => b.likes_count - a.likes_count);
     else if (sortMode === "likes_asc") sorted.sort((a, b) => a.likes_count - b.likes_count);
     else sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     return sorted;
-  }, [clips, search, sortMode, onlyLiked, likedSet]);
+  }, [clips, search, sortMode, onlyLiked, onlyMine, likedSet]);
 
   const [visibleCount, setVisibleCount] = useState(INITIAL_BATCH);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -294,7 +302,7 @@ export function MediaFeed({
   // changes, so switching away and back doesn't leave a stale scroll depth
   // mixed with a new result set. Adjusting state during render (React's
   // documented pattern for this) instead of an effect avoids an extra commit.
-  const filterKey = `${search}|${sortMode}|${onlyLiked}`;
+  const filterKey = `${search}|${sortMode}|${onlyLiked}|${onlyMine}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   if (filterKey !== prevFilterKey) {
     setPrevFilterKey(filterKey);
@@ -424,6 +432,16 @@ export function MediaFeed({
             />
             Only liked
           </label>
+          <label className="flex items-center gap-2 text-sm text-zinc-300 select-none">
+            <input
+              type="checkbox"
+              checked={onlyMine}
+              onChange={(e) => setOnlyMine(e.target.checked)}
+              disabled={!canParticipate}
+              className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-40"
+            />
+            My clips
+          </label>
           <select
             value={sortMode}
             onChange={(e) => setSortMode(e.target.value as SortMode)}
@@ -438,7 +456,11 @@ export function MediaFeed({
 
       {visibleClips.length === 0 ? (
         <p className="text-center text-zinc-500 py-8">
-          {onlyLiked ? "You haven't liked any clips yet." : "No clips yet — be the first to submit one."}
+          {onlyMine
+            ? "You haven't submitted any clips yet."
+            : onlyLiked
+              ? "You haven't liked any clips yet."
+              : "No clips yet — be the first to submit one."}
         </p>
       ) : (
         <>

@@ -81,7 +81,20 @@ export async function toggleClipLike(clipId: string): Promise<{ ok?: boolean; er
 export async function deleteClip(clipId: string): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
-  if (!(await isModerator(session.userId))) return { error: "Only staff can delete clips." };
+  // Staff delete anyone's clip; everyone else only their own. Checked against
+  // the row here rather than trusting the caller — the is_own flag the feed
+  // sends down decides which button to draw, nothing more.
+  if (!(await isModerator(session.userId))) {
+    const playerId = await getApprovedPlayerId(session.userId);
+    if (!playerId) return { error: "Only approved players can delete clips." };
+
+    const { data: clip } = await supabaseAdmin
+      .from("clips")
+      .select("player_id")
+      .eq("id", clipId)
+      .maybeSingle();
+    if (clip?.player_id !== playerId) return { error: "You can only delete your own clips." };
+  }
 
   const { error } = await supabaseAdmin.from("clips").delete().eq("id", clipId);
   if (error) return { error: error.message };
