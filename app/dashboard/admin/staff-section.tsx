@@ -28,7 +28,11 @@ function RoleBadge({ role }: { role: string }) {
 // schedule override, match result or moderation decision. Only counts actions
 // taken from the moment the feature shipped; there was no admin action log
 // before it, so nothing earlier can be credited.
-function ContributionBadge({ points }: { points: number }) {
+//
+// null means the viewer ranks at or below this member, so getStaffList never
+// sent a number — nothing to hide here, and nothing to render.
+function ContributionBadge({ points }: { points: number | null }) {
+  if (points === null) return null;
   return (
     <span
       title={`${points.toLocaleString()} contribution ${points === 1 ? "point" : "points"} — one per registration, platform claim, replay review, schedule override, match result or moderation decision`}

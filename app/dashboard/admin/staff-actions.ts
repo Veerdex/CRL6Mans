@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
-import { isDirectorVerified, isCEOVerified } from "@/app/lib/players";
+import { isDirectorVerified, isCEOVerified, getStaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { addRoleById, removeRoleById } from "@/app/lib/discord-api";
 import { getStaffRoleIdMap } from "@/app/lib/discord-bot";
@@ -21,6 +21,10 @@ type StaffRoleIdMap = Record<StaffTier, string | null>;
 
 function rolesUpTo(tier: StaffTier): StaffTier[] {
   return STAFF_TIERS.slice(0, STAFF_TIERS.indexOf(tier) + 1);
+}
+
+function tierRank(tier: StaffTier | null): number {
+  return tier ? STAFF_TIERS.indexOf(tier) : -1;
 }
 
 // Staff Discord roles are cumulative (a Director also holds Moderator, a CEO
@@ -45,7 +49,7 @@ export type StaffMember = {
   username: string | null;
   added_by: string | null;
   created_at: string;
-  contributions: number;
+  contributions: number | null; // null = this viewer isn't ranked high enough to see it
 };
 
 export async function getStaffList(): Promise<StaffMember[]> {
@@ -55,10 +59,21 @@ export async function getStaffList(): Promise<StaffMember[]> {
     .from("staff_roles")
     .select("discord_id, role, username, added_by, created_at")
     .order("created_at", { ascending: true });
-  const rows = data ?? [];
+  const rows = (data ?? []) as Omit<StaffMember, "contributions">[];
 
-  const counts = await getStaffContributionCounts(rows.map(r => r.discord_id));
-  return rows.map(r => ({ ...r, contributions: counts[r.discord_id] ?? 0 })) as StaffMember[];
+  // A contribution count is only visible to someone ranked strictly above its
+  // owner: the CEO sees directors and moderators, a director sees moderators,
+  // and nobody sees their own or a peer's. Decided here rather than in the
+  // client component because a count that only the render hides is still in the
+  // payload that carried it there.
+  const viewerRank = tierRank(await getStaffRole(session.userId));
+  const visible = rows.filter(r => viewerRank > tierRank(r.role));
+  const counts = await getStaffContributionCounts(visible.map(r => r.discord_id));
+
+  return rows.map(r => ({
+    ...r,
+    contributions: viewerRank > tierRank(r.role) ? counts[r.discord_id] ?? 0 : null,
+  }));
 }
 
 export async function addStaffMember(
