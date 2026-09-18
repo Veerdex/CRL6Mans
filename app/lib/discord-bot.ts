@@ -1820,7 +1820,7 @@ function ratingCmd(inputs: Array<[string, number]>) {
     `## ${rv} RV\n` +
       `2v2 — peak \`${peak2v2}\` · current \`${current2v2}\`\n` +
       `3v3 — peak \`${peak3v3}\` · current \`${current3v3}\`\n` +
-      `-# Rank Value weights 2v2 more heavily than 3v3, and peak more heavily than current. Only you can see this.`
+      `-# Rank Value weights 2v2 above 3v3, and within each mode the higher of your two numbers counts for more than a plain average would. Only you can see this.`
   );
 }
 
