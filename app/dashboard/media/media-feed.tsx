@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
-import { submitClip, toggleClipLike, deleteClip, setClipOfWeek, toggleClipConfirmations } from "@/app/dashboard/media/actions";
+import { submitClip, toggleClipLike, deleteClip, renameClip, setClipOfWeek, toggleClipConfirmations } from "@/app/dashboard/media/actions";
 import { ClipConfirmModal } from "@/app/dashboard/media/clip-confirm-modal";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
@@ -11,6 +11,11 @@ import { isLinkOnlyPlatform, type ClipPlatform } from "@/app/lib/clip-embed";
 
 const INITIAL_BATCH = 20;
 const BATCH_SIZE = 10;
+
+// Mirrors MAX_TITLE_LENGTH in lib/clip-submit, which can't be imported into a
+// client component — it sits beside supabaseAdmin. Both submit and rename
+// re-clamp server-side, so this only stops the typing.
+const TITLE_MAX = 150;
 
 export type Clip = {
   id: string;
@@ -85,6 +90,9 @@ function ClipCard({
   const [likeError, setLikeError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [cowError, setCowError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(clip.title);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   // Twitch embeds need the page's real hostname, but reading it during the
   // initial render would differ between server and client and cause a
@@ -124,6 +132,24 @@ function ClipCard({
         return;
       }
       setConfirmOpen(false);
+    });
+  }
+
+  function startEditing() {
+    setRenameError(null);
+    setDraftTitle(clip.title);
+    setEditing(true);
+  }
+
+  function handleRename() {
+    setRenameError(null);
+    startTransition(async () => {
+      const result = await renameClip(clip.id, draftTitle);
+      if (result?.error) {
+        setRenameError(result.error);
+        return;
+      }
+      setEditing(false);
     });
   }
 
@@ -174,7 +200,41 @@ function ClipCard({
           <ClipFrame clip={clip} host={host} />
         </div>
       )}
-      <p className="text-white font-medium">{clip.title}</p>
+      {editing ? (
+        <div className="space-y-2">
+          <input
+            type="text"
+            value={draftTitle}
+            onChange={(e) => setDraftTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleRename();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            maxLength={TITLE_MAX}
+            autoFocus
+            aria-label="Clip title"
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
+          />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRename}
+              disabled={isPending || !draftTitle.trim()}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+            >
+              {isPending ? "Saving…" : "Save"}
+            </button>
+            <button
+              onClick={() => { setEditing(false); setRenameError(null); }}
+              className="text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+          {renameError && <p className="text-xs text-red-400">{renameError}</p>}
+        </div>
+      ) : (
+        <p className="text-white font-medium">{clip.title}</p>
+      )}
       <p className="text-xs text-zinc-500">
         Posted by{" "}
         {clip.submitted_by_username ? (
@@ -217,6 +277,17 @@ function ClipCard({
                 Set as Clip of the Week
               </button>
             )}
+            <button
+              onClick={startEditing}
+              disabled={editing}
+              className="text-zinc-500 hover:text-amber-400 transition-colors disabled:opacity-40"
+              aria-label="Edit clip title"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
             <button
               onClick={() => setConfirmOpen(true)}
               className="text-zinc-500 hover:text-red-400 transition-colors"
@@ -355,7 +426,7 @@ export function MediaFeed({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Clip title"
-            maxLength={150}
+            maxLength={TITLE_MAX}
             className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
           />
           <input

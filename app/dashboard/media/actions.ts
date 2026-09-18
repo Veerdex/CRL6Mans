@@ -7,7 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { isLinkOnlyPlatform, type ClipPlatform } from "@/app/lib/clip-embed";
-import { createClip } from "@/app/lib/clip-submit";
+import { createClip, MAX_TITLE_LENGTH } from "@/app/lib/clip-submit";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -78,28 +78,62 @@ export async function toggleClipLike(clipId: string): Promise<{ ok?: boolean; er
   return { ok: true };
 }
 
+// Staff manage anyone's clip; everyone else only their own. Checked against the
+// row rather than trusting the caller — the is_own flag the feed sends down
+// decides which buttons to draw, nothing more. Shared by delete and rename so
+// the two can't drift; the verb only picks the wording.
+async function clipPermissionError(
+  discordId: string,
+  clipId: string,
+  verb: "delete" | "edit",
+): Promise<string | null> {
+  if (await isModerator(discordId)) return null;
+
+  const playerId = await getApprovedPlayerId(discordId);
+  if (!playerId) return `Only approved players can ${verb} clips.`;
+
+  const { data: clip } = await supabaseAdmin
+    .from("clips")
+    .select("player_id")
+    .eq("id", clipId)
+    .maybeSingle();
+  if (clip?.player_id !== playerId) return `You can only ${verb} your own clips.`;
+
+  return null;
+}
+
 export async function deleteClip(clipId: string): Promise<{ ok?: boolean; error?: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
-  // Staff delete anyone's clip; everyone else only their own. Checked against
-  // the row here rather than trusting the caller — the is_own flag the feed
-  // sends down decides which button to draw, nothing more.
-  if (!(await isModerator(session.userId))) {
-    const playerId = await getApprovedPlayerId(session.userId);
-    if (!playerId) return { error: "Only approved players can delete clips." };
-
-    const { data: clip } = await supabaseAdmin
-      .from("clips")
-      .select("player_id")
-      .eq("id", clipId)
-      .maybeSingle();
-    if (clip?.player_id !== playerId) return { error: "You can only delete your own clips." };
-  }
+  const denied = await clipPermissionError(session.userId, clipId, "delete");
+  if (denied) return { error: denied };
 
   const { error } = await supabaseAdmin.from("clips").delete().eq("id", clipId);
   if (error) return { error: error.message };
 
   revalidatePath("/dashboard/media");
+  return { ok: true };
+}
+
+// Title only. The URL is what dedup, the platform and the embed are all derived
+// from, so changing it would mean re-running createClip's whole classification
+// rather than an update.
+export async function renameClip(clipId: string, title: string): Promise<{ ok?: boolean; error?: string }> {
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
+  const denied = await clipPermissionError(session.userId, clipId, "edit");
+  if (denied) return { error: denied };
+
+  const trimmed = title.trim().slice(0, MAX_TITLE_LENGTH);
+  if (!trimmed) return { error: "Title is required." };
+
+  const { error } = await supabaseAdmin.from("clips").update({ title: trimmed }).eq("id", clipId);
+  if (error) return { error: error.message };
+
+  // The crowned clip is rendered on the dashboard home as well as here, and a
+  // moderator can rename one from either feed before it is crowned or after.
+  revalidatePath("/dashboard/media");
+  revalidatePath("/dashboard");
   return { ok: true };
 }
 
