@@ -4,7 +4,10 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { AdminSubSection } from "./admin-sub-section";
 import { LocalTime } from "@/app/dashboard/local-time";
 
-const HOBBY_STORAGE_LIMIT_BYTES = 5 * 1024 * 1024 * 1024;
+// Hobby includes 1 GB, not the 5 GB this used to claim. The changelog that
+// sounds like it says otherwise ("Increased Blob store limit for Hobby users",
+// June 2026) raised the number of stores, 5 to 100 — not the size of one.
+const HOBBY_STORAGE_LIMIT_BYTES = 1 * 1024 * 1024 * 1024;
 const SUPABASE_STORAGE_FREE_LIMIT_BYTES = 1 * 1024 * 1024 * 1024;
 const SUPABASE_DB_FREE_LIMIT_BYTES = 500 * 1024 * 1024;
 
@@ -117,25 +120,46 @@ async function fetchDatabaseSizeBytes(): Promise<number> {
 // measurement time is shown so nobody reads a cached number as live.
 const MEASUREMENT_TTL_SECONDS = 3600;
 
-type Measured<T> = { value: T; measuredAt: string };
+type Measured<T> = { value: T; error: string | null; measuredAt: string };
 
-function measured<T>(key: string, fetcher: () => Promise<T>) {
+// The failure is cached alongside the success on purpose. unstable_cache stores
+// nothing when the fetcher throws, so catching outside it meant a failing
+// measurement retried on every single admin render - the exact uncapped call
+// rate the window above exists to prevent, and list() is billed whether or not
+// it succeeds. Catching inside puts a broken backend on the same hourly budget
+// as a working one. The cost is that fixing a backend takes up to an hour to
+// show here, which is why the panel timestamps the error too rather than
+// letting a stale failure read as a live one.
+function measured<T>(key: string, fetcher: () => Promise<T>, empty: T, fallbackMessage: string) {
   return unstable_cache(
-    async (): Promise<Measured<T>> => ({ value: await fetcher(), measuredAt: new Date().toISOString() }),
+    async (): Promise<Measured<T>> => {
+      const measuredAt = new Date().toISOString();
+      try {
+        return { value: await fetcher(), error: null, measuredAt };
+      } catch (e) {
+        return { value: empty, error: e instanceof Error ? e.message : fallbackMessage, measuredAt };
+      }
+    },
     ["admin-storage", key],
     { revalidate: MEASUREMENT_TTL_SECONDS, tags: ["admin-storage-usage"] },
   );
 }
 
-const measuredBlobs = measured("blobs", fetchAllBlobs);
-const measuredBuckets = measured("buckets", fetchSupabaseBuckets);
-const measuredDatabaseSize = measured("database-size", fetchDatabaseSizeBytes);
+const measuredBlobs = measured("blobs", fetchAllBlobs, [], "Failed to load Blob storage usage.");
+const measuredBuckets = measured("buckets", fetchSupabaseBuckets, [], "Failed to load Supabase storage usage.");
+const measuredDatabaseSize = measured(
+  "database-size",
+  fetchDatabaseSizeBytes,
+  0,
+  "Failed to load database size. Has scripts/add-database-size-rpc-migration.sql been run?",
+);
 
-function MeasuredAt({ iso }: { iso: string | null }) {
+function MeasuredAt({ iso, failed = false }: { iso: string | null; failed?: boolean }) {
   if (!iso) return null;
   return (
     <p className="text-xs text-zinc-600 mt-2">
-      Measured <LocalTime iso={iso} className="text-zinc-500" /> · refreshes hourly
+      {failed ? "Attempted" : "Measured"} <LocalTime iso={iso} className="text-zinc-500" />{" "}
+      · {failed ? "retries hourly" : "refreshes hourly"}
     </p>
   );
 }
@@ -230,34 +254,9 @@ function LargestFiles({ files }: { files: { path: string; size: number }[] }) {
 }
 
 export async function StorageUsageSection() {
-  let blobs: { pathname: string; size: number }[] = [];
-  let blobError: string | null = null;
-  let blobMeasuredAt: string | null = null;
-  try {
-    ({ value: blobs, measuredAt: blobMeasuredAt } = await measuredBlobs());
-  } catch (e) {
-    blobError = e instanceof Error ? e.message : "Failed to load Blob storage usage.";
-  }
-
-  let buckets: BucketUsage[] = [];
-  let bucketError: string | null = null;
-  let bucketMeasuredAt: string | null = null;
-  try {
-    ({ value: buckets, measuredAt: bucketMeasuredAt } = await measuredBuckets());
-  } catch (e) {
-    bucketError = e instanceof Error ? e.message : "Failed to load Supabase storage usage.";
-  }
-
-  let dbSizeBytes = 0;
-  let dbError: string | null = null;
-  let dbMeasuredAt: string | null = null;
-  try {
-    ({ value: dbSizeBytes, measuredAt: dbMeasuredAt } = await measuredDatabaseSize());
-  } catch (e) {
-    dbError = e instanceof Error
-      ? e.message
-      : "Failed to load database size. Has scripts/add-database-size-rpc-migration.sql been run?";
-  }
+  const { value: blobs, error: blobError, measuredAt: blobMeasuredAt } = await measuredBlobs();
+  const { value: buckets, error: bucketError, measuredAt: bucketMeasuredAt } = await measuredBuckets();
+  const { value: dbSizeBytes, error: dbError, measuredAt: dbMeasuredAt } = await measuredDatabaseSize();
 
   const blobTotalBytes = blobs.reduce((sum, b) => sum + b.size, 0);
 
@@ -279,14 +278,17 @@ export async function StorageUsageSection() {
         <div>
           <h3 className="text-sm font-semibold text-zinc-300 mb-3">Vercel Blob (sponsor logo/video uploads)</h3>
           {blobError ? (
-            <p className="text-sm text-red-400">{blobError}</p>
+            <div>
+              <p className="text-sm text-red-400">{blobError}</p>
+              <MeasuredAt iso={blobMeasuredAt} failed />
+            </div>
           ) : (
             <div className="space-y-4">
               <UsageStats
                 usedLabel="Storage Used"
                 used={blobTotalBytes}
                 cap={HOBBY_STORAGE_LIMIT_BYTES}
-                capLabel="5 GB cap (Hobby free tier)"
+                capLabel="1 GB cap (Hobby free tier)"
                 extraStat={{ label: "Files", value: blobs.length }}
               />
               <LargestFiles files={blobs.map((b) => ({ path: b.pathname, size: b.size }))} />
@@ -298,7 +300,10 @@ export async function StorageUsageSection() {
         <div>
           <h3 className="text-sm font-semibold text-zinc-300 mb-3">Supabase Storage (all buckets)</h3>
           {bucketError ? (
-            <p className="text-sm text-red-400">{bucketError}</p>
+            <div>
+              <p className="text-sm text-red-400">{bucketError}</p>
+              <MeasuredAt iso={bucketMeasuredAt} failed />
+            </div>
           ) : (
             <div className="space-y-4">
               <UsageStats
@@ -329,7 +334,10 @@ export async function StorageUsageSection() {
         <div>
           <h3 className="text-sm font-semibold text-zinc-300 mb-3">Supabase Database</h3>
           {dbError ? (
-            <p className="text-sm text-red-400">{dbError}</p>
+            <div>
+              <p className="text-sm text-red-400">{dbError}</p>
+              <MeasuredAt iso={dbMeasuredAt} failed />
+            </div>
           ) : (
             <div>
               <UsageStats
