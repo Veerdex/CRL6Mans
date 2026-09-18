@@ -194,6 +194,20 @@ const commands = [
     description: "Get the link to the CRL 6Mans website",
   },
   {
+    name: "rating",
+    description: "Work out the Rank Value a set of MMRs produces — only you see the result",
+    // min_value/max_value make Discord reject an out-of-range number in the
+    // client before it is ever sent. ratingCmd re-checks the same bounds: this
+    // registration is deployed by hand and separately from the handler, so the
+    // handler cannot assume the constraints above are the ones in force.
+    options: [
+      { name: "peak_2v2",    description: "All-time peak 2v2 MMR (0–3000)",    type: INTEGER, required: true, min_value: 0, max_value: 3000 },
+      { name: "current_2v2", description: "Current season 2v2 MMR (0–3000)",   type: INTEGER, required: true, min_value: 0, max_value: 3000 },
+      { name: "peak_3v3",    description: "All-time peak 3v3 MMR (0–3000)",    type: INTEGER, required: true, min_value: 0, max_value: 3000 },
+      { name: "current_3v3", description: "Current season 3v3 MMR (0–3000)",   type: INTEGER, required: true, min_value: 0, max_value: 3000 },
+    ],
+  },
+  {
     name: "postclip",
     // The length and conduct rules are a note here rather than confirmation
     // options, since the tick-boxes only ever restated what this line says.

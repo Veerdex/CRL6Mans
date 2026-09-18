@@ -15,7 +15,7 @@ import {
   getRoundName, GROUP_STAGE_PREFIX, parseGroupNum,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
-import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow } from "./rating";
+import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow, calculatePlayerRating } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "./team-size";
 import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft-order";
@@ -1784,6 +1784,44 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
 
 function site() {
   return ephemeralReply("🔗 https://www.crlw6m.fyi/");
+}
+
+const RATING_MMR_MIN = 0;
+const RATING_MMR_MAX = 3000;
+
+// /rating — what RV a set of MMRs produces, without having to register or edit a
+// profile to find out. Pure math on the numbers typed in: it reads nothing and
+// writes nothing, which is why it answers directly instead of deferring.
+//
+// The bounds are checked here as well as declared on the registered options.
+// register-commands.mjs is deployed by hand and separately from this file, so
+// the constraints Discord is enforcing may not be the ones written above.
+function ratingCmd(inputs: Array<[string, number]>) {
+  const invalid = inputs.filter(
+    ([, v]) => !Number.isInteger(v) || v < RATING_MMR_MIN || v > RATING_MMR_MAX
+  );
+  if (invalid.length > 0) {
+    const labels = invalid.map(([label]) => label).join(", ");
+    const subject = invalid.length > 1 ? "must each be a whole number" : "must be a whole number";
+    return ephemeralReply(`❌ ${labels} ${subject} between ${RATING_MMR_MIN} and ${RATING_MMR_MAX}.`);
+  }
+
+  const [peak2v2, current2v2, peak3v3, current3v3] = inputs.map(([, v]) => v);
+  const rv = Math.round(
+    calculatePlayerRating({
+      at_2v2: peak2v2,
+      season_2v2: current2v2,
+      at_3v3: peak3v3,
+      season_3v3: current3v3,
+    })
+  );
+
+  return ephemeralReply(
+    `## ${rv} RV\n` +
+      `2v2 — peak \`${peak2v2}\` · current \`${current2v2}\`\n` +
+      `3v3 — peak \`${peak3v3}\` · current \`${current3v3}\`\n` +
+      `-# Rank Value weights 2v2 more heavily than 3v3, and peak more heavily than current. Only you can see this.`
+  );
 }
 
 // /postclip — the Discord entry point to the same submission the Media tab
@@ -3852,6 +3890,12 @@ export async function handleCommand(interaction: Interaction) {
 
   switch (name) {
     case "site":          return site();
+    case "rating":        return ratingCmd([
+      ["Peak 2v2", Number(opt(interaction, "peak_2v2"))],
+      ["Current 2v2", Number(opt(interaction, "current_2v2"))],
+      ["Peak 3v3", Number(opt(interaction, "peak_3v3"))],
+      ["Current 3v3", Number(opt(interaction, "current_3v3"))],
+    ]);
     case "totalplayers":  return totalPlayers();
     case "totalusers":    return totalUsers();
     case "playerinfo":    return playerInfo(String(opt(interaction, "username")));
