@@ -48,6 +48,26 @@ export async function setJoinGateEnabled(value: boolean): Promise<{ error?: stri
   return { ok: true };
 }
 
+// Director+, for the same reason as the join gate: switching this off means an
+// unreviewed claim counts everywhere a verified account does, including replay
+// stat attribution. Existing verified rows are untouched either way — this only
+// changes which statuses are accepted from here on, so flipping it back
+// immediately restores the stricter reading with nothing to clean up.
+export async function setClaimApprovalRequired(value: boolean): Promise<{ error?: string; ok?: boolean }> {
+  const cookieStore = await cookies();
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
+
+  const { error } = await supabaseAdmin
+    .from("league_settings")
+    .update({ claim_approval_required: value })
+    .not("id", "is", null);
+  if (error) return { error: "Failed to update. Has the claim-approval migration been run?" };
+
+  revalidatePath("/dashboard/admin");
+  return { ok: true };
+}
+
 // Records the admin's adjudication of a discrepancy. This never certifies a
 // match directly — only re-analyzing the replay through the existing upload/
 // analyze flow (which reruns the Step 6 resolver) can flip identity_status to

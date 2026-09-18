@@ -31,6 +31,8 @@ import { ReplayAnalysisModeToggle } from "./replay-analysis-mode-toggle";
 import { ReplayReviewCard, type ReplayReviewCardData } from "./replay-review-card";
 import type { ReplayAnalysisMode } from "@/app/lib/replay-analysis-mode";
 import { JoinGateToggle } from "./join-gate-toggle";
+import { ClaimApprovalToggle } from "./claim-approval-toggle";
+import { isClaimApprovalRequired } from "@/app/lib/platform-account-gate";
 import { TournamentManager } from "./tournament-manager";
 import type { Tournament, Season } from "./tournament-actions";
 import { InitSettingsButton } from "./init-settings-button";
@@ -392,6 +394,11 @@ export default async function AdminPage() {
   const replayAnalysisMode: ReplayAnalysisMode =
     settings?.replay_analysis_mode === "strict" ? "strict" : "loose";
   const joinGateEnabled = settings?.join_gate_enabled ?? false;
+  // Read on its own rather than joining the settings select above: that select
+  // names its columns explicitly, so adding one there would fail the whole
+  // query — and every setting on this page with it — on any deploy that lands
+  // before the migration. isClaimApprovalRequired degrades to ON by itself.
+  const claimApprovalRequired = await isClaimApprovalRequired();
 
   const { data: reviewMatchRows } = await supabaseAdmin
     .from("matches")
@@ -1246,6 +1253,9 @@ export default async function AdminPage() {
         defaultOpen={pending.length > 0 || platformClaimCards.length > 0}
         description="New player sign-ups awaiting approval or rejection, plus platform account claims (Steam, Epic, console) awaiting verification. A player needs both an approved registration and, once enforcement is on, a verified account to fully participate."
       >
+        <div className="mb-5">
+          <ClaimApprovalToggle initialRequired={claimApprovalRequired} />
+        </div>
         {pending.length === 0 && platformClaimCards.length === 0 ? (
           <p className="text-zinc-400 text-sm">No pending registrations or platform account claims.</p>
         ) : (

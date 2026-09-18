@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { isClaimApprovalRequired } from "@/app/lib/platform-account-gate";
 import type { PlayerStat } from "@/app/lib/replay-parser";
 import type { ExpectedPlayer, VerifiedAccountRecord } from "@/app/lib/replay-identity-resolver";
 
@@ -77,18 +78,30 @@ export async function fetchGlobalVerifiedAccounts(
   );
   if (distinctOnlineIds.length === 0) return [];
 
-  const { data: accounts } = await supabaseAdmin
+  // With admin approval switched off, an unreviewed claim resolves a replay
+  // exactly as a verified account does — that is the whole point of the toggle.
+  // The claim still has to own the platform ID (enforced at submission, which
+  // also runs the ban-evasion cross-check), and it still has to have been in
+  // force at kickoff: claiming an account after a match must not retroactively
+  // credit its stats. A claimed row has no valid_from, so created_at stands in
+  // as the window start.
+  const approvalRequired = await isClaimApprovalRequired();
+
+  const base = supabaseAdmin
     .from("player_platform_accounts")
-    .select("player_id, platform, platform_account_id, verified_display_name, valid_from, valid_until, revoked_at")
-    .in("platform_account_id", distinctOnlineIds)
-    .not("verified_at", "is", null);
+    .select("player_id, platform, platform_account_id, verified_display_name, valid_from, valid_until, revoked_at, created_at")
+    .in("platform_account_id", distinctOnlineIds);
+
+  const { data: accounts } = approvalRequired
+    ? await base.not("verified_at", "is", null)
+    : await base.or("verified_at.not.is.null,verification_status.in.(claimed,pending_verification)");
 
   return (accounts ?? []).map(a => ({
     playerId: a.player_id as string,
     platform: a.platform as VerifiedAccountRecord["platform"],
     platformAccountId: a.platform_account_id as string,
     verifiedDisplayName: a.verified_display_name as string | null,
-    validFrom: a.valid_from as string,
+    validFrom: (a.valid_from ?? a.created_at) as string,
     validUntil: a.valid_until as string | null,
     revokedAt: a.revoked_at as string | null,
   }));
