@@ -9,6 +9,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { finalizeMatchAndCloseChannel } from "@/app/lib/discord-bot";
 import { notifyMatchChannel } from "@/app/lib/match-notifications";
 import { pushToTeam } from "@/app/lib/push";
+import { recordStaffAction } from "@/app/lib/staff-contributions";
 import type { ReplayAnalysisMode } from "@/app/lib/replay-analysis-mode";
 import type { AnalyzedGameStat } from "@/app/dashboard/admin/match-actions";
 
@@ -109,6 +110,8 @@ export async function approveReplayReview(
     match.pending_away_score as number,
   );
 
+  await recordStaffAction("replay_review_approved", matchId);
+
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/season");
@@ -165,6 +168,8 @@ export async function rejectReplayReview(
     matchId,
     `❌ An admin rejected this series' replay submission.\n**Reason:** ${trimmed}\nPlease upload the correct replays and resubmit.`,
   ).catch(() => {});
+
+  await recordStaffAction("replay_review_rejected", matchId);
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/my-team");

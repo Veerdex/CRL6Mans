@@ -24,6 +24,21 @@ function RoleBadge({ role }: { role: string }) {
   );
 }
 
+// One point per adjudication — a registration, platform claim, replay review,
+// schedule override, match result or moderation decision. Only counts actions
+// taken from the moment the feature shipped; there was no admin action log
+// before it, so nothing earlier can be credited.
+function ContributionBadge({ points }: { points: number }) {
+  return (
+    <span
+      title={`${points.toLocaleString()} contribution ${points === 1 ? "point" : "points"} — one per registration, platform claim, replay review, schedule override, match result or moderation decision`}
+      className="text-[11px] font-semibold px-2 py-0.5 rounded border tabular-nums text-emerald-400 bg-emerald-950/40 border-emerald-800/60"
+    >
+      {points.toLocaleString()} {points === 1 ? "pt" : "pts"}
+    </span>
+  );
+}
+
 function ConfirmRemove({
   member,
   canRemove,
@@ -114,6 +129,7 @@ export function StaffManager({ staff, userIsCEO, userIsDirector }: Props) {
           <div className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3">
             <span className="flex-1 text-sm text-white font-medium">{ceo.username ?? ceo.discord_id}</span>
             <span className="text-xs text-zinc-500 font-mono">{ceo.discord_id}</span>
+            <ContributionBadge points={ceo.contributions} />
             <RoleBadge role="ceo" />
           </div>
         ) : (
@@ -132,6 +148,7 @@ export function StaffManager({ staff, userIsCEO, userIsDirector }: Props) {
               <div key={m.discord_id} className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3">
                 <span className="flex-1 text-sm text-white font-medium">{m.username ?? m.discord_id}</span>
                 <span className="text-xs text-zinc-500 font-mono">{m.discord_id}</span>
+                <ContributionBadge points={m.contributions} />
                 <RoleBadge role="director" />
                 <ConfirmRemove member={m} canRemove={userIsCEO} onRemove={handleRemove} />
               </div>
@@ -151,6 +168,7 @@ export function StaffManager({ staff, userIsCEO, userIsDirector }: Props) {
               <div key={m.discord_id} className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3">
                 <span className="flex-1 text-sm text-white font-medium">{m.username ?? m.discord_id}</span>
                 <span className="text-xs text-zinc-500 font-mono">{m.discord_id}</span>
+                <ContributionBadge points={m.contributions} />
                 <RoleBadge role="moderator" />
                 <ConfirmRemove member={m} canRemove={userIsDirector} onRemove={handleRemove} />
               </div>

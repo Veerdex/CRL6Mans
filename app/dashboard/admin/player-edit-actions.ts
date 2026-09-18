@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { recordStaffAction } from "@/app/lib/staff-contributions";
 
 async function assertAdmin() {
   const cookieStore = await cookies();
@@ -55,6 +56,8 @@ export async function approvePlayerEditRequest(
     .update({ status: "approved", updated_at: new Date().toISOString() })
     .eq("id", requestId);
 
+  await recordStaffAction("profile_change_approved", req.player_id);
+
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/settings");
   return { ok: true };
@@ -66,7 +69,9 @@ export async function rejectPlayerEditRequest(
 ): Promise<{ error?: string; ok?: boolean }> {
   await assertAdmin();
 
-  const { error } = await supabaseAdmin
+  // Selecting the affected rows only so the contribution can be gated on one
+  // actually transitioning — PostgREST reports no error for a zero-row update.
+  const { data: rejected, error } = await supabaseAdmin
     .from("player_edit_requests")
     .update({
       status:     "rejected",
@@ -74,9 +79,12 @@ export async function rejectPlayerEditRequest(
       updated_at: new Date().toISOString(),
     })
     .eq("id", requestId)
-    .eq("status", "pending");
+    .eq("status", "pending")
+    .select("player_id");
 
   if (error) return { error: error.message };
+
+  if (rejected?.length) await recordStaffAction("profile_change_rejected", rejected[0].player_id);
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/settings");

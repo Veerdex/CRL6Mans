@@ -7,6 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { notifyMatchChannel } from "@/app/lib/match-notifications";
+import { recordStaffAction } from "@/app/lib/staff-contributions";
 
 async function verifyAdmin() {
   const cookieStore = await cookies();
@@ -40,6 +41,8 @@ export async function approveScheduleOverride(
       await notifyMatchChannel(matchId, `✅ Admin approved the match time: <t:${ts}:F>. It's locked in — see you then! 🎮`);
     }
   } catch { /* best-effort */ }
+
+  await recordStaffAction("schedule_override_approved", matchId);
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/my-team");
@@ -75,6 +78,8 @@ export async function rejectScheduleOverride(
   try {
     await notifyMatchChannel(matchId, "❌ Admin declined the out-of-window time. Please propose a new time within the scheduled window.");
   } catch { /* best-effort */ }
+
+  await recordStaffAction("schedule_override_rejected", matchId);
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/my-team");

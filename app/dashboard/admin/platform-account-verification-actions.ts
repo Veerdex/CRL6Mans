@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { recordStaffAction } from "@/app/lib/staff-contributions";
 import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
 
 // The verification-method label is audit metadata only — no code path branches
@@ -103,6 +104,8 @@ export async function verifyPlatformAccount(
     detail_json: { platform: account.platform, platform_account_id: platformAccountId, method: verificationMethod },
   });
 
+  await recordStaffAction("platform_account_verified", accountId);
+
   revalidatePath("/dashboard/admin");
   return { ok: true };
 }
@@ -147,6 +150,8 @@ export async function rejectPlatformAccount(
     actor: adminId,
     detail_json: { admin_note: adminNote.trim() || null, cooldown: cooldown ?? null },
   });
+
+  await recordStaffAction("platform_account_rejected", accountId);
 
   if (cooldown) {
     const cooldownResult = await kickForRejectionCooldown(
@@ -225,6 +230,8 @@ export async function correctPlatformAccount(
     },
   });
 
+  await recordStaffAction("platform_account_corrected", accountId);
+
   revalidatePath("/dashboard/admin");
   return { ok: true };
 }
@@ -257,6 +264,8 @@ export async function revokePlatformAccount(
     actor: adminId,
     detail_json: { admin_note: adminNote.trim() },
   });
+
+  await recordStaffAction("platform_account_revoked", accountId);
 
   revalidatePath("/dashboard/admin");
   return { ok: true };

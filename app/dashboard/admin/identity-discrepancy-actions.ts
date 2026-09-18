@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { recordStaffAction } from "@/app/lib/staff-contributions";
 import { buildResolverContext } from "@/app/lib/replay-identity-context";
 import { resolveReplayParticipants } from "@/app/lib/replay-identity-resolver";
 import type { PlayerStat } from "@/app/lib/replay-parser";
@@ -114,6 +115,8 @@ export async function resolveIdentityDiscrepancy(
     await supabaseAdmin.from("matches").update({ identity_status: "rejected" }).eq("id", row.match_id);
   }
 
+  await recordStaffAction("identity_discrepancy_resolved", discrepancyId);
+
   revalidatePath("/dashboard/admin");
   return { ok: true };
 }
@@ -201,6 +204,11 @@ export async function reverifyGameIdentity(
       })
       .eq("replay_id", certRow.replay_id)
       .eq("status", "open");
+
+    // Only a successful reverification scores. A failed one is a retry the admin
+    // is expected to repeat after fixing more data, and success clears
+    // player_resolutions_json, so this can land at most once per game.
+    await recordStaffAction("game_identity_reverified", matchId);
   }
 
   revalidatePath("/dashboard/admin");

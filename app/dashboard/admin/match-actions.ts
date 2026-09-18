@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
 import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
+import { recordStaffAction } from "@/app/lib/staff-contributions";
 import { evaluateAndPersistGameCertification, resolveSubmittedGames, resolvePlatformIdMatches } from "@/app/lib/replay-identity-certification";
 
 async function verifyAdmin() {
@@ -43,6 +44,7 @@ export async function dqTeamFromMatch(
 
   const result = await execReportMatchResult(matchId, homeScore, awayScore, 0, /*forfeit*/ true, /*skipRatingUpdate*/ true);
   if (result.ok) {
+    await recordStaffAction("team_disqualified", matchId);
     revalidatePath("/dashboard/admin");
     revalidatePath("/dashboard/season");
     revalidatePath("/dashboard/my-team");
@@ -374,6 +376,8 @@ export async function reportMatchResult(
     .from("matches")
     .update({ identity_status: gate.identityStatus, replay_review_status: "none" })
     .eq("id", matchId);
+
+  await recordStaffAction("match_result_reported", matchId);
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/season");

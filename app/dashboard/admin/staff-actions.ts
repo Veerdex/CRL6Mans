@@ -8,6 +8,7 @@ import { isDirectorVerified, isCEOVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { addRoleById, removeRoleById } from "@/app/lib/discord-api";
 import { getStaffRoleIdMap } from "@/app/lib/discord-bot";
+import { getStaffContributionCounts } from "@/app/lib/staff-contributions";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -44,6 +45,7 @@ export type StaffMember = {
   username: string | null;
   added_by: string | null;
   created_at: string;
+  contributions: number;
 };
 
 export async function getStaffList(): Promise<StaffMember[]> {
@@ -53,7 +55,10 @@ export async function getStaffList(): Promise<StaffMember[]> {
     .from("staff_roles")
     .select("discord_id, role, username, added_by, created_at")
     .order("created_at", { ascending: true });
-  return (data ?? []) as StaffMember[];
+  const rows = data ?? [];
+
+  const counts = await getStaffContributionCounts(rows.map(r => r.discord_id));
+  return rows.map(r => ({ ...r, contributions: counts[r.discord_id] ?? 0 })) as StaffMember[];
 }
 
 export async function addStaffMember(

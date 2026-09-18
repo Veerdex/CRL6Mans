@@ -7,6 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified, addRegisteredRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { deleteCollegeIdImage } from "@/app/lib/college-ids";
+import { recordStaffAction } from "@/app/lib/staff-contributions";
 import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
 
 export type PlayerEditFields = {
@@ -158,6 +159,10 @@ export async function approvePlayerWithEdits(
     .update({ college_image_url: "" })
     .eq("account_id", id);
 
+  // Past the claimed-row guard above, so a second click on an already-approved
+  // registration has already returned rather than scoring a second point.
+  await recordStaffAction("registration_approved", id);
+
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard", "layout");
   return { ok: true };
@@ -203,6 +208,10 @@ export async function rejectPlayer(
     );
     if (cooldownResult.error) return { error: `Registration rejected, but the cooldown failed: ${cooldownResult.error}` };
   }
+
+  // Unlike the approval path this one returns ok even when nothing transitioned,
+  // so the row count has to gate the point explicitly.
+  if (rejected?.length) await recordStaffAction("registration_rejected", id);
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard", "layout");

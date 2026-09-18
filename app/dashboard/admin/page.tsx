@@ -77,7 +77,7 @@ async function StaffSection({ userIsCEO, userIsDirector }: { userIsCEO: boolean;
       tabId="staff-management"
       title="Staff Management"
       defaultOpen={false}
-      description="Grant or revoke moderator, director, and CEO roles for staff members. A staff member's role determines which players they can moderate — moderators can only act on non-staff, directors can act on moderators too, and CEOs can act on anyone."
+      description="Grant or revoke moderator, director, and CEO roles for staff members. A staff member's role determines which players they can moderate — moderators can only act on non-staff, directors can act on moderators too, and CEOs can act on anyone. The points beside each name are contribution points: one per decision made on a player or a match."
     >
       <StaffManager staff={staff} userIsCEO={userIsCEO} userIsDirector={userIsDirector} />
     </AdminSubSection>
