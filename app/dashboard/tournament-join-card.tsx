@@ -144,22 +144,18 @@ export function TournamentJoinCard({
         {error && <span className="text-lg text-red-400">{error}</span>}
       </div>
       <div className="shrink-0 flex flex-col items-center gap-2">
-        {/* Out of flow so the size can sit beside the button without widening the
-            column, which would otherwise shift the button and the prize tile. */}
-        <div className="relative">
-          <span className="absolute right-full top-1/2 -translate-y-1/2 mr-2 px-2 py-0.5 rounded-md bg-zinc-800/70 border border-zinc-600/50 text-[13.5px] font-semibold tracking-wide text-zinc-300 tabular-nums whitespace-nowrap">
-            {teamSize}v{teamSize}
-          </span>
-          <button
-            onClick={(e) => { e.stopPropagation(); toggle(); }}
-            disabled={isPending}
-            className={`px-4 py-2 rounded-lg text-[21px] font-semibold transition-colors ${
-              joined ? "bg-red-700 hover:bg-red-600 text-white" : "bg-emerald-600 hover:bg-emerald-500 text-white"
-            }`}
-          >
-            {isPending ? "..." : joined ? "Leave" : "Join"}
-          </button>
-        </div>
+        <span className="px-2 py-0.5 rounded-md bg-zinc-800/70 border border-zinc-600/50 text-[13.5px] font-semibold tracking-wide text-zinc-300 tabular-nums whitespace-nowrap">
+          {teamSize}v{teamSize}
+        </span>
+        <button
+          onClick={(e) => { e.stopPropagation(); toggle(); }}
+          disabled={isPending}
+          className={`px-4 py-2 rounded-lg text-[21px] font-semibold transition-colors ${
+            joined ? "bg-red-700 hover:bg-red-600 text-white" : "bg-emerald-600 hover:bg-emerald-500 text-white"
+          }`}
+        >
+          {isPending ? "..." : joined ? "Leave" : "Join"}
+        </button>
         <div className="flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-3 py-1.5 min-w-[90px]">
           <p className="text-[11.25px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
           <p className="text-[20.25px] font-bold text-amber-400 tabular-nums">${totalPrizePool.toLocaleString()}</p>
