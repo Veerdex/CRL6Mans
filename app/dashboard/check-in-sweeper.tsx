@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { sweepCheckIns } from "@/app/dashboard/my-team/schedule-actions";
 
 const THROTTLE_MS = 120_000;
@@ -12,6 +13,11 @@ const KEY = "checkin-sweep-at";
 // This is a hedge, not a replacement for the per-minute cron pinger: if nobody is
 // on the site at all, nothing here fires either.
 export function CheckInSweeper() {
+  // Keyed on the route, not mounted once: the dashboard layout survives client-side
+  // navigation, so an empty dep array would sweep on arrival and never again. The two
+  // throttles collapse a burst of navigation into one sweep.
+  const pathname = usePathname();
+
   useEffect(() => {
     let last = 0;
     try {
@@ -22,7 +28,7 @@ export function CheckInSweeper() {
       sessionStorage.setItem(KEY, String(Date.now()));
     } catch {}
     sweepCheckIns().catch(() => {});
-  }, []);
+  }, [pathname]);
 
   return null;
 }
