@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { execAutoPick } from "@/app/lib/discord-bot";
+import { stampCronHeartbeat } from "@/app/lib/cron-heartbeat";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -10,6 +11,8 @@ export async function GET(request: Request) {
   if (!secret || auth !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  await stampCronHeartbeat("autopick");
 
   // Loop to handle multiple consecutive timeouts (e.g., several captains all AFK)
   let iterations = 0;

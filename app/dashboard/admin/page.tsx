@@ -57,6 +57,7 @@ import { PatreonOverrideSection } from "./patreon-override-section";
 import { PatreonTiersSection } from "./patreon-tiers-section";
 import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
 import { StorageUsageSection } from "./storage-section";
+import { CronHealthSection } from "./cron-health-section";
 import { RoundScheduler, type ScheduleSection, type RoundMatchInfo } from "./round-scheduler";
 import { ScheduleOverrideCard, type ScheduleOverrideCardData } from "./schedule-override-card";
 import { canonicalStage, stageName, STAGE_ORDER, expectedStageRounds, type RoundScheduleRow } from "./schedule-utils";
@@ -1087,6 +1088,7 @@ export default async function AdminPage() {
         { id: "patreon-tiers", label: "Tiers & Benefits", level: "director" },
         { id: "patreon-overrides", label: "Tier Overrides", level: "director" },
         { id: "storage", label: "Storage & Limits", level: "director" },
+        { id: "cron-health", label: "Cron Health", level: "director" },
       ],
     },
     {
@@ -1663,6 +1665,7 @@ export default async function AdminPage() {
         {userIsDirector && <PatreonTiersAdminSection />}
         {userIsDirector && <PatreonOverrideAdminSection />}
         {userIsDirector && <StorageUsageSection />}
+        {userIsDirector && <CronHealthSection />}
       </AdminSection>
 
       {userIsDirector && (

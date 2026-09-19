@@ -5,6 +5,7 @@ import { execStartDraft, execAutoBalanceTeams, execStartSeason, execFinalizeTeam
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 import { freezeUnfrozenMatchPredictions } from "@/app/lib/match-predictions";
 import { cleanupOrphanedVerificationReplays } from "@/app/lib/platform-account-cleanup";
+import { stampCronHeartbeat } from "@/app/lib/cron-heartbeat";
 
 export const runtime = "nodejs";
 // Draft start / team finalize can do many sequential Discord role calls, so give
@@ -21,6 +22,8 @@ export async function GET(request: Request) {
   if (!secret || auth !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  await stampCronHeartbeat("scheduler");
 
   const now = Date.now();
   const fired: string[] = [];

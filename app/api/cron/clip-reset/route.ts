@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { sendChannelMessage } from "@/app/lib/discord-api";
 import { mostRecentSundayMidnightPacific } from "@/app/lib/clip-schedule";
+import { stampCronHeartbeat } from "@/app/lib/cron-heartbeat";
 
 export const runtime = "nodejs";
 
@@ -15,6 +16,10 @@ export async function GET(request: Request) {
   if (!secret || auth !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Ahead of the three separate return paths below, so a run that exits early
+  // still records that the pinger reached us.
+  await stampCronHeartbeat("clipreset");
 
   const now = new Date();
   const fired: string[] = [];
