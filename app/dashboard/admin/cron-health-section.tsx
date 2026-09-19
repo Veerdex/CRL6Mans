@@ -7,12 +7,21 @@ import { CronHealthRows, type CronHealthRow } from "./cron-health-rows";
 // the newest write, and a cached read would serve a stale one. It's a single
 // select on a one-row table, unlike the billed measurements in StorageUsageSection.
 export async function CronHealthSection() {
-  const { data } = await supabaseAdmin
+  // Caught, not just checked: AdminSubSection's children run on every admin render
+  // regardless of which tab is open, so a throw here would take down the whole Data
+  // section for every director — including ones who never open this tab.
+  const { data, error } = await supabaseAdmin
     .from("league_settings")
     .select(`active_tournament_id, ${CRON_JOBS.map((j) => j.column).join(", ")}`)
-    .single();
+    .single()
+    .then((r) => r, (e) => ({ data: null, error: e as { message?: string } }));
 
   const row = data as Record<string, string | null> | null;
+  // Before the migration the whole select fails on the undefined columns, which is
+  // what separates "nobody has run the migration" from "the pinger has never once
+  // reached us" — otherwise both render as three empty rows and an admin can't tell
+  // whether to run SQL or fix an Authorization header.
+  const migrationMissing = !!error;
 
   const rows: CronHealthRow[] = CRON_JOBS.map((j) => ({
     key: j.key,
@@ -23,9 +32,9 @@ export async function CronHealthSection() {
   }));
 
   const eventActive = !!row?.active_tournament_id;
-  const stale = rows.filter(
-    (r) => !r.lastRunAt || Date.now() - new Date(r.lastRunAt).getTime() >= 15 * 60 * 1000,
-  );
+  const stale = migrationMissing
+    ? []
+    : rows.filter((r) => !r.lastRunAt || Date.now() - new Date(r.lastRunAt).getTime() >= 15 * 60 * 1000);
 
   return (
     <AdminSubSection
@@ -36,6 +45,17 @@ export async function CronHealthSection() {
       description="When each scheduled job was last reached by the external per-minute pinger. Green is under 3 minutes, amber under 15."
     >
       <div className="space-y-4">
+        {migrationMissing && (
+          <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-4">
+            <p className="text-amber-400 font-semibold">Migration not run</p>
+            <p className="text-sm text-zinc-400 mt-1">
+              Run <code className="text-zinc-300">scripts/cron-heartbeat-migration.sql</code> in the
+              Supabase SQL editor. Until then the heartbeat columns don&apos;t exist and every row
+              below reads empty regardless of whether the jobs are running.
+            </p>
+          </div>
+        )}
+
         {eventActive && stale.length > 0 && (
           <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-4">
             <p className="text-red-400 font-semibold">
