@@ -70,6 +70,9 @@ interface Props {
   scoreConfirmed: boolean;
   scoreSubmittedAt?: string | null;
   opponentNotReady?: boolean;
+  // Tournament match with an open check-in window that both teams haven't cleared.
+  checkInPending?: boolean;
+  iCheckedIn?: boolean;
   opponentName?: string | null;
   isTournament?: boolean;
   statsEnabled?: boolean;
@@ -509,7 +512,7 @@ export function SeriesReplayPanel({
   matchId, homeTeam, awayTeam, bestOf,
   myTeamId, pendingHomeScore, pendingAwayScore, scoreSubmittedByTeamId, scoreConfirmed,
   scoreSubmittedAt = null,
-  opponentNotReady = false, opponentName = null,
+  opponentNotReady = false, checkInPending = false, iCheckedIn = false, opponentName = null,
   isTournament = false, statsEnabled = true,
   replayAnalysisMode = "loose", unmatchedByGame = {},
 }: Props) {
@@ -763,6 +766,27 @@ export function SeriesReplayPanel({
           </p>
           <p className="text-sm text-zinc-400 max-w-md mx-auto">
             {`${opponentName ?? "Your opponent"} still has an earlier match to play before they face you. You'll be able to report the result here once they've finished it.`}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Both teams must check in before either can report (tournament only) ──
+  // Placed after the pending-result branches so a series submitted before the window
+  // expired can still be confirmed or disputed.
+
+  if (checkInPending) {
+    return (
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        {header}
+        <div className="px-5 py-8 text-center space-y-2">
+          <p className="text-3xl">📋</p>
+          <p className="text-sm font-semibold text-amber-300">Check in to report this match</p>
+          <p className="text-sm text-zinc-400 max-w-md mx-auto">
+            {iCheckedIn
+              ? `You're checked in — once ${opponentName ?? "your opponent"} checks in too, you'll be able to upload replays and report the score here.`
+              : "Both teams have to check in before replays or a score can be submitted. Use the check-in panel on this page."}
           </p>
         </div>
       </div>

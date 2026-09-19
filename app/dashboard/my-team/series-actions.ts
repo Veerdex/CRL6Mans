@@ -31,6 +31,21 @@ async function getTeamMember() {
   return player;
 }
 
+// Neither side may report a tournament result until both teams have checked in.
+// Keyed on the match's own checkin_deadline rather than league_settings.active_tournament_id
+// so it fails open: a season match never gets a deadline stamped, and a tournament match
+// whose window openCheckInForMatch hasn't opened yet (the admin hasn't scheduled the stage
+// start, or the cron hasn't run) stays reportable instead of being stuck with no override.
+function checkInGate(m: {
+  checkin_deadline: string | null;
+  home_checked_in: boolean | null;
+  away_checked_in: boolean | null;
+}): string | null {
+  if (!m.checkin_deadline) return null;
+  if (m.home_checked_in && m.away_checked_in) return null;
+  return "Both teams have to check in before the result can be reported.";
+}
+
 // Captain of either team submits a claimed series result.
 // Does NOT finalise the match — writes to pending fields only.
 // The opposing captain must confirm before admin can accept it.
@@ -45,7 +60,7 @@ export async function submitSeriesResult(
 
   const { data: match } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, home_score, score_confirmed, result_reported_at")
+    .select("id, home_team_id, away_team_id, home_score, score_confirmed, result_reported_at, checkin_deadline, home_checked_in, away_checked_in")
     .eq("id", matchId)
     .single();
 
@@ -54,6 +69,8 @@ export async function submitSeriesResult(
     return { error: "Your team is not in this match" };
   if (match.home_score !== null) return { error: "This match already has a recorded result" };
   if (match.score_confirmed) return { error: "The result has already been confirmed — contact an admin to change it" };
+  const checkIn = checkInGate(match);
+  if (checkIn) return { error: checkIn };
 
   if (!Number.isInteger(homeWins) || !Number.isInteger(awayWins) || homeWins < 0 || awayWins < 0)
     return { error: "Scores must be non-negative whole numbers." };
@@ -231,6 +248,16 @@ export async function uploadGameReplay(
 
   if (!(await isStatsTrackingEnabled()))
     return { error: "This tournament doesn't track stats — report the series score instead." };
+
+  const { data: checkInRow } = await supabaseAdmin
+    .from("matches")
+    .select("checkin_deadline, home_checked_in, away_checked_in")
+    .eq("id", matchId)
+    .maybeSingle();
+  if (checkInRow) {
+    const checkIn = checkInGate(checkInRow);
+    if (checkIn) return { error: checkIn };
+  }
 
   const file = formData.get("replay") as File | null;
   if (!file) return { error: "No file provided" };

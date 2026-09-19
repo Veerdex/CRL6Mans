@@ -484,6 +484,16 @@ export default async function MyTeamPage() {
   // about unrecognised players before deciding whether to accept the score.
   const unmatchedByGame = nextMatch ? await getUnmatchedByGame(nextMatch.id) : {};
 
+  // Mirrors checkInGate in series-actions.ts — a stamped deadline means a tournament
+  // match, and until both sides clear it neither can upload a replay or report a score.
+  const nextMatchSchedule = nextMatch ? scheduleMap[nextMatch.id] : undefined;
+  const checkInPending =
+    !!nextMatchSchedule?.checkin_deadline &&
+    !(nextMatchSchedule.home_checked_in && nextMatchSchedule.away_checked_in);
+  const iCheckedIn = nextMatch?.home_team_id === teamId
+    ? !!nextMatchSchedule?.home_checked_in
+    : !!nextMatchSchedule?.away_checked_in;
+
   const oppApprovedSubs = (oppApprovedSubsRaw ?? []) as { player_out_id: string; sub_player_id: string | null }[];
   const oppSubIds = oppApprovedSubs.map((r) => r.sub_player_id).filter((x): x is string => !!x);
   const incomingIds = [
@@ -795,6 +805,8 @@ export default async function MyTeamPage() {
           scoreConfirmed={nextMatch?.score_confirmed ?? false}
           scoreSubmittedAt={nextMatch?.score_submitted_at ?? null}
           opponentNotReady={opponentNotReady}
+          checkInPending={checkInPending}
+          iCheckedIn={iCheckedIn}
           opponentName={opponentName}
           isTournament={!!activeTournamentId}
           statsEnabled={statsEnabled}
