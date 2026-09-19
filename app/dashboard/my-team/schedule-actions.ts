@@ -344,3 +344,24 @@ export async function processCheckInsNow(): Promise<{ ok: boolean }> {
   revalidatePath("/dashboard/my-team");
   return { ok: true };
 }
+
+// Fired from the dashboard layout so any player on any page nudges expired check-ins
+// along, instead of the DQ waiting for the daily cron when neither team has my-team
+// open. openReadyMatchChannels reads every match and can hit the Discord API, so this
+// is throttled per server instance — Fluid Compute reuses instances, and the stamp is
+// taken before the awaits so two concurrent requests can't both slip through.
+// No revalidatePath: the caller is usually on some other page, and CheckInRow already
+// refreshes the one page that needs it.
+let lastSweepMs = 0;
+const SWEEP_INTERVAL_MS = 60_000;
+
+export async function sweepCheckIns(): Promise<{ swept: boolean }> {
+  const session = await getSession();
+  if (!session?.userId) return { swept: false };
+  const now = Date.now();
+  if (now - lastSweepMs < SWEEP_INTERVAL_MS) return { swept: false };
+  lastSweepMs = now;
+  await processExpiredCheckIns().catch(() => {});
+  await openReadyMatchChannels().catch(() => {});
+  return { swept: true };
+}

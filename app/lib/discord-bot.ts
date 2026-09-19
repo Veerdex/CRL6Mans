@@ -2419,17 +2419,26 @@ async function openCheckInForMatch(matchId: string, stage: string, round: number
     deadlineMs = new Date(start).getTime() + CHECKIN_WINDOW_MS;
   }
   // Later rounds open immediately, so notify now and mark notified. Round 1 opens at
-  // the scheduled stage start — processExpiredCheckIns notifies when that arrives.
+  // the scheduled stage start — processExpiredCheckIns sends the second, at-the-window
+  // nudge when that arrives.
   const immediate = deadlineMs - CHECKIN_WINDOW_MS <= Date.now();
   await supabaseAdmin.from("matches")
     .update({ checkin_deadline: new Date(deadlineMs).toISOString(), checkin_notified: immediate })
     .eq("id", matchId);
 
-  if (immediate && m.home_team_id && m.away_team_id) {
-    const payload = { title: "Check in now!", body: "Your match is ready — check in within 10 minutes or forfeit.", url: "/dashboard/my-team", tag: "checkin", category: "tournament" as const };
-    pushToTeam(m.home_team_id, payload).catch(() => {});
-    pushToTeam(m.away_team_id, payload).catch(() => {});
-  }
+  if (!m.home_team_id || !m.away_team_id) return;
+
+  // A window opening in the future is announced NOW rather than only when it opens.
+  // The at-the-window push depends on processExpiredCheckIns running inside a 10-minute
+  // slice, which the daily Vercel cron will almost never hit — without this, round 1 of
+  // every stage would DQ teams on a window nobody was told about. No absolute time in the
+  // body: pushes are rendered server-side and there's no canonical league timezone, so it
+  // points at the page, which shows the opening time in the viewer's own zone.
+  const payload = immediate
+    ? { title: "Check in now!", body: "Your match is ready — check in within 10 minutes or forfeit.", url: "/dashboard/my-team", tag: "checkin", category: "tournament" as const }
+    : { title: "Match scheduled", body: "Check-in opens when your match is due to start. Both teams have 10 minutes to check in or forfeit.", url: "/dashboard/my-team", tag: "checkin-soon", category: "tournament" as const };
+  pushToTeam(m.home_team_id, payload).catch(() => {});
+  pushToTeam(m.away_team_id, payload).catch(() => {});
 }
 
 // Creates the match's Discord channel once both teams have checked in.

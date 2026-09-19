@@ -13,6 +13,7 @@ import { AppTitle } from "./app-title";
 import MobileNav from "./mobile-nav";
 import { ServiceWorkerRegistrar } from "./sw-register";
 import { TabVisitTracker } from "./tab-visit-tracker";
+import { CheckInSweeper } from "./check-in-sweeper";
 import { NotificationButton } from "./notification-button";
 import { PullToRefresh } from "./pull-to-refresh";
 import { NameDecorationProvider } from "./name-decoration";
@@ -337,6 +338,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="flex flex-col h-dvh text-white relative z-[1]">
         <ServiceWorkerRegistrar />
         <TabVisitTracker />
+        {activeTournamentId && status === "approved" && !isGuest && <CheckInSweeper />}
 
         {/* Top bar — desktop only */}
         <header
@@ -428,6 +430,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex h-dvh text-white relative z-[1]">
       <ServiceWorkerRegistrar />
       <TabVisitTracker />
+      {activeTournamentId && status === "approved" && !isGuest && <CheckInSweeper />}
       <aside
         className={`relative z-20 hidden md:flex w-56 flex-col bg-zinc-900 border-r border-zinc-800${navSponsors.sideNav ? " has-nav-bg" : ""}`}
       >
