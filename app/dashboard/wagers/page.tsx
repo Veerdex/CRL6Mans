@@ -107,7 +107,7 @@ export default async function WagersPage() {
       supabaseAdmin
         .from("matches")
         .select(
-          "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, schedule_accepted, schedule_admin_required, admin_scheduled, pending_home_score, score_submitted_at, home_checked_in, away_checked_in, predicted_home_win_prob, predicted_away_win_prob, betting_mode, home_score, away_score",
+          "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, schedule_accepted, schedule_admin_required, admin_scheduled, pending_home_score, score_submitted_at, result_reported_at, home_checked_in, away_checked_in, predicted_home_win_prob, predicted_away_win_prob, betting_mode, home_score, away_score",
         )
         .order("stage")
         .order("round")
@@ -156,6 +156,7 @@ export default async function WagersPage() {
       m.home_score === null &&
       m.pending_home_score === null &&
       m.score_submitted_at === null &&
+      m.result_reported_at === null &&
       !(m.home_checked_in && m.away_checked_in) &&
       m.home_team_id &&
       m.away_team_id &&

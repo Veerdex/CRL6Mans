@@ -45,7 +45,7 @@ export async function submitSeriesResult(
 
   const { data: match } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, home_score, score_confirmed")
+    .select("id, home_team_id, away_team_id, home_score, score_confirmed, result_reported_at")
     .eq("id", matchId)
     .single();
 
@@ -91,6 +91,9 @@ export async function submitSeriesResult(
       score_submitted_by_team_id: player.team_id,
       score_confirmed:            false,
       score_submitted_at:         new Date().toISOString(),
+      // One-way betting latch — a retraction clears everything else on this row,
+      // but the score is already public in the match channel by then.
+      result_reported_at:         match.result_reported_at ?? new Date().toISOString(),
     })
     .eq("id", matchId);
 

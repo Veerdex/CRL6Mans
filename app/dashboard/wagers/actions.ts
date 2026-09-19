@@ -147,6 +147,7 @@ type MatchBettingState = {
   home_score: number | null;
   pending_home_score: number | null;
   score_submitted_at: string | null;
+  result_reported_at: string | null;
   home_checked_in: boolean | null;
   away_checked_in: boolean | null;
 };
@@ -169,7 +170,14 @@ function isBettingClosed(match: MatchBettingState): string | null {
   if (match.status === "completed" || match.home_score !== null) {
     return "Match is already completed";
   }
-  if (match.pending_home_score !== null || match.score_submitted_at !== null) {
+  // result_reported_at is the latch: cancelSeriesSubmission and a rejected replay
+  // review both null the pending columns, and without it a retraction would re-open
+  // betting on a score the match channel has already announced.
+  if (
+    match.pending_home_score !== null ||
+    match.score_submitted_at !== null ||
+    match.result_reported_at !== null
+  ) {
     return "Betting is closed — a result has already been submitted for this match.";
   }
   if (match.home_checked_in && match.away_checked_in) {
@@ -247,7 +255,7 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
   const matchIds = [...new Set(bets.map((b) => b.matchId))];
   const { data: matches } = await supabaseAdmin
     .from("matches")
-    .select("id, status, scheduled_at, schedule_accepted, schedule_admin_required, admin_scheduled, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in, betting_mode")
+    .select("id, status, scheduled_at, schedule_accepted, schedule_admin_required, admin_scheduled, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, result_reported_at, home_checked_in, away_checked_in, betting_mode")
     .in("id", matchIds);
 
   for (const matchId of matchIds) {
@@ -386,7 +394,7 @@ export async function placeParlayBet(
   const matchIds = [...new Set(legs.map((l) => l.matchId))];
   const { data: matches } = await supabaseAdmin
     .from("matches")
-    .select("id, status, scheduled_at, schedule_accepted, schedule_admin_required, admin_scheduled, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in, betting_mode")
+    .select("id, status, scheduled_at, schedule_accepted, schedule_admin_required, admin_scheduled, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, result_reported_at, home_checked_in, away_checked_in, betting_mode")
     .in("id", matchIds);
 
   // Pool-mode matches have no fixed multiplier, so they can't be priced into a
