@@ -221,19 +221,10 @@ export async function GET(request: Request) {
 
   if (passed(t.season_start_at) && !seasonActive && !draftActive) {
     const res = await execStartSeason();
+    // Both the start-grant and the season-start push live inside execStartSeason, so
+    // they fire identically whether the season is started here, via the admin
+    // dashboard, or via the Discord /confirm command.
     fired.push(res.ok ? "season_started" : `season_start_failed:${res.message}`);
-    if (res.ok) {
-      // Start-grant (coin_grant_pending_start) is set inside execStartSeason itself
-      // so it fires identically whether the season is started here, via the admin
-      // dashboard, or via the Discord /confirm command.
-      pushToAllApproved({
-        title: "Season Started!",
-        body: "The season is now live. Check the schedule for your upcoming matches.",
-        url: "/dashboard/season",
-        tag: "season-start",
-        category: "season",
-      }).catch(() => {});
-    }
   }
 
   // ── 4. Tournament check-in: DQ expired windows + open ready channels ──

@@ -18,6 +18,7 @@ import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow, calculatePlayerRating } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "./team-size";
+import { APP_NAME } from "./constants";
 import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft-order";
 import { draftLabel, draftStartEmbed, onTheClockEmbed, pickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "./solo-team";
@@ -1770,6 +1771,18 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
       ]);
     } catch { /* best-effort */ }
   }
+
+  // Lives here rather than in the callers so it fires identically however the season
+  // was started — the cron's auto-trigger, the admin dashboard button, or /confirm
+  // START SEASON in Discord, which previously sent no season-start push at all.
+  // Same reasoning as the start-grant above.
+  pushToAllApproved({
+    title: "Season Started!",
+    body: `The ${APP_NAME} season is now live. Check the schedule for your upcoming matches.`,
+    url: "/dashboard/season",
+    tag: "season-start",
+    category: "season",
+  }).catch(() => {});
 
   const cut = bracketResult.cutTeams ?? 0;
   const playing = numTeams - cut;

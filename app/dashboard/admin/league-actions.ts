@@ -448,17 +448,8 @@ export async function adminEndDraft(code: string) {
 export async function adminStartSeason(code: string) {
   await verifyAdmin();
   if (code !== "START SEASON") return { error: 'Type exactly: START SEASON' };
-  const result = await execStartSeason();
-  if (result.ok) {
-    pushToAllApproved({
-      title: "Season Started!",
-      body: `The ${APP_NAME} season is now live. Check the schedule for your upcoming matches.`,
-      url: "/dashboard/season",
-      tag: "season-start",
-      category: "season",
-    }).catch(() => {});
-  }
-  return result;
+  // The season-start push fires inside execStartSeason, so every start path sends it.
+  return execStartSeason();
 }
 
 export async function openDraftSignups() {
