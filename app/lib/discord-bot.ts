@@ -1724,12 +1724,14 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   let isTestRun = !!settings?.is_test_season;
   let adminMinTeams = 0;
   let scheduledStartAt: string | null = null;
+  let tournamentName: string | null = null;
   if (activeTournamentId) {
     const { data: t } = await supabaseAdmin
-      .from("tournaments").select("is_test, min_teams, season_start_at").eq("id", activeTournamentId).single();
+      .from("tournaments").select("name, is_test, min_teams, season_start_at").eq("id", activeTournamentId).single();
     isTestRun = !!t?.is_test;
     adminMinTeams = (t?.min_teams as number | null) ?? 0;
     scheduledStartAt = (t?.season_start_at as string | null) ?? null;
+    tournamentName = (t?.name as string | null) ?? null;
   }
 
   // An under-filled event gets no start grant. The preset minimum above already
@@ -1776,13 +1778,25 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   // was started — the cron's auto-trigger, the admin dashboard button, or /confirm
   // START SEASON in Discord, which previously sent no season-start push at all.
   // Same reasoning as the start-grant above.
-  pushToAllApproved({
-    title: "Season Started!",
-    body: `The ${APP_NAME} season is now live. Check the schedule for your upcoming matches.`,
-    url: "/dashboard/season",
-    tag: "season-start",
-    category: "season",
-  }).catch(() => {});
+  // Named like the completion push in execReportMatchResult: the event name carries in
+  // the body, with a fallback for a tournament row that somehow has no name.
+  pushToAllApproved(
+    activeTournamentId
+      ? {
+          title: "Tournament Started!",
+          body: `${tournamentName ?? "The tournament"} is now live. Check the schedule for your upcoming matches.`,
+          url: "/dashboard/season",
+          tag: "tournament-start",
+          category: "tournament",
+        }
+      : {
+          title: "Season Started!",
+          body: `The ${APP_NAME} season is now live. Check the schedule for your upcoming matches.`,
+          url: "/dashboard/season",
+          tag: "season-start",
+          category: "season",
+        },
+  ).catch(() => {});
 
   const cut = bracketResult.cutTeams ?? 0;
   const playing = numTeams - cut;
