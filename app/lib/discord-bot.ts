@@ -2411,12 +2411,14 @@ async function openCheckInForMatch(matchId: string, stage: string, round: number
   if (!m || m.checkin_deadline) return;
   let deadlineMs = Date.now() + CHECKIN_WINDOW_MS;
   if (round === 1) {
-    // The first round of a stage starts at its scheduled time. If the admin hasn't
-    // scheduled it yet, do NOT open a window — otherwise every team would be DQ'd
-    // 10 minutes after the bracket is generated. Scheduling the stage re-runs this.
+    // If an admin set a round-1 schedule for this stage, the window opens at that time.
+    // Tournaments normally have none — round schedules are a season mechanism, and a
+    // tournament's round 1 is gated by check-in itself (showStartButton in
+    // round-scheduler.tsx is explicitly season-only). So with no schedule the window
+    // opens now, which for round 1 of the first stage is the moment execStartSeason
+    // builds the bracket: the tournament starting IS the call to play.
     const start = await stageStartPlayAt(stage);
-    if (!start) return;
-    deadlineMs = new Date(start).getTime() + CHECKIN_WINDOW_MS;
+    if (start) deadlineMs = new Date(start).getTime() + CHECKIN_WINDOW_MS;
   }
   // Later rounds open immediately, so notify now and mark notified. Round 1 opens at
   // the scheduled stage start — processExpiredCheckIns sends the second, at-the-window
