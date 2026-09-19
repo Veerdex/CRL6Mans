@@ -141,6 +141,9 @@ async function lockMatchBettingMode(matchId: string, currentMode: string | null,
 type MatchBettingState = {
   status: string | null;
   scheduled_at: string | null;
+  schedule_accepted: boolean | null;
+  schedule_admin_required: boolean | null;
+  admin_scheduled: boolean | null;
   home_score: number | null;
   pending_home_score: number | null;
   score_submitted_at: string | null;
@@ -148,11 +151,20 @@ type MatchBettingState = {
   away_checked_in: boolean | null;
 };
 
-// Betting is only open for matches with a confirmed future scheduled time. Results are
+// Betting is only open for matches with a *locked-in* future time. Results are
 // player-reported and a single team can auto-finalize them, so an unscheduled match
 // (scheduled_at null — the default for most bracket matches) must NOT be bettable: its
 // outcome may already be known or self-reportable. Past start, a submitted/finalized
 // result, or both teams checked in also close betting as defense in depth.
+//
+// "Locked in" is the same condition /dashboard/schedule renders as confirmed: a time
+// exists, no admin sign-off is outstanding, and it came from either a team agreeing to
+// the opponent's proposal or an admin pinning it. A season match negotiated between
+// captains carries scheduled_at from the moment one side *proposes* — betting there
+// would run on a time the opponent can still reject, and rejectScheduleOverride wipes
+// scheduled_at outright. Tournament matches are unaffected: their times are fixed, and
+// both syncRoundMatchPins and pinMatchTime stamp schedule_accepted with
+// schedule_admin_required false, so they pass on the first try.
 function isBettingClosed(match: MatchBettingState): string | null {
   if (match.status === "completed" || match.home_score !== null) {
     return "Match is already completed";
@@ -165,6 +177,12 @@ function isBettingClosed(match: MatchBettingState): string | null {
   }
   if (!match.scheduled_at) {
     return "Betting isn't open for this match yet — it hasn't been scheduled.";
+  }
+  if (match.schedule_admin_required) {
+    return "Betting isn't open for this match yet — its time is still waiting on admin approval.";
+  }
+  if (!match.schedule_accepted && !match.admin_scheduled) {
+    return "Betting isn't open for this match yet — a time has been proposed but both teams haven't agreed to it.";
   }
   if (new Date(match.scheduled_at) <= new Date()) {
     return "Betting is closed for this match — it has already started.";
@@ -229,7 +247,7 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
   const matchIds = [...new Set(bets.map((b) => b.matchId))];
   const { data: matches } = await supabaseAdmin
     .from("matches")
-    .select("id, status, scheduled_at, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in, betting_mode")
+    .select("id, status, scheduled_at, schedule_accepted, schedule_admin_required, admin_scheduled, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in, betting_mode")
     .in("id", matchIds);
 
   for (const matchId of matchIds) {
@@ -368,7 +386,7 @@ export async function placeParlayBet(
   const matchIds = [...new Set(legs.map((l) => l.matchId))];
   const { data: matches } = await supabaseAdmin
     .from("matches")
-    .select("id, status, scheduled_at, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in, betting_mode")
+    .select("id, status, scheduled_at, schedule_accepted, schedule_admin_required, admin_scheduled, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, home_checked_in, away_checked_in, betting_mode")
     .in("id", matchIds);
 
   // Pool-mode matches have no fixed multiplier, so they can't be priced into a

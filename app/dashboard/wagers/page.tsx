@@ -107,7 +107,7 @@ export default async function WagersPage() {
       supabaseAdmin
         .from("matches")
         .select(
-          "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, predicted_home_win_prob, predicted_away_win_prob, betting_mode, home_score, away_score",
+          "id, stage, round, match_number, home_team_id, away_team_id, status, scheduled_at, schedule_accepted, schedule_admin_required, admin_scheduled, pending_home_score, score_submitted_at, home_checked_in, away_checked_in, predicted_home_win_prob, predicted_away_win_prob, betting_mode, home_score, away_score",
         )
         .order("stage")
         .order("round")
@@ -140,17 +140,28 @@ export default async function WagersPage() {
     | null;
   const fallbackBestOf = (format?.best_of ?? 3) as BestOf;
 
-  // Only matches with a confirmed future scheduled time are bettable. Unscheduled
-  // matches (scheduled_at null) are hidden — their outcome may already be known or
-  // self-reportable, so betting on them must not be possible. Mirrors isBettingClosed
-  // in actions.ts.
+  // Only matches with a locked-in future time are bettable. Unscheduled matches
+  // (scheduled_at null) are hidden — their outcome may already be known or
+  // self-reportable, so betting on them must not be possible. A season time that one
+  // captain has merely proposed is not locked in: the opponent can still reject it and
+  // an out-of-window one can still be wiped by an admin. Tournament times are fixed and
+  // admin-stamped, so they qualify immediately.
+  //
+  // Every clause here must mirror isBettingClosed in actions.ts — a match rendered as
+  // bettable that the server then rejects is a dead-end for the player.
   const now = Date.now();
   const bettable = (allMatches ?? []).filter(
     (m) =>
       m.status !== "completed" &&
+      m.home_score === null &&
+      m.pending_home_score === null &&
+      m.score_submitted_at === null &&
+      !(m.home_checked_in && m.away_checked_in) &&
       m.home_team_id &&
       m.away_team_id &&
       m.scheduled_at &&
+      !m.schedule_admin_required &&
+      (m.schedule_accepted || m.admin_scheduled) &&
       new Date(m.scheduled_at).getTime() > now,
   );
 
@@ -187,12 +198,13 @@ export default async function WagersPage() {
 
   const bettableMatchIds = matches.map((m) => m.id);
 
-  // Grid: only matches actually bettable right now (mirrors the `bettable` filter
-  // above) plus already-completed ones. A group stage schedules every round's
-  // matchup upfront since both teams are known from the start, so filtering on
+  // Grid: upcoming matches plus already-completed ones. A group stage schedules every
+  // round's matchup upfront since both teams are known from the start, so filtering on
   // "both teams assigned" alone would surface the entire group schedule at once —
-  // scoping to scheduled_at > now (or completed) keeps the grid to what the
-  // betting tab actually lets you act on.
+  // scoping to scheduled_at > now (or completed) keeps the grid to a useful size.
+  // Deliberately looser than `bettable`: the grid is an overview, and it takes
+  // bettableMatchIds separately to decide which cells are actually actionable, so a
+  // match with an unconfirmed time still shows its odds without offering a bet.
   const gridMatchesRaw = (allMatches ?? []).filter(
     (m) =>
       m.home_team_id &&
