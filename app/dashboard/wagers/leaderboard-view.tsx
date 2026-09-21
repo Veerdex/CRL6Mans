@@ -85,22 +85,18 @@ export function LeaderboardView({
                 <span className={`text-sm font-bold tabular-nums w-7 shrink-0 ${rankColor}`}>
                   {globalRank}
                 </span>
-                <div className="flex-1 min-w-0">
-                  {/* PlayerName carries its own truncate and applies the supporter
-                      colour as an inline style, so the amber "you" tint stays a
-                      fallback for players with no decoration. */}
-                  <div className="flex items-center gap-2 min-w-0">
-                    <PlayerName
-                      displayName={entry.display_name}
-                      username={entry.username}
-                      discordId={entry.discord_id}
-                      className={`text-sm font-semibold ${isMe ? "text-amber-300" : "text-white"}`}
-                    />
-                    {isMe && <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest shrink-0">You</span>}
-                  </div>
-                  {entry.display_name && (
-                    <p className="text-[11px] text-zinc-500 truncate">@{entry.username}</p>
-                  )}
+                {/* PlayerName carries its own truncate and applies the supporter
+                    colour as an inline style, so the amber "you" tint stays a
+                    fallback for players with no decoration. It also shows the
+                    @username on hover, which is why no second line does. */}
+                <div className="flex-1 flex items-center gap-2 min-w-0">
+                  <PlayerName
+                    displayName={entry.display_name}
+                    username={entry.username}
+                    discordId={entry.discord_id}
+                    className={`text-sm font-semibold ${isMe ? "text-amber-300" : "text-white"}`}
+                  />
+                  {isMe && <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest shrink-0">You</span>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <CoinIcon className="text-sm" />
