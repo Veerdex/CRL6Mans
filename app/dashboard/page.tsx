@@ -431,34 +431,13 @@ export default async function DashboardPage({
         </div>
       )}
 
-      {/* Open tournaments. A non-approved viewer gets the read-only card instead of
-          the join/sign-up controls — team-mode cards especially, since teamViews is
-          only built for approved players and TeamSignupPanel renders nothing without it. */}
+      {/* Open tournaments. Ungated: a non-approved viewer used to see nothing here and
+          nothing in Upcoming either (which excludes anything already open), so the
+          tournament vanished from their home page for the whole sign-up window. */}
       {openTournaments.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-[21px] font-semibold text-zinc-300">Open Tournaments</h2>
-          {!isApproved && openTournaments.map((t) => {
-            const timeline = buildTimeline(t, false, endIsoFor(t));
-            const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
-            const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
-            const designId = (t as { design_id?: string | null }).design_id ?? null;
-            const design = !sponsor && designId ? designById.get(designId) ?? null : null;
-            return (
-              <EventCard
-                key={t.id}
-                href={`/dashboard?tournament=${t.id}`}
-                name={t.name}
-                items={timeline}
-                nextEvent={nextTimelineEvent(timeline, now)}
-                prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}
-                prize2nd={(t as { prize_2nd?: number | null }).prize_2nd ?? null}
-                prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
-                sponsor={sponsor ?? null}
-                design={design}
-              />
-            );
-          })}
-          {isApproved && openPlayerTs.map((t) => {
+          {openPlayerTs.map((t) => {
             const timeline = buildTimeline(t, false, endIsoFor(t));
             const nextEvent = nextTimelineEvent(timeline, now);
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
@@ -485,6 +464,31 @@ export default async function DashboardPage({
                 sponsor={sponsor}
                 fallbackBackgroundUrl={design?.background_image_url ?? null}
                 fallbackBackgroundCrop={design?.content_crop?.background}
+                canJoin={isApproved}
+              />
+            );
+          })}
+          {/* Team mode has no single join button to stand in for, and its panel needs
+              the teamViews only built for approved players, so it degrades to the
+              read-only card instead. */}
+          {!isApproved && openTeamTs.map((t) => {
+            const timeline = buildTimeline(t, false, endIsoFor(t));
+            const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
+            const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
+            const designId = (t as { design_id?: string | null }).design_id ?? null;
+            const design = !sponsor && designId ? designById.get(designId) ?? null : null;
+            return (
+              <EventCard
+                key={t.id}
+                href={`/dashboard?tournament=${t.id}`}
+                name={t.name}
+                items={timeline}
+                nextEvent={nextTimelineEvent(timeline, now)}
+                prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}
+                prize2nd={(t as { prize_2nd?: number | null }).prize_2nd ?? null}
+                prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
+                sponsor={sponsor ?? null}
+                design={design}
               />
             );
           })}

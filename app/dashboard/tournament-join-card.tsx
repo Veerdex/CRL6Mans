@@ -6,6 +6,7 @@ import { joinTournament, leaveTournament } from "./tournament-join-actions";
 import { LocalTime } from "./local-time";
 import type { TimelineItem } from "@/app/lib/tournament-timeline";
 import { TrackerConfirmModal } from "./tracker-confirm-modal";
+import { RegisterPromptModal } from "./register-prompt-modal";
 import { CountdownLabel } from "./countdown-label";
 import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import type { PublicSponsor } from "@/app/lib/sponsors-public";
@@ -29,6 +30,7 @@ export function TournamentJoinCard({
   sponsor = null,
   fallbackBackgroundUrl = null,
   fallbackBackgroundCrop,
+  canJoin = true,
 }: {
   id: string;
   name: string;
@@ -49,6 +51,9 @@ export function TournamentJoinCard({
   sponsor?: PublicSponsor | null;
   fallbackBackgroundUrl?: string | null;
   fallbackBackgroundCrop?: MediaCrop;
+  // The card still renders its Join button for a viewer who has no roster spot —
+  // pressing it explains why they can't rather than leaving them to guess.
+  canJoin?: boolean;
 }) {
   const router = useRouter();
   const totalPrizePool = (prize1st ?? 0) + (prize2nd ?? 0) + (prize3rd4th ?? 0) * 2;
@@ -58,9 +63,11 @@ export function TournamentJoinCard({
   const [error, setError] = useState<string | null>(null);
   const [inviteRequired, setInviteRequired] = useState(false);
   const [trackerStale, setTrackerStale] = useState(false);
+  const [registerPrompt, setRegisterPrompt] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const toggle = () => {
+    if (!canJoin) { setRegisterPrompt(true); return; }
     setError(null);
     setInviteRequired(false);
     setTrackerStale(false);
@@ -198,6 +205,7 @@ export function TournamentJoinCard({
         onClose={() => setTrackerStale(false)}
         isPending={isPending}
       />
+      <RegisterPromptModal open={registerPrompt} onClose={() => setRegisterPrompt(false)} />
       </div>
     </div>
   );
