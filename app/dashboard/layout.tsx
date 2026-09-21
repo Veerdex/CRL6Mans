@@ -274,10 +274,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
     "game",
     ...(hasSponsors ? ["sponsors"] : []),
     "patreon",
-    // Adjacent to Settings on purpose: both are icon-only utility tabs and
-    // BOTTOM_KEYS pulls them out of the main nav as a pair.
-    "notifications",
+    // Adjacent on purpose: both are icon-only utility tabs and BOTTOM_KEYS
+    // pulls them out of the main nav as a pair, in this order.
     "settings",
+    "notifications",
     "testreplay",
   ];
 
