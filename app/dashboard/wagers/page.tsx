@@ -83,7 +83,7 @@ export default async function WagersPage() {
   // events, so show a leaderboard-only view instead of redirecting away.
   if (!hasActiveContent) {
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="h-full overflow-y-auto overscroll-contain">
         <div className="px-4 pt-4">
           <SponsoredByLine tabKey="wagers" />
         </div>

@@ -64,9 +64,15 @@ export default async function RootLayout({
       data-theme={theme}
       data-sponsor-mode={theme === "sponsor" ? sponsorTheme?.mode ?? "light" : undefined}
       style={sponsorStyle}
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} antialiased`}
     >
-      <body className="min-h-full flex flex-col overflow-x-hidden bg-zinc-950">
+      {/* min-h-dvh, not min-h-full: a percentage height on <html> resolves against
+          the large viewport, so the document stayed toolbar-height taller than the
+          visible area on mobile. That slop was scrollable, which is what made the
+          whole page shift — and drag into pull-to-refresh — when an inner scroller
+          reached its end. The dvh unit tracks the toolbar instead, and <html> is
+          left content-sized so it can't reintroduce the taller box. */}
+      <body className="min-h-dvh flex flex-col overflow-x-hidden bg-zinc-950">
         <VisitTracker />
         {/* Portrait-only guard — covers the app when a phone is held in landscape */}
         <div className="rotate-overlay fixed inset-0 z-[100] bg-zinc-950 flex-col items-center justify-center text-center px-10 gap-4">

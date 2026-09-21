@@ -739,6 +739,15 @@ aside.has-nav-bg .sidebar-flyout a.bg-zinc-800 { color: var(--color-white); }
   body { overflow: hidden; }
 }
 
+/* The app shell sizes itself to the viewport and scrolls in inner panes, so a
+   downward swipe that runs past the top of one of those panes has nowhere useful
+   to go — the browser turns it into pull-to-refresh and the player loses their
+   place. `none` rather than `contain`: contain only stops the gesture chaining to
+   the document, and the document's own bounce is what triggers the reload. */
+html {
+  overscroll-behavior-y: none;
+}
+
 body {
   background: var(--color-background);
   color: var(--color-foreground);
