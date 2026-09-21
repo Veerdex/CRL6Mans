@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { sendChannelMessage } from "@/app/lib/discord-api";
 import { clipOfWeekEmbed, clipOfWeekPing } from "@/app/lib/clip-embeds";
-import { clipPreviewImageUrl } from "@/app/lib/clip-embed";
+import { clipPreviewImageUrl, type ClipPlatform } from "@/app/lib/clip-embed";
+import { fetchClipThumbnail } from "@/app/lib/link-preview";
 import { mostRecentSundayMidnightPacific } from "@/app/lib/clip-schedule";
 import { stampCronHeartbeat } from "@/app/lib/cron-heartbeat";
 import { deleteExpiredNotifications } from "@/app/lib/notifications";
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
   // active clip.
   const { data: winner } = await supabaseAdmin
     .from("clips")
-    .select("id, title, url, thumbnail_url, likes_count, players!clips_player_id_fkey(username, display_name)")
+    .select("id, title, url, platform, thumbnail_url, likes_count, players!clips_player_id_fkey(username, display_name)")
     .is("archived_at", null)
     .in("platform", ["youtube", "medal", "streamable", "twitch"])
     .order("likes_count", { ascending: false })
@@ -132,16 +133,23 @@ export async function GET(request: Request) {
         | undefined;
       const roleId = (settings?.registered_role_id as string | null) ?? null;
 
+      // YouTube resolves offline from the video ID; Medal, Streamable and Twitch
+      // need their clip page scraped, and it has to happen here rather than at
+      // submission time because Medal's og:image is a signed URL that outlives
+      // neither the week nor the wait (see fetchClipThumbnail).
+      const imageUrl =
+        clipPreviewImageUrl({
+          url: winner.url as string,
+          thumbnail_url: (winner.thumbnail_url as string | null) ?? null,
+        }) ?? (await fetchClipThumbnail(winner.platform as ClipPlatform, winner.url as string));
+
       const embed = clipOfWeekEmbed({
         weekNumber,
         title: winner.title as string,
         url: winner.url as string,
         likes: winner.likes_count as number,
         submitterName: submitter?.display_name ?? submitter?.username ?? null,
-        imageUrl: clipPreviewImageUrl({
-          url: winner.url as string,
-          thumbnail_url: (winner.thumbnail_url as string | null) ?? null,
-        }),
+        imageUrl,
       });
 
       // `parse: []` with an explicit roles list is what keeps the ping to the
