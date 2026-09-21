@@ -38,7 +38,8 @@ app/
   api/
     admin/                # Internal admin API routes
     auth/discord/         # OAuth2 initiation + callback
-    cron/                 # Vercel cron jobs (draft-autopick, tournament-scheduler, clip-reset)
+    cron/                 # Vercel cron jobs (draft-autopick, tournament-scheduler,
+                          #   clip-reset, patreon-sync, discord-sync)
     discord/interactions/ # Discord slash command handler (POST, nacl-verified)
     push/                 # Web push subscription endpoint
   dashboard/
@@ -146,7 +147,7 @@ unregistered → (submits register form) → pending → (admin approves) → ap
 - Mirrors tournament config into `league_settings` (single source of truth for the draft/season machinery).
 - Idempotent — safe to call mid-draft.
 
-**Cron**: `vercel.json` has `/api/cron/draft-autopick`, `/api/cron/tournament-scheduler`, and `/api/cron/clip-reset` on a daily fallback schedule (`0 0 * * *` — Vercel Hobby plan limit). **Per-minute execution must be configured via an external pinger** (e.g. cron-job.org) hitting all three endpoints with the correct `Authorization: Bearer <CRON_SECRET>` header. The autopick timer is 45 seconds; the client fires it instantly when the deadline passes, so the cron only matters when nobody has the draft page open. `clip-reset` does two independent things on every invocation: (1) archives any clip whose own `expires_at` has passed — each clip's expiry is computed at submission time via `computeClipExpiry` in `app/lib/clip-schedule.ts` as the end of the week *after* the one it was submitted in, guaranteeing at least 7 days regardless of submission day (e.g. a Saturday submission survives 8 days, not <1); and (2) once per week (most recent Sunday 00:00 America/Los_Angeles), crowns the Media tab's Clip of the Week and archives only that winning clip so it stops appearing in the main feed. Both need the per-minute pinger since expiries land on different days for different clips.
+**Cron**: `vercel.json` has five jobs on a daily fallback schedule (`0 0 * * *` — Vercel Hobby plan limit): `/api/cron/draft-autopick`, `/api/cron/tournament-scheduler`, `/api/cron/clip-reset`, `/api/cron/patreon-sync`, and `/api/cron/discord-sync`. **Per-minute execution must be configured via an external pinger** (e.g. cron-job.org) hitting the endpoints with the correct `Authorization: Bearer <CRON_SECRET>` header — the first three only. `patreon-sync` and `discord-sync` are daily-only by design: patron status and a Discord username/avatar can each be a day stale without anyone noticing. The autopick timer is 45 seconds; the client fires it instantly when the deadline passes, so the cron only matters when nobody has the draft page open. `clip-reset` does two independent things on every invocation: (1) archives any clip whose own `expires_at` has passed — each clip's expiry is computed at submission time via `computeClipExpiry` in `app/lib/clip-schedule.ts` as the end of the week *after* the one it was submitted in, guaranteeing at least 7 days regardless of submission day (e.g. a Saturday submission survives 8 days, not <1); and (2) once per week (most recent Sunday 00:00 America/Los_Angeles), crowns the Media tab's Clip of the Week and archives only that winning clip so it stops appearing in the main feed. Both need the per-minute pinger since expiries land on different days for different clips.
 
 **Tournament scheduler** also fires push notifications on key lifecycle events: signups open/close, draft start, season start.
 
@@ -233,6 +234,13 @@ lands only on the mirror is invisible to every migrated surface — that's the b
 class behind stale nicknames, lost theme choices, and test users the admin page
 couldn't see. When adding a feature, read Tier 1 for who someone *is* and Tier 3
 for what team they're on.
+
+`username` and `avatar` are the exception that proves the rule: the OAuth
+callback refreshes them on Tier 1 at every login, and `/api/cron/discord-sync`
+(`app/lib/discord-identity-sync.ts`) re-reads them from Discord daily and writes
+**both** tiers, because nothing else writes the Tier 3 copies at all. That sync
+never touches `display_name` — that column is a nickname the player sets in
+Settings, not Discord's `global_name`.
 
 A row-creating flow must create all the tiers it needs: `approvePlayerWithEdits`
 (Tier 3 on approval) and `createTestAccounts` in `admin/league-actions.ts` are the

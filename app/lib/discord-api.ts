@@ -175,6 +175,38 @@ export async function searchGuildMembers(
   return data.map(m => ({ id: m.user.id, username: m.user.username, nick: m.nick, globalName: m.user.global_name }));
 }
 
+// The global Discord profile, independent of guild membership. Deliberately
+// /users/{id} rather than the guild member list: that one is gated on the
+// GUILD_MEMBERS privileged intent, while this needs none and still resolves for
+// someone who has left the server. Null means "could not read" — a 404 for a
+// deleted account, a rate limit, a network failure — never "has no avatar", so
+// callers can skip instead of overwriting good data with nothing.
+export async function fetchDiscordUser(
+  userId: string,
+  attempt = 0,
+): Promise<{ username: string; avatar: string | null } | null> {
+  if (!BOT_TOKEN) return null;
+  if (userId.startsWith("test_")) return null;
+  try {
+    const res = await fetch(`${API}/users/${userId}`, { headers: botHeaders() });
+    if (res.status === 429) {
+      const data = await res.json().catch(() => ({})) as { retry_after?: number };
+      const retryAfter = data.retry_after ?? 1;
+      if (attempt < 4 && retryAfter <= 15) {
+        await new Promise(r => setTimeout(r, Math.ceil(retryAfter * 1000) + 250));
+        return fetchDiscordUser(userId, attempt + 1);
+      }
+      console.error(`[fetchDiscordUser] user=${userId} rate limited (retry_after: ${retryAfter}s)`);
+      return null;
+    }
+    if (!res.ok) return null;
+    const data = await res.json() as { username?: string; avatar?: string | null };
+    return data.username ? { username: data.username, avatar: data.avatar ?? null } : null;
+  } catch {
+    return null;
+  }
+}
+
 // Creates a private text channel visible only to the specified roles (+ anyone with Administrator).
 // VIEW_CHANNEL(1024) | SEND_MESSAGES(2048) | ATTACH_FILES(32768) | READ_MESSAGE_HISTORY(65536) = 101376
 export async function createTextChannel(
