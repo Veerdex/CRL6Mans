@@ -30,7 +30,10 @@ const REASONS = [
 // the ceiling everywhere else because the page is only max-w-2xl wide. Ranks
 // past the third reuse the smallest treatment rather than shrinking forever.
 //
-// Each panel's fill is its border color at low alpha, so the two always agree.
+// Each panel's fill is its border color at low alpha, so the two always agree —
+// but only on a dark page. The fills are theme tokens (--patron-tier-N-fill in
+// globals.css) because a tint that lifts a panel off near-black washes out
+// entirely on the light and CRL6Mans pages, and tier 3's white one vanishes.
 // Motion is the other axis of hierarchy: Tier 1 glows hardest and its field of
 // light burns brightest, Tier 2 gets both dialled down, Tier 3 neither. Both
 // the border glow and the field drifting across the panel are driven by Perlin
@@ -46,7 +49,7 @@ const TIER_LAYOUT = [
     chipEm: 3.45,
     avatars: true,
     border: "#3736ac",
-    fill: "rgba(55, 54, 172, 0.20)",
+    fill: "var(--patron-tier-1-fill)",
     chipBorderPx: 1.5,
     // Tailwind only emits utilities it can see spelled out, so the hover
     // classes are literals here rather than assembled from a distance.
@@ -82,7 +85,7 @@ const TIER_LAYOUT = [
     chipEm: 2.76,
     avatars: false,
     border: "#a855f7",
-    fill: "rgba(168, 85, 247, 0.14)",
+    fill: "var(--patron-tier-2-fill)",
     chipBorderPx: 0.75,
     hoverRise: "transition-transform duration-200 ease-out hover:-translate-y-1",
     glow: {
@@ -114,7 +117,7 @@ const TIER_LAYOUT = [
     chipEm: 2.3,
     avatars: false,
     border: "#ffffff",
-    fill: "rgba(255, 255, 255, 0.07)",
+    fill: "var(--patron-tier-3-fill)",
     chipBorderPx: 0.75,
     hoverRise: null as string | null,
     glow: null,

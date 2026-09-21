@@ -199,6 +199,13 @@ html[data-theme="light"] {
   --c-yellow-800: #854d0e;
   --c-yellow-900: #fef9c3;
   --c-yellow-950: #fefce8;
+
+  /* Support Us patron tiers. Same hues, carried at a heavier alpha so they read
+     as panels against a white page instead of washing out; tier 3's neutral has
+     to invert outright, since white on white is nothing. */
+  --patron-tier-1-fill: rgba(55, 54, 172, 0.34);
+  --patron-tier-2-fill: rgba(168, 85, 247, 0.26);
+  --patron-tier-3-fill: rgba(24, 24, 27, 0.10);
 }
 
 /* ── DARK (today's look = Tailwind defaults) ──────────────────────────────── */
@@ -290,6 +297,11 @@ html[data-theme="dark"] {
   --c-yellow-800: #854d0e;
   --c-yellow-900: #713f12;
   --c-yellow-950: #422006;
+
+  /* The originals: a faint tint is enough to lift a panel off a near-black page. */
+  --patron-tier-1-fill: rgba(55, 54, 172, 0.20);
+  --patron-tier-2-fill: rgba(168, 85, 247, 0.14);
+  --patron-tier-3-fill: rgba(255, 255, 255, 0.07);
 }
 
 /* ── CRL6Mans (default) — blue (#3736ac) shell + orange (#e88a24) accents ──── */
@@ -355,6 +367,13 @@ html[data-theme="dark"] {
   --c-yellow-300:#a16207; --c-yellow-400:#ca8a04; --c-yellow-500:#eab308;
   --c-yellow-600:#ca8a04; --c-yellow-700:#a16207; --c-yellow-800:#854d0e;
   --c-yellow-900:#fef9c3; --c-yellow-950:#fefce8;
+
+  /* Support Us patron tiers — see the light theme. Declared on :root so the
+     sponsor theme's light base inherits them without its own copy; the dark
+     base overrides them alongside its surfaces. */
+  --patron-tier-1-fill: rgba(55, 54, 172, 0.34);
+  --patron-tier-2-fill: rgba(168, 85, 247, 0.26);
+  --patron-tier-3-fill: rgba(24, 24, 27, 0.10);
 }
 
 /* CRL6Mans shell: blue sidebar + mobile bottom-nav with light text & orange active.
@@ -525,6 +544,11 @@ html[data-theme="sponsor"][data-sponsor-mode="dark"] {
   --c-zinc-800: var(--sponsor-border, #27272a);
   --c-zinc-900: var(--sponsor-surface, #18181b);
   --c-zinc-950: var(--sponsor-bg, #09090b);
+
+  /* Dark base, so the faint tints work again. */
+  --patron-tier-1-fill: rgba(55, 54, 172, 0.20);
+  --patron-tier-2-fill: rgba(168, 85, 247, 0.14);
+  --patron-tier-3-fill: rgba(255, 255, 255, 0.07);
 
   --c-indigo-50:  color-mix(in oklab, var(--sponsor-accent, #e88a24) 8%, white 92%);
   --c-indigo-100: color-mix(in oklab, var(--sponsor-accent, #e88a24) 15%, white 85%);
