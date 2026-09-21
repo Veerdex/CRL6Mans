@@ -40,7 +40,7 @@ export default async function SettingsPage({
     getSettingsTabTheme(),
     supabaseAdmin
       .from("accounts")
-      .select("status, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_name_glint, patreon_connected_at, patreon_tier_override, patreon_avatar_border")
+      .select("status, is_guest, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_name_glint, patreon_connected_at, patreon_tier_override, patreon_avatar_border")
       .eq("discord_id", session.userId)
       .single(),
   ]);
@@ -84,6 +84,9 @@ export default async function SettingsPage({
   // view — account preferences only. Platform account claims and MMR/tracker
   // edits require an approved roster spot.
   const isApproved = account?.status === "approved";
+  // Mirrors the Replay Analyzer's own guard (test-replay/page.tsx) so the link
+  // never points at a page that would bounce the viewer back to /dashboard.
+  const isGuest = account?.is_guest === true;
 
   let pending: PendingRequest | null = null;
   let rejected: RejectedRequest | null = null;
@@ -162,6 +165,20 @@ export default async function SettingsPage({
         <span className="text-sm font-semibold text-white">Help &amp; FAQ</span>
         <span className="text-zinc-500">↗</span>
       </Link>
+      {!isGuest && (
+        <Link
+          href="/dashboard/test-replay"
+          className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 mb-4 hover:border-zinc-700 transition-colors"
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-white">Replay Analyzer</span>
+            <span className="block text-xs text-zinc-500 mt-0.5">
+              Read the scoreboard out of a .replay file.
+            </span>
+          </span>
+          <span className="text-zinc-500 shrink-0">↗</span>
+        </Link>
+      )}
       <div className="mb-4">
         <ThemeToggle
           initial={

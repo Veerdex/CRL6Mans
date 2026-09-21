@@ -278,7 +278,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
     // pulls them out of the main nav as a pair, in this order.
     "settings",
     "notifications",
-    "testreplay",
   ];
 
   // Pending and unregistered are surfaced identically — both get the
@@ -327,6 +326,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
     notifications: { ...ALL_NAV.notifications, badgeCount: unreadCount },
   };
 
+  // testreplay is no longer in commonExtras — the Replay Analyzer is reached
+  // from the Settings page instead. It stays listed here so that an admin who
+  // force-shows it through the nav tab overrides still gets it in the bottom
+  // row rather than loose in the main nav.
   const BOTTOM_KEYS = new Set(["notifications", "settings", "admin", "testreplay"]);
   const mainNavKeys = navKeys.filter((k) => !BOTTOM_KEYS.has(k));
   const mainNavItems = mainNavKeys.map((k) => navMap[k]);
