@@ -14,6 +14,7 @@ import { recordEventResults } from "@/app/lib/event-results";
 import { resetSeason } from "./league-actions";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "@/app/lib/team-size";
+import { prizePoolTotal } from "@/app/lib/career-points";
 
 export type JoinMode = "teams" | "players";
 export type TeamAssignment = "snake_draft" | "auto_balance";
@@ -196,6 +197,67 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
   };
 }
 
+// The body carries no dates. A push is a server-rendered string and there is no
+// viewer timezone to render one in (same reason the check-in pushes in
+// discord-bot.ts point at a page instead of naming a time), so the schedule is
+// left to /dashboard, where <LocalTime> shows every date in the reader's own zone.
+function tournamentHeadline(t: TournamentInput): string {
+  const parts = [`${t.team_size}v${t.team_size}`];
+  const pool = prizePoolTotal(t.prize_1st, t.prize_2nd, t.prize_3rd4th);
+  if (pool > 0) parts.push(`$${pool.toLocaleString()} prize pool`);
+  parts.push(t.join_mode === "teams" ? "team sign-ups" : "solo sign-ups");
+  return parts.join(" · ");
+}
+
+// An edit touches every column, so a notification on any write would fire for a
+// typo fixed in the overview. Only these move the plans a player has already
+// made; everything else changes silently.
+const NOTIFIED_FIELDS = [
+  "name",
+  "team_size",
+  "join_mode",
+  "draft_open_at",
+  "draft_close_at",
+  "draft_start_at",
+  "season_start_at",
+  "prize_1st",
+  "prize_2nd",
+  "prize_3rd4th",
+] as const;
+
+const CHANGE_LABELS: Record<(typeof NOTIFIED_FIELDS)[number], string> = {
+  name: "name",
+  team_size: "team size",
+  join_mode: "sign-up mode",
+  draft_open_at: "schedule",
+  draft_close_at: "schedule",
+  draft_start_at: "schedule",
+  season_start_at: "schedule",
+  prize_1st: "prize pool",
+  prize_2nd: "prize pool",
+  prize_3rd4th: "prize pool",
+};
+
+const DATE_FIELDS = new Set(["draft_open_at", "draft_close_at", "draft_start_at", "season_start_at"]);
+
+// Postgres hands a timestamptz back in its own format ("+00:00"), which never
+// string-matches the ISO the form submitted. Compared as instants instead, or
+// every save would report a schedule change it didn't make.
+function unchanged(field: string, before: unknown, after: unknown): boolean {
+  if (before == null || after == null) return (before ?? null) === (after ?? null);
+  if (DATE_FIELDS.has(field)) {
+    const a = new Date(before as string).getTime();
+    const b = new Date(after as string).getTime();
+    if (!Number.isNaN(a) && !Number.isNaN(b)) return a === b;
+  }
+  return before === after;
+}
+
+function listChanges(labels: string[]): string {
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+}
+
 export async function listTournaments(): Promise<Tournament[]> {
   await verifyAdmin();
   const { data } = await supabaseAdmin
@@ -219,6 +281,19 @@ export async function createTournament(input: TournamentInput) {
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
+
+  // A test tournament is staff scaffolding — announcing it would put a fixture
+  // nobody can enter in front of the whole league.
+  if (!value!.is_test) {
+    pushToAllApproved({
+      title: `New Tournament: ${value!.name}`,
+      body: `${tournamentHeadline(value!)}. Open the dashboard for sign-up times and details.`,
+      url: "/dashboard",
+      tag: "tournament-created",
+      category: "tournament",
+    }).catch(() => {});
+  }
+
   return { ok: true, message: `Tournament "${value!.name}" scheduled.` };
 }
 
@@ -228,10 +303,32 @@ export async function updateTournament(id: string, input: TournamentInput) {
   if (error) return { error };
 
   const { data: existing } = await supabaseAdmin
-    .from("tournaments").select("status").eq("id", id).single();
+    .from("tournaments")
+    // Spelled out because the typed client parses the select at compile time and
+    // can't read a template literal. Keep in step with NOTIFIED_FIELDS.
+    .select(
+      "status, is_test, name, team_size, join_mode, draft_open_at, draft_close_at, draft_start_at, season_start_at, prize_1st, prize_2nd, prize_3rd4th",
+    )
+    .eq("id", id)
+    .single();
   if (!existing) return { error: "Tournament not found." };
   if (existing.status !== "scheduled")
     return { error: "Only scheduled tournaments can be edited." };
+
+  // Read before the write, compared against the sanitized value rather than the
+  // raw input — sanitize() folds 0 to null, which would otherwise read as a
+  // change on every save.
+  // Typed against the whitelist rather than cast loose: if the select above ever
+  // loses a field, this stops compiling instead of silently reading undefined
+  // and reporting that field as changed on every save.
+  const before: Record<(typeof NOTIFIED_FIELDS)[number], unknown> = existing;
+  const changedLabels = [
+    ...new Set(
+      NOTIFIED_FIELDS.filter(
+        (f) => !unchanged(f, before[f], (value as unknown as Record<string, unknown>)[f]),
+      ).map((f) => CHANGE_LABELS[f]),
+    ),
+  ];
 
   const { error: dbError } = await supabaseAdmin
     .from("tournaments")
@@ -243,6 +340,21 @@ export async function updateTournament(id: string, input: TournamentInput) {
   // so without this an edited overview stays stale on the Overview tab.
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
+
+  // Silent when the edit only touched the overview, MMR floors, format internals
+  // or anything else off the whitelist. `is_test` is read from the stored row,
+  // not the input, so flipping a live tournament to a test one still announces
+  // the change that flip accompanied.
+  if (changedLabels.length && !existing.is_test) {
+    pushToAllApproved({
+      title: `${value!.name} Updated`,
+      body: `The ${listChanges(changedLabels)} changed. Open the dashboard for the latest details.`,
+      url: "/dashboard",
+      tag: "tournament-updated",
+      category: "tournament",
+    }).catch(() => {});
+  }
+
   return { ok: true, message: "Tournament updated." };
 }
 
