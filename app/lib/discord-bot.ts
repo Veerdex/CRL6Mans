@@ -3625,8 +3625,10 @@ export async function execDisqualifyTeam(teamId: string): Promise<{ ok: boolean;
 // than left to float -- a match report is worth a few hundred ms to not lose
 // track of players' coins.
 //
-// Both settlement paths filter on status "pending", so the retry can only touch
-// wagers the failed attempt didn't already settle.
+// Both settlement paths filter on status "pending", so a retry can only touch
+// wagers the failed attempt didn't already settle -- but that is not enough on
+// its own for pool-mode matches, where a payout is a share of the pool the other
+// pending wagers form. See PreWriteError for when the retry is allowed to run.
 async function settleMatchWagers(
   matchId: string,
   forfeit: boolean,
@@ -3636,27 +3638,46 @@ async function settleMatchWagers(
   const settle = () =>
     forfeit ? voidMatchWagers(matchId) : resolveMatchWagers(matchId, homeScore, awayScore);
 
+  let failure: unknown;
   try {
     await settle();
     return;
-  } catch {
-    /* one retry below — most failures here are a transient connection blip */
+  } catch (e) {
+    failure = e;
   }
 
-  try {
-    await settle();
-  } catch (e) {
-    // Nothing downstream can recover this, so it is escalated to a human with
-    // the one fact that is about to be lost: whether it needed a refund.
-    console.error(`[wagers] settlement failed for match ${matchId} (${forfeit ? "void" : "resolve"})`, e);
-    pushToAdmins({
-      title: "Wager settlement failed",
-      body: `Match ${matchId} could not ${forfeit ? "refund" : "settle"} its wagers after two attempts. Staked coins are still pending and need a manual fix.`,
-      url: "/dashboard/admin",
-      category: "announcement",
-    }).catch(() => {});
+  // Retried only when the failure happened before anything was written. A blip
+  // almost always hits the first call, so this still covers the case worth
+  // retrying, and re-running a half-finished settlement is the one thing that
+  // could pay a player the wrong amount rather than merely miss them.
+  if (failure instanceof PreWriteError) {
+    try {
+      await settle();
+      return;
+    } catch (e) {
+      failure = e;
+    }
   }
+
+  // Nothing downstream can recover this, so it is escalated to a human. The
+  // wording matters: wagers are marked settled before coins move, so the likely
+  // state is settled-but-uncredited, not still-pending -- someone searching for
+  // pending bets would find nothing and conclude it was fine.
+  console.error(`[wagers] settlement failed for match ${matchId} (${forfeit ? "void" : "resolve"})`, failure);
+  pushToAdmins({
+    title: "Wager settlement failed",
+    body: `Match ${matchId} could not ${forfeit ? "refund" : "settle"} its wagers. Some bets may be marked settled without the coins having been paid out — they need checking by hand.`,
+    url: "/dashboard/admin",
+    category: "announcement",
+  }).catch(() => {});
 }
+
+// Raised only by reads that run before a settlement has written anything, which
+// makes them the one failure a retry is known to be safe against. Anything thrown
+// later may have landed a partial write, and re-running on a half-settled set
+// recomputes a pari-mutuel pool from whatever is still pending -- paying the
+// survivors an amount that was never correct.
+class PreWriteError extends Error {}
 
 // Supabase hands a failed write back as an error field on a resolved promise, so
 // a batch of them fails silently unless every result is inspected. Only the first
@@ -3674,7 +3695,7 @@ async function voidMatchWagers(matchId: string): Promise<void> {
   // like "this match had no bets" and settle nothing, silently.
   const { data: wagers, error } = await supabaseAdmin
     .from("wagers").select("id, player_id, amount").eq("match_id", matchId).eq("status", "pending");
-  if (error) throw new Error(`reading pending wagers: ${error.message}`);
+  if (error) throw new PreWriteError(`reading pending wagers: ${error.message}`);
   if ((wagers ?? []).length) {
     // The status flip stays ahead of the refund on purpose. Marking a wager void
     // takes it out of the "pending" filter, so a retry skips it and can never pay
@@ -3695,7 +3716,11 @@ async function voidMatchWagers(matchId: string): Promise<void> {
   if (legsError) throw new Error(`reading pending parlay legs: ${legsError.message}`);
   const parlayIds = [...new Set((legs ?? []).map((l) => l.parlay_id as string))];
   for (const pid of parlayIds) {
-    const { data: p } = await supabaseAdmin.from("parlays").select("player_id, amount, status").eq("id", pid).single();
+    // Not folded into the `!p` check below: that branch means "already settled,
+    // skip", and a failed read landing there would silently skip a refund.
+    const { data: p, error: parlayError } = await supabaseAdmin
+      .from("parlays").select("player_id, amount, status").eq("id", pid).single();
+    if (parlayError) throw new Error(`reading parlay ${pid}: ${parlayError.message}`);
     if (!p || p.status !== "pending") continue;
     throwOnAny(await Promise.all([
       supabaseAdmin.from("parlays").update({ status: "void" }).eq("id", pid),
@@ -3760,12 +3785,16 @@ async function resolveMatchWagers(matchId: string, homeScore: number, awayScore:
     .select("id, player_id, bet_type, amount, odds_multiplier")
     .eq("match_id", matchId)
     .eq("status", "pending");
-  if (error) throw new Error(`reading pending wagers: ${error.message}`);
+  if (error) throw new PreWriteError(`reading pending wagers: ${error.message}`);
 
   if (!(wagers ?? []).length) return;
   const rows = wagers!;
 
-  const { data: match } = await supabaseAdmin.from("matches").select("betting_mode").eq("id", matchId).single();
+  // A failed read here would fall through to `false` and settle a pari-mutuel
+  // match at fixed odds -- wrong payouts, not missing ones.
+  const { data: match, error: matchError } = await supabaseAdmin
+    .from("matches").select("betting_mode").eq("id", matchId).single();
+  if (matchError) throw new PreWriteError(`reading betting mode: ${matchError.message}`);
   const isPool = match?.betting_mode === "pool";
 
   const totalGames = homeScore + awayScore;
@@ -3895,10 +3924,14 @@ async function resolveMatchWagers(matchId: string, homeScore: number, awayScore:
 
     const affectedParlayIds = [...new Set(parlayLegs!.map((l) => l.parlay_id as string))];
     for (const parlayId of affectedParlayIds) {
-      const { data: allLegs } = await supabaseAdmin
+      // This read decides whether to pay the parlay, and `every` on an empty array
+      // is true -- so a failed read would report a parlay with no losing legs and
+      // no pending legs, and pay out in full. Checked before it is used.
+      const { data: allLegs, error: allLegsError } = await supabaseAdmin
         .from("parlay_legs")
         .select("status")
         .eq("parlay_id", parlayId);
+      if (allLegsError) throw new Error(`reading parlay ${parlayId} legs: ${allLegsError.message}`);
 
       const hasLost = (allLegs ?? []).some((l) => l.status === "lost");
       const allDone = (allLegs ?? []).every((l) => l.status !== "pending");
