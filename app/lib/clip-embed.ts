@@ -168,6 +168,23 @@ const AUTOPLAY_OFF: Partial<Record<ClipPlatform, string>> = {
   twitch: "autoplay=false",
 };
 
+// A still image for a clip, for the one place that can't mount a player: the
+// Discord Clip of the Week embed. Everywhere on the site renders the platform's
+// own iframe and gets a real poster frame from it (see the note above).
+//
+// YouTube is the only Clip-of-the-Week-eligible platform whose thumbnail is
+// derivable from data already stored — i.ytimg is deterministic from the video
+// ID, no API call and no auth. Medal, Streamable and Twitch each need their own
+// oEmbed round-trip, and the stored thumbnail_url is null for all four of them
+// (clip-submit only fetches one for the link-only platforms, which are exactly
+// the ones barred from winning), so those fall through to null and the embed
+// simply carries no image.
+export function clipPreviewImageUrl(clip: { url: string; thumbnail_url: string | null }): string | null {
+  const youtubeId = clip.url.match(YOUTUBE_ID_PATTERN)?.[1];
+  if (youtubeId) return `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`;
+  return clip.thumbnail_url;
+}
+
 // Turns a stored embed_url into the src an <iframe> can actually use.
 //
 // Twitch's embed API rejects a clip iframe unless its `parent` query param
