@@ -396,12 +396,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </a>
             )}
             <NotificationButton />
-            {bottomNavItems.map((item) => (
+            {/* Labelled tabs first so the icon-only pair clusters at the right
+                edge, matching where the sidebar puts it. */}
+            {[...labelledBottomItems, ...iconOnlyBottomItems].map((item) => (
               <NavLink
                 key={item.href}
                 href={item.href}
                 title={item.iconOnly ? item.label : undefined}
-                className={item.iconOnly ? "gap-1.5 px-2" : ""}
+                compact={item.iconOnly}
               >
                 {item.icon}
                 {item.iconOnly ? <span className="sr-only">{item.label}</span> : item.label}
@@ -534,7 +536,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
                     key={item.href}
                     href={item.href}
                     title={item.label}
-                    className="flex-1 justify-center gap-1.5"
+                    compact
+                    className="flex-1 justify-center"
                   >
                     {item.icon}
                     <span className="sr-only">{item.label}</span>
