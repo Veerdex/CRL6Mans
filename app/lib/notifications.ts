@@ -27,22 +27,28 @@ export type FeedNotification = {
 // so a cron-triggered push and an admin-triggered push would disagree about
 // whether the same event is worth recording, leaving unexplainable holes in the
 // feed. The push is ephemeral; this row is the record.
+// try/catch rather than only handling the resolved error: a PostgREST error
+// (including "table doesn't exist" before the migration runs) comes back on the
+// result object, but a network failure rejects. This sits in the path of every
+// push, including the ones execStartSeason awaits, so it must never be the
+// reason a season fails to start.
 export async function recordNotification(audience: NotificationAudience, payload: PushPayload) {
-  const expiresAt = new Date(Date.now() + NOTIFICATION_TTL_DAYS * 24 * 60 * 60 * 1000);
-  await supabaseAdmin
-    .from("notifications")
-    .insert({
-      title: payload.title,
-      body: payload.body,
-      url: payload.url ?? null,
-      category: payload.category ?? null,
-      admin_category: audience.kind === "admins" ? (audience.adminCategory ?? null) : null,
-      audience: audience.kind,
-      team_id: audience.kind === "team" ? audience.teamId : null,
-      discord_ids: audience.kind === "users" ? audience.discordIds : null,
-      expires_at: expiresAt.toISOString(),
-    })
-    .then(undefined, () => {});
+  try {
+    const expiresAt = new Date(Date.now() + NOTIFICATION_TTL_DAYS * 24 * 60 * 60 * 1000);
+    await supabaseAdmin
+      .from("notifications")
+      .insert({
+        title: payload.title,
+        body: payload.body,
+        url: payload.url ?? null,
+        category: payload.category ?? null,
+        admin_category: audience.kind === "admins" ? (audience.adminCategory ?? null) : null,
+        audience: audience.kind,
+        team_id: audience.kind === "team" ? audience.teamId : null,
+        discord_ids: audience.kind === "users" ? audience.discordIds : null,
+        expires_at: expiresAt.toISOString(),
+      });
+  } catch { /* best-effort */ }
 }
 
 type Viewer = {
@@ -164,19 +170,24 @@ export async function getUnreadCount(discordId: string): Promise<number> {
 }
 
 export async function markNotificationsRead(discordId: string) {
-  await supabaseAdmin
-    .from("accounts")
-    .update({ notifications_read_at: new Date().toISOString() })
-    .eq("discord_id", discordId)
-    .then(undefined, () => {});
+  try {
+    await supabaseAdmin
+      .from("accounts")
+      .update({ notifications_read_at: new Date().toISOString() })
+      .eq("discord_id", discordId);
+  } catch { /* best-effort */ }
 }
 
 // Called from the clip-reset cron, which already sweeps expired rows every minute.
 export async function deleteExpiredNotifications(): Promise<number> {
-  const { data } = await supabaseAdmin
-    .from("notifications")
-    .delete()
-    .lte("expires_at", new Date().toISOString())
-    .select("id");
-  return data?.length ?? 0;
+  try {
+    const { data } = await supabaseAdmin
+      .from("notifications")
+      .delete()
+      .lte("expires_at", new Date().toISOString())
+      .select("id");
+    return data?.length ?? 0;
+  } catch {
+    return 0;
+  }
 }
