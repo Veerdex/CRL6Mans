@@ -241,6 +241,26 @@ export default async function AdminPage() {
   type RawPlayerRow = { account_id: string; team_id: string | null; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null };
   const playersByAccountId = new Map(((playerRows ?? []) as RawPlayerRow[]).map(p => [p.account_id, p]));
 
+  // Who someone *is* belongs to Tier 1. The copies on `players` are a legacy
+  // mirror with no writer but the daily Discord sync, so reading them straight
+  // renders whoever the player was when the tiers were split. Overlaid from
+  // `allAccounts`, which is already loaded above — `players.id` is the account id.
+  type IdentityFields = { discord_id: string; username: string; display_name: string | null; avatar: string | null };
+  const identityByAccountId = new Map(
+    ((allAccounts ?? []) as ({ id: string } & IdentityFields)[]).map((a) => [a.id, a]),
+  );
+  function withTier1Identity<T extends IdentityFields>(row: T, accountId: string): T {
+    const identity = identityByAccountId.get(accountId);
+    if (!identity) return row;
+    return {
+      ...row,
+      discord_id: identity.discord_id,
+      username: identity.username,
+      display_name: identity.display_name,
+      avatar: identity.avatar,
+    };
+  }
+
   const scheduledTournamentIds = (tournaments ?? [])
     .filter((t) => t.status === "scheduled")
     .map((t) => t.id as string);
@@ -311,7 +331,7 @@ export default async function AdminPage() {
       : Promise.resolve({ data: [] as { id: string; discord_id: string; username: string; display_name: string | null; avatar: string | null }[] }),
   ]);
   const platformClaimPlayerMap = Object.fromEntries((platformClaimPlayers ?? []).map(p => [p.id, p]));
-  const signupPlayerMap = new Map((signupPlayerRows ?? []).map((p) => [p.id, p]));
+  const signupPlayerMap = new Map((signupPlayerRows ?? []).map((p) => [p.id, withTier1Identity(p, p.id)]));
 
   const scheduledTournamentById = new Map((tournaments ?? []).map((t) => [t.id as string, t]));
 
@@ -811,7 +831,10 @@ export default async function AdminPage() {
       : Promise.resolve({ data: [] as { id: string; stage: string; round: number; match_number: number; home_team_id: string | null; away_team_id: string | null; scheduled_at: string | null; admin_scheduled: boolean; schedule_proposed_by_team_id: string | null; discord_channel_id: string | null }[] }),
   ]);
 
-  const enteredCount = (draftPoolRows ?? []).length;
+  const draftPoolEntries: DraftPoolEntry[] = ((draftPoolRows ?? []) as DraftPoolEntry[]).map((r) =>
+    withTier1Identity(r, r.id),
+  );
+  const enteredCount = draftPoolEntries.length;
 
   type MatchStageRow = { stage: string; round: number; discord_channel_id: string | null };
   const matchStageRows = (allMatchStages ?? []) as MatchStageRow[];
@@ -1542,7 +1565,7 @@ export default async function AdminPage() {
           defaultOpen={false}
           description="Everyone currently signed up to play — the season's 'Enter Draft' pool plus sign-ups for any scheduled standalone tournaments (player or team mode). Remove an entrant before its draft/tournament starts if they need to be pulled from signups."
         >
-          <DraftPoolPanel entries={(draftPoolRows ?? []) as DraftPoolEntry[]} tournamentGroups={draftPoolTournamentGroups} />
+          <DraftPoolPanel entries={draftPoolEntries} tournamentGroups={draftPoolTournamentGroups} />
         </AdminSubSection>
       )}
 
