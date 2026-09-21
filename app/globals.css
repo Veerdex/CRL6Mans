@@ -206,6 +206,10 @@ html[data-theme="light"] {
   --patron-tier-1-fill: rgba(55, 54, 172, 0.34);
   --patron-tier-2-fill: rgba(168, 85, 247, 0.26);
   --patron-tier-3-fill: rgba(24, 24, 27, 0.10);
+  /* Exponent applied to the Perlin field's lit value (tier-glow.tsx). 0.5 is a
+     square root: the same noise, pulled up toward its ceiling so the drifting
+     light still registers against a bright page. */
+  --patron-field-gamma: 0.5;
 }
 
 /* ── DARK (today's look = Tailwind defaults) ──────────────────────────────── */
@@ -302,6 +306,7 @@ html[data-theme="dark"] {
   --patron-tier-1-fill: rgba(55, 54, 172, 0.20);
   --patron-tier-2-fill: rgba(168, 85, 247, 0.14);
   --patron-tier-3-fill: rgba(255, 255, 255, 0.07);
+  --patron-field-gamma: 1;
 }
 
 /* ── CRL6Mans (default) — blue (#3736ac) shell + orange (#e88a24) accents ──── */
@@ -374,6 +379,7 @@ html[data-theme="dark"] {
   --patron-tier-1-fill: rgba(55, 54, 172, 0.34);
   --patron-tier-2-fill: rgba(168, 85, 247, 0.26);
   --patron-tier-3-fill: rgba(24, 24, 27, 0.10);
+  --patron-field-gamma: 0.5;
 }
 
 /* CRL6Mans shell: blue sidebar + mobile bottom-nav with light text & orange active.
@@ -549,6 +555,7 @@ html[data-theme="sponsor"][data-sponsor-mode="dark"] {
   --patron-tier-1-fill: rgba(55, 54, 172, 0.20);
   --patron-tier-2-fill: rgba(168, 85, 247, 0.14);
   --patron-tier-3-fill: rgba(255, 255, 255, 0.07);
+  --patron-field-gamma: 1;
 
   --c-indigo-50:  color-mix(in oklab, var(--sponsor-accent, #e88a24) 8%, white 92%);
   --c-indigo-100: color-mix(in oklab, var(--sponsor-accent, #e88a24) 15%, white 85%);

@@ -151,8 +151,32 @@ function fbm3(x: number, y: number, z: number): number {
 const FIELD_W = 56;
 const FIELD_H = 28;
 
+// Which themes are light-based is globals.css's business, so the exponent comes
+// from a token rather than a theme check duplicated here. Watched rather than
+// read once, because the theme toggle flips data-theme in place without a reload.
+function useFieldGamma() {
+  const gamma = useRef(1);
+  useEffect(() => {
+    const read = () => {
+      const raw = parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--patron-field-gamma"),
+      );
+      gamma.current = Number.isFinite(raw) && raw > 0 ? raw : 1;
+    };
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme", "data-sponsor-mode"],
+    });
+    return () => obs.disconnect();
+  }, []);
+  return gamma;
+}
+
 function NoiseField({ field }: { field: FieldSpec }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const gamma = useFieldGamma();
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -172,6 +196,8 @@ function NoiseField({ field }: { field: FieldSpec }) {
       last = now;
 
       const z = (now / 1000) * field.speed + field.seed;
+      // Folded into the remap's own exponent — one pow per pixel either way.
+      const exp = 1.4 * gamma.current;
       for (let y = 0; y < FIELD_H; y++) {
         for (let x = 0; x < FIELD_W; x++) {
           const n = (fbm3((x / FIELD_W) * field.scale, (y / FIELD_H) * field.scale * 0.5, z) + 1) / 2;
@@ -179,7 +205,7 @@ function NoiseField({ field }: { field: FieldSpec }) {
           // remapping against the range it actually occupies is what lets the
           // brightest patches reach full strength. The floor sits inside that
           // range so the panel keeps dark areas for the light to read against.
-          const lit = Math.min(1, Math.max(0, (n - 0.4) / 0.36)) ** 1.4;
+          const lit = Math.min(1, Math.max(0, (n - 0.4) / 0.36)) ** exp;
           const w = lit * field.white;
           const i = (y * FIELD_W + x) * 4;
           data[i] = r + (255 - r) * w;
@@ -192,7 +218,7 @@ function NoiseField({ field }: { field: FieldSpec }) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [field]);
+  }, [field, gamma]);
 
   return (
     <canvas
