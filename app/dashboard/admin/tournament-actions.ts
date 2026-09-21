@@ -197,6 +197,11 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
   };
 }
 
+// Off for now. Both announcements below are built and working; flip this to true
+// to turn them back on. Typed boolean rather than inferred `false` so the guarded
+// blocks stay live code to the compiler instead of narrowing to dead branches.
+const ANNOUNCE_TOURNAMENT_CHANGES: boolean = false;
+
 // The body carries no dates. A push is a server-rendered string and there is no
 // viewer timezone to render one in (same reason the check-in pushes in
 // discord-bot.ts point at a page instead of naming a time), so the schedule is
@@ -284,7 +289,7 @@ export async function createTournament(input: TournamentInput) {
 
   // A test tournament is staff scaffolding — announcing it would put a fixture
   // nobody can enter in front of the whole league.
-  if (!value!.is_test) {
+  if (ANNOUNCE_TOURNAMENT_CHANGES && !value!.is_test) {
     pushToAllApproved({
       title: `New Tournament: ${value!.name}`,
       body: `${tournamentHeadline(value!)}. Open the dashboard for sign-up times and details.`,
@@ -353,7 +358,7 @@ export async function updateTournament(id: string, input: TournamentInput) {
   // or anything else off the whitelist. `is_test` is read from the stored row,
   // not the input, so flipping a live tournament to a test one still announces
   // the change that flip accompanied.
-  if (changedLabels.length && !existing.is_test) {
+  if (ANNOUNCE_TOURNAMENT_CHANGES && changedLabels.length && !existing.is_test) {
     const sentences: string[] = [];
     if (renamed) sentences.push(`${existing.name} is now called ${value!.name}.`);
     if (otherLabels.length)
