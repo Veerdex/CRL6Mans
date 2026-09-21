@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { CoinIcon } from "@/app/dashboard/coin-icon";
 
 type QA = { q: string; a: React.ReactNode };
 type Section = { title: string; items: QA[] };
@@ -92,7 +93,7 @@ const SECTIONS: Section[] = [
     items: [
       {
         q: "What are Westside Wages?",
-        a: "An in-app virtual currency (🪙) you can bet with on upcoming matches. It has no real-world value — it's just for fun and league bragging rights.",
+        a: <>An in-app virtual currency (<CoinIcon />) you can bet with on upcoming matches. It has no real-world value — it&apos;s just for fun and league bragging rights.</>,
       },
       {
         q: "How do I place a bet?",

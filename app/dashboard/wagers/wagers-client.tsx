@@ -6,6 +6,7 @@ import { getOULines, getTotalSlots, HOUSE_VIG, type MatchPrediction } from "./pr
 import { LeaderboardView, type LeaderboardEntry } from "./leaderboard-view";
 import { MatchOverviewGrid, type OverviewMatch } from "./overview-grid";
 import { PlayerName } from "@/app/dashboard/player-name";
+import { CoinIcon } from "@/app/dashboard/coin-icon";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -469,7 +470,7 @@ export function WagersClient({
         ]);
         setParlaySelections({});
         setParlayAmount("100");
-        setSuccessMsg(`Parlay placed! Potential payout: 🪙 ${parlayPayout.toLocaleString()}`);
+        setSuccessMsg(`Parlay placed! Potential payout: ${parlayPayout.toLocaleString()}`);
         setTimeout(() => setSuccessMsg(null), 5000);
       }
     } finally {
@@ -544,7 +545,7 @@ export function WagersClient({
             </svg>
           </button>
           <div className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5">
-            <span className="text-sm">🪙</span>
+            <CoinIcon className="text-sm" />
             <span className="text-sm font-semibold text-amber-400">{localBalance.toLocaleString()}</span>
             <span className="text-xs text-zinc-500 hidden sm:inline">Westside Wages</span>
           </div>
@@ -896,9 +897,10 @@ function MatchMarketView({
                     {betDescription(placed.bet_type, home?.name ?? "Home", away?.name ?? "Away")}
                   </span>
                   <span className="text-xs text-zinc-500 shrink-0 tabular-nums">
+                    <CoinIcon /> {placed.amount.toLocaleString()} →{" "}
                     {placed.odds_multiplier == null
-                      ? `🪙 ${placed.amount.toLocaleString()} → payout set at close`
-                      : `🪙 ${placed.amount.toLocaleString()} → ${Math.round(placed.amount * placed.odds_multiplier).toLocaleString()}`}
+                      ? "payout set at close"
+                      : Math.round(placed.amount * placed.odds_multiplier).toLocaleString()}
                   </span>
                 </div>
               ) : (
@@ -922,7 +924,7 @@ function MatchMarketView({
                           </span>
                           {isPool && (
                             <span className="text-[10px] text-zinc-500 tabular-nums mt-0.5">
-                              🪙 {(betTypeTotals[match.id]?.[s.betType] ?? 0).toLocaleString()}
+                              <CoinIcon /> {(betTypeTotals[match.id]?.[s.betType] ?? 0).toLocaleString()}
                             </span>
                           )}
                         </div>
@@ -1060,7 +1062,7 @@ function BetSlip({
                   {betMode === "straight" && (
                     <div className="flex items-center gap-2">
                       <div className="flex-1 flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 min-w-0">
-                        <span className="text-xs text-zinc-500 shrink-0">🪙</span>
+                        <CoinIcon className="text-xs" />
                         <input
                           type="number"
                           min="10"
@@ -1074,7 +1076,7 @@ function BetSlip({
                       <div className="text-right shrink-0">
                         <p className="text-[9px] text-zinc-600 uppercase tracking-wide">Win</p>
                         <p className="text-sm font-bold text-amber-400 tabular-nums">
-                          {payout == null ? "at close" : `🪙 ${payout.toLocaleString()}`}
+                          {payout == null ? "at close" : <><CoinIcon /> {payout.toLocaleString()}</>}
                         </p>
                       </div>
                     </div>
@@ -1110,12 +1112,12 @@ function BetSlip({
               <div>
                 <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-0.5">Total Bet</p>
                 <p className={`text-lg font-bold ${totalCost > localBalance ? "text-red-400" : "text-white"}`}>
-                  🪙 {totalCost.toLocaleString()}
+                  <CoinIcon /> {totalCost.toLocaleString()}
                 </p>
               </div>
               <div className="text-right">
                 <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-0.5">Total Payout</p>
-                <p className="text-lg font-bold text-amber-400">🪙 {totalPayout.toLocaleString()}</p>
+                <p className="text-lg font-bold text-amber-400"><CoinIcon /> {totalPayout.toLocaleString()}</p>
               </div>
             </div>
             {hasPoolSelections && (
@@ -1136,7 +1138,7 @@ function BetSlip({
             {/* Parlay single wager input */}
             <div className="flex items-center gap-2">
               <div className="flex-1 flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 min-w-0">
-                <span className="text-xs text-zinc-500 shrink-0">🪙</span>
+                <CoinIcon className="text-xs" />
                 <input
                   type="number"
                   min="10"
@@ -1149,7 +1151,7 @@ function BetSlip({
               </div>
               <div className="text-right shrink-0">
                 <p className="text-[9px] text-zinc-600 uppercase tracking-wide">Payout</p>
-                <p className="text-sm font-bold text-amber-400 tabular-nums">🪙 {parlayPayout.toLocaleString()}</p>
+                <p className="text-sm font-bold text-amber-400 tabular-nums"><CoinIcon /> {parlayPayout.toLocaleString()}</p>
               </div>
             </div>
             {error && <div className="px-3 py-2 bg-red-900/40 border border-red-700/50 rounded-lg text-xs text-red-300">{error}</div>}
@@ -1238,10 +1240,10 @@ function MyBetsView({
         <h2 className="text-base font-bold text-white">My Bets</h2>
         <div className="text-right">
           <p className="text-xs text-zinc-500">
-            {pendingCount} pending · <span className="text-amber-400 font-semibold">🪙 {atStake.toLocaleString()}</span> at stake
+            {pendingCount} pending · <span className="text-amber-400 font-semibold"><CoinIcon /> {atStake.toLocaleString()}</span> at stake
           </p>
           <p className="text-xs text-zinc-500">
-            Max payout · <span className="text-emerald-400 font-semibold">🪙 {maxPayout.toLocaleString()}</span>
+            Max payout · <span className="text-emerald-400 font-semibold"><CoinIcon /> {maxPayout.toLocaleString()}</span>
             {hasPendingPoolWagers && <span className="text-zinc-600"> (+ pool bets, set at close)</span>}
           </p>
         </div>
@@ -1255,11 +1257,11 @@ function MyBetsView({
             const { badge, desc } = legLabel(w.match_id, w.bet_type);
             const isPool = w.odds_multiplier == null;
             const odds = isPool ? "Pool" : multiplierToAmericanOdds(w.odds_multiplier!);
-            const payoutLabel = isPool
+            const payoutLabel: ReactNode = isPool
               ? w.status === "pending"
                 ? "payout set at close"
-                : `🪙 ${w.amount.toLocaleString()} → ${(w.payout_amount ?? 0).toLocaleString()}`
-              : `🪙 ${w.amount.toLocaleString()} → ${Math.round(w.amount * w.odds_multiplier!).toLocaleString()}`;
+                : <><CoinIcon /> {w.amount.toLocaleString()} → {(w.payout_amount ?? 0).toLocaleString()}</>
+              : <><CoinIcon /> {w.amount.toLocaleString()} → {Math.round(w.amount * w.odds_multiplier!).toLocaleString()}</>;
             return (
               <button
                 key={`${w.match_id}:${w.bet_type}:${i}`}
@@ -1302,7 +1304,7 @@ function MyBetsView({
                   <div className="text-right">
                     <p className="text-sm font-bold text-amber-400 tabular-nums">{odds}</p>
                     <p className="text-[11px] text-zinc-500 tabular-nums">
-                      🪙 {p.amount.toLocaleString()} → {payout.toLocaleString()}
+                      <CoinIcon /> {p.amount.toLocaleString()} → {payout.toLocaleString()}
                     </p>
                   </div>
                 </div>

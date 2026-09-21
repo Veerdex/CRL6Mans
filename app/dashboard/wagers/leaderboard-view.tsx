@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { PlayerName } from "@/app/dashboard/player-name";
+import { CoinIcon } from "@/app/dashboard/coin-icon";
 
 export type LeaderboardEntry = { username: string; display_name: string | null; discord_id: string | null; crl_coins: number };
 
@@ -102,7 +103,7 @@ export function LeaderboardView({
                   )}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <span className="text-sm">🪙</span>
+                  <CoinIcon className="text-sm" />
                   <span className={`text-sm font-bold tabular-nums ${isMe ? "text-amber-400" : "text-zinc-200"}`}>
                     {entry.crl_coins.toLocaleString()}
                   </span>
@@ -137,7 +138,7 @@ export function WagesLeaderboardOnly({
             <p className="text-[11px] text-zinc-600 mt-0.5">Your Westside Wages carry over between events.</p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-base">🪙</span>
+            <CoinIcon className="text-base" />
             <span className="text-base font-bold tabular-nums text-amber-400">{balance.toLocaleString()}</span>
           </div>
         </div>

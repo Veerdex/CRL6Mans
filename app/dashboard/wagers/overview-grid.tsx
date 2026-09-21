@@ -1,3 +1,5 @@
+import { CoinIcon } from "@/app/dashboard/coin-icon";
+
 type Team = { id: string; name: string; logo_url: string | null };
 
 export type OverviewMatch = {
@@ -114,7 +116,7 @@ function TeamRow({ team, pct, wagered }: { team: Team | undefined; pct: number; 
       )}
       <span className="text-sm font-semibold text-zinc-200 truncate flex-1">{team?.name ?? "?"}</span>
       <span className="text-sm font-bold text-amber-400 tabular-nums">{pct}%</span>
-      <span className="text-xs text-zinc-500 tabular-nums w-16 text-right">🪙 {wagered.toLocaleString()}</span>
+      <span className="text-xs text-zinc-500 tabular-nums w-16 text-right"><CoinIcon /> {wagered.toLocaleString()}</span>
     </div>
   );
 }
