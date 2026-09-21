@@ -20,10 +20,10 @@ import { TrackerUpdateBanner } from "./tracker-update-banner";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { AnnouncementBanner } from "./announcement-banner";
 import { CountdownLabel } from "./countdown-label";
-import { getPublicSponsors } from "@/app/lib/sponsors-public";
-import { getPublicDesigns } from "@/app/lib/designs-public";
+import { getPublicSponsors, type PublicSponsor } from "@/app/lib/sponsors-public";
+import { getPublicDesigns, type PublicDesign } from "@/app/lib/designs-public";
 import { cropStyle } from "@/app/lib/media-crop";
-import { buildTimeline, nextTimelineEvent, projectedTeamCount, projectedEndIso } from "@/app/lib/tournament-timeline";
+import { buildTimeline, nextTimelineEvent, projectedTeamCount, projectedEndIso, type TimelineItem } from "@/app/lib/tournament-timeline";
 import type { SeasonFormatConfig } from "@/app/dashboard/season/format-constants";
 import { TournamentDetailView } from "./tournament-detail";
 import { SponsoredByLine } from "./sponsored-by-line";
@@ -431,11 +431,34 @@ export default async function DashboardPage({
         </div>
       )}
 
-      {/* Open tournaments you can join */}
-      {isApproved && openTournaments.length > 0 && (
+      {/* Open tournaments. A non-approved viewer gets the read-only card instead of
+          the join/sign-up controls — team-mode cards especially, since teamViews is
+          only built for approved players and TeamSignupPanel renders nothing without it. */}
+      {openTournaments.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-[21px] font-semibold text-zinc-300">Open Tournaments</h2>
-          {openPlayerTs.map((t) => {
+          {!isApproved && openTournaments.map((t) => {
+            const timeline = buildTimeline(t, false, endIsoFor(t));
+            const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
+            const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
+            const designId = (t as { design_id?: string | null }).design_id ?? null;
+            const design = !sponsor && designId ? designById.get(designId) ?? null : null;
+            return (
+              <EventCard
+                key={t.id}
+                href={`/dashboard?tournament=${t.id}`}
+                name={t.name}
+                items={timeline}
+                nextEvent={nextTimelineEvent(timeline, now)}
+                prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}
+                prize2nd={(t as { prize_2nd?: number | null }).prize_2nd ?? null}
+                prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
+                sponsor={sponsor ?? null}
+                design={design}
+              />
+            );
+          })}
+          {isApproved && openPlayerTs.map((t) => {
             const timeline = buildTimeline(t, false, endIsoFor(t));
             const nextEvent = nextTimelineEvent(timeline, now);
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;
@@ -465,7 +488,7 @@ export default async function DashboardPage({
               />
             );
           })}
-          {openTeamTs.map((t) => {
+          {isApproved && openTeamTs.map((t) => {
             if (!teamViews[t.id]) return null;
             const timeline = buildTimeline(t, false, endIsoFor(t));
             const nextEvent = nextTimelineEvent(timeline, now);
@@ -506,72 +529,19 @@ export default async function DashboardPage({
             const sponsor = sponsorId ? sponsorById.get(sponsorId) : null;
             const designId = (t as { design_id?: string | null }).design_id ?? null;
             const design = !sponsor && designId ? designById.get(designId) ?? null : null;
-            const prize1st = (t as { prize_1st?: number | null }).prize_1st ?? null;
-            const prize2nd = (t as { prize_2nd?: number | null }).prize_2nd ?? null;
-            const prize3rd4th = (t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null;
-            const totalPrizePool = (prize1st ?? 0) + (prize2nd ?? 0) + (prize3rd4th ?? 0) * 2;
-            const backgroundUrl = sponsor?.background_image_url ?? design?.background_image_url ?? null;
-            const backgroundCrop = sponsor?.content_crop?.background ?? design?.content_crop?.background;
             return (
-              <Link
+              <EventCard
                 key={t.id}
                 href={`/dashboard?tournament=${t.id}`}
-                className={`relative aspect-video overflow-hidden border border-zinc-800 rounded-xl transition-all duration-200 hover:-translate-y-1 hover:border-amber-500/50 hover:shadow-[0_10px_28px_-8px_rgba(232,138,36,0.4)] cursor-pointer block ${backgroundUrl ? "" : "bg-zinc-900"}`}
-              >
-                {backgroundUrl && (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={backgroundUrl}
-                      alt=""
-                      className="absolute inset-0 w-full h-full"
-                      style={cropStyle(backgroundCrop)}
-                    />
-                    <div className="absolute inset-0 bg-black/70" />
-                  </>
-                )}
-                <div className="relative h-full overflow-y-auto px-4 py-3">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <div className="flex items-center gap-2">
-                      {sponsor?.logo_url && (
-                        <div className="relative w-12 h-12 rounded-xl border border-zinc-800 overflow-hidden shrink-0">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={sponsor.logo_url}
-                            alt={sponsor.name}
-                            className="absolute inset-0 w-full h-full"
-                            style={cropStyle(sponsor.content_crop?.logo)}
-                          />
-                        </div>
-                      )}
-                      <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-white leading-tight break-words">{t.name}</p>
-                    </div>
-                    {nextEvent && <CountdownLabel label={nextEvent.label} iso={nextEvent.iso} />}
-                    {items.length > 0 && (
-                      <div className="flex flex-col gap-0.5">
-                        {items.map(({ label, iso, est }) => (
-                          <span key={label} className="text-[13.5px] text-zinc-500">
-                            {label}: <LocalTime iso={iso} upcoming suffix={est ? " (est.)" : undefined} className="text-zinc-400" />
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="shrink-0 flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-3 py-1.5 min-w-[90px]">
-                    <p className="text-[11.25px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
-                    <p className="text-[20.25px] font-bold text-amber-400 tabular-nums">${totalPrizePool.toLocaleString()}</p>
-                    {totalPrizePool > 0 && (
-                      <div className="mt-1 text-[12.375px] text-zinc-400 space-y-0.5">
-                        <p>1st: <span className="text-zinc-200">${(prize1st ?? 0).toLocaleString()}</span></p>
-                        <p>2nd: <span className="text-zinc-200">${(prize2nd ?? 0).toLocaleString()}</span></p>
-                        <p>3rd-4th: <span className="text-zinc-200">${(prize3rd4th ?? 0).toLocaleString()}</span></p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                </div>
-              </Link>
+                name={t.name}
+                items={items}
+                nextEvent={nextEvent}
+                prize1st={(t as { prize_1st?: number | null }).prize_1st ?? null}
+                prize2nd={(t as { prize_2nd?: number | null }).prize_2nd ?? null}
+                prize3rd4th={(t as { prize_3rd4th?: number | null }).prize_3rd4th ?? null}
+                sponsor={sponsor ?? null}
+                design={design}
+              />
             );
           })}
         </div>
@@ -579,6 +549,97 @@ export default async function DashboardPage({
 
       <PastEvents events={pastEvents} />
     </div>
+  );
+}
+
+// Read-only tournament card: name, countdown, timeline, prize pool. Used for
+// tournaments that aren't open yet, and for open ones seen by a viewer who has
+// no way to act on them — a non-approved player would otherwise watch the
+// tournament vanish from the home page for the whole sign-up window, since
+// upcomingTournaments deliberately excludes anything already open.
+function EventCard({
+  href,
+  name,
+  items,
+  nextEvent,
+  prize1st,
+  prize2nd,
+  prize3rd4th,
+  sponsor,
+  design,
+}: {
+  href: string;
+  name: string;
+  items: TimelineItem[];
+  nextEvent: TimelineItem | null;
+  prize1st: number | null;
+  prize2nd: number | null;
+  prize3rd4th: number | null;
+  sponsor: PublicSponsor | null;
+  design: PublicDesign | null;
+}) {
+  const totalPrizePool = (prize1st ?? 0) + (prize2nd ?? 0) + (prize3rd4th ?? 0) * 2;
+  const backgroundUrl = sponsor?.background_image_url ?? design?.background_image_url ?? null;
+  const backgroundCrop = sponsor?.content_crop?.background ?? design?.content_crop?.background;
+  return (
+    <Link
+      href={href}
+      className={`relative aspect-video overflow-hidden border border-zinc-800 rounded-xl transition-all duration-200 hover:-translate-y-1 hover:border-amber-500/50 hover:shadow-[0_10px_28px_-8px_rgba(232,138,36,0.4)] cursor-pointer block ${backgroundUrl ? "" : "bg-zinc-900"}`}
+    >
+      {backgroundUrl && (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={backgroundUrl}
+            alt=""
+            className="absolute inset-0 w-full h-full"
+            style={cropStyle(backgroundCrop)}
+          />
+          <div className="absolute inset-0 bg-black/70" />
+        </>
+      )}
+      <div className="relative h-full overflow-y-auto px-4 py-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0 space-y-2">
+          <div className="flex items-center gap-2">
+            {sponsor?.logo_url && (
+              <div className="relative w-12 h-12 rounded-xl border border-zinc-800 overflow-hidden shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={sponsor.logo_url}
+                  alt={sponsor.name}
+                  className="absolute inset-0 w-full h-full"
+                  style={cropStyle(sponsor.content_crop?.logo)}
+                />
+              </div>
+            )}
+            <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-white leading-tight break-words">{name}</p>
+          </div>
+          {nextEvent && <CountdownLabel label={nextEvent.label} iso={nextEvent.iso} />}
+          {items.length > 0 && (
+            <div className="flex flex-col gap-0.5">
+              {items.map(({ label, iso, est }) => (
+                <span key={label} className="text-[13.5px] text-zinc-500">
+                  {label}: <LocalTime iso={iso} upcoming suffix={est ? " (est.)" : undefined} className="text-zinc-400" />
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="shrink-0 flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-3 py-1.5 min-w-[90px]">
+          <p className="text-[11.25px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
+          <p className="text-[20.25px] font-bold text-amber-400 tabular-nums">${totalPrizePool.toLocaleString()}</p>
+          {totalPrizePool > 0 && (
+            <div className="mt-1 text-[12.375px] text-zinc-400 space-y-0.5">
+              <p>1st: <span className="text-zinc-200">${(prize1st ?? 0).toLocaleString()}</span></p>
+              <p>2nd: <span className="text-zinc-200">${(prize2nd ?? 0).toLocaleString()}</span></p>
+              <p>3rd-4th: <span className="text-zinc-200">${(prize3rd4th ?? 0).toLocaleString()}</span></p>
+            </div>
+          )}
+        </div>
+      </div>
+      </div>
+    </Link>
   );
 }
 
