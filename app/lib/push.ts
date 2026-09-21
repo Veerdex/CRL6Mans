@@ -30,20 +30,69 @@ async function notificationsEnabled(): Promise<boolean> {
   }
 }
 
+// A push service reports a permanently invalid subscription as 404 or 410. Those
+// rows are deleted: nothing will ever be delivered to them again, and left alone
+// they accumulate for every player who clears site data or reinstalls.
+//
+// Nothing else is pruned, and 400/403 deliberately are not. Those mean the VAPID
+// credentials don't match the ones the subscription was created with — a server
+// misconfiguration, not a dead subscription. Those endpoints start working again
+// the moment the keypair is right, so deleting them would turn a recoverable
+// config mistake into permanent, league-wide loss of every subscription.
+const GONE_STATUSES = new Set([404, 410]);
+
+type SendOutcome = { endpoint: string; status: number | null; failed: boolean };
+
 async function sendToSubscriptions(
   subs: { endpoint: string; p256dh: string; auth: string }[],
   payload: PushPayload
 ) {
-  await Promise.allSettled(
-    subs.map((sub) =>
-      webpush
-        .sendNotification(
+  const body = JSON.stringify(payload);
+  const settled = await Promise.allSettled(
+    subs.map(async (sub): Promise<SendOutcome> => {
+      try {
+        await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-          JSON.stringify(payload)
-        )
-        .catch(() => null)
-    )
+          body
+        );
+        return { endpoint: sub.endpoint, status: null, failed: false };
+      } catch (e) {
+        return { endpoint: sub.endpoint, status: (e as { statusCode?: number })?.statusCode ?? null, failed: true };
+      }
+    })
   );
+
+  // Every caller fires this without awaiting a result, so a failure to clean up
+  // after a failure must not surface as an unhandled rejection.
+  try {
+    const failures = settled
+      .map((s) => (s.status === "fulfilled" ? s.value : null))
+      .filter((o): o is SendOutcome => o !== null && o.failed);
+    if (!failures.length) return;
+
+    const gone = failures
+      .filter((f) => f.status !== null && GONE_STATUSES.has(f.status))
+      .map((f) => f.endpoint);
+    if (gone.length) {
+      await supabaseAdmin.from("push_subscriptions").delete().in("endpoint", gone);
+    }
+
+    // Counted by status rather than logged one line per failure: a single wrong
+    // VAPID key fails every subscription at once, and thousands of identical
+    // lines would bury the one number that matters.
+    const byStatus: Record<string, number> = {};
+    for (const f of failures) {
+      const key = f.status === null ? "network" : String(f.status);
+      byStatus[key] = (byStatus[key] ?? 0) + 1;
+    }
+    console.error(
+      `[push] ${failures.length}/${subs.length} deliveries failed`,
+      byStatus,
+      gone.length ? `— pruned ${gone.length} dead subscription(s)` : ""
+    );
+  } catch {
+    /* best-effort */
+  }
 }
 
 // Every pushToX records the event in the in-app feed before sending. The record
