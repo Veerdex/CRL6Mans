@@ -151,11 +151,15 @@ function fbm3(x: number, y: number, z: number): number {
 const FIELD_W = 56;
 const FIELD_H = 28;
 
-// Which themes are light-based is globals.css's business, so the exponent comes
-// from a token rather than a theme check duplicated here. Watched rather than
-// read once, because the theme toggle flips data-theme in place without a reload.
-function useFieldGamma() {
+function NoiseField({ field }: { field: FieldSpec }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Which themes are light-based is globals.css's business, so the exponent comes
+  // from a token rather than a theme check duplicated here. Watched rather than
+  // read once, because the theme toggle flips data-theme in place without a reload.
+  // Declared here rather than in a custom hook so it stays a ref exhaustive-deps
+  // recognises, and the draw loop below keeps a dependency array of just [field].
   const gamma = useRef(1);
+
   useEffect(() => {
     const read = () => {
       const raw = parseFloat(
@@ -171,12 +175,6 @@ function useFieldGamma() {
     });
     return () => obs.disconnect();
   }, []);
-  return gamma;
-}
-
-function NoiseField({ field }: { field: FieldSpec }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const gamma = useFieldGamma();
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -218,7 +216,7 @@ function NoiseField({ field }: { field: FieldSpec }) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [field, gamma]);
+  }, [field]);
 
   return (
     <canvas
