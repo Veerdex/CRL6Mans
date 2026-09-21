@@ -330,6 +330,14 @@ export async function updateTournament(id: string, input: TournamentInput) {
     ),
   ];
 
+  // `name` is the one whitelist field whose label tells the reader nothing: a
+  // notification headed by a name they have never seen, saying the name changed,
+  // is unreadable unless the old name appears beside it. It gets a sentence of
+  // its own. Derived from the label list rather than re-diffed so the two can't
+  // disagree about whether the rename happened.
+  const renamed = changedLabels.includes(CHANGE_LABELS.name);
+  const otherLabels = changedLabels.filter((l) => l !== CHANGE_LABELS.name);
+
   const { error: dbError } = await supabaseAdmin
     .from("tournaments")
     .update({ ...value, updated_at: new Date().toISOString() })
@@ -346,9 +354,15 @@ export async function updateTournament(id: string, input: TournamentInput) {
   // not the input, so flipping a live tournament to a test one still announces
   // the change that flip accompanied.
   if (changedLabels.length && !existing.is_test) {
+    const sentences: string[] = [];
+    if (renamed) sentences.push(`${existing.name} is now called ${value!.name}.`);
+    if (otherLabels.length)
+      sentences.push(`The ${listChanges(otherLabels)} ${renamed ? "also " : ""}changed.`);
+    sentences.push("Open the dashboard for the latest details.");
+
     pushToAllApproved({
       title: `${value!.name} Updated`,
-      body: `The ${listChanges(changedLabels)} changed. Open the dashboard for the latest details.`,
+      body: sentences.join(" "),
       url: "/dashboard",
       tag: "tournament-updated",
       category: "tournament",
