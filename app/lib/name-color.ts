@@ -53,7 +53,9 @@ const OUTLINE_OFFSETS = [
   [-1, 1],
   [-1, -1],
 ] as const;
-const OUTLINE_EM = 0.055;
+// Exported because PlayerName has to pad its truncating span by exactly this
+// much: the shadow is drawn outside the glyphs, and truncate clips to the box.
+export const OUTLINE_EM = 0.055;
 
 export function nameOutlineShadow(hex: string): string {
   const outline = outlineColorFor(hex);

@@ -4,6 +4,7 @@ import { SupporterBadge } from "./supporter-badge";
 import { useNameDecoration } from "./name-decoration";
 import { useProfileViewer } from "./profile-viewer";
 import { nameStyle } from "@/app/lib/name-glint";
+import { OUTLINE_EM } from "@/app/lib/name-color";
 
 interface Props {
   displayName: string | null;
@@ -67,7 +68,16 @@ export function PlayerName({
             : undefined
         }
         className={`truncate min-w-0 ${fx.className} ${clickable ? "cursor-pointer hover:underline underline-offset-2" : ""}`}
-        style={fx.style}
+        // A supporter's outline is a text-shadow, so it paints OUTLINE_EM outside
+        // the glyphs — and truncate's overflow:hidden clips to the padding box,
+        // which shaved that ink off. Padding widens what's kept; the matching
+        // negative margin hands the space straight back, so the name occupies
+        // exactly the box it did before on every side, decorated or not.
+        style={{
+          ...fx.style,
+          padding: `${OUTLINE_EM}em`,
+          margin: `-${OUTLINE_EM}em`,
+        }}
         title={name}
       >
         {name}
