@@ -26,7 +26,12 @@ import { NotificationPrompt } from "./notification-prompt";
 import { LogoutButton } from "./logout-button";
 import { OwnProfileButton } from "./own-profile-button";
 
-type NavItem = { href: string; label: string; icon: React.ReactNode; alert?: boolean; badgeCount?: number };
+// iconOnly is honoured only by the desktop bottom row (sidebar footer / top-bar
+// right edge), where the tabs sit in a tight cluster and the icons carry
+// themselves. Mobile's "More" sheet renders the same items through
+// NavLeafContent and deliberately keeps its labels — a bare icon in a two-column
+// list has nothing to read it against.
+type NavItem = { href: string; label: string; icon: React.ReactNode; alert?: boolean; badgeCount?: number; iconOnly?: boolean };
 
 const icon = (d: string, key: string) => (
   <svg key={key} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -43,6 +48,7 @@ const ALL_NAV: Record<string, NavItem> = {
   notifications: {
     href: "/dashboard/notifications",
     label: "Notifications",
+    iconOnly: true,
     icon: <svg key="notifications-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
   },
   welcome: {
@@ -98,6 +104,7 @@ const ALL_NAV: Record<string, NavItem> = {
   settings: {
     href: "/dashboard/settings",
     label: "Settings",
+    iconOnly: true,
     icon: <svg key="settings-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>,
   },
   register: {
@@ -267,6 +274,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     "game",
     ...(hasSponsors ? ["sponsors"] : []),
     "patreon",
+    // Adjacent to Settings on purpose: both are icon-only utility tabs and
+    // BOTTOM_KEYS pulls them out of the main nav as a pair.
+    "notifications",
     "settings",
     "testreplay",
   ];
@@ -281,7 +291,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   } else if (status === "approved") {
     navKeys = [
       "home",
-      "notifications",
       ...(teamId ? ["myteam"] : []),
       ...(hasTeams ? ["teams"] : []),
       ...(draftActive ? ["draft"] : []),
@@ -293,7 +302,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       ...commonExtras,
     ];
   } else {
-    navKeys = ["home", "notifications", "register", ...commonExtras];
+    navKeys = ["home", "register", ...commonExtras];
   }
   navKeys = applyNavTabOverrides(navKeys, settings.navTabOverrides);
 
@@ -318,10 +327,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
     notifications: { ...ALL_NAV.notifications, badgeCount: unreadCount },
   };
 
-  const BOTTOM_KEYS = new Set(["settings", "admin", "testreplay"]);
+  const BOTTOM_KEYS = new Set(["notifications", "settings", "admin", "testreplay"]);
   const mainNavKeys = navKeys.filter((k) => !BOTTOM_KEYS.has(k));
   const mainNavItems = mainNavKeys.map((k) => navMap[k]);
   const bottomNavItems = navKeys.filter((k) => BOTTOM_KEYS.has(k)).map((k) => navMap[k]);
+  const labelledBottomItems = bottomNavItems.filter((i) => !i.iconOnly);
+  const iconOnlyBottomItems = bottomNavItems.filter((i) => i.iconOnly);
   const navItems = [...mainNavItems, ...bottomNavItems];
   // Grouped view for desktop only — mobile keeps the flat list above since it
   // already has its own bottom-tab + "More" sheet pattern.
@@ -386,9 +397,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
             )}
             <NotificationButton />
             {bottomNavItems.map((item) => (
-              <NavLink key={item.href} href={item.href}>
+              <NavLink
+                key={item.href}
+                href={item.href}
+                title={item.iconOnly ? item.label : undefined}
+                className={item.iconOnly ? "gap-1.5 px-2" : ""}
+              >
                 {item.icon}
-                {item.label}
+                {item.iconOnly ? <span className="sr-only">{item.label}</span> : item.label}
                 {item.alert && <NavAlertBadge />}
                 {item.badgeCount ? <NavCountBadge count={item.badgeCount} /> : null}
               </NavLink>
@@ -501,13 +517,33 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
         {bottomNavItems.length > 0 && (
           <div className="px-3 pb-2 space-y-1">
-            {bottomNavItems.map((item) => (
+            {labelledBottomItems.map((item) => (
               <NavLink key={item.href} href={item.href}>
                 {item.icon}
                 {item.label}
                 {item.alert && <NavAlertBadge />}
+                {item.badgeCount ? <NavCountBadge count={item.badgeCount} /> : null}
               </NavLink>
             ))}
+            {/* Side by side rather than stacked: a lone icon on its own
+                full-width row reads as a label that failed to render. */}
+            {iconOnlyBottomItems.length > 0 && (
+              <div className="flex items-center gap-1">
+                {iconOnlyBottomItems.map((item) => (
+                  <NavLink
+                    key={item.href}
+                    href={item.href}
+                    title={item.label}
+                    className="flex-1 justify-center gap-1.5"
+                  >
+                    {item.icon}
+                    <span className="sr-only">{item.label}</span>
+                    {item.alert && <NavAlertBadge />}
+                    {item.badgeCount ? <NavCountBadge count={item.badgeCount} /> : null}
+                  </NavLink>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

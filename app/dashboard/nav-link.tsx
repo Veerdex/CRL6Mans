@@ -7,15 +7,17 @@ type Props = {
   href: string;
   children: React.ReactNode;
   className?: string;
+  title?: string;
 };
 
-export default function NavLink({ href, children, className = "" }: Props) {
+export default function NavLink({ href, children, className = "", title }: Props) {
   const pathname = usePathname();
   const active = href === "/dashboard" ? pathname === href : pathname.startsWith(href);
 
   return (
     <Link
       href={href}
+      title={title}
       className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${className} ${
         active
           ? "bg-zinc-800 text-white"
