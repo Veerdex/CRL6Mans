@@ -7,7 +7,8 @@ import NavLink from "./nav-link";
 import { TopNav, type TopNavEntry } from "./top-nav";
 import { SidebarNavGroup } from "./sidebar-nav-group";
 import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
-import { NavAlertBadge } from "./nav-alert-badge";
+import { NavAlertBadge, NavCountBadge } from "./nav-alert-badge";
+import { getUnreadCount } from "@/app/lib/notifications";
 import { applyNavTabOverrides } from "@/app/lib/nav-tabs";
 import { AppTitle } from "./app-title";
 import MobileNav from "./mobile-nav";
@@ -25,7 +26,7 @@ import { NotificationPrompt } from "./notification-prompt";
 import { LogoutButton } from "./logout-button";
 import { OwnProfileButton } from "./own-profile-button";
 
-type NavItem = { href: string; label: string; icon: React.ReactNode; alert?: boolean };
+type NavItem = { href: string; label: string; icon: React.ReactNode; alert?: boolean; badgeCount?: number };
 
 const icon = (d: string, key: string) => (
   <svg key={key} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -38,6 +39,11 @@ const ALL_NAV: Record<string, NavItem> = {
     href: "/dashboard",
     label: "Home",
     icon: icon("M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M9 22V12h6v10", "home-icon"),
+  },
+  notifications: {
+    href: "/dashboard/notifications",
+    label: "Notifications",
+    icon: <svg key="notifications-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
   },
   welcome: {
     href: "/dashboard/welcome",
@@ -275,6 +281,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   } else if (status === "approved") {
     navKeys = [
       "home",
+      "notifications",
       ...(teamId ? ["myteam"] : []),
       ...(hasTeams ? ["teams"] : []),
       ...(draftActive ? ["draft"] : []),
@@ -286,7 +293,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       ...commonExtras,
     ];
   } else {
-    navKeys = ["home", "register", ...commonExtras];
+    navKeys = ["home", "notifications", "register", ...commonExtras];
   }
   navKeys = applyNavTabOverrides(navKeys, settings.navTabOverrides);
 
@@ -297,11 +304,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // While a tournament is running, the "Season" tab stands in for it —
   // no separate tournament nav entry, just a relabel driven by the same
   // global flag that distinguishes a tournament-run season from a manual one.
+  // Only when the tab is actually in the nav — a guest has no notifications tab,
+  // so there's no reason to pay for the count on every page they load.
+  const unreadCount = navKeys.includes("notifications")
+    ? await getUnreadCount(session.userId).catch(() => 0)
+    : 0;
+
   const navMap: Record<string, NavItem> = {
     ...ALL_NAV,
     ...(activeTournamentId ? { season: { ...ALL_NAV.season, label: "Tournament" } } : {}),
     // Settings is where the claim form lives, so the badge rides its tab.
     ...(needsPlatformClaim ? { settings: { ...ALL_NAV.settings, alert: true } } : {}),
+    notifications: { ...ALL_NAV.notifications, badgeCount: unreadCount },
   };
 
   const BOTTOM_KEYS = new Set(["settings", "admin", "testreplay"]);
@@ -376,6 +390,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 {item.icon}
                 {item.label}
                 {item.alert && <NavAlertBadge />}
+                {item.badgeCount ? <NavCountBadge count={item.badgeCount} /> : null}
               </NavLink>
             ))}
           </div>

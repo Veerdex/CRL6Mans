@@ -1,8 +1,8 @@
-import { NavAlertBadge } from "./nav-alert-badge";
+import { NavAlertBadge, NavCountBadge } from "./nav-alert-badge";
 
 export const PODIUM_HREF = "/dashboard/podium";
 
-type LeafLike = { href: string; label: string; icon: React.ReactNode; alert?: boolean };
+type LeafLike = { href: string; label: string; icon: React.ReactNode; alert?: boolean; badgeCount?: number };
 
 // Applied to the outer Link/button of the Podium tab wherever it renders —
 // a slow breathing glow ring on the whole pill.
@@ -65,7 +65,7 @@ export function PodiumGlowIcon({ children }: { children: React.ReactNode }) {
 // object may safely appear in several mounted nav components at once.
 export function NavLeafContent({ item }: { item: LeafLike }) {
   if (item.href !== PODIUM_HREF) {
-    return <>{item.icon}{item.label}{item.alert && <NavAlertBadge />}</>;
+    return <>{item.icon}{item.label}{item.alert && <NavAlertBadge />}{item.badgeCount ? <NavCountBadge count={item.badgeCount} /> : null}</>;
   }
   return (
     <>

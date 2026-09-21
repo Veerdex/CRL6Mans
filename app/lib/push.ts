@@ -1,6 +1,7 @@
 import webpush from "web-push";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "./supabase";
+import { recordNotification } from "./notifications";
 
 webpush.setVapidDetails(
   `mailto:${process.env.VAPID_EMAIL ?? "admin@crl6mans.com"}`,
@@ -45,7 +46,12 @@ async function sendToSubscriptions(
   );
 }
 
+// Every pushToX records the event in the in-app feed before sending. The record
+// comes first and is never gated on notificationsEnabled(), which reads a
+// per-request cookie — gating it would mean the same event is filed when a cron
+// fires it and silently dropped when an admin does.
 export async function pushToUser(discordId: string, payload: PushPayload) {
+  await recordNotification({ kind: "users", discordIds: [discordId] }, payload);
   if (!(await notificationsEnabled())) return;
   const { data } = await supabaseAdmin
     .from("push_subscriptions")
@@ -62,6 +68,7 @@ export type AdminNotificationCategory =
   | "schedule_approvals";
 
 export async function pushToAdmins(payload: PushPayload, adminCategory?: AdminNotificationCategory) {
+  await recordNotification({ kind: "admins", adminCategory }, payload);
   if (!(await notificationsEnabled())) return;
   // Respect per-category admin notification toggles (default on when unset).
   if (adminCategory) {
@@ -99,6 +106,7 @@ function filterByCategory(
 }
 
 export async function pushToAllApproved(payload: PushPayload) {
+  await recordNotification({ kind: "all" }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players, error } = await supabaseAdmin
     .from("players")
@@ -119,6 +127,7 @@ export async function pushToAllApproved(payload: PushPayload) {
 
 export async function pushToDiscordIds(discordIds: string[], payload: PushPayload) {
   if (!discordIds.length) return;
+  await recordNotification({ kind: "users", discordIds }, payload);
   if (!(await notificationsEnabled())) return;
   const { data } = await supabaseAdmin
     .from("push_subscriptions")
@@ -128,6 +137,7 @@ export async function pushToDiscordIds(discordIds: string[], payload: PushPayloa
 }
 
 export async function pushToTeam(teamId: string, payload: PushPayload) {
+  await recordNotification({ kind: "team", teamId }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players } = await supabaseAdmin
     .from("players")
@@ -144,6 +154,7 @@ export async function pushToTeam(teamId: string, payload: PushPayload) {
 }
 
 export async function pushToEnteredDraft(payload: PushPayload) {
+  await recordNotification({ kind: "draft" }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players, error } = await supabaseAdmin
     .from("players")

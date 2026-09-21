@@ -4,6 +4,8 @@ import Link from "next/link";
 import { decrypt } from "@/app/lib/session";
 import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { getUnreadCount } from "@/app/lib/notifications";
+import { NotificationsBell } from "./notifications-bell";
 import { ClipOfWeek } from "@/app/dashboard/media/clip-of-week";
 import type { Clip } from "@/app/dashboard/media/media-feed";
 import DraftCard from "./draft-card";
@@ -302,17 +304,22 @@ export default async function DashboardPage({
   const activeEventPrize2nd = (activeTournament as { prize_2nd?: number | null } | null)?.prize_2nd ?? null;
   const activeEventPrize3rd4th = (activeTournament as { prize_3rd4th?: number | null } | null)?.prize_3rd4th ?? null;
   const activeEventTotalPrize = (activeEventPrize1st ?? 0) + (activeEventPrize2nd ?? 0) + (activeEventPrize3rd4th ?? 0) * 2;
+  const unreadCount = await getUnreadCount(session.userId).catch(() => 0);
+
   const activeEventBackgroundUrl = activeEventSponsor?.background_image_url ?? activeEventDesign?.background_image_url ?? null;
   const activeEventBackgroundCrop = activeEventSponsor?.content_crop?.background ?? activeEventDesign?.content_crop?.background;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-white inline-flex items-center gap-2 flex-wrap">
-          Dashboard
-          <SponsoredByLine tabKey="home" />
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">Welcome back, {player?.display_name ?? session.username}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-white inline-flex items-center gap-2 flex-wrap">
+            Dashboard
+            <SponsoredByLine tabKey="home" />
+          </h1>
+          <p className="text-sm text-zinc-400 mt-1">Welcome back, {player?.display_name ?? session.username}</p>
+        </div>
+        <NotificationsBell count={unreadCount} />
       </div>
 
       {settings?.announcement_text && settings.announcement_destination !== "discord" && (

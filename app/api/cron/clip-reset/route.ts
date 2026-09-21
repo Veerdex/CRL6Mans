@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { sendChannelMessage } from "@/app/lib/discord-api";
 import { mostRecentSundayMidnightPacific } from "@/app/lib/clip-schedule";
 import { stampCronHeartbeat } from "@/app/lib/cron-heartbeat";
+import { deleteExpiredNotifications } from "@/app/lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -36,6 +37,13 @@ export async function GET(request: Request) {
     .lte("expires_at", now.toISOString())
     .select("id");
   if (expiredClips?.length) fired.push(`expired:${expiredClips.length}`);
+
+  // Same shape of sweep, so it rides along here rather than earning its own cron.
+  // Notifications are deleted outright rather than archived — nothing reads a
+  // notification past its expiry, unlike a clip, which stays visible in Media's
+  // past-weeks view.
+  const purged = await deleteExpiredNotifications().catch(() => 0);
+  if (purged) fired.push(`notifications_purged:${purged}`);
 
   const boundary = mostRecentSundayMidnightPacific(now);
 

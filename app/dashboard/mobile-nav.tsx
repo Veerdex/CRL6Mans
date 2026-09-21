@@ -5,10 +5,10 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LogoutButton } from "./logout-button";
 import { NavLeafContent, PodiumGlowIcon, PODIUM_HREF, podiumTabClass, podiumLabelClass } from "./podium-glow";
-import { NavAlertBadge } from "./nav-alert-badge";
+import { NavAlertBadge, NavCountBadge } from "./nav-alert-badge";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
-type Item = { href: string; label: string; icon: React.ReactNode; alert?: boolean };
+type Item = { href: string; label: string; icon: React.ReactNode; alert?: boolean; badgeCount?: number };
 
 type Props = {
   items: Item[];
@@ -75,6 +75,7 @@ export default function MobileNav({ items, username, displayName, avatarDiscordI
               <span className="flex items-center justify-center gap-1 max-w-full min-w-0 px-1">
                 <span className={`truncate ${podium ? podiumLabelClass : ""}`}>{item.label}</span>
                 {item.alert && <NavAlertBadge size="sm" />}
+                {item.badgeCount ? <NavCountBadge count={item.badgeCount} size="sm" /> : null}
               </span>
             </Link>
           );
@@ -101,6 +102,9 @@ export default function MobileNav({ items, username, displayName, avatarDiscordI
                   inside this sheet — the button has to carry it or the alert is
                   invisible on the surface most players use. */}
               {overflow.some((i) => i.alert) && <NavAlertBadge size="sm" />}
+              {/* Same reasoning for the unread count: if the bell overflowed into
+                  the sheet, the number has to surface on the button. */}
+              <NavCountBadge count={overflow.reduce((n, i) => n + (i.badgeCount ?? 0), 0)} size="sm" />
             </span>
           </button>
         )}
