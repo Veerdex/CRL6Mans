@@ -19,7 +19,7 @@ export default async function NotificationsPage() {
   const feed = await getNotificationFeed(session.userId);
 
   return (
-    <div className="max-w-3xl">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
       <h1 className="text-3xl font-bold mb-1">Notifications</h1>
       <p className="text-sm text-zinc-500 mb-6">
         Everything the league has sent you in the last {NOTIFICATION_TTL_DAYS} days.
