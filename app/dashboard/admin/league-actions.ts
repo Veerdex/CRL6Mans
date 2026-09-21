@@ -947,6 +947,43 @@ export async function setAdminNotificationPref(category: string, enabled: boolea
   return { ok: true };
 }
 
+// Sends a real push down the real pushToAdmins path. It exists as a button rather
+// than a script because a push sent from a developer machine is signed with that
+// machine's VAPID keypair, and every production subscription was created against
+// the deployed site's — so those sends fail for a reason that says nothing about
+// whether production works. Sent from here, the signature is production's own.
+//
+// Reports counts rather than "sent": the failure this is meant to catch is silent
+// by nature, and five subscriptions failing identically looks exactly like success
+// from the caller's side.
+export async function sendTestAdminNotification() {
+  const session = await verifyAdmin();
+
+  const { data: staff } = await supabaseAdmin.from("staff_roles").select("discord_id");
+  const staffIds = [...new Set((staff ?? []).map((s) => s.discord_id as string).filter(Boolean))];
+
+  // A staff member with no subscription row is the quiet half of the problem:
+  // nothing fails, they simply never hear anything, so it never gets reported.
+  const { data: subs } = staffIds.length
+    ? await supabaseAdmin.from("push_subscriptions").select("discord_id").in("discord_id", staffIds)
+    : { data: [] };
+  const subscribed = new Set((subs ?? []).map((s) => s.discord_id as string));
+
+  const result = await pushToAdmins({
+    title: "Test notification",
+    body: `Sent by ${session.username} from the admin panel. If this reached you, push notifications are working on this device.`,
+    url: "/dashboard/admin",
+    category: "announcement",
+  });
+
+  return {
+    ok: true,
+    staffCount: staffIds.length,
+    staffWithoutSubscription: staffIds.filter((id) => !subscribed.has(id)).length,
+    ...result,
+  };
+}
+
 // Removes all team-related Discord roles from every real player. Fetches each
 // member's current roles first so it only deletes roles they actually have
 // (avoids hundreds of no-op calls that trip Discord's rate limiter). Sequential

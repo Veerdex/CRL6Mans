@@ -43,10 +43,38 @@ const GONE_STATUSES = new Set([404, 410]);
 
 type SendOutcome = { endpoint: string; status: number | null; failed: boolean };
 
+// Returned so a caller can show a human what happened. The counts are the whole
+// point of the admin test button: "sent" is not an answer when the interesting
+// outcome is five subscriptions failing identically.
+export type PushResult = {
+  attempted: number;
+  delivered: number;
+  failed: number;
+  byStatus: Record<string, number>;
+  pruned: number;
+  // Hosts rather than endpoints: an endpoint is a bearer capability for pushing
+  // to that person's browser, and this ends up on a screen.
+  failedHosts: string[];
+  deliveredHosts: string[];
+};
+
+function hostOf(endpoint: string): string {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return "unparseable";
+  }
+}
+
+const EMPTY_RESULT: PushResult = {
+  attempted: 0, delivered: 0, failed: 0, byStatus: {}, pruned: 0,
+  failedHosts: [], deliveredHosts: [],
+};
+
 async function sendToSubscriptions(
   subs: { endpoint: string; p256dh: string; auth: string }[],
   payload: PushPayload
-) {
+): Promise<PushResult> {
   const body = JSON.stringify(payload);
   const settled = await Promise.allSettled(
     subs.map(async (sub): Promise<SendOutcome> => {
@@ -62,37 +90,51 @@ async function sendToSubscriptions(
     })
   );
 
-  // Every caller fires this without awaiting a result, so a failure to clean up
-  // after a failure must not surface as an unhandled rejection.
-  try {
-    const failures = settled
-      .map((s) => (s.status === "fulfilled" ? s.value : null))
-      .filter((o): o is SendOutcome => o !== null && o.failed);
-    if (!failures.length) return;
+  const outcomes = settled
+    .map((s) => (s.status === "fulfilled" ? s.value : null))
+    .filter((o): o is SendOutcome => o !== null);
+  const failures = outcomes.filter((o) => o.failed);
 
+  // Counted by status rather than logged one line per failure: a single wrong
+  // VAPID key fails every subscription at once, and thousands of identical
+  // lines would bury the one number that matters.
+  const byStatus: Record<string, number> = {};
+  for (const f of failures) {
+    const key = f.status === null ? "network" : String(f.status);
+    byStatus[key] = (byStatus[key] ?? 0) + 1;
+  }
+
+  const result: PushResult = {
+    attempted: subs.length,
+    delivered: outcomes.length - failures.length,
+    failed: failures.length,
+    byStatus,
+    pruned: 0,
+    failedHosts: [...new Set(failures.map((f) => hostOf(f.endpoint)))],
+    deliveredHosts: [...new Set(outcomes.filter((o) => !o.failed).map((o) => hostOf(o.endpoint)))],
+  };
+  if (!failures.length) return result;
+
+  // Every other caller fires this without awaiting a result, so a failure to
+  // clean up after a failure must not surface as an unhandled rejection.
+  try {
     const gone = failures
       .filter((f) => f.status !== null && GONE_STATUSES.has(f.status))
       .map((f) => f.endpoint);
     if (gone.length) {
-      await supabaseAdmin.from("push_subscriptions").delete().in("endpoint", gone);
+      const { error } = await supabaseAdmin.from("push_subscriptions").delete().in("endpoint", gone);
+      if (!error) result.pruned = gone.length;
     }
 
-    // Counted by status rather than logged one line per failure: a single wrong
-    // VAPID key fails every subscription at once, and thousands of identical
-    // lines would bury the one number that matters.
-    const byStatus: Record<string, number> = {};
-    for (const f of failures) {
-      const key = f.status === null ? "network" : String(f.status);
-      byStatus[key] = (byStatus[key] ?? 0) + 1;
-    }
     console.error(
       `[push] ${failures.length}/${subs.length} deliveries failed`,
       byStatus,
-      gone.length ? `— pruned ${gone.length} dead subscription(s)` : ""
+      result.pruned ? `— pruned ${result.pruned} dead subscription(s)` : ""
     );
   } catch {
     /* best-effort */
   }
+  return result;
 }
 
 // Every pushToX records the event in the in-app feed before sending. The record
@@ -116,9 +158,14 @@ export type AdminNotificationCategory =
   | "profile_changes"
   | "schedule_approvals";
 
-export async function pushToAdmins(payload: PushPayload, adminCategory?: AdminNotificationCategory) {
+// Returns a delivery summary. Callers that fire-and-forget ignore it; the admin
+// test button is the one that needs to know whether anything actually landed.
+export async function pushToAdmins(
+  payload: PushPayload,
+  adminCategory?: AdminNotificationCategory
+): Promise<PushResult> {
   await recordNotification({ kind: "admins", adminCategory }, payload);
-  if (!(await notificationsEnabled())) return;
+  if (!(await notificationsEnabled())) return { ...EMPTY_RESULT };
   // Respect per-category admin notification toggles (default on when unset).
   if (adminCategory) {
     const { data: settings } = await supabaseAdmin
@@ -126,18 +173,19 @@ export async function pushToAdmins(payload: PushPayload, adminCategory?: AdminNo
       .select("admin_notification_prefs")
       .maybeSingle();
     const prefs = settings?.admin_notification_prefs as Record<string, boolean> | null | undefined;
-    if (prefs && prefs[adminCategory] === false) return;
+    if (prefs && prefs[adminCategory] === false) return { ...EMPTY_RESULT };
   }
   const { data: staff } = await supabaseAdmin
     .from("staff_roles")
     .select("discord_id");
   const ids = (staff ?? []).map((s) => s.discord_id as string).filter(Boolean);
-  if (!ids.length) return;
+  if (!ids.length) return { ...EMPTY_RESULT };
   const { data } = await supabaseAdmin
     .from("push_subscriptions")
     .select("endpoint, p256dh, auth")
     .in("discord_id", ids);
-  if (data?.length) await sendToSubscriptions(data, payload);
+  if (!data?.length) return { ...EMPTY_RESULT };
+  return sendToSubscriptions(data, payload);
 }
 
 function filterByCategory(
