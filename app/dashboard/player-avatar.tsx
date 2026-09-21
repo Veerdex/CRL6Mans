@@ -3,9 +3,19 @@
 import type { CSSProperties } from "react";
 import { useNameDecoration } from "./name-decoration";
 import { avatarBorderFrameStyle, getAvatarBorder } from "@/app/lib/avatar-borders";
-import { avatarSrc } from "@/app/lib/avatar-url";
+import { DEFAULT_AVATAR, avatarSrc } from "@/app/lib/avatar-url";
 
 export { avatarSrc };
+
+// A stale avatar hash still builds a well-formed CDN URL, so avatarSrc can't
+// catch it — only the 404 can, and the browser paints its broken-image glyph
+// rather than falling back. The ref repeats the check instead of trusting
+// onError alone: a 404 already in the HTTP cache fires its error event before
+// React attaches the handler, and that event is simply lost.
+function fallBackToDefault(img: HTMLImageElement | null) {
+  if (!img || img.src === DEFAULT_AVATAR) return;
+  if (img.complete && img.naturalWidth === 0) img.src = DEFAULT_AVATAR;
+}
 
 interface Props {
   discordId: string | null;
@@ -48,6 +58,11 @@ export function PlayerAvatar({
         src={avatarSrc(discordId, avatar, cdnSize)}
         alt={alt}
         className="w-full h-full rounded-full object-cover"
+        ref={fallBackToDefault}
+        onError={(e) => {
+          const img = e.currentTarget;
+          if (img.src !== DEFAULT_AVATAR) img.src = DEFAULT_AVATAR;
+        }}
       />
       {resolved && (
         // Painted over the avatar, not around it: the avatar is sized to the

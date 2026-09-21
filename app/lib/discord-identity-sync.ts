@@ -10,6 +10,7 @@ export type IdentitySyncResult = {
   scanned: number;
   updated: number;
   unreachable: number;
+  failed: number;
 };
 
 /**
@@ -45,6 +46,7 @@ export async function syncDiscordIdentities(): Promise<IdentitySyncResult> {
 
   let updated = 0;
   let unreachable = 0;
+  let failed = 0;
 
   for (const [i, account] of rows.entries()) {
     if (i > 0) await new Promise((r) => setTimeout(r, REQUEST_SPACING_MS));
@@ -68,14 +70,24 @@ export async function syncDiscordIdentities(): Promise<IdentitySyncResult> {
       avatar: fresh.avatar,
       updated_at: new Date().toISOString(),
     };
+    // Counted off the write's own error, not off reaching this line: both tiers
+    // are written blind, so a rejected patch would otherwise report a clean
+    // `updated` for a row it never touched.
+    let wrote = false;
+    let refused = false;
     if (accountStale) {
-      await supabaseAdmin.from("accounts").update(patch).eq("id", account.id);
+      const { error } = await supabaseAdmin.from("accounts").update(patch).eq("id", account.id);
+      if (error) refused = true;
+      else wrote = true;
     }
     if (mirrorStale) {
-      await supabaseAdmin.from("players").update(patch).eq("account_id", account.id);
+      const { error } = await supabaseAdmin.from("players").update(patch).eq("account_id", account.id);
+      if (error) refused = true;
+      else wrote = true;
     }
-    updated++;
+    if (wrote) updated++;
+    if (refused) failed++;
   }
 
-  return { scanned: rows.length, updated, unreachable };
+  return { scanned: rows.length, updated, unreachable, failed };
 }
