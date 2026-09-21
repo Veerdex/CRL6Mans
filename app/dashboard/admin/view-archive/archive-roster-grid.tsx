@@ -64,7 +64,7 @@ export function ArchiveRosterGrid({ teams }: { teams: TournamentArchive["teams"]
                     roster.map((player) => (
                       <div key={player.username} className="flex items-center gap-3 px-5 py-3">
                         <div className="w-7 h-7 rounded-full bg-zinc-700 shrink-0" />
-                        <span className="flex-1 text-sm text-zinc-200 truncate">
+                        <span className="flex-1 text-sm text-zinc-200 whitespace-nowrap min-w-0">
                           <PlayerName displayName={player.displayName} username={player.username} discordId={player.discordId} />
                           {player.isCaptain && (
                             <span className="ml-1.5 text-xs font-semibold text-yellow-400">C</span>

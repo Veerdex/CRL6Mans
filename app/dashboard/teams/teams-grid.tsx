@@ -143,7 +143,7 @@ export function TeamsGrid({ teams, byTeam, avgMmr, myTeamId, initialQuery = "" }
                           className="flex items-center gap-3 px-5 py-3 hover:bg-zinc-800 transition-colors group"
                         >
                           <PlayerAvatar discordId={player.discord_id} avatar={player.avatar} username={player.username} className="w-7 h-7" />
-                          <span className="flex-1 text-sm text-zinc-200 group-hover:text-white transition-colors truncate">
+                          <span className="flex-1 text-sm text-zinc-200 group-hover:text-white transition-colors whitespace-nowrap min-w-0">
                             <PlayerName displayName={player.display_name} username={player.username} discordId={player.discord_id} />
                             {player.is_captain && (
                               <span className="ml-1.5 text-xs font-semibold text-yellow-400">C</span>

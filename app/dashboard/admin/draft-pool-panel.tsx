@@ -69,7 +69,7 @@ function DraftPoolRow({ entry }: { entry: DraftPoolEntry }) {
     <div className="flex items-center gap-3 px-4 py-3 flex-wrap bg-zinc-900 border border-zinc-800 rounded-xl">
       <Avatar discordId={entry.discord_id} avatar={entry.avatar} username={entry.username} />
 
-      <span className="flex-1 text-sm font-medium text-zinc-200 truncate min-w-0">
+      <span className="flex-1 text-sm font-medium text-zinc-200 whitespace-nowrap min-w-0">
         <PlayerName displayName={entry.display_name} username={entry.username} discordId={entry.discord_id} />
       </span>
 
@@ -132,7 +132,7 @@ function TournamentEntryRow({ tournamentId, entry }: { tournamentId: string; ent
   return (
     <div className="flex items-center gap-2 px-3 py-2 flex-wrap bg-zinc-800/60 border border-zinc-700/60 rounded-lg">
       <Avatar discordId={entry.discordId} avatar={entry.avatar} username={entry.username} />
-      <span className="flex-1 text-sm text-zinc-200 truncate min-w-0">
+      <span className="flex-1 text-sm text-zinc-200 whitespace-nowrap min-w-0">
         <PlayerName displayName={entry.displayName} username={entry.username} discordId={entry.discordId} />
       </span>
       {confirming ? (

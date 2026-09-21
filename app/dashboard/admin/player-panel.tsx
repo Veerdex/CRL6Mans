@@ -281,7 +281,7 @@ function PlayerRow({
           href={player.tracker_url || undefined}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex-1 text-sm font-medium text-zinc-200 truncate min-w-0 hover:text-indigo-400 transition-colors"
+          className="flex-1 text-sm font-medium text-zinc-200 whitespace-nowrap min-w-0 hover:text-indigo-400 transition-colors"
         >
           <PlayerName displayName={player.display_name} username={username} discordId={player.discord_id} />
         </a>

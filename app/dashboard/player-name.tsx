@@ -73,6 +73,11 @@ export function PlayerName({
         // which shaved that ink off. Padding widens what's kept; the matching
         // negative margin hands the space straight back, so the name occupies
         // exactly the box it did before on every side, decorated or not.
+        //
+        // This is also why no caller wraps a PlayerName in its own `truncate`:
+        // that wrapper's overflow:hidden would clip the outline right back off
+        // at the same edge. Row wrappers use `whitespace-nowrap min-w-0` and
+        // leave the ellipsis to this span, which is the one sized to the text.
         style={{
           ...fx.style,
           padding: `${OUTLINE_EM}em`,
