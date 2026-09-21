@@ -396,9 +396,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </a>
             )}
             <NotificationButton />
-            {/* Labelled tabs first so the icon-only pair clusters at the right
-                edge, matching where the sidebar puts it. */}
-            {[...labelledBottomItems, ...iconOnlyBottomItems].map((item) => (
+            {/* Icon-only pair leads the cluster, matching the sidebar footer. */}
+            {[...iconOnlyBottomItems, ...labelledBottomItems].map((item) => (
               <NavLink
                 key={item.href}
                 href={item.href}
@@ -519,14 +518,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
         {bottomNavItems.length > 0 && (
           <div className="px-3 pb-2 space-y-1">
-            {labelledBottomItems.map((item) => (
-              <NavLink key={item.href} href={item.href}>
-                {item.icon}
-                {item.label}
-                {item.alert && <NavAlertBadge />}
-                {item.badgeCount ? <NavCountBadge count={item.badgeCount} /> : null}
-              </NavLink>
-            ))}
             {/* Side by side rather than stacked: a lone icon on its own
                 full-width row reads as a label that failed to render. */}
             {iconOnlyBottomItems.length > 0 && (
@@ -547,6 +538,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 ))}
               </div>
             )}
+            {labelledBottomItems.map((item) => (
+              <NavLink key={item.href} href={item.href}>
+                {item.icon}
+                {item.label}
+                {item.alert && <NavAlertBadge />}
+                {item.badgeCount ? <NavCountBadge count={item.badgeCount} /> : null}
+              </NavLink>
+            ))}
           </div>
         )}
 
