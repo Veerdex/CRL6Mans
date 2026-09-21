@@ -3520,8 +3520,7 @@ export async function execReportMatchResult(
 
   // Resolve wagers for this match
   // A forfeit didn't actually play out, so refund all wagers instead of settling them.
-  if (forfeit) voidMatchWagers(matchId).catch(() => {});
-  else resolveMatchWagers(matchId, homeScore, awayScore).catch(() => {});
+  await settleMatchWagers(matchId, forfeit, homeScore, awayScore);
 
   return {
     ok: true,
@@ -3614,32 +3613,95 @@ export async function execDisqualifyTeam(teamId: string): Promise<{ ok: boolean;
   return { ok: true, message: "Team disqualified." };
 }
 
+// Settling staked coins happens exactly once, here, and nothing re-runs it. The
+// call used to be fire-and-forget with a swallowed error, so a transient failure
+// left every bet on the match pending forever -- coins neither paid out nor
+// returned, with nothing logged.
+//
+// It cannot be swept up afterwards either: `forfeit` is a parameter and is never
+// written to the match row, so after the fact nothing can tell a refund from a
+// settlement, and guessing wrong pays out bets on a game that was never played.
+// This is the only moment that distinction is known, so it is awaited rather
+// than left to float -- a match report is worth a few hundred ms to not lose
+// track of players' coins.
+//
+// Both settlement paths filter on status "pending", so the retry can only touch
+// wagers the failed attempt didn't already settle.
+async function settleMatchWagers(
+  matchId: string,
+  forfeit: boolean,
+  homeScore: number,
+  awayScore: number,
+): Promise<void> {
+  const settle = () =>
+    forfeit ? voidMatchWagers(matchId) : resolveMatchWagers(matchId, homeScore, awayScore);
+
+  try {
+    await settle();
+    return;
+  } catch {
+    /* one retry below — most failures here are a transient connection blip */
+  }
+
+  try {
+    await settle();
+  } catch (e) {
+    // Nothing downstream can recover this, so it is escalated to a human with
+    // the one fact that is about to be lost: whether it needed a refund.
+    console.error(`[wagers] settlement failed for match ${matchId} (${forfeit ? "void" : "resolve"})`, e);
+    pushToAdmins({
+      title: "Wager settlement failed",
+      body: `Match ${matchId} could not ${forfeit ? "refund" : "settle"} its wagers after two attempts. Staked coins are still pending and need a manual fix.`,
+      url: "/dashboard/admin",
+      category: "announcement",
+    }).catch(() => {});
+  }
+}
+
+// Supabase hands a failed write back as an error field on a resolved promise, so
+// a batch of them fails silently unless every result is inspected. Only the first
+// error is reported: they are almost always the same outage seen N times.
+function throwOnAny(results: { error: { message: string } | null }[], what: string): void {
+  const first = results.find((r) => r.error);
+  if (first) throw new Error(`${what}: ${first.error!.message}`);
+}
+
 // Refunds every pending wager/parlay on a forfeited match (the game wasn't played,
 // so over/under and moneyline bets can't fairly be settled).
 async function voidMatchWagers(matchId: string): Promise<void> {
-  const { data: wagers } = await supabaseAdmin
+  // Thrown rather than shrugged off: supabase reports a failed read as an error
+  // field, not an exception, so discarding it made a query failure look exactly
+  // like "this match had no bets" and settle nothing, silently.
+  const { data: wagers, error } = await supabaseAdmin
     .from("wagers").select("id, player_id, amount").eq("match_id", matchId).eq("status", "pending");
+  if (error) throw new Error(`reading pending wagers: ${error.message}`);
   if ((wagers ?? []).length) {
-    await Promise.all(wagers!.map((w) =>
+    // The status flip stays ahead of the refund on purpose. Marking a wager void
+    // takes it out of the "pending" filter, so a retry skips it and can never pay
+    // the same stake twice; the cost is that a refund failing here leaves a void
+    // wager that was never credited, which is why the error is raised instead of
+    // dropped -- that is the case a human has to go fix by hand.
+    throwOnAny(await Promise.all(wagers!.map((w) =>
       supabaseAdmin.from("wagers").update({ status: "void", payout_amount: w.amount }).eq("id", w.id),
-    ));
-    await Promise.all(wagers!.map((w) =>
+    )), "voiding wagers");
+    throwOnAny(await Promise.all(wagers!.map((w) =>
       supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: w.player_id, coin_amount: w.amount }),
-    ));
+    )), "refunding wager stakes");
   }
 
   // Any parlay that includes this match is voided in full and the stake refunded.
-  const { data: legs } = await supabaseAdmin
+  const { data: legs, error: legsError } = await supabaseAdmin
     .from("parlay_legs").select("parlay_id").eq("match_id", matchId).eq("status", "pending");
+  if (legsError) throw new Error(`reading pending parlay legs: ${legsError.message}`);
   const parlayIds = [...new Set((legs ?? []).map((l) => l.parlay_id as string))];
   for (const pid of parlayIds) {
     const { data: p } = await supabaseAdmin.from("parlays").select("player_id, amount, status").eq("id", pid).single();
     if (!p || p.status !== "pending") continue;
-    await Promise.all([
+    throwOnAny(await Promise.all([
       supabaseAdmin.from("parlays").update({ status: "void" }).eq("id", pid),
       supabaseAdmin.from("parlay_legs").update({ status: "void" }).eq("parlay_id", pid),
       supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: p.player_id, coin_amount: p.amount }),
-    ]);
+    ]), `voiding parlay ${pid}`);
   }
 }
 
@@ -3690,11 +3752,15 @@ function evaluateBetWon(betType: string, homeWon: boolean, totalGames: number): 
 }
 
 async function resolveMatchWagers(matchId: string, homeScore: number, awayScore: number): Promise<void> {
-  const { data: wagers } = await supabaseAdmin
+  // Same reason as voidMatchWagers: a discarded error here is indistinguishable
+  // from a match nobody bet on, and the early return below would then leave every
+  // stake pending with no second chance to notice.
+  const { data: wagers, error } = await supabaseAdmin
     .from("wagers")
     .select("id, player_id, bet_type, amount, odds_multiplier")
     .eq("match_id", matchId)
     .eq("status", "pending");
+  if (error) throw new Error(`reading pending wagers: ${error.message}`);
 
   if (!(wagers ?? []).length) return;
   const rows = wagers!;
@@ -3761,7 +3827,12 @@ async function resolveMatchWagers(matchId: string, homeScore: number, awayScore:
     }
   }
 
-  const updates: PromiseLike<unknown>[] = [];
+  // Status updates and coin credits are deliberately two awaits, not one combined
+  // Promise.all. Inside a single batch their order is undefined, so a credit could
+  // land while the update that takes the wager out of "pending" fails -- and the
+  // retry in settleMatchWagers would then pay the same win a second time. Settled
+  // first, paid second: a retry can only ever miss a payout, never duplicate one.
+  const updates: PromiseLike<{ error: { message: string } | null }>[] = [];
   if (isPool) {
     // Payout varies per wager (proportional to stake), so pool-mode rows are
     // updated individually rather than bulk .in()-updated with one shared status.
@@ -3779,18 +3850,24 @@ async function resolveMatchWagers(matchId: string, homeScore: number, awayScore:
     if (lostIds.length) updates.push(supabaseAdmin.from("wagers").update({ status: "lost" }).in("id", lostIds));
     if (voidIds.length) updates.push(supabaseAdmin.from("wagers").update({ status: "void" }).in("id", voidIds));
   }
-  for (const [playerId, gain] of Object.entries(gainByPlayer)) {
-    updates.push(supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: playerId, coin_amount: gain }));
-  }
+  throwOnAny(await Promise.all(updates), "settling wagers");
 
-  await Promise.all(updates);
+  throwOnAny(
+    await Promise.all(
+      Object.entries(gainByPlayer).map(([playerId, gain]) =>
+        supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: playerId, coin_amount: gain }),
+      ),
+    ),
+    "paying out wagers",
+  );
 
   // Resolve parlay legs for this match
-  const { data: parlayLegs } = await supabaseAdmin
+  const { data: parlayLegs, error: legsError } = await supabaseAdmin
     .from("parlay_legs")
     .select("id, parlay_id, bet_type")
     .eq("match_id", matchId)
     .eq("status", "pending");
+  if (legsError) throw new Error(`reading pending parlay legs: ${legsError.message}`);
 
   if ((parlayLegs ?? []).length) {
     const legWonIds: string[] = [];
@@ -3811,10 +3888,10 @@ async function resolveMatchWagers(matchId: string, homeScore: number, awayScore:
       else legLostIds.push(leg.id);
     }
 
-    const legUpdates: PromiseLike<unknown>[] = [];
+    const legUpdates: PromiseLike<{ error: { message: string } | null }>[] = [];
     if (legWonIds.length) legUpdates.push(supabaseAdmin.from("parlay_legs").update({ status: "won" }).in("id", legWonIds));
     if (legLostIds.length) legUpdates.push(supabaseAdmin.from("parlay_legs").update({ status: "lost" }).in("id", legLostIds));
-    await Promise.all(legUpdates);
+    throwOnAny(await Promise.all(legUpdates), "settling parlay legs");
 
     const affectedParlayIds = [...new Set(parlayLegs!.map((l) => l.parlay_id as string))];
     for (const parlayId of affectedParlayIds) {
@@ -3836,10 +3913,10 @@ async function resolveMatchWagers(matchId: string, homeScore: number, awayScore:
           .single();
         if (p) {
           const payout = Math.round(p.amount * Number(p.combined_multiplier));
-          await Promise.all([
+          throwOnAny(await Promise.all([
             supabaseAdmin.from("parlays").update({ status: "won" }).eq("id", parlayId),
             supabaseAdmin.rpc("increment_crl_coins", { player_discord_id: p.player_id, coin_amount: payout }),
-          ]);
+          ]), `paying out parlay ${parlayId}`);
         }
       }
     }
