@@ -163,10 +163,16 @@ export function AdminNotificationToggles({ initial }: { initial: Record<string, 
 
         {result && (
           <div className="border-t border-zinc-700 pt-3 space-y-1 text-xs">
-            <p className={result.failed ? "text-amber-400" : "text-emerald-400"}>
-              {result.attempted === 0
-                ? "No staff devices are subscribed — nothing was sent."
-                : `${result.delivered} of ${result.attempted} device${result.attempted === 1 ? "" : "s"} accepted the push.`}
+            <p className={result.failed || result.skipped ? "text-amber-400" : "text-emerald-400"}>
+              {result.skipped === "notifications-off"
+                ? "Nothing was sent — push is switched off in this browser (the Notifications toggle in Testing & Tools). That switch is a cookie on your own browser, so it silences sends you trigger, for everyone."
+                : result.skipped === "category-off"
+                  ? "Nothing was sent — this notification category is switched off above."
+                  : result.skipped === "no-staff"
+                    ? "Nothing was sent — no staff accounts exist to notify."
+                    : result.skipped === "no-subscriptions"
+                      ? "Nothing was sent — no staff device is subscribed to push at all."
+                      : `${result.delivered} of ${result.attempted} device${result.attempted === 1 ? "" : "s"} accepted the push.`}
             </p>
             {result.failed > 0 && (
               <p className="text-zinc-400">

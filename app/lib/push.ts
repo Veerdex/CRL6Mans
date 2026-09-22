@@ -56,6 +56,10 @@ export type PushResult = {
   // to that person's browser, and this ends up on a screen.
   failedHosts: string[];
   deliveredHosts: string[];
+  // Why nothing was sent, when nothing was. Without this every reason collapses
+  // into attempted: 0, and "nobody is subscribed" would be reported for a send
+  // that was switched off in the caller's own browser.
+  skipped?: "notifications-off" | "category-off" | "no-staff" | "no-subscriptions";
 };
 
 function hostOf(endpoint: string): string {
@@ -165,7 +169,7 @@ export async function pushToAdmins(
   adminCategory?: AdminNotificationCategory
 ): Promise<PushResult> {
   await recordNotification({ kind: "admins", adminCategory }, payload);
-  if (!(await notificationsEnabled())) return { ...EMPTY_RESULT };
+  if (!(await notificationsEnabled())) return { ...EMPTY_RESULT, skipped: "notifications-off" };
   // Respect per-category admin notification toggles (default on when unset).
   if (adminCategory) {
     const { data: settings } = await supabaseAdmin
@@ -173,18 +177,18 @@ export async function pushToAdmins(
       .select("admin_notification_prefs")
       .maybeSingle();
     const prefs = settings?.admin_notification_prefs as Record<string, boolean> | null | undefined;
-    if (prefs && prefs[adminCategory] === false) return { ...EMPTY_RESULT };
+    if (prefs && prefs[adminCategory] === false) return { ...EMPTY_RESULT, skipped: "category-off" };
   }
   const { data: staff } = await supabaseAdmin
     .from("staff_roles")
     .select("discord_id");
   const ids = (staff ?? []).map((s) => s.discord_id as string).filter(Boolean);
-  if (!ids.length) return { ...EMPTY_RESULT };
+  if (!ids.length) return { ...EMPTY_RESULT, skipped: "no-staff" };
   const { data } = await supabaseAdmin
     .from("push_subscriptions")
     .select("endpoint, p256dh, auth")
     .in("discord_id", ids);
-  if (!data?.length) return { ...EMPTY_RESULT };
+  if (!data?.length) return { ...EMPTY_RESULT, skipped: "no-subscriptions" };
   return sendToSubscriptions(data, payload);
 }
 
