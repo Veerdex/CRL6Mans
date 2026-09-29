@@ -80,11 +80,12 @@ app/
 
 ## Auth flow
 
-1. `GET /api/auth/discord` — redirects to Discord OAuth, sets `oauth_state` cookie.
+1. `GET /api/auth/discord` — redirects to Discord OAuth, sets `oauth_state` cookie. Sends `prompt=none` so a returning player never sees the authorize screen again, plus an `oauth_silent` cookie marking the attempt as silent. Discord **errors instead of prompting** when it can't be silent (never authorized, authorization revoked, or not signed in to Discord in that browser), so the callback answers a failed silent attempt by retrying at `?consent=1`, which omits `prompt` and clears the cookie. Without that retry a first-time player would dead-end on `/login?error=cancelled`.
 2. `GET /api/auth/discord/callback` — exchanges code, fetches Discord user, calls `createSession()`, mirrors saved theme into `theme` cookie, redirects to `/dashboard`.
 3. Every protected page/layout calls `decrypt(cookieStore.get("session")?.value)` and redirects to `/login` on null.
-4. Session payload: `{ userId: string (Discord snowflake), username, avatar, expiresAt }`.
-5. Sessions expire after 7 days.
+4. Session payload: `{ userId: string (Discord snowflake), username, avatar, expiresAt, sessionVersion, authTime }`.
+5. **Sessions slide.** A token lasts 7 days, and `proxy.ts` re-issues it once past the midpoint — so an active player is never signed out mid-use, and only a genuinely idle one is. `authTime` records the last real Discord authentication and is carried through renewals unchanged, capping the whole chain at `SESSION_MAX_AGE_MS` (30 days). **That cap is load-bearing:** the OAuth callback is the only writer of `accounts.mfa_enabled`, which gates the admin panel, and the only thing that refreshes the username and avatar the token carries — so unbounded renewal would let a staff member who turned off Discord 2FA keep admin access forever. Past the cap the token is simply not renewed and expires on its own; it is not treated as revoked.
+6. Renewal is also where **ban/kick revocation actually fires**: `renewSession` calls `verifySessionCurrent` before extending, and a `session_version` mismatch clears the cookie. Checking it per-renewal rather than per-request keeps it to one query every few days per player, so revocation lands within the renewal interval rather than instantly.
 
 ## Staff hierarchy
 
