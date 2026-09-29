@@ -23,7 +23,7 @@ import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft
 import { draftLabel, draftStartEmbed, onTheClockEmbed, pickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "./solo-team";
 import { notifyMatchChannel } from "./match-notifications";
-import { createClip } from "./clip-submit";
+import { announceClip, clipsChannelId, createClip } from "./clip-submit";
 import { kickAccount, banAccount, findAccountByDiscordId, DEFAULT_KICK_TIMEOUT_MS, type RevokedPatron } from "./moderation";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
@@ -1852,10 +1852,11 @@ function ratingCmd(inputs: Array<[string, number]>) {
 }
 
 // /postclip — the Discord entry point to the same submission the Media tab
-// uses. Everything that can reject the clip runs before the insert, so an
-// invalid link leaves no row and posts no message. The clips channel message
-// is plain content with the URL last, so Discord renders its own player;
-// the Clip of the Week cron deliberately uses an embed instead.
+// uses, posting the same message through announceClip. Everything that can
+// reject the clip runs before the insert, so an invalid link leaves no row and
+// posts no message. The missing-channel check stays ahead of createClip here
+// and not on the Media tab side: there the clip still has a home without
+// Discord, but this command's only confirmation is the post itself.
 //
 // The 60-second and conduct confirmations are a Media tab feature only — here
 // they are a line in the command's description, since a tick-box a player
@@ -1870,12 +1871,7 @@ async function postClip(userId: string, url: string, title: string) {
     return ephemeralReply("❌ Only approved players can post clips.");
   }
 
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings")
-    .select("clips_channel_id")
-    .single();
-
-  const channelId = settings?.clips_channel_id as string | null;
+  const channelId = await clipsChannelId();
   if (!channelId) {
     return ephemeralReply("❌ No clips channel is set. An admin has to run `/admin setclipschannel` in the clips channel first.");
   }
@@ -1884,15 +1880,7 @@ async function postClip(userId: string, url: string, title: string) {
   if (!result.clip) return ephemeralReply(`❌ ${result.error}`);
   const clip = result.clip;
 
-  // The title is player-typed, so the submitter's own mention is the only one
-  // let through — otherwise a title of "@everyone" pings the server.
-  const posted = await sendChannelMessage(
-    channelId,
-    `🎬 **${clip.title}** — <@${userId}>\n${clip.url}`,
-    undefined,
-    { parse: [], users: [userId] }
-  );
-  if (!posted) {
+  if (!(await announceClip(channelId, clip, userId))) {
     return ephemeralReply(`⚠️ Added **${clip.title}** to the Media tab, but the message in <#${channelId}> failed to send.`);
   }
   // The post in the clips channel is the confirmation, so nothing is said back.

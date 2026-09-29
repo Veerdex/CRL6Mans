@@ -7,7 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModerator } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { isLinkOnlyPlatform, type ClipPlatform } from "@/app/lib/clip-embed";
-import { createClip, MAX_TITLE_LENGTH } from "@/app/lib/clip-submit";
+import { announceClip, clipsChannelId, createClip, MAX_TITLE_LENGTH } from "@/app/lib/clip-submit";
 
 async function getSession() {
   const cookieStore = await cookies();
@@ -24,7 +24,7 @@ async function getApprovedPlayerId(discordId: string): Promise<string | null> {
   return player.id;
 }
 
-export async function submitClip(title: string, url: string, durationConfirmed: boolean, appropriateConfirmed: boolean): Promise<{ ok?: boolean; error?: string }> {
+export async function submitClip(title: string, url: string, durationConfirmed: boolean, appropriateConfirmed: boolean): Promise<{ ok?: boolean; error?: string; warning?: string }> {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
   const playerId = await getApprovedPlayerId(session.userId);
@@ -39,11 +39,21 @@ export async function submitClip(title: string, url: string, durationConfirmed: 
     if (!appropriateConfirmed) return { error: "You must confirm the clip is appropriate for the league community." };
   }
 
-  const { error } = await createClip(playerId, title, url);
-  if (error) return { error };
+  const result = await createClip(playerId, title, url);
+  if (!result.clip) return { error: result.error };
+
+  // Posted to the clips channel exactly as /postclip does. A send that doesn't
+  // land is reported rather than swallowed, but never fails the submission: the
+  // clip already exists and the Media tab is its home. An unset clips channel is
+  // a config state a player can do nothing about, so it passes quietly.
+  let warning: string | undefined;
+  const channelId = await clipsChannelId();
+  if (channelId && !(await announceClip(channelId, result.clip, session.userId))) {
+    warning = "Your clip was added to the Media tab, but posting it to Discord failed.";
+  }
 
   revalidatePath("/dashboard/media");
-  return { ok: true };
+  return { ok: true, warning };
 }
 
 export async function toggleClipLike(clipId: string): Promise<{ ok?: boolean; error?: string }> {

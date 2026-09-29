@@ -339,6 +339,7 @@ export function MediaFeed({
   const [durationConfirmed, setDurationConfirmed] = useState(false);
   const [appropriateConfirmed, setAppropriateConfirmed] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitNotice, setSubmitNotice] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isToggling, startToggleTransition] = useTransition();
@@ -401,12 +402,16 @@ export function MediaFeed({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
+    setSubmitNotice(null);
     startTransition(async () => {
       const result = await submitClip(title, url, durationConfirmed, appropriateConfirmed);
       if (result?.error) {
         setSubmitError(result.error);
         return;
       }
+      // The clip was created, so the form clears either way; a warning only
+      // reports that the Discord half of it didn't land.
+      setSubmitNotice(result?.warning ?? null);
       setTitle("");
       setUrl("");
       setDurationConfirmed(false);
@@ -474,6 +479,7 @@ export function MediaFeed({
             </div>
           )}
           {submitError && <p className="text-sm text-red-400">{submitError}</p>}
+          {submitNotice && <p className="text-sm text-amber-400">{submitNotice}</p>}
           <button
             type="submit"
             disabled={isPending || !title.trim() || !url.trim() || (confirmationsEnabled && (!durationConfirmed || !appropriateConfirmed))}

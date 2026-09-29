@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "./supabase";
+import { sendChannelMessage } from "./discord-api";
 import { classifyClipUrl, isLinkOnlyPlatform, type ClipPlatform } from "./clip-embed";
 import { fetchClipThumbnail } from "./link-preview";
 import { computeClipExpiry } from "./clip-schedule";
@@ -20,6 +21,8 @@ export type CreatedClip = {
 // bot's /postclip both go through it so the URL rules, the per-player cap, the
 // dedup message and the expiry can't drift apart between the two entry points.
 // Every failure returns before the insert, so a rejected clip leaves no trace.
+// The clips-channel message both of them post is announceClip below, which lives
+// here for the same reason.
 export async function createClip(
   playerId: string,
   title: string,
@@ -71,4 +74,33 @@ export async function createClip(
       platform: classified.platform,
     },
   };
+}
+
+export async function clipsChannelId(): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("league_settings")
+    .select("clips_channel_id")
+    .single();
+  return (data?.clips_channel_id as string | null) ?? null;
+}
+
+// Plain content with the URL last and on its own line, so Discord renders its
+// own player for it — the Clip of the Week crowning deliberately uses an embed
+// instead. The title is player-typed, so the submitter's own mention is the only
+// one let through, or a title of "@everyone" pings the server through the bot.
+// That guard is owned here rather than passed in so neither entry point can
+// forget it. Returns whether the message landed; the caller decides whether a
+// failure is worth surfacing.
+export async function announceClip(
+  channelId: string,
+  clip: CreatedClip,
+  discordUserId: string,
+): Promise<boolean> {
+  const posted = await sendChannelMessage(
+    channelId,
+    `🎬 **${clip.title}** — <@${discordUserId}>\n${clip.url}`,
+    undefined,
+    { parse: [], users: [discordUserId] }
+  );
+  return posted !== null;
 }
