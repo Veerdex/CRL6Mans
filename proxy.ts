@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { decrypt } from "@/app/lib/session";
+import {
+  decrypt,
+  renewSession,
+  sessionCookieOptions,
+  shouldRenewSession,
+  type RenewedSession,
+} from "@/app/lib/session";
 import { getBaseUrl } from "@/app/lib/base-url";
 
 const protectedRoutes = ["/dashboard"];
@@ -67,14 +73,36 @@ export async function proxy(req: NextRequest) {
 
   const isProtected = protectedRoutes.some((r) => path.startsWith(r));
 
-  const session = await decrypt(req.cookies.get("session")?.value);
+  let session = await decrypt(req.cookies.get("session")?.value);
+
+  // Login stamps a fixed expiry and nothing else ever re-issues it, so without
+  // a sliding renewal a player is signed out on a timer that started whenever
+  // they last logged in, no matter how much they've used the site since — and
+  // once per browser, because the cookie is per-browser.
+  let renewed: RenewedSession | null = null;
+  let revoked = false;
+  if (session && shouldRenewSession(session)) {
+    renewed = await renewSession(session);
+    if (!renewed) {
+      revoked = true;
+      session = null;
+    }
+  }
+
+  // Only touches the cookie when there's something to say, so an anonymous
+  // visitor isn't handed a pointless Set-Cookie on every page.
+  const applySession = (res: NextResponse) => {
+    if (renewed) res.cookies.set("session", renewed.token, sessionCookieOptions(renewed.expiresAt));
+    else if (revoked) res.cookies.delete("session");
+    return res;
+  };
 
   if (isProtected && !session?.userId) {
-    return NextResponse.redirect(new URL("/login", req.nextUrl));
+    return applySession(NextResponse.redirect(new URL("/login", req.nextUrl)));
   }
 
   if (path === "/login" && session?.userId) {
-    return NextResponse.redirect(new URL("/dashboard", req.nextUrl));
+    return applySession(NextResponse.redirect(new URL("/dashboard", req.nextUrl)));
   }
 
   // Fresh nonce per request. It's passed in via the request headers so the
@@ -88,7 +116,7 @@ export async function proxy(req: NextRequest) {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("content-security-policy", csp);
-  return response;
+  return applySession(response);
 }
 
 export const config = {

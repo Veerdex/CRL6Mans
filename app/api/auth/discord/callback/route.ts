@@ -18,15 +18,21 @@ export async function GET(request: NextRequest) {
 
   const cookieStore = await cookies();
 
-  const clearState = () => cookieStore.delete("oauth_state");
+  // Set only when the authorize request used prompt=none. Such an attempt fails
+  // for anyone who hasn't authorized the app (or isn't signed in to Discord in
+  // this browser), and that is not a cancellation — so ask again with the screen
+  // shown instead of dead-ending a first-time player on the login page. The
+  // retry drops the cookie, so a genuine cancel there falls through below.
+  const wasSilent = cookieStore.get("oauth_silent")?.value === "1";
 
-  if (discordError) {
-    clearState();
-    return safeRedirect(request, "/login?error=cancelled");
-  }
+  const clearState = () => {
+    cookieStore.delete("oauth_state");
+    cookieStore.delete("oauth_silent");
+  };
 
-  if (!code) {
+  if (discordError || !code) {
     clearState();
+    if (wasSilent) return safeRedirect(request, "/api/auth/discord?consent=1");
     return safeRedirect(request, "/login?error=cancelled");
   }
 
