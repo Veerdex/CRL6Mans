@@ -45,6 +45,9 @@ next-env.d.ts
 .idea/
 .vscode/
 
+# Standalone game prototype — has its own package.json and Vite build
+/game-proto
+
 # Local player exports (contain Discord ids)
 player-names.csv
 guild-members.csv
