@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createSession } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { getBaseUrl } from "@/app/lib/base-url";
+import { hasSeenWelcome, WELCOME_SEEN_COOKIE, WELCOME_SEEN_MAX_AGE } from "@/app/dashboard/welcome/welcome-seen";
 
 // This prevents host-header injection from affecting redirect destinations.
 function safeRedirect(request: NextRequest, path: string) {
@@ -119,6 +120,12 @@ export async function GET(request: NextRequest) {
       path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax",
       secure: isProduction,
     });
+    if (await hasSeenWelcome(user.id, undefined)) {
+      cookieStore.set(WELCOME_SEEN_COOKIE, "1", {
+        path: "/", maxAge: WELCOME_SEEN_MAX_AGE, sameSite: "lax",
+        secure: isProduction,
+      });
+    }
 
     return safeRedirect(request, "/dashboard");
   } catch (err) {

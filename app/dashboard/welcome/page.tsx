@@ -1,11 +1,15 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { APP_NAME } from "@/app/lib/constants";
+import { decrypt } from "@/app/lib/session";
 import { dismissWelcome } from "./actions";
+import { hasSeenWelcome, WELCOME_SEEN_COOKIE } from "./welcome-seen";
 
 export default async function WelcomePage() {
   const cookieStore = await cookies();
-  if (cookieStore.get("welcome_seen")?.value === "1") redirect("/dashboard");
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId) redirect("/login");
+  if (await hasSeenWelcome(session.userId, cookieStore.get(WELCOME_SEEN_COOKIE)?.value)) redirect("/dashboard");
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto space-y-6">

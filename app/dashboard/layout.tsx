@@ -10,6 +10,7 @@ import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
 import { NavAlertBadge, NavCountBadge } from "./nav-alert-badge";
 import { getUnreadCount } from "@/app/lib/notifications";
 import { applyNavTabOverrides } from "@/app/lib/nav-tabs";
+import { hasSeenWelcome, WELCOME_SEEN_COOKIE } from "./welcome/welcome-seen";
 import { AppTitle } from "./app-title";
 import MobileNav from "./mobile-nav";
 import { ServiceWorkerRegistrar } from "./sw-register";
@@ -225,7 +226,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const userId = session!.userId;
 
   const navLayout = cookieStore.get("nav_layout")?.value === "topbar" ? "topbar" : "sidebar";
-  const welcomeSeen = cookieStore.get("welcome_seen")?.value === "1";
 
   // Every fetch the chrome needs, in one bundle. app/dashboard/layout-data.ts
   // holds the LOAD_MODE switch that decides whether they run in stages or all
@@ -306,7 +306,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   navKeys = applyNavTabOverrides(navKeys, settings.navTabOverrides);
 
   // Onboarding tab — shown until the player dismisses it ("I got it!").
-  if (!welcomeSeen && !isGuest) navKeys.unshift("welcome");
+  if (!isGuest && !(await hasSeenWelcome(userId, cookieStore.get(WELCOME_SEEN_COOKIE)?.value))) {
+    navKeys.unshift("welcome");
+  }
   if (admin) navKeys.push("admin");
 
   // While a tournament is running, the "Season" tab stands in for it —
