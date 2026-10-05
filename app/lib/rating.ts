@@ -82,6 +82,7 @@ export function playerRatingFromRow(p: PlayerRatingRow): number {
 export function initialTeamRating(playerRatings: number[]): number {
   const finite = playerRatings.filter((v) => Number.isFinite(v) && v > 0);
   const base = finite.length > 0 ? finite : [1200];
+  if (base.length === 2) return twoPlayerTeamRating(base[0], base[1]);
   const avg = base.reduce((s, v) => s + v, 0) / base.length;
   const padded = [...base];
   while (padded.length < 3) padded.push(avg);
@@ -89,6 +90,19 @@ export function initialTeamRating(playerRatings: number[]): number {
 
   const topTwoCore = powerMean([strongest, second], TOP_TWO_POWER);
   return (1 - WEAKEST_WEIGHT) * topTwoCore + WEAKEST_WEIGHT * weakest;
+}
+
+// 2v2 is deliberately carry-weighted: the pair's average stands in as the
+// middle player of the three-player blend, so the better player lands at
+// ~72% and the weaker at ~28% — a 2000+1600 pair rates ~1888, not 1800.
+// Spelled out rather than left to the padding above so a change to how short
+// rosters pad can't silently flatten 2v2 back to a plain average.
+function twoPlayerTeamRating(a: number, b: number): number {
+  const better = Math.max(a, b);
+  const weaker = Math.min(a, b);
+  const middle = (a + b) / 2;
+  const topTwoCore = powerMean([better, middle], TOP_TWO_POWER);
+  return (1 - WEAKEST_WEIGHT) * topTwoCore + WEAKEST_WEIGHT * weaker;
 }
 
 // Single fallback policy for "what rating should a prediction use for this
