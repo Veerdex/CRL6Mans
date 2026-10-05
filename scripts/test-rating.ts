@@ -59,6 +59,20 @@ test("initialTeamRating pads short rosters and truncates long ones", () => {
   assert.ok(Math.abs(four - topThree) < CLOSE, "a 4th, weakest player should be dropped entirely");
 });
 
+test("initialTeamRating weights a 2v2 pair ~72/28 toward the better player, not a plain average", () => {
+  const golden: [number, number, number][] = [
+    [2000, 1600, 1888.4898405283077],
+    [1991, 1522, 1860.1337249056583],
+    [1804, 1732, 1784.0073010839792],
+    [2200, 1400, 1975.9979103263536],
+  ];
+  for (const [a, b, expected] of golden) {
+    assert.ok(Math.abs(initialTeamRating([a, b]) - expected) < CLOSE, `${a}+${b}`);
+    assert.ok(Math.abs(initialTeamRating([b, a]) - expected) < CLOSE, `${b}+${a} (order-independent)`);
+  }
+  assert.ok(Math.abs(initialTeamRating([1800, 1800]) - 1800) < CLOSE, "an even pair is its own rating");
+});
+
 test("predictSeries scoreline probabilities sum to 1 across several ratings and bestOf values", () => {
   const cases: [number, number, number][] = [
     [1500, 1500, 4], [1800, 1200, 4], [1200, 1800, 4],
