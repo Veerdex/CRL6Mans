@@ -8,7 +8,7 @@ import { isGuildMember } from "@/app/lib/discord-api";
 import { isTrackerStale } from "@/app/lib/tracker";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
-import { isCurrentlyKicked } from "@/app/lib/players";
+import { isCurrentlyKicked, isModerator } from "@/app/lib/players";
 import { hasEarlySignupAccess, signupWindowOpen } from "@/app/lib/signup-window";
 
 async function currentPlayer() {
@@ -34,10 +34,10 @@ export async function joinTournament(tournamentId: string, confirmTrackerSame = 
 
   const { data: t } = await supabaseAdmin
     .from("tournaments")
-    .select("status, join_mode, signups_open, signups_closed, draft_open_at, draft_close_at, min_mmr_2v2, min_mmr_3v3, stats_enabled")
+    .select("status, join_mode, signups_open, signups_closed, draft_open_at, draft_close_at, min_mmr_2v2, min_mmr_3v3, stats_enabled, is_test")
     .eq("id", tournamentId)
     .single();
-  if (!t) return { error: "Tournament not found." };
+  if (!t || (t.is_test && !(await isModerator(player.userId)))) return { error: "Tournament not found." };
   if (t.join_mode !== "players") return { error: "This tournament uses team sign-ups." };
   if ((t as { signups_closed?: boolean }).signups_closed) return { error: "Sign-ups are closed." };
   if (!signupWindowOpen(t, await hasEarlySignupAccess(player.userId)))

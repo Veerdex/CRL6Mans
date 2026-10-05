@@ -60,6 +60,7 @@ export async function GET(request: Request) {
         url: "/dashboard",
         tag: "signups-open",
         category: "tournament",
+        testTournament: !!s.is_test,
       }).catch(() => {});
     } else if (s.signups_open && passed(s.draft_close_at)) {
       await supabaseAdmin.from("tournaments")
@@ -71,12 +72,14 @@ export async function GET(request: Request) {
         url: "/dashboard",
         tag: "signups-closed",
         category: "tournament",
+        testTournament: !!s.is_test,
       }).catch(() => {});
       pushToAdmins({
         title: `${s.name} Signups Closed`,
         body: "Tournament signups have closed.",
         url: "/dashboard/admin",
         tag: "signups-closed-admin",
+        testTournament: !!s.is_test,
       }).catch(() => {});
     }
   }
@@ -103,6 +106,7 @@ export async function GET(request: Request) {
           body: `Could not activate ${due.name}: ${res.error}`,
           url: "/dashboard/admin",
           tag: "autostart-failed",
+          testTournament: !!due.is_test,
         }).catch(() => {});
       }
     }
@@ -183,6 +187,7 @@ export async function GET(request: Request) {
           body: `Could not finalize teams: ${res.message}`,
           url: "/dashboard/admin",
           tag: "autostart-failed",
+          testTournament: !!t.is_test,
         }).catch(() => {});
       }
     }
@@ -204,12 +209,14 @@ export async function GET(request: Request) {
           url: "/dashboard/draft",
           tag: "draft-start",
           category: "draft",
+          testTournament: !!t.is_test,
         }).catch(() => {});
         pushToAdmins({
           title: "Draft Starting!",
           body: "The draft is now live.",
           url: "/dashboard/draft",
           tag: "draft-start-admin",
+          testTournament: !!t.is_test,
         }).catch(() => {});
       } else {
         pushToAdmins({
@@ -217,6 +224,7 @@ export async function GET(request: Request) {
           body: `Could not start draft: ${res.message}`,
           url: "/dashboard/admin",
           tag: "autostart-failed",
+          testTournament: !!t.is_test,
         }).catch(() => {});
       }
     }

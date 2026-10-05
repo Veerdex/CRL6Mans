@@ -211,6 +211,9 @@ function groupNavKeys(keys: string[], navMap: Record<string, NavItem>, navGroups
   return result;
 }
 
+// Tabs that only show the running event — hidden from players while it's a test.
+const EVENT_NAV_KEYS = new Set(["myteam", "teams", "draft", "season", "schedule"]);
+
 function isNavGroup(entry: TopNavEntry): entry is Extract<TopNavEntry, { items: NavItem[] }> {
   return "items" in entry;
 }
@@ -255,7 +258,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { status, teamId, isGuest } = playerInfo;
   const admin = staffRole !== null && mfaOk;
   const needsMfa = staffRole !== null && !mfaOk;
-  const { seasonActive, draftActive, activeTournamentId } = settings;
+  // A running test tournament is staff-only: for everyone else the chrome
+  // behaves as if no event were live.
+  const hideTestEvent = settings.activeTournamentIsTest && staffRole === null;
+  const { seasonActive, draftActive, activeTournamentId } = hideTestEvent
+    ? { seasonActive: false, draftActive: false, activeTournamentId: null }
+    : settings;
   const hasActiveContent = seasonActive || !!activeTournamentId;
 
   const priorityHrefs: string[] = [];
@@ -304,6 +312,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
     navKeys = ["home", "register", ...commonExtras];
   }
   navKeys = applyNavTabOverrides(navKeys, settings.navTabOverrides);
+  // After the overrides, so an admin's force-show can't reopen them.
+  if (hideTestEvent) navKeys = navKeys.filter((k) => !EVENT_NAV_KEYS.has(k));
 
   // Onboarding tab — shown until the player dismisses it ("I got it!").
   if (!isGuest && !(await hasSeenWelcome(userId, cookieStore.get(WELCOME_SEEN_COOKIE)?.value))) {

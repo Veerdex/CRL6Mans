@@ -424,7 +424,7 @@ export async function openSignups(id: string) {
     .eq("id", id);
   if (error) return { error: error.message };
 
-  const { data: tName } = await supabaseAdmin.from("tournaments").select("name").eq("id", id).single();
+  const { data: tName } = await supabaseAdmin.from("tournaments").select("name, is_test").eq("id", id).single();
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
@@ -435,6 +435,7 @@ export async function openSignups(id: string) {
     url: "/dashboard",
     tag: "signups-open",
     category: "tournament",
+    testTournament: !!tName?.is_test,
   }).catch(() => {});
 
   return { ok: true, message: "Sign-ups opened." };
@@ -442,7 +443,7 @@ export async function openSignups(id: string) {
 
 export async function closeSignups(id: string) {
   await verifyAdmin();
-  const { data: tName } = await supabaseAdmin.from("tournaments").select("name").eq("id", id).single();
+  const { data: tName } = await supabaseAdmin.from("tournaments").select("name, is_test").eq("id", id).single();
 
   const { error } = await supabaseAdmin
     .from("tournaments")
@@ -459,12 +460,14 @@ export async function closeSignups(id: string) {
     url: "/dashboard",
     tag: "signups-closed",
     category: "tournament",
+    testTournament: !!tName?.is_test,
   }).catch(() => {});
   pushToAdmins({
     title: `${tName?.name ?? "Tournament"} Signups Closed`,
     body: "Tournament signups have closed.",
     url: "/dashboard/admin",
     tag: "signups-closed-admin",
+    testTournament: !!tName?.is_test,
   }).catch(() => {});
 
   return { ok: true, message: "Sign-ups closed." };

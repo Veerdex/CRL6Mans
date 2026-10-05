@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirectIfTestTournamentHidden } from "@/app/lib/test-tournament";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
@@ -211,6 +212,7 @@ function peakMmrSub(p: Parameters<typeof playerRatingFromRow>[0]) {
 }
 
 export default async function MyTeamPage() {
+  await redirectIfTestTournamentHidden();
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");

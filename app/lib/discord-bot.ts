@@ -3,6 +3,7 @@ import { getTierPrices, getTierRoleIds, numberedPaidTiers } from "./patreon-enti
 import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfaEnabled, type StaffRole } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
+import { isActiveTournamentTest, isTestTournament } from "./test-tournament";
 import { ptDate, ptWallToUtc } from "./pt-time";
 import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView } from "./discord-api";
 import {
@@ -1289,6 +1290,7 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
   if (settings?.season_active) return { ok: false, message: "❌ Season already active." };
   const tid = settings?.active_tournament_id as string | null | undefined;
   if (!tid) return { ok: false, message: "❌ No active tournament." };
+  const testTournament = await isTestTournament(tid);
   const teamLimit: number = settings?.num_teams ?? 0;
   const teamSize = normalizeTeamSize(settings?.team_size);
   const format = settings?.season_format as { preset?: string } | null;
@@ -1338,6 +1340,7 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
       body: `Your team didn't reach the ${teamSize}-player minimum by the sign-up deadline, so it wasn't entered.`,
       url: "/dashboard",
       tag: "team-signup-too-few",
+      testTournament,
     }).catch(() => {});
   }
 
@@ -1372,6 +1375,7 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
       body: message,
       url: "/dashboard/admin",
       tag: "tournament-cancelled-admin",
+      testTournament,
     }).catch(() => {});
 
     if (allAcceptedPlayerIds.length) {
@@ -1382,6 +1386,7 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
         body: "Not enough teams signed up in time, so the tournament has been cancelled.",
         url: "/dashboard",
         tag: "tournament-cancelled",
+        testTournament,
       }).catch(() => {});
     }
 
@@ -1404,6 +1409,7 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
       body: "Your team signed up in time but didn't make the cutoff for this tournament.",
       url: "/dashboard",
       tag: "team-signup-cut",
+      testTournament,
     }).catch(() => {});
   }
 
@@ -1788,6 +1794,7 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
           url: "/dashboard/season",
           tag: "tournament-start",
           category: "tournament",
+          testTournament: isTestRun,
         }
       : {
           title: "Season Started!",
@@ -2581,6 +2588,7 @@ export async function finalizeAcceptedSeries(
     body: `Both teams accepted a ${homeScore}–${awayScore} series, but its replays contain unrecognised players.`,
     url: "/dashboard/admin",
     tag: "replay-review",
+    testTournament: await isActiveTournamentTest(),
   }).catch(() => {});
 
   notifyMatchChannel(
@@ -3484,7 +3492,7 @@ export async function execReportMatchResult(
 
         if (tournamentId) {
           const { data: t } = await supabaseAdmin
-            .from("tournaments").select("name").eq("id", tournamentId).single();
+            .from("tournaments").select("name, is_test").eq("id", tournamentId).single();
           const name = t?.name ?? "The tournament";
           pushToAllApproved({
             title: "Tournament Complete!",
@@ -3492,6 +3500,7 @@ export async function execReportMatchResult(
             url: "/dashboard/podium",
             tag: "tournament-complete",
             category: "tournament",
+            testTournament: !!t?.is_test,
           }).catch(() => {});
         } else {
           pushToAllApproved({

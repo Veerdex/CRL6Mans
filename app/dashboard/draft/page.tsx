@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirectIfTestTournamentHidden } from "@/app/lib/test-tournament";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -11,6 +12,7 @@ import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 const rankValue = playerRatingFromRow;
 
 export default async function DraftPage() {
+  await redirectIfTestTournamentHidden();
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
 

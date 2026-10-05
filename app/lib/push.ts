@@ -2,6 +2,8 @@ import webpush from "web-push";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "./supabase";
 import { recordNotification } from "./notifications";
+import { developerDiscordIds } from "./players";
+import { isActiveTournamentTest } from "./test-tournament";
 
 webpush.setVapidDetails(
   `mailto:${process.env.VAPID_EMAIL ?? "admin@crl6mans.com"}`,
@@ -17,6 +19,11 @@ export type PushPayload = {
   url?: string;
   tag?: string;
   category?: NotificationCategory;
+  // About a test tournament: delivered to developers only, whatever audience
+  // the caller named. Left unset, pushToTeam, pushToEnteredDraft and the
+  // match-scoped admin categories infer it from the active tournament, since
+  // those audiences only exist inside the running event.
+  testTournament?: boolean;
 };
 
 // Returns false when an admin has disabled notifications via the Admin panel.
@@ -145,7 +152,21 @@ async function sendToSubscriptions(
 // comes first and is never gated on notificationsEnabled(), which reads a
 // per-request cookie — gating it would mean the same event is filed when a cron
 // fires it and silently dropped when an admin does.
+export async function pushToDevelopers(payload: PushPayload): Promise<PushResult> {
+  const ids = developerDiscordIds();
+  if (!ids.length) return { ...EMPTY_RESULT, skipped: "no-staff" };
+  await recordNotification({ kind: "users", discordIds: ids }, payload);
+  if (!(await notificationsEnabled())) return { ...EMPTY_RESULT, skipped: "notifications-off" };
+  const { data } = await supabaseAdmin
+    .from("push_subscriptions")
+    .select("endpoint, p256dh, auth")
+    .in("discord_id", ids);
+  if (!data?.length) return { ...EMPTY_RESULT, skipped: "no-subscriptions" };
+  return sendToSubscriptions(data, payload);
+}
+
 export async function pushToUser(discordId: string, payload: PushPayload) {
+  if (payload.testTournament) return void (await pushToDevelopers(payload));
   await recordNotification({ kind: "users", discordIds: [discordId] }, payload);
   if (!(await notificationsEnabled())) return;
   const { data } = await supabaseAdmin
@@ -162,12 +183,16 @@ export type AdminNotificationCategory =
   | "profile_changes"
   | "schedule_approvals";
 
+const EVENT_ADMIN_CATEGORIES = new Set<AdminNotificationCategory>(["match_reporting", "sub_requests", "schedule_approvals"]);
+
 // Returns a delivery summary. Callers that fire-and-forget ignore it; the admin
 // test button is the one that needs to know whether anything actually landed.
 export async function pushToAdmins(
   payload: PushPayload,
   adminCategory?: AdminNotificationCategory
 ): Promise<PushResult> {
+  const inferTest = !!adminCategory && EVENT_ADMIN_CATEGORIES.has(adminCategory);
+  if (payload.testTournament ?? (inferTest && (await isActiveTournamentTest()))) return pushToDevelopers(payload);
   await recordNotification({ kind: "admins", adminCategory }, payload);
   if (!(await notificationsEnabled())) return { ...EMPTY_RESULT, skipped: "notifications-off" };
   // Respect per-category admin notification toggles (default on when unset).
@@ -207,6 +232,7 @@ function filterByCategory(
 }
 
 export async function pushToAllApproved(payload: PushPayload) {
+  if (payload.testTournament) return void (await pushToDevelopers(payload));
   await recordNotification({ kind: "all" }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players, error } = await supabaseAdmin
@@ -228,6 +254,7 @@ export async function pushToAllApproved(payload: PushPayload) {
 
 export async function pushToDiscordIds(discordIds: string[], payload: PushPayload) {
   if (!discordIds.length) return;
+  if (payload.testTournament) return void (await pushToDevelopers(payload));
   await recordNotification({ kind: "users", discordIds }, payload);
   if (!(await notificationsEnabled())) return;
   const { data } = await supabaseAdmin
@@ -238,6 +265,7 @@ export async function pushToDiscordIds(discordIds: string[], payload: PushPayloa
 }
 
 export async function pushToTeam(teamId: string, payload: PushPayload) {
+  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToDevelopers(payload));
   await recordNotification({ kind: "team", teamId }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players } = await supabaseAdmin
@@ -255,6 +283,7 @@ export async function pushToTeam(teamId: string, payload: PushPayload) {
 }
 
 export async function pushToEnteredDraft(payload: PushPayload) {
+  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToDevelopers(payload));
   await recordNotification({ kind: "draft" }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players, error } = await supabaseAdmin
