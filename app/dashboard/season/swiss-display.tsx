@@ -306,13 +306,15 @@ export function SwissBracketDisplay({
                       ) : (
                         <DefaultLogo name={teams[id]?.name ?? ""} className="w-4 h-4 rounded text-[8px]" />
                       )}
-                      {/* Black, not a tint of the box colour: the crl6mans and
-                          light themes remap emerald-950/red-950 to a near-white
-                          mint and pink, so anything lighter is invisible here. */}
-                      <span className="truncate flex-1 font-medium text-black">
+                      {/* text-white, not a tint of the box colour: --c-white is
+                          the primary-text token, so it is #ffffff on dark and ink
+                          (#18181b / #1e1d44) on the light themes — which is what
+                          these boxes need, since crl6mans and light remap
+                          emerald-950/red-950 to a near-white mint and pink. */}
+                      <span className="truncate flex-1 font-medium text-white">
                         {teams[id]?.name ?? "?"}
                       </span>
-                      <span className="text-[10px] shrink-0 ml-1 text-black/60">{b.w}–{b.l}</span>
+                      <span className="text-[10px] shrink-0 ml-1 text-white/60">{b.w}–{b.l}</span>
                     </div>
                   ))}
                 </div>
