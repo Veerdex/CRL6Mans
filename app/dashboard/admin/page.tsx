@@ -818,13 +818,21 @@ export default async function AdminPage() {
 
   // ── Scheduling section data ────────────────────────────────────────────────
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
+  // Keyed on the bracket existing rather than the season being live, because the
+  // bracket is now built 30 minutes before the first matches and that window is the
+  // only chance to time round 1: once the season starts, round 1 is already live and
+  // isRoundLocked refuses to edit it. Setting a round's time is also what makes its
+  // matches bettable — syncRoundMatchPins stamps scheduled_at — so the wagers tab
+  // has nothing to offer on round 1 until this panel is reachable before the start.
+  const bracketExists = (allMatchStages ?? []).some((m) => m.stage != null);
+  const schedulingVisible = !!settings?.season_active || bracketExists;
   const [{ data: roundScheduleRows }, { data: schedulerMatchRows }] = await Promise.all([
-    settings?.season_active
+    schedulingVisible
       ? (activeTournamentId
           ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").eq("tournament_id", activeTournamentId)
           : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").is("tournament_id", null))
       : Promise.resolve({ data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string; range_days: number | null }[] }),
-    settings?.season_active
+    schedulingVisible
       ? supabaseAdmin
           .from("matches")
           .select("id, stage, round, match_number, home_team_id, away_team_id, scheduled_at, admin_scheduled, schedule_proposed_by_team_id, discord_channel_id")
@@ -1087,7 +1095,7 @@ export default async function AdminPage() {
       label: "Season & League",
       subTabs: [
         { id: "announcements", label: "Announcements", level: "director", value: settings?.announcement_text ? 1 : undefined },
-        ...(seasonActive ? [{ id: "scheduling", label: "Scheduling", level: "director" as const, notification: schedulingUnscheduledCount || undefined }] : []),
+        ...(schedulingVisible ? [{ id: "scheduling", label: "Scheduling", level: "director" as const, notification: schedulingUnscheduledCount || undefined }] : []),
         { id: "tournaments", label: "Tournaments", level: "director", value: (tournaments ?? []).filter((t) => t.status === "scheduled" || t.status === "active").length },
         { id: "season-settings", label: "Season Settings", level: "director" },
         { id: "draft-pool", label: "Draft Pool", level: "director", value: enteredCount + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0) },
@@ -1453,18 +1461,18 @@ export default async function AdminPage() {
         </AdminSubSection>
       )}
 
-      {/* ── Scheduling (Director+, visible whenever a season is active) ── */}
-      {userIsDirector && seasonActive && (
+      {/* ── Scheduling (Director+, from bracket generation through the season) ── */}
+      {userIsDirector && schedulingVisible && (
         <AdminSubSection
           sectionId="season-league"
           tabId="scheduling"
           title="Scheduling"
           notification={schedulingUnscheduledCount || undefined}
           defaultOpen={schedulingUnscheduledCount > 0}
-          description="Set the play window and deadline for each round of the active season, per stage. The badge counts rounds that don't have a schedule set yet."
+          description="Set the play window and deadline for each round, per stage. Available from the moment the bracket is generated — a round given a specific time becomes bettable, and round 1 can only be timed before the event starts. The badge counts rounds that don't have a schedule set yet."
         >
           {schedulingSections.length === 0 ? (
-            <p className="text-sm text-zinc-500">No rounds found. Start the season to generate the bracket.</p>
+            <p className="text-sm text-zinc-500">No rounds found — the bracket hasn&apos;t been generated yet.</p>
           ) : (
             <RoundScheduler
               tournamentId={activeTournamentId}
