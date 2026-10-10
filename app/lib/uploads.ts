@@ -1,5 +1,9 @@
 import "server-only";
 
+import { HEIC_MESSAGE, MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "./upload-limits";
+
+export { HEIC_MESSAGE };
+
 // Raster image types only. SVG is intentionally excluded — it can carry
 // embedded <script>, and these files land in public Supabase buckets.
 const IMAGE_TYPES: Record<string, string> = {
@@ -30,9 +34,10 @@ const TYPE_BY_EXT: Record<string, string> = {
   pdf: "application/pdf",
 };
 
-// Must match the bodySizeLimit in next.config.ts so the size error message
-// is accurate (the framework enforces 5MB before the handler runs).
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+// A backstop, not the gate. Vercel 413s a body over 4.5 MB before this handler
+// is ever entered, so an oversized file never reaches here — the browser has to
+// reject it first (checkUploadFile in upload-limits.ts). This still runs for a
+// caller that is not a browser form.
 
 function checkMagicBytes(header: Uint8Array, type: string): boolean {
   switch (type) {
@@ -90,12 +95,6 @@ export type UploadResult =
   | { ext: string; contentType: string; bytes: ArrayBuffer }
   | { error: string };
 
-// Not thrown at the user as-is anywhere else: an iPhone photo copied off a
-// desktop keeps its HEIC container, and "wrong file type" gives no way out.
-export const HEIC_MESSAGE =
-  "iPhone HEIC photos aren't supported. Screenshot the photo and upload that, " +
-  "or switch Settings → Camera → Formats to \"Most Compatible\" and retake it.";
-
 async function validateUpload(
   file: File,
   allowed: Record<string, string>,
@@ -105,7 +104,7 @@ async function validateUpload(
 
   const type = resolveType(file, allowed);
   if (!type) return { error: rejectMessage };
-  if (file.size > MAX_IMAGE_BYTES) return { error: "File must be 5 MB or smaller." };
+  if (file.size > MAX_UPLOAD_BYTES) return { error: `File must be ${MAX_UPLOAD_LABEL} or smaller.` };
 
   const bytes = await file.arrayBuffer();
   const header = new Uint8Array(bytes, 0, Math.min(12, bytes.byteLength));

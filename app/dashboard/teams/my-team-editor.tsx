@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateTeamInfo, toggleTeamLock } from "./actions";
+import { checkUploadFile, IMAGE_EXTENSIONS, MAX_UPLOAD_LABEL } from "@/app/lib/upload-limits";
 
 interface Team {
   id: string;
@@ -35,6 +36,7 @@ export function MyTeamEditor({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   // Drag-to-reposition state
   const previewRef = useRef<HTMLDivElement>(null);
@@ -60,8 +62,17 @@ export function MyTeamEditor({
     };
   }, []);
 
+  // Has to reject before the file is attached, not after: Vercel 413s a request
+  // body over 4.5 MB before the server action is entered, so an oversized logo
+  // made `updateTeamInfo` throw rather than return `{ error }`, and the throw
+  // reached the error boundary as "the page couldn't load".
   const handleFileSelect = (file: File) => {
-    if (!file.type.startsWith("image/")) return;
+    const problem = checkUploadFile(file);
+    if (problem) {
+      setFileError(problem);
+      return;
+    }
+    setFileError(null);
     setLogoFile(file);
     setPreview(URL.createObjectURL(file));
   };
@@ -75,15 +86,27 @@ export function MyTeamEditor({
       fd.append("offsetY", String(Math.round(posY)));
       if (logoFile) fd.append("logo", logoFile);
 
-      const result = await updateTeamInfo(fd);
-      if ("error" in result) {
-        setFeedback({ msg: result.error ?? "Something went wrong.", ok: false });
-      } else {
-        setFeedback({ msg: "Saved!", ok: true });
-        setLogoFile(null);
-        router.refresh();
+      // The request can fail before the action runs — a body the platform
+      // refuses, or a dropped connection — and an uncaught rejection in a
+      // transition takes the whole page to the error boundary.
+      try {
+        const result = await updateTeamInfo(fd);
+        if ("error" in result) {
+          setFeedback({ msg: result.error ?? "Something went wrong.", ok: false });
+        } else {
+          setFeedback({ msg: "Saved!", ok: true });
+          setLogoFile(null);
+          router.refresh();
+        }
+      } catch {
+        setFeedback({
+          msg: logoFile
+            ? `Upload failed. Make sure the image is ${MAX_UPLOAD_LABEL} or smaller, then try again.`
+            : "Couldn't save. Check your connection and try again.",
+          ok: false,
+        });
       }
-      setTimeout(() => setFeedback(null), 3000);
+      setTimeout(() => setFeedback(null), 6000);
     });
   };
 
@@ -173,15 +196,20 @@ export function MyTeamEditor({
               <input
                 id={`logo-input-${team.id}`}
                 type="file"
-                accept="image/*"
+                accept={IMAGE_EXTENSIONS.map((e) => `.${e}`).join(",")}
                 className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
+                // Cleared so re-picking the same file after a rejection still
+                // fires onChange.
+                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) handleFileSelect(f); }}
               />
               <p className="text-sm text-zinc-400">
                 {isDragOver ? "Drop to upload" : "Drop image here or click to browse"}
               </p>
-              <p className="text-xs text-zinc-600 mt-1">PNG, JPG, SVG supported</p>
+              <p className="text-xs text-zinc-600 mt-1">
+                PNG, JPG, WEBP, AVIF or GIF · max {MAX_UPLOAD_LABEL}
+              </p>
             </div>
+            {fileError && <p className="text-xs text-red-400 mt-1.5">{fileError}</p>}
           </div>
 
           {/* Preview + alignment */}

@@ -15,7 +15,8 @@
     "test:draft-order": "tsc app/lib/draft-order.ts scripts/test-draft-order.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-draft-order.js",
     "test:draft-embeds": "tsc app/lib/draft-embeds.ts scripts/test-draft-embeds.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-draft-embeds.js",
     "test:hybrid-layout": "tsc app/dashboard/season/hybrid-layout.ts scripts/test-hybrid-layout.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-hybrid-layout.js",
-    "test:swiss-layout": "tsc app/dashboard/season/swiss-layout.ts scripts/test-swiss-layout.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-swiss-layout.js"
+    "test:swiss-layout": "tsc app/dashboard/season/swiss-layout.ts scripts/test-swiss-layout.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-swiss-layout.js",
+    "test:upload-limits": "tsc app/lib/upload-limits.ts scripts/test-upload-limits.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --lib es2019,dom --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-upload-limits.js"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",
