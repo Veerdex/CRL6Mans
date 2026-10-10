@@ -337,7 +337,9 @@ export async function GET(request: Request) {
   // Settles the seeding while there is still time to check it, and locks adding
   // teams. Nothing reaches Discord: execPregenerateBracket opens no channel and
   // no check-in window, and both of those paths independently refuse while
-  // season_active is false.
+  // season_active is false. The start time is passed in because the opening round
+  // is stamped with it — the only time a tournament match gets, and what makes it
+  // bettable for this window.
   //
   // Gated on the formation trigger being absent or past, not on teams_formed_at:
   // a field built by hand from the Teams tab never stamps that column and should
@@ -369,7 +371,7 @@ export async function GET(request: Request) {
       .is("bracket_generated_at", null)
       .select("id");
     if (claimed?.length) {
-      const res = await execPregenerateBracket();
+      const res = await execPregenerateBracket(t.season_start_at as string);
       if (!res.ok) await supabaseAdmin.from("tournaments").update({ bracket_generated_at: null }).eq("id", t.id);
       fired.push(res.ok ? "bracket_pregenerated" : `bracket_pregen_skipped:${res.message}`);
     }

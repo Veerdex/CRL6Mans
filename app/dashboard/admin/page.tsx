@@ -821,9 +821,10 @@ export default async function AdminPage() {
   // Keyed on the bracket existing rather than the season being live, because the
   // bracket is now built 30 minutes before the first matches and that window is the
   // only chance to time round 1: once the season starts, round 1 is already live and
-  // isRoundLocked refuses to edit it. Setting a round's time is also what makes its
-  // matches bettable — syncRoundMatchPins stamps scheduled_at — so the wagers tab
-  // has nothing to offer on round 1 until this panel is reachable before the start.
+  // isRoundLocked refuses to edit it. That matters for a season, whose round times
+  // are set here and are also what makes a round bettable; a tournament's opening
+  // round is stamped by execPregenerateBracket instead, and its later rounds run on
+  // check-in rather than a schedule.
   // "scheduled" is what makes it a live bracket, the same predicate the Teams tab
   // uses: a finished event keeps its matches as "completed" until the next build
   // deletes them, and pre-created downstream slots sit at "pending" — counting

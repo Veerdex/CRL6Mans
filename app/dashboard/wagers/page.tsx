@@ -144,8 +144,12 @@ export default async function WagersPage() {
   // (scheduled_at null) are hidden — their outcome may already be known or
   // self-reportable, so betting on them must not be possible. A season time that one
   // captain has merely proposed is not locked in: the opponent can still reject it and
-  // an out-of-window one can still be wiped by an admin. Tournament times are fixed and
-  // admin-stamped, so they qualify immediately.
+  // an out-of-window one can still be wiped by an admin. A tournament has no round
+  // schedules at all — those are a season mechanism — so its only stamped time is the
+  // opening round's, written by execPregenerateBracket from the event's start time;
+  // that one is admin-stamped and qualifies immediately. Later tournament rounds are
+  // unbettable by construction: a matchup becomes known and its check-in opens in the
+  // same call, leaving no window.
   //
   // Every clause here must mirror isBettingClosed in actions.ts — a match rendered as
   // bettable that the server then rejects is a dead-end for the player.

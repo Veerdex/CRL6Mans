@@ -1713,7 +1713,7 @@ const GROUP_PRESETS = new Set(["group_single_elimination", "group_swiss_single_e
  * seconds ago would still look inactive and the bracket would be built from
  * captain-only rosters.
  */
-export async function execPregenerateBracket(): Promise<{ ok: boolean; message: string }> {
+export async function execPregenerateBracket(round1PlayAt?: string): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
     .select("season_format, num_teams, team_size, draft_active, season_active")
@@ -1772,7 +1772,46 @@ export async function execPregenerateBracket(): Promise<{ ok: boolean; message: 
   if (!bracketResult.ok)
     return { ok: false, message: `Bracket generation error — ${bracketResult.error}` };
 
+  if (round1PlayAt) await stampOpeningRoundTime(round1PlayAt);
+
   return { ok: true, message: `Bracket generated for ${rosteredTeams} teams.` };
+}
+
+// Gives the opening round the event's own start time, which is the only time a
+// tournament match ever gets: round schedules are a season mechanism, and the
+// three writers of scheduled_at (the admin round pin, the admin match pin, a
+// captain's proposal) are all season paths. Without this nothing in a tournament
+// is ever bettable — the wagers tab needs a confirmed future time — and with it
+// round 1 is bettable for exactly the pre-generation window, closing at the start
+// when check-in opens.
+//
+// Deliberately writes no round_schedules row: stageStartPlayAt reads that table,
+// not matches, so round 1's check-in window still opens at the start exactly as it
+// does today. A row would also re-point openReadyMatchChannels at a season-shaped
+// schedule for an event that doesn't use one.
+async function stampOpeningRoundTime(playAt: string): Promise<void> {
+  const { data: built } = await supabaseAdmin
+    .from("matches").select("id, stage, round, status").not("stage", "is", null);
+  if (!built?.length) return;
+
+  const presentStages = new Set(built.map((m) => canonicalStage(m.stage as string)));
+  const firstStage = STAGE_ORDER.find((s) => presentStages.has(s));
+  if (!firstStage) return;
+
+  // Only "scheduled" rows: a bye is inserted completed and has no one to bet on,
+  // and the group/Swiss/DE formats pre-create their later rows as pending.
+  const ids = built
+    .filter((m) => canonicalStage(m.stage as string) === firstStage && m.round === 1 && m.status === "scheduled")
+    .map((m) => m.id as string);
+  if (!ids.length) return;
+
+  await supabaseAdmin.from("matches").update({
+    scheduled_at: playAt,
+    admin_scheduled: true,
+    schedule_accepted: true,
+    schedule_admin_required: false,
+    schedule_proposed_by_team_id: null,
+  }).in("id", ids);
 }
 
 export async function execStartSeason(): Promise<{ ok: boolean; message: string }> {
