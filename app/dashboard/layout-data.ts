@@ -5,6 +5,7 @@ import { getNameDecorations } from "@/app/lib/patreon-entitlements";
 import { type NavTabOverrides } from "@/app/lib/nav-tabs";
 import { needsPlatformAccountClaim } from "@/app/lib/platform-account-gate";
 import { REGISTRATION_BONUS, WEEKLY_GRANT } from "@/app/lib/coins";
+import { isTestTournament } from "@/app/lib/test-tournament";
 
 // ── The switch ────────────────────────────────────────────────────────────────
 // How the dashboard chrome fetches its data. Change it here, in code — there is
@@ -40,6 +41,7 @@ type Settings = {
   seasonActive: boolean;
   draftActive: boolean;
   activeTournamentId: string | null;
+  activeTournamentIsTest: boolean;
   statsEnabled: boolean;
   navTabOverrides: NavTabOverrides;
 };
@@ -70,10 +72,12 @@ async function fetchSettings(): Promise<Settings> {
     .from("league_settings")
     .select("draft_active, season_active, active_tournament_id, stats_enabled, nav_tab_overrides")
     .single();
+  const activeTournamentId = (data?.active_tournament_id as string | null) ?? null;
   return {
     seasonActive: data?.season_active ?? false,
     draftActive: data?.draft_active ?? false,
-    activeTournamentId: (data?.active_tournament_id as string | null) ?? null,
+    activeTournamentId,
+    activeTournamentIsTest: await isTestTournament(activeTournamentId),
     statsEnabled: data?.stats_enabled ?? true,
     navTabOverrides: (data?.nav_tab_overrides as NavTabOverrides | null) ?? {},
   };

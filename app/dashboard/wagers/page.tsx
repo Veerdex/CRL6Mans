@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
+import { hidesActiveTestTournament } from "@/app/lib/test-tournament";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
@@ -68,7 +69,8 @@ export default async function WagersPage() {
 
   const activeTournamentId = (ls?.active_tournament_id as string | null) ?? null;
   const seasonActive = ls?.season_active ?? false;
-  const hasActiveContent = seasonActive || !!activeTournamentId;
+  // A test tournament's matches aren't for players to bet on.
+  const hasActiveContent = (seasonActive || !!activeTournamentId) && !(await hidesActiveTestTournament(session.userId));
   const globalBettingMode: "fixed" | "pool" = ls?.betting_mode === "pool" ? "pool" : "fixed";
   const teamSize = normalizeTeamSize(ls?.team_size);
 

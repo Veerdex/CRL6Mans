@@ -8,6 +8,7 @@ import { isDirectorVerified } from "@/app/lib/players";
 import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, deleteMatchChannels, execSyncRoles, voidAllPendingWagers, setDraftChannelVisibility } from "@/app/lib/discord-bot";
 import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app/lib/discord-api";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft, pushToRosteredPlayers } from "@/app/lib/push";
+import { isActiveTournamentTest } from "@/app/lib/test-tournament";
 import { APP_NAME } from "@/app/lib/constants";
 import { computeTopStats } from "@/app/lib/game-stats";
 import { rollUpCareerStats } from "@/app/lib/career-stats";
@@ -402,6 +403,7 @@ export async function adminStartDraft(code: string, maxTeamsRaw?: string) {
       body: "The draft is now live.",
       url: "/dashboard/draft",
       tag: "draft-start-admin",
+      testTournament: await isActiveTournamentTest(),
     }).catch(() => {});
   }
   return result;
@@ -432,6 +434,7 @@ export async function adminAutoBalance(code: string, maxTeamsRaw?: string) {
       body: "Teams have been auto-balanced.",
       url: "/dashboard/teams",
       tag: "teams-generated-admin",
+      testTournament: await isActiveTournamentTest(),
     }).catch(() => {});
   }
   return result;
@@ -455,6 +458,7 @@ export async function adminEndDraft(code: string) {
       body: "Teams have been finalized.",
       url: "/dashboard/teams",
       tag: "draft-end-admin",
+      testTournament: await isActiveTournamentTest(),
     }).catch(() => {});
   }
   return result;

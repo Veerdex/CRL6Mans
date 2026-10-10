@@ -19,7 +19,7 @@ import { buildTimeline, buildStageStarts } from "@/app/lib/tournament-timeline";
 import { stageEmblem } from "@/app/lib/format-emblems";
 import { playerRatingFromRow, initialTeamRating } from "@/app/lib/rating";
 import { normalizeTeamSize, teamSizeLabel } from "@/app/lib/team-size";
-import { isDirectorVerified } from "@/app/lib/players";
+import { isDirectorVerified, isModerator } from "@/app/lib/players";
 import { TeamRatingList, type TeamRatingRow } from "./team-rating-list";
 import { PlayerName } from "./player-name";
 import { hasEarlySignupAccess, inEarlySignupWindow, signupWindowOpen, type SignupWindowRow } from "@/app/lib/signup-window";
@@ -95,11 +95,11 @@ export async function TournamentDetailView({
 }) {
   const tab: TabId = TABS.some((tb) => tb.id === rawTab) ? (rawTab as TabId) : "overview";
 
-  const [{ data: t }, { data: settings }, { data: player }, publicSponsors, publicDesigns, canEditRules] = await Promise.all([
+  const [{ data: t }, { data: settings }, { data: player }, publicSponsors, publicDesigns, canEditRules, moderator] = await Promise.all([
     supabaseAdmin
       .from("tournaments")
       .select(
-        "id, name, overview, status, join_mode, team_assignment, team_size, signups_open, signups_closed, draft_open_at, draft_close_at, draft_start_at, season_start_at, season_format, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, min_mmr_2v2, min_mmr_3v3, summary"
+        "id, name, overview, status, join_mode, team_assignment, team_size, signups_open, signups_closed, draft_open_at, draft_close_at, draft_start_at, season_start_at, season_format, stage_starts, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, min_mmr_2v2, min_mmr_3v3, summary, is_test"
       )
       .eq("id", tournamentId)
       .maybeSingle(),
@@ -108,9 +108,11 @@ export async function TournamentDetailView({
     getPublicSponsors(),
     getPublicDesigns(),
     isDirectorVerified(discordId),
+    isModerator(discordId),
   ]);
 
-  if (!t) {
+  // A test tournament reads as nonexistent to anyone who isn't staff.
+  if (!t || (t.is_test && !moderator)) {
     return (
       <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto space-y-4">
         <p className="text-sm text-zinc-500">Tournament not found.</p>
