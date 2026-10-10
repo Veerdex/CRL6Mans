@@ -248,8 +248,10 @@ async function fetchNeedsPlatformClaim(
 // Podium nav only shows when there's a non-hidden completed event with a champion.
 async function fetchHasPodium(): Promise<boolean> {
   const [{ data: podSeasons }, { data: podTournaments }] = await Promise.all([
-    supabaseAdmin.from("seasons").select("summary").eq("hidden_from_home", false).limit(20),
-    supabaseAdmin.from("tournaments").select("summary").eq("status", "completed").eq("hidden_from_home", false).limit(20),
+    // Same window the page itself reads, so the link can't point at a podium that
+    // redirects straight back to /dashboard.
+    supabaseAdmin.from("seasons").select("summary").eq("hidden_from_home", false).order("ended_at", { ascending: false }).limit(10),
+    supabaseAdmin.from("tournaments").select("summary").eq("status", "completed").eq("hidden_from_home", false).order("ended_at", { ascending: false }).limit(10),
   ]);
   const anyChamp = (rows: { summary: unknown }[] | null) =>
     (rows ?? []).some((r) => !!(r.summary as { champion?: string | null } | null)?.champion);

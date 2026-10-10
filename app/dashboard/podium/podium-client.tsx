@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
+import { LocalTime } from "@/app/dashboard/local-time";
 
 const CONFETTI_COLORS = [
   "#e88a24", "#fbbf24", "#fde68a",
@@ -220,10 +221,6 @@ export function PodiumClient({
   accolades,
   sponsoredByLine,
 }: PodiumClientProps) {
-  const dateStr = eventDate
-    ? new Date(eventDate).toLocaleDateString(undefined, { dateStyle: "long" })
-    : null;
-
   return (
     <>
       <Starfield />
@@ -260,17 +257,17 @@ export function PodiumClient({
             >
               {eventKind}
             </span>
-            {dateStr && <span className="text-sm text-zinc-500">{dateStr}</span>}
+            {eventDate && <LocalTime iso={eventDate} dateOnly className="text-sm text-zinc-500" />}
             {sponsoredByLine}
           </div>
         </div>
 
-        {/* Main body: centered champion + roster, accolades floated right (desktop) */}
+        {/* Main body: champion + roster, accolades in a right-hand column (desktop) */}
         <div className="relative flex-1 flex min-h-0">
 
           {/* Champion column — centered on the full width */}
           <div
-            className="flex-1 flex flex-col items-center justify-center gap-4 px-6 py-6"
+            className="flex-1 min-w-0 flex flex-col items-center justify-center gap-4 px-6 py-6"
             style={{ animation: "fade-up 0.65s 0.1s ease-out both" }}
           >
             <p className="text-sm font-bold uppercase tracking-[0.25em] text-amber-400">Champion</p>
@@ -302,10 +299,10 @@ export function PodiumClient({
                 <img
                   src={championLogoUrl}
                   alt={champion}
-                  className="relative z-10 w-[19.5rem] h-[19.5rem] sm:w-[27rem] sm:h-[27rem] lg:w-[30rem] lg:h-[30rem] rounded-3xl object-cover ring-4 ring-amber-500/50 shadow-2xl"
+                  className="relative z-10 w-[19.5rem] sm:w-[27rem] lg:w-[30rem] max-w-full aspect-square rounded-3xl object-cover ring-4 ring-amber-500/50 shadow-2xl"
                 />
               ) : (
-                <div className="relative z-10 w-[19.5rem] h-[19.5rem] sm:w-[27rem] sm:h-[27rem] lg:w-[30rem] lg:h-[30rem] rounded-3xl bg-zinc-800 border border-zinc-700 flex items-center justify-center ring-4 ring-amber-500/20">
+                <div className="relative z-10 w-[19.5rem] sm:w-[27rem] lg:w-[30rem] max-w-full aspect-square rounded-3xl bg-zinc-800 border border-zinc-700 flex items-center justify-center ring-4 ring-amber-500/20">
                   <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-600">
                     <path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4z"/>
                     <path d="M5 4H3v2a3 3 0 0 0 3 3M19 4h2v2a3 3 0 0 1-3 3"/>
@@ -358,9 +355,11 @@ export function PodiumClient({
             )}
           </div>
 
-          {/* Accolades — desktop: floated on the right, vertically centered */}
+          {/* Accolades — desktop: a real column, not an overlay. Floating it over the
+              centered logo collided as soon as the content area dropped under ~1100px,
+              which a 1280px laptop with the sidebar open does. */}
           {accolades.length > 0 && (
-            <div className="hidden lg:flex flex-col absolute right-5 top-1/2 -translate-y-1/2 w-72 max-h-[85%] gap-2.5 overflow-y-auto">
+            <div className="hidden lg:flex flex-col shrink-0 self-center w-72 max-h-full gap-2.5 overflow-y-auto pr-5 py-6">
               <AccoladeList accolades={accolades} />
             </div>
           )}

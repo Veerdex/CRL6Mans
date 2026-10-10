@@ -75,9 +75,13 @@ export async function computeTopStats(): Promise<TopStats> {
   }
 
   const entries = [...agg.entries()];
+  // Starting at 0 rather than -Infinity means a stat nobody recorded has no leader
+  // at all. Demos are the live case: they only populate when a replay's network
+  // stream parses, so a score-sheet-only event would otherwise hand "Demos Per
+  // Game — 0.00" to whichever player happened to aggregate first.
   const leader = (valueFn: (a: Agg) => number) => {
     let bestId: string | null = null;
-    let bestVal = -Infinity;
+    let bestVal = 0;
     for (const [id, a] of entries) {
       const v = valueFn(a);
       if (v > bestVal) { bestVal = v; bestId = id; }
