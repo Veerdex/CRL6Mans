@@ -138,9 +138,10 @@ export default async function TeamsPage({
           <h1 className="text-xl font-bold text-white">Teams</h1>
           <SponsoredByLine tabKey="teams" />
         </div>
-        {teams.length === 0 ? (
-          <p className="text-zinc-400">No teams yet — the draft hasn&apos;t started.</p>
-        ) : userIsAdmin ? (
+        {/* An admin gets the manager even with nothing to list: its ＋ is the only
+            way to build the first team by hand, and an empty-state paragraph here
+            would hide it exactly when it's wanted. */}
+        {userIsAdmin ? (
           <AdminTeamsManager
             teams={teams}
             byTeam={byTeam as Record<string, {
@@ -156,6 +157,8 @@ export default async function TeamsPage({
             teamSize={teamSize}
             lateEntriesOpen={lateEntriesOpen}
           />
+        ) : teams.length === 0 ? (
+          <p className="text-zinc-400">No teams yet — the draft hasn&apos;t started.</p>
         ) : (
           <TeamsGrid
             teams={teams}

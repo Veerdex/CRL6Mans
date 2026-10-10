@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { swapPlayersBetweenTeams, swapRosterPlayerWithBenchPlayer, disqualifyTeam, addPlayerToEvent, removePlayerFromEvent } from "./actions";
+import { swapPlayersBetweenTeams, swapRosterPlayerWithBenchPlayer, disqualifyTeam, addPlayerToEvent, removePlayerFromEvent, createTeam } from "./actions";
 import { MyTeamEditor } from "./my-team-editor";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { playerRatingFromRow } from "@/app/lib/rating";
@@ -106,6 +106,179 @@ function BenchRow({
   );
 }
 
+function PickRow({
+  player, checked, disabled, onToggle,
+}: {
+  player: AvailablePlayer;
+  checked: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={disabled}
+      className={`w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+        checked ? "bg-indigo-950/50 ring-1 ring-inset ring-indigo-600" : "hover:bg-zinc-800"
+      }`}
+    >
+      <span
+        className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center text-[10px] font-bold ${
+          checked ? "bg-indigo-600 border-indigo-500 text-white" : "border-zinc-600"
+        }`}
+      >
+        {checked ? "✓" : ""}
+      </span>
+      <span className="text-sm text-zinc-200 min-w-0 truncate">{player.display_name ?? player.username}</span>
+      {player.sub_willing && (
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-emerald-400 border border-emerald-900 rounded px-1.5 py-0.5">
+          Sub
+        </span>
+      )}
+      <span className="ml-auto text-xs text-zinc-500 shrink-0">{rv(player).toLocaleString()} RV</span>
+    </button>
+  );
+}
+
+// The roster has to be exactly team_size: the server rejects anything else, so
+// the counter and the disabled rows are only there to say so before the click.
+function NewTeamDialog({
+  availablePlayers, teamSize, onClose, onCreated,
+}: {
+  availablePlayers: AvailablePlayer[];
+  teamSize: number;
+  onClose: () => void;
+  onCreated: (message?: string) => void;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const [showOutsiders, setShowOutsiders] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const match = (p: AvailablePlayer) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return p.username.toLowerCase().includes(q) || (p.display_name ?? "").toLowerCase().includes(q);
+  };
+  const inEvent = availablePlayers.filter((p) => p.inEvent && match(p));
+  const outsiders = availablePlayers.filter((p) => !p.inEvent && match(p));
+
+  const full = selected.length >= teamSize;
+  const toggle = (id: string) =>
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : full ? prev : [...prev, id]));
+  const rowFor = (p: AvailablePlayer) => (
+    <PickRow
+      key={p.id}
+      player={p}
+      checked={selected.includes(p.id)}
+      disabled={isPending || (full && !selected.includes(p.id))}
+      onToggle={() => toggle(p.id)}
+    />
+  );
+
+  function submit() {
+    setError(null);
+    startTransition(async () => {
+      const res = await createTeam(selected);
+      if (res?.error) {
+        setError(res.error);
+        return;
+      }
+      onCreated(res?.message);
+    });
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md max-h-full flex flex-col rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl"
+      >
+        <div className="px-5 py-4 border-b border-zinc-800">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-semibold text-white">New team</h3>
+            <span className={`ml-auto text-xs font-semibold ${full ? "text-emerald-400" : "text-zinc-500"}`}>
+              {selected.length} / {teamSize} selected
+            </span>
+          </div>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search players…"
+            autoFocus
+            className="mt-3 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-600"
+          />
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="px-5 py-2 border-b border-zinc-800 flex items-center gap-2 bg-zinc-900">
+            <span className="text-xs font-semibold text-zinc-400">In this event — no team</span>
+            <span className="text-xs text-zinc-600">{inEvent.length}</span>
+          </div>
+          <div className="divide-y divide-zinc-800">
+            {inEvent.length === 0 ? (
+              <p className="px-5 py-3 text-xs text-zinc-600">
+                {query.trim() ? "No matches." : "Everyone who entered this event is on a team."}
+              </p>
+            ) : (
+              inEvent.map(rowFor)
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowOutsiders((v) => !v)}
+            className="w-full px-5 py-2 border-t border-zinc-800 flex items-center gap-2 text-left hover:bg-zinc-800 transition-colors"
+          >
+            <span className="text-xs font-semibold text-zinc-400">Not in this event</span>
+            <span className="text-xs text-zinc-600">{outsiders.length}</span>
+            <span className="ml-auto text-xs text-zinc-500">{showOutsiders ? "↑ Hide" : "Show"}</span>
+          </button>
+          {showOutsiders && (
+            <div className="divide-y divide-zinc-800 border-t border-zinc-800">
+              {outsiders.length === 0 ? (
+                <p className="px-5 py-3 text-xs text-zinc-600">
+                  {query.trim() ? "No matches." : "Only approved players appear here — approve a late registration first."}
+                </p>
+              ) : (
+                outsiders.map(rowFor)
+              )}
+            </div>
+          )}
+        </div>
+
+        {error && <p className="px-5 py-2 text-xs text-rose-400 border-t border-zinc-800">{error}</p>}
+
+        <div className="px-5 py-3 border-t border-zinc-800 flex items-center gap-2">
+          <p className="text-xs text-zinc-600 min-w-0">
+            Picking someone who isn&apos;t in the event enters them in it.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto shrink-0 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs rounded-lg"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={isPending || !full}
+            className="shrink-0 px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg"
+          >
+            {isPending ? "Creating…" : "Create team"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Either a rostered player (tied to a team) or a bench player (no team yet).
 type SwapSelection = { kind: "roster"; playerId: string; teamId: string; name: string } | { kind: "bench"; playerId: string; name: string };
 
@@ -128,6 +301,8 @@ export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = []
   const [benchQuery, setBenchQuery] = useState("");
   const [showOutsiders, setShowOutsiders] = useState(false);
   const [benchError, setBenchError] = useState<string | null>(null);
+  const [newTeamOpen, setNewTeamOpen] = useState(false);
+  const [newTeamNotice, setNewTeamNotice] = useState<string | null>(null);
 
   const swapEnabled = joinMode !== "teams";
 
@@ -224,16 +399,42 @@ export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = []
 
   return (
     <div className="space-y-4">
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search teams or players…"
-        className="w-full max-w-sm bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-      />
-      {visibleTeams.length === 0 && query.trim() && (
-        <p className="text-zinc-500 text-sm">No teams match &quot;{query}&quot;.</p>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search teams or players…"
+          className="w-full max-w-sm bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        />
+        <button
+          type="button"
+          onClick={() => { setNewTeamNotice(null); setNewTeamOpen(true); }}
+          title={`Add a team (${teamSize} player${teamSize === 1 ? "" : "s"})`}
+          aria-label="Add a team"
+          className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white text-xl leading-none font-semibold transition-colors"
+        >
+          +
+        </button>
+      </div>
+      {newTeamNotice && <p className="text-xs text-emerald-400">{newTeamNotice}</p>}
+      {newTeamOpen && (
+        <NewTeamDialog
+          availablePlayers={availablePlayers}
+          teamSize={teamSize}
+          onClose={() => setNewTeamOpen(false)}
+          onCreated={(message) => {
+            setNewTeamOpen(false);
+            setNewTeamNotice(message ?? "Team created.");
+            router.refresh();
+          }}
+        />
       )}
+      {teams.length === 0 ? (
+        <p className="text-zinc-400 text-sm">No teams yet — the draft hasn&apos;t started. Use ＋ to build one by hand.</p>
+      ) : visibleTeams.length === 0 && query.trim() ? (
+        <p className="text-zinc-500 text-sm">No teams match &quot;{query}&quot;.</p>
+      ) : null}
 
       {swapSource && !swapTarget && (
         <div className="flex items-center gap-3 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-4 py-2.5">
