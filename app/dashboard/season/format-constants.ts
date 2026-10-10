@@ -269,9 +269,12 @@ export type StageScheduleEntry = {
   estimatedMinutes: number;
 };
 
-// Per-match spacing: 8 minutes per game in the series, rounded up to the next 5.
+// Per-match spacing: 8 minutes per game in the series, rounded up to the next 5,
+// plus 5 for the check-in window every round opens before anyone can play. The
+// games charged are the series maximum, so a BO3 that ends 2-0 finishes early.
+const CHECKIN_ALLOWANCE_MIN = 5;
 function gapMin(bo: BestOf): number {
-  return Math.ceil((8 * bo) / 5) * 5;
+  return Math.ceil((8 * bo) / 5) * 5 + CHECKIN_ALLOWANCE_MIN;
 }
 
 const log2ceil = (n: number) => Math.max(1, Math.ceil(Math.log2(Math.max(2, n))));
@@ -299,12 +302,16 @@ function groupStageRounds(teams: number): number {
 }
 
 // Double-elimination wall-clock rounds: WB = log2(size), LB = 2·(log2(size)−1),
-// plus the grand final. LB is the critical path for size ≥ 4. (bracket.ts)
+// plus the grand final. LB is the critical path for size ≥ 4, and it starts one
+// slot late: wbLoserTarget(1, …) sends WB R1's losers to LB R1, so LB R1 cannot
+// run beside WB R1. Hence `1 + lb`, not `lb` — for 8 teams the path is WB R1,
+// (WB R2 ‖ LB R1), (WB F ‖ LB R2), LB R3, LB F, GF. The grand final's bracket
+// reset is conditional and not counted. (bracket.ts)
 function deRounds(teams: number): number {
   if (teams <= 2) return 1;
   const wb = log2ceil(teams);
   const lb = 2 * (wb - 1);
-  return Math.max(wb, lb) + 1;
+  return Math.max(wb, 1 + lb) + 1;
 }
 
 // Swiss runs until every team reaches 3 wins or 3 losses → at most 5 rounds, all standard.
@@ -382,9 +389,13 @@ export function computeStageSchedule(
     }
 
     case "de_swiss_single_elimination": {
-      // DE qualifier narrows N → 16: WB k = log2(size/8), LB = 2·(k−1), run in parallel.
+      // DE qualifier narrows N → 16: WB k = log2(size/8), LB = 2·(k−1). The two
+      // run in parallel, but the qualifier routes WB losers through the same
+      // wbLoserTarget as a full DE, so its LB R1 also waits on WB R1 — one slot
+      // late, and no grand final to add. k = 1 means no LB rounds at all.
       const k = Math.max(1, log2ceil(teams) - 3);
-      const qualRounds = Math.max(k, 2 * (k - 1));
+      const lbq = 2 * (k - 1);
+      const qualRounds = Math.max(k, lbq > 0 ? 1 + lbq : 0);
       return [
         { key: "de_qualifier", label: "DE Qualifier", estimatedMinutes: seRoundsDuration(qualRounds, slotTiers(config, "de_qualifier")) },
         swiss,
