@@ -179,6 +179,8 @@
      30 → 38 and 28 → 35, and the crest stretches to the row as on the cards. */
   body.tall .grouprow { height: 38px; padding: 0 12px; }
   body.tall .swissrow { height: 35px; }
+  /* +50% on the width too, which is what buys the name column back. */
+  body.tall .swissbox { width: 315px; }
   body.tall .grouprow .side, body.tall .swissrow .side { align-self: stretch; }
   body.tall .grouprow .glogo, body.tall .swissrow .slogo {
     align-self: stretch; width: auto; height: auto; aspect-ratio: 1;
@@ -298,7 +300,7 @@
       <div class="holder" id="h3">
         <p class="subname">group &mdash; bordered, fluid width in production</p>
         <div class="grouprow" id="groupRow"></div>
-        <p class="subname second">swiss &mdash; borderless, 210px, hairline-separated<span class="squeeze" id="squeeze"></span></p>
+        <p class="subname second">swiss &mdash; borderless, fixed width, hairline-separated<span class="squeeze" id="squeeze"></span></p>
         <div class="swissbox">
           <div class="swissdiv"></div>
           <div class="swissrow" id="swissRow"></div>

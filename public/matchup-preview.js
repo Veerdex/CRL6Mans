@@ -73,8 +73,8 @@ const REACH = {
 // The shipped heights and the proposed one. MATCH_H/MH are read by the bracket's
 // own layout math, not just the card, so the ported change is more than a number.
 const SIZES = {
-  tall:    { name: "Proposed",    tag: "+25%",    bracket: 100, hybrid: 100, group: 38, swiss: 35 },
-  current: { name: "Ships today", tag: "CURRENT", bracket: 68,  hybrid: 66,  group: 30, swiss: 28 },
+  tall:    { name: "Proposed",    tag: "+25%",    bracket: 100, hybrid: 100, group: 38, swiss: 35, swissW: 315 },
+  current: { name: "Ships today", tag: "CURRENT", bracket: 68,  hybrid: 66,  group: 30, swiss: 28, swissW: 210 },
 };
 
 let state = "completed";
@@ -250,15 +250,15 @@ function render() {
   const sz = SIZES[size];
   el("dim1").innerHTML = "210&times;" + sz.bracket + (size === "tall" ? " &middot; proposed, ships 210&times;68" : "");
   el("dim2").innerHTML = "210&times;" + sz.hybrid + (size === "tall" ? " &middot; proposed, ships 210&times;66" : "");
-  el("dim3").innerHTML = "group " + sz.group + "px &middot; swiss " + sz.swiss + "px" +
-    (size === "tall" ? " &middot; proposed, ships 30 / 28" : "");
-  // The Swiss row is the only one of the four holding two teams in a fixed 210px,
-  // so a crest that grows with the row eats the name column. 208 inside the
-  // border, less 16 padding, less the 40px score and the two 4px gaps, halved —
-  // plus the 8px the crest bleeds back when it stretches.
+  el("dim3").innerHTML = "group " + sz.group + "px &middot; swiss " + sz.swissW + "&times;" + sz.swiss +
+    (size === "tall" ? " &middot; proposed, ships 30 / 210&times;28" : "");
+  // The Swiss row is the only one of the four fitting two teams into a fixed
+  // width, so a crest that grows with the row eats the name column: the box
+  // inside its border, less 16 padding, less the 40px score and the two 4px
+  // gaps, halved — plus the 8px the crest bleeds back when it stretches.
   const crestPx = size === "tall" ? sz.swiss : 14;
   const bleed = size === "tall" ? 8 : 0;
-  el("squeeze").innerHTML = " &middot; " + ((208 - 16 - 40 - 8) / 2 + bleed - crestPx - 4) +
+  el("squeeze").innerHTML = " &middot; " + ((sz.swissW - 2 - 16 - 40 - 8) / 2 + bleed - crestPx - 4) +
     "px left for each name" + (size === "tall" ? " (54px today)" : "");
   // A scaled element still occupies its unscaled box, so each holder's height is
   // measured unscaled and reserved at scale — otherwise the next view overlaps it.
