@@ -34,13 +34,30 @@ async function enrollInEvent(playerId: string) {
     .from("league_settings").select("active_tournament_id").single();
   const tournamentId = (settings?.active_tournament_id as string | null) ?? null;
 
+  let isNewEntry: boolean;
   if (tournamentId) {
     const { error } = await supabaseAdmin
       .from("tournament_entries").insert({ tournament_id: tournamentId, player_id: playerId });
     if (error && !error.message.toLowerCase().includes("duplicate")) return { error: error.message };
+    isNewEntry = !error;
+  } else {
+    const { data: p } = await supabaseAdmin
+      .from("players").select("draft_entered").eq("id", playerId).single();
+    isNewEntry = !p?.draft_entered;
   }
 
-  await supabaseAdmin.from("players").update({ draft_entered: true }).eq("id", playerId);
+  // Both formation paths order the pool by draft_entered_at and cut the tail, so
+  // a genuinely new entry has to be stamped now. A timestamp left over from an
+  // earlier event would seat them ahead of people who signed up on time — and
+  // send one of those the "yours came in after the last spot was taken" notice,
+  // which would be false. Someone already entered keeps their real place.
+  await supabaseAdmin
+    .from("players")
+    .update(isNewEntry
+      ? { draft_entered: true, draft_entered_at: new Date().toISOString() }
+      : { draft_entered: true })
+    .eq("id", playerId);
+
   // Own statement: pre-migration this column doesn't exist, and folding it in
   // would take draft_entered down with it.
   await supabaseAdmin.from("players").update({ draft_not_selected_reason: null }).eq("id", playerId);
@@ -51,13 +68,23 @@ async function enrollInEvent(playerId: string) {
 // sign-ups are open there is nothing to fix — the player can enter themselves.
 async function eventAcceptsLateEntries(): Promise<{ ok: true } | { ok: false; error: string }> {
   const { data: settings } = await supabaseAdmin
-    .from("league_settings").select("active_tournament_id, draft_open").single();
+    .from("league_settings").select("active_tournament_id, draft_open, draft_active, season_active").single();
   const tournamentId = (settings?.active_tournament_id as string | null) ?? null;
 
+  // Every teardown path runs resetSeason, which clears draft_entered for
+  // everyone and also drops active_tournament_id — so a finished tournament
+  // lands in this branch too, and a non-empty pool is what distinguishes "an
+  // event is in flight" from "between events".
   if (!tournamentId) {
-    return settings?.draft_open
-      ? { ok: false, error: "Draft sign-ups are still open — the player can enter from their dashboard." }
-      : { ok: true };
+    if (settings?.draft_open)
+      return { ok: false, error: "Draft sign-ups are still open — the player can enter from their dashboard." };
+    if (settings?.draft_active || settings?.season_active) return { ok: true };
+    const { count } = await supabaseAdmin
+      .from("players").select("*", { count: "exact", head: true })
+      .eq("status", "approved").eq("draft_entered", true);
+    return (count ?? 0) > 0
+      ? { ok: true }
+      : { ok: false, error: "No event is in progress." };
   }
 
   const { data: t } = await supabaseAdmin

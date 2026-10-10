@@ -28,7 +28,7 @@ export default async function TeamsPage({
       .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, tracker_url, is_captain, team_id")
       .eq("status", "approved")
       .not("team_id", "is", null),
-    supabaseAdmin.from("league_settings").select("active_tournament_id, season_active, team_size, draft_open").single(),
+    supabaseAdmin.from("league_settings").select("active_tournament_id, season_active, team_size, draft_open, draft_active").single(),
   ]);
 
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
@@ -57,12 +57,6 @@ export default async function TeamsPage({
   ]);
 
   const joinMode: "players" | "teams" = (tourney?.join_mode as "players" | "teams" | undefined) ?? "players";
-
-  // Mirrors eventAcceptsLateEntries in actions.ts — the server is the gate, this
-  // only decides whether the buttons are worth rendering.
-  const lateEntriesOpen = activeTournamentId
-    ? !!tourney?.signups_closed && (tourney.status === "scheduled" || tourney.status === "active")
-    : !settings?.draft_open;
 
   // Fetch tournament entries once — used for both allowedTeamIds and availablePlayers.
   const entryPlayerIds: Set<string> | null = activeTournamentId
@@ -119,6 +113,13 @@ export default async function TeamsPage({
     return total / roster.length;
   };
   teams.sort((a, b) => teamAvgMmr(b.id) - teamAvgMmr(a.id));
+
+  // Mirrors eventAcceptsLateEntries in actions.ts — the server is the gate, this
+  // only decides whether the buttons are worth rendering. Rostered teams stand in
+  // for the server's "pool is non-empty" check, since resetSeason clears both.
+  const lateEntriesOpen = activeTournamentId
+    ? !!tourney?.signups_closed && (tourney.status === "scheduled" || tourney.status === "active")
+    : !settings?.draft_open && (!!settings?.draft_active || !!settings?.season_active || teams.length > 0);
 
   // Find the current user's team (for highlighting)
   const myPlayer = session?.userId
