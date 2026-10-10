@@ -18,7 +18,7 @@ export default async function TeamsPage({
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
 
-  const [userIsAdmin, { data: teamsRaw }, { data: allPlayers }, { data: settings }] = await Promise.all([
+  const [userIsAdmin, { data: teamsRaw }, { data: allPlayers }, { data: settings }, { data: matchSlots }] = await Promise.all([
     session?.userId ? isModeratorVerified(session.userId) : Promise.resolve(false),
     supabaseAdmin
       .from("teams")
@@ -29,7 +29,18 @@ export default async function TeamsPage({
       .eq("status", "approved")
       .not("team_id", "is", null),
     supabaseAdmin.from("league_settings").select("active_tournament_id, season_active, team_size, draft_open, draft_active").single(),
+    supabaseAdmin.from("matches").select("home_team_id, away_team_id"),
   ]);
+
+  // Which teams hold a match, so the card can offer Disqualify where there are
+  // results to forfeit and Remove where the team is still just a roster. Same
+  // predicate removeTeam gates on — if the two drift the button offers an action
+  // the server refuses.
+  const teamsWithMatches = new Set<string>();
+  (matchSlots ?? []).forEach((m) => {
+    if (m.home_team_id) teamsWithMatches.add(m.home_team_id as string);
+    if (m.away_team_id) teamsWithMatches.add(m.away_team_id as string);
+  });
 
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
   const teamSize = normalizeTeamSize(settings?.team_size);
@@ -156,6 +167,7 @@ export default async function TeamsPage({
             joinMode={joinMode}
             teamSize={teamSize}
             lateEntriesOpen={lateEntriesOpen}
+            teamsWithMatches={teams.filter((t) => teamsWithMatches.has(t.id)).map((t) => t.id)}
           />
         ) : teams.length === 0 ? (
           <p className="text-zinc-400">No teams yet — the draft hasn&apos;t started.</p>

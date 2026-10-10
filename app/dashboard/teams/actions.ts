@@ -383,6 +383,82 @@ export async function swapRosterPlayerWithBenchPlayer(rosterPlayerId: string, be
   return { success: true };
 }
 
+/**
+ * Takes a team apart instead of disqualifying it. A team that holds no match has
+ * nothing to forfeit, so execDisqualifyTeam would do nothing but set a flag and
+ * leave a dead team on the page — removal is the honest action, and the one the
+ * Teams tab offers until the bracket seeds it.
+ *
+ * The slot survives: it is what the draft and the bracket builders map onto, and
+ * it is what createTeam claims next. Only its occupants and its identity go.
+ */
+export async function removeTeam(teamId: string) {
+  const session = await getSession();
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
+
+  // Same test claimTeamSlot uses for "this slot holds a bracket position", not a
+  // global "has any bracket been built": a team created after generation has no
+  // seed and no results, so it is still removable.
+  const { count: ownMatches } = await supabaseAdmin
+    .from("matches").select("*", { count: "exact", head: true })
+    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
+  if (ownMatches) return { error: "This team has matches — disqualify it instead." };
+
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("draft_active").single();
+  if (settings?.draft_active) return { error: "Finish or end the draft before removing a team." };
+
+  const { data: team } = await supabaseAdmin
+    .from("teams").select("id, name, slot_number, discord_role_id").eq("id", teamId).single();
+  if (!team) return { error: "Team not found." };
+
+  const { data: roster } = await supabaseAdmin
+    .from("players").select("id, discord_id, is_captain").eq("team_id", teamId);
+  const teamSize = await resolveTeamSize();
+
+  await supabaseAdmin.from("players").update({ team_id: null, is_captain: false }).eq("team_id", teamId);
+
+  // Back to the state the formation paths leave a reused slot in, so the next
+  // roster to claim it doesn't inherit this one's name, logo or rating.
+  await supabaseAdmin
+    .from("teams")
+    .update({
+      name: typeof team.slot_number === "number" ? `Team ${team.slot_number}` : team.name,
+      logo_url: null, logo_offset_x: 50, logo_offset_y: 50,
+      wins: 0, losses: 0, is_locked: false, season_rating: null, initial_rating: null,
+      is_disqualified: false, disqualified_at: null,
+    })
+    .eq("id", teamId);
+
+  // The players stay in the event — they land back on the available list, still
+  // requestable as subs and still draftable — so the shared tournament role is
+  // untouched and only the team's own roles come off.
+  for (const p of roster ?? []) {
+    if (!p.discord_id) continue;
+    if (teamSize > 1 && team.discord_role_id) removeRoleById(p.discord_id, team.discord_role_id).catch(() => {});
+    if (p.is_captain) removeRole(p.discord_id, "Captain").catch(() => {});
+  }
+
+  // num_teams is what the later stage builders size their brackets off. Shrinking
+  // it is only safe while no bracket exists at all — a partially built one reads it
+  // back when it generates its next stage.
+  const { count: anyBracketMatches } = await supabaseAdmin
+    .from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null);
+  if (!anyBracketMatches) {
+    const { data: rosters } = await supabaseAdmin.from("players").select("team_id").not("team_id", "is", null);
+    const rosteredTeams = new Set((rosters ?? []).map((r) => r.team_id as string)).size;
+    await supabaseAdmin.from("league_settings")
+      .update({ num_teams: rosteredTeams, updated_at: new Date().toISOString() }).not("id", "is", null);
+  }
+
+  revalidatePath("/dashboard/teams");
+  revalidatePath("/dashboard/my-team");
+  revalidatePath("/dashboard/subs");
+  revalidatePath("/dashboard/season");
+  revalidatePath("/dashboard/admin");
+  return { success: true, message: `${team.name} removed — its players are back on the available list.` };
+}
+
 export async function disqualifyTeam(teamId: string) {
   const session = await getSession();
   if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };

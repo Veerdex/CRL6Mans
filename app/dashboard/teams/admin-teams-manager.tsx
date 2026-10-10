@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { swapPlayersBetweenTeams, swapRosterPlayerWithBenchPlayer, disqualifyTeam, addPlayerToEvent, removePlayerFromEvent, createTeam } from "./actions";
+import { swapPlayersBetweenTeams, swapRosterPlayerWithBenchPlayer, disqualifyTeam, removeTeam, addPlayerToEvent, removePlayerFromEvent, createTeam } from "./actions";
 import { MyTeamEditor } from "./my-team-editor";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { playerRatingFromRow } from "@/app/lib/rating";
@@ -65,6 +65,7 @@ interface Props {
   joinMode?: "players" | "teams";
   teamSize?: number;
   lateEntriesOpen?: boolean;
+  teamsWithMatches?: string[];
 }
 
 function rv(p: Parameters<typeof playerRatingFromRow>[0]) {
@@ -294,11 +295,13 @@ function isValidTarget(source: SwapSelection, candidate: SwapSelection): boolean
   return true;
 }
 
-export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = [], initialQuery = "", joinMode = "players", teamSize = 3, lateEntriesOpen = false }: Props) {
+export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = [], initialQuery = "", joinMode = "players", teamSize = 3, lateEntriesOpen = false, teamsWithMatches = [] }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmDqTeamId, setConfirmDqTeamId] = useState<string | null>(null);
   const [dqConfirmText, setDqConfirmText] = useState("");
+  const [dqError, setDqError] = useState<string | null>(null);
+  const seeded = new Set(teamsWithMatches);
   const [swapSource, setSwapSource] = useState<SwapSelection | null>(null);
   const [swapTarget, setSwapTarget] = useState<SwapSelection | null>(null);
   const [swapError, setSwapError] = useState<string | null>(null);
@@ -343,9 +346,14 @@ export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = []
       })()
     : teams;
 
-  function handleDisqualify(teamId: string) {
+  function handleDisqualify(teamId: string, remove: boolean) {
+    setDqError(null);
     startTransition(async () => {
-      await disqualifyTeam(teamId);
+      const res = remove ? await removeTeam(teamId) : await disqualifyTeam(teamId);
+      // Both refuse on state that moved since the page rendered — a bracket
+      // generated in another tab, a draft going active — so keep the panel open
+      // and say so rather than looking like it worked.
+      if (res?.error) { setDqError(res.error); return; }
       setConfirmDqTeamId(null);
       setDqConfirmText("");
       router.refresh();
@@ -476,6 +484,10 @@ export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = []
         const offsetY = team.logo_offset_y ?? 50;
         const isConfirmingDq = confirmDqTeamId === team.id;
         const isDqd = !!team.is_disqualified;
+        // Nothing to forfeit until the team holds a match, so until then the red
+        // action takes the team apart instead of marking it disqualified.
+        const removeMode = !seeded.has(team.id);
+        const verb = removeMode ? "Remove" : "Disqualify";
 
         return (
           <div
@@ -516,28 +528,35 @@ export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = []
                 </span>
               ) : isConfirmingDq ? (
                 <button
-                  onClick={() => { setConfirmDqTeamId(null); setDqConfirmText(""); }}
+                  onClick={() => { setConfirmDqTeamId(null); setDqConfirmText(""); setDqError(null); }}
                   className="shrink-0 px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs rounded-lg"
                 >
                   Cancel
                 </button>
               ) : (
                 <button
-                  onClick={() => { setConfirmDqTeamId(team.id); setDqConfirmText(""); }}
+                  onClick={() => { setConfirmDqTeamId(team.id); setDqConfirmText(""); setDqError(null); }}
                   className="shrink-0 text-[10px] font-bold text-red-500 hover:text-red-400 border border-red-800/50 hover:border-red-600/60 rounded px-2 py-1 transition-colors uppercase tracking-wide"
-                  title="Disqualify team"
+                  title={removeMode ? "Remove team — frees the slot, players go back to the available list" : "Disqualify team"}
                 >
-                  Disqualify
+                  {verb}
                 </button>
               )}
             </div>
 
-            {/* Disqualify confirmation — requires typing the team name to avoid mis-clicks */}
+            {/* Confirmation — requires typing the team name to avoid mis-clicks.
+                Remove gets the same gate: it wipes the name, logo and rating. */}
             {isConfirmingDq && (
               <div className="px-5 py-3 border-b border-zinc-800 bg-red-950/20 space-y-2">
                 <p className="text-xs text-zinc-300">
-                  Type <span className="font-semibold text-white">{team.name}</span> to confirm disqualification.
+                  Type <span className="font-semibold text-white">{team.name}</span> to confirm
+                  {removeMode ? " removal." : " disqualification."}
                 </p>
+                {removeMode && (
+                  <p className="text-xs text-zinc-500">
+                    The slot is freed and reusable with ＋. Its players stay in the event and go back to the available list.
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
@@ -548,13 +567,14 @@ export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = []
                     className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-red-600"
                   />
                   <button
-                    onClick={() => handleDisqualify(team.id)}
+                    onClick={() => handleDisqualify(team.id, removeMode)}
                     disabled={isPending || dqConfirmText.trim().toLowerCase() !== team.name.trim().toLowerCase()}
                     className="shrink-0 px-3 py-1.5 bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg"
                   >
-                    {isPending ? "Disqualifying…" : "Disqualify"}
+                    {isPending ? (removeMode ? "Removing…" : "Disqualifying…") : verb}
                   </button>
                 </div>
+                {dqError && <p className="text-xs text-red-400">{dqError}</p>}
               </div>
             )}
 
