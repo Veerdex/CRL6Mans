@@ -28,7 +28,7 @@ export default async function TeamsPage({
       .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, tracker_url, is_captain, team_id")
       .eq("status", "approved")
       .not("team_id", "is", null),
-    supabaseAdmin.from("league_settings").select("active_tournament_id, season_active, team_size").single(),
+    supabaseAdmin.from("league_settings").select("active_tournament_id, season_active, team_size, draft_open").single(),
   ]);
 
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
@@ -36,25 +36,33 @@ export default async function TeamsPage({
 
   // All approved players not currently on a team — passed to AdminTeamsManager as the
   // bench swap pool, regardless of whether they entered the active tournament/draft.
-  type AvailablePlayer = { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null; team_id: string | null };
+  // inEvent splits them: swapping in someone who never signed up is allowed, but the
+  // admin has to be able to see which is which among two dozen names.
+  type AvailablePlayer = { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null; team_id: string | null; draft_entered?: boolean | null; sub_willing?: boolean | null; inEvent?: boolean };
 
   const [{ data: tourney }, { data: entries }, { data: participants }] = await Promise.all([
     activeTournamentId
-      ? supabaseAdmin.from("tournaments").select("join_mode").eq("id", activeTournamentId).single()
-      : Promise.resolve({ data: null as { join_mode: string | null } | null }),
+      ? supabaseAdmin.from("tournaments").select("join_mode, status, signups_closed").eq("id", activeTournamentId).single()
+      : Promise.resolve({ data: null as { join_mode: string | null; status?: string | null; signups_closed?: boolean | null } | null }),
     activeTournamentId
       ? supabaseAdmin.from("tournament_entries").select("player_id").eq("tournament_id", activeTournamentId)
       : Promise.resolve({ data: null as { player_id: string }[] | null }),
     userIsAdmin
       ? supabaseAdmin
           .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, team_id")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, team_id, draft_entered, sub_willing")
           .eq("status", "approved")
           .is("team_id", null)
       : Promise.resolve({ data: [] as AvailablePlayer[] }),
   ]);
 
   const joinMode: "players" | "teams" = (tourney?.join_mode as "players" | "teams" | undefined) ?? "players";
+
+  // Mirrors eventAcceptsLateEntries in actions.ts — the server is the gate, this
+  // only decides whether the buttons are worth rendering.
+  const lateEntriesOpen = activeTournamentId
+    ? !!tourney?.signups_closed && (tourney.status === "scheduled" || tourney.status === "active")
+    : !settings?.draft_open;
 
   // Fetch tournament entries once — used for both allowedTeamIds and availablePlayers.
   const entryPlayerIds: Set<string> | null = activeTournamentId
@@ -71,7 +79,12 @@ export default async function TeamsPage({
     );
   }
 
-  const availablePlayers: AvailablePlayer[] = (participants ?? []) as AvailablePlayer[];
+  // Same membership test the sub-request gate uses (subs/actions.ts): the entry
+  // row when a tournament is live, draft_entered otherwise.
+  const availablePlayers: AvailablePlayer[] = ((participants ?? []) as AvailablePlayer[]).map((p) => ({
+    ...p,
+    inEvent: entryPlayerIds ? entryPlayerIds.has(p.id) : !!p.draft_entered,
+  }));
 
   // Group players by team
   const byTeam: Record<string, NonNullable<typeof allPlayers>> = {};
@@ -138,6 +151,7 @@ export default async function TeamsPage({
             initialQuery={initialSearch ?? ""}
             joinMode={joinMode}
             teamSize={teamSize}
+            lateEntriesOpen={lateEntriesOpen}
           />
         ) : (
           <TeamsGrid

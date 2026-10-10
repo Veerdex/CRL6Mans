@@ -18,6 +18,104 @@ async function getSession() {
   return decrypt(cookieStore.get("session")?.value);
 }
 
+// A tournament_entries row (or draft_entered, for a season) is what the rest of
+// the app reads as "in this event": it decides whether a team is listed at all
+// (teams/page.tsx allowedTeamIds, layout-data.ts hasTeams), whether the 24h
+// reminder reaches someone (pushToTournamentRoster), and whether a captain may
+// request them as a sub (subs/actions.ts). A player can be put on a roster
+// without ever having signed up, so enrolment has to follow them in or they end
+// up rostered and invisible to all of it.
+//
+// in_active_draft is deliberately untouched: it means "inside the current
+// draft's cutoff pool", and writing it would drop a mid-event addition into a
+// live draft's pick list.
+async function enrollInEvent(playerId: string) {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("active_tournament_id").single();
+  const tournamentId = (settings?.active_tournament_id as string | null) ?? null;
+
+  if (tournamentId) {
+    const { error } = await supabaseAdmin
+      .from("tournament_entries").insert({ tournament_id: tournamentId, player_id: playerId });
+    if (error && !error.message.toLowerCase().includes("duplicate")) return { error: error.message };
+  }
+
+  await supabaseAdmin.from("players").update({ draft_entered: true }).eq("id", playerId);
+  // Own statement: pre-migration this column doesn't exist, and folding it in
+  // would take draft_entered down with it.
+  await supabaseAdmin.from("players").update({ draft_not_selected_reason: null }).eq("id", playerId);
+  return {};
+}
+
+// The window the admin asked for: sign-ups closed, event not yet over. While
+// sign-ups are open there is nothing to fix — the player can enter themselves.
+async function eventAcceptsLateEntries(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("active_tournament_id, draft_open").single();
+  const tournamentId = (settings?.active_tournament_id as string | null) ?? null;
+
+  if (!tournamentId) {
+    return settings?.draft_open
+      ? { ok: false, error: "Draft sign-ups are still open — the player can enter from their dashboard." }
+      : { ok: true };
+  }
+
+  const { data: t } = await supabaseAdmin
+    .from("tournaments").select("status, signups_closed").eq("id", tournamentId).single();
+  if (!t) return { ok: false, error: "Active tournament not found." };
+  if (!t.signups_closed)
+    return { ok: false, error: "Sign-ups are still open — the player can enter from their dashboard." };
+  if (t.status !== "scheduled" && t.status !== "active")
+    return { ok: false, error: "This tournament has already ended." };
+  return { ok: true };
+}
+
+export async function addPlayerToEvent(playerId: string) {
+  const session = await getSession();
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
+
+  const window = await eventAcceptsLateEntries();
+  if (!window.ok) return { error: window.error };
+
+  const { data: player } = await supabaseAdmin
+    .from("players").select("id, status").eq("id", playerId).single();
+  if (player?.status !== "approved") return { error: "Only approved players can be added." };
+
+  const result = await enrollInEvent(playerId);
+  if (result.error) return { error: result.error };
+
+  revalidatePath("/dashboard/teams");
+  revalidatePath("/dashboard/subs");
+  return { success: true };
+}
+
+export async function removePlayerFromEvent(playerId: string) {
+  const session = await getSession();
+  if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
+
+  const window = await eventAcceptsLateEntries();
+  if (!window.ok) return { error: window.error };
+
+  const { data: player } = await supabaseAdmin
+    .from("players").select("id, team_id").eq("id", playerId).single();
+  // Dropping the entry row of a rostered player is how a team vanishes from the
+  // Teams page — allowedTeamIds keeps a team only while someone on it is entered.
+  if (player?.team_id) return { error: "Take them off their team first." };
+
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings").select("active_tournament_id").single();
+  const tournamentId = (settings?.active_tournament_id as string | null) ?? null;
+  if (tournamentId) {
+    await supabaseAdmin.from("tournament_entries").delete()
+      .eq("tournament_id", tournamentId).eq("player_id", playerId);
+  }
+  await supabaseAdmin.from("players").update({ draft_entered: false }).eq("id", playerId);
+
+  revalidatePath("/dashboard/teams");
+  revalidatePath("/dashboard/subs");
+  return { success: true };
+}
+
 export async function updateTeamInfo(formData: FormData) {
   const session = await getSession();
   if (!session?.userId) redirect("/login");
@@ -247,6 +345,11 @@ export async function swapRosterPlayerWithBenchPlayer(rosterPlayerId: string, be
   await syncSoloTeamIdentity(teamId, teamSize);
 
   await assignCaptainIfMissing(teamId);
+
+  // After the roster writes, never before: a swap that failed halfway shouldn't
+  // leave someone enrolled in an event they aren't playing in. The player going
+  // the other way keeps their entry — they signed up, they just lost the slot.
+  await enrollInEvent(bench.id);
 
   revalidatePath("/dashboard/teams");
   revalidatePath("/dashboard/my-team");

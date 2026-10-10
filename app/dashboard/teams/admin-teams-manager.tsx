@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { swapPlayersBetweenTeams, swapRosterPlayerWithBenchPlayer, disqualifyTeam } from "./actions";
+import { swapPlayersBetweenTeams, swapRosterPlayerWithBenchPlayer, disqualifyTeam, addPlayerToEvent, removePlayerFromEvent } from "./actions";
 import { MyTeamEditor } from "./my-team-editor";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { playerRatingFromRow } from "@/app/lib/rating";
@@ -50,6 +50,8 @@ type AvailablePlayer = {
   id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
   peak_1v1: string | null; current_1v1: string | null;
   team_id: string | null;
+  sub_willing?: boolean | null;
+  inEvent?: boolean;
 };
 
 interface Props {
@@ -60,6 +62,7 @@ interface Props {
   initialQuery?: string;
   joinMode?: "players" | "teams";
   teamSize?: number;
+  lateEntriesOpen?: boolean;
 }
 
 const gradients = [
@@ -83,6 +86,42 @@ function rv(p: Parameters<typeof playerRatingFromRow>[0]) {
   return Math.round(playerRatingFromRow(p));
 }
 
+function BenchRow({
+  player, isSelected, onSelect, action, disabled,
+}: {
+  player: AvailablePlayer;
+  isSelected: boolean;
+  onSelect: () => void;
+  action: { label: string; onClick: () => void } | null;
+  disabled: boolean;
+}) {
+  return (
+    <div
+      onClick={onSelect}
+      className={`flex items-center gap-2 px-5 py-2.5 cursor-pointer hover:bg-zinc-800 transition-colors ${
+        isSelected ? "bg-indigo-950/50 ring-1 ring-inset ring-indigo-600" : ""
+      }`}
+    >
+      <span className="text-sm text-zinc-300 min-w-0 truncate">{player.display_name ?? player.username}</span>
+      {player.sub_willing && (
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-emerald-400 border border-emerald-900 rounded px-1.5 py-0.5">
+          Sub
+        </span>
+      )}
+      <span className="ml-auto text-xs text-zinc-500 shrink-0">{rv(player).toLocaleString()} RV</span>
+      {action && (
+        <button
+          onClick={(e) => { e.stopPropagation(); action.onClick(); }}
+          disabled={disabled}
+          className="shrink-0 text-xs text-zinc-400 hover:text-indigo-400 disabled:opacity-40 transition-colors"
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Either a rostered player (tied to a team) or a bench player (no team yet).
 type SwapSelection = { kind: "roster"; playerId: string; teamId: string; name: string } | { kind: "bench"; playerId: string; name: string };
 
@@ -93,7 +132,7 @@ function isValidTarget(source: SwapSelection, candidate: SwapSelection): boolean
   return true;
 }
 
-export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = [], initialQuery = "", joinMode = "players", teamSize = 3 }: Props) {
+export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = [], initialQuery = "", joinMode = "players", teamSize = 3, lateEntriesOpen = false }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmDqTeamId, setConfirmDqTeamId] = useState<string | null>(null);
@@ -102,8 +141,28 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
   const [swapTarget, setSwapTarget] = useState<SwapSelection | null>(null);
   const [swapError, setSwapError] = useState<string | null>(null);
   const [query, setQuery] = useState(initialQuery);
+  const [benchQuery, setBenchQuery] = useState("");
+  const [showOutsiders, setShowOutsiders] = useState(false);
+  const [benchError, setBenchError] = useState<string | null>(null);
 
   const swapEnabled = joinMode !== "teams";
+
+  const benchMatch = (p: AvailablePlayer) => {
+    const q = benchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return p.username.toLowerCase().includes(q) || (p.display_name ?? "").toLowerCase().includes(q);
+  };
+  const inEventBench = availablePlayers.filter((p) => p.inEvent && benchMatch(p));
+  const outsiderBench = availablePlayers.filter((p) => !p.inEvent && benchMatch(p));
+
+  function handleEventMembership(playerId: string, add: boolean) {
+    setBenchError(null);
+    startTransition(async () => {
+      const res = add ? await addPlayerToEvent(playerId) : await removePlayerFromEvent(playerId);
+      if (res?.error) setBenchError(res.error);
+      else router.refresh();
+    });
+  }
 
   const visibleTeams = query.trim()
     ? (() => {
@@ -354,32 +413,89 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
       })}
     </div>
 
-      {/* Bench — players who entered the draft/tournament but aren't rostered yet */}
+      {/* Bench — every approved player with no team, split by whether they're in
+          this event. Either side can be swapped in; the split exists because the
+          second list is the whole rest of the league and an admin reaching for an
+          exception needs to see who actually signed up. */}
       {swapEnabled && availablePlayers.length > 0 && (
         <div className="rounded-xl border border-zinc-800 bg-zinc-900">
-          <div className="px-5 py-3 border-b border-zinc-800">
-            <h3 className="text-sm font-semibold text-zinc-300">Available Players</h3>
-            <p className="text-xs text-zinc-500">Select a rostered player above, then one of these to swap them in.</p>
+          <div className="px-5 py-3 border-b border-zinc-800 space-y-2">
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-300">Available Players</h3>
+              <p className="text-xs text-zinc-500">Select a rostered player above, then one of these to swap them in.</p>
+            </div>
+            <input
+              value={benchQuery}
+              onChange={(e) => setBenchQuery(e.target.value)}
+              placeholder="Search available players…"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-600"
+            />
+          </div>
+
+          {benchError && (
+            <p className="px-5 py-2 text-xs text-rose-400 border-b border-zinc-800">{benchError}</p>
+          )}
+
+          <div className="px-5 py-2 border-b border-zinc-800 flex items-center gap-2">
+            <span className="text-xs font-semibold text-zinc-400">In this event — no team</span>
+            <span className="text-xs text-zinc-600">{inEventBench.length}</span>
           </div>
           <div className="divide-y divide-zinc-800 max-h-72 overflow-y-auto">
-            {availablePlayers.map((p) => {
-              const peak = rv(p);
-              const selection: SwapSelection = { kind: "bench", playerId: p.id, name: p.display_name ?? p.username };
-              const isSelected = swapSource?.playerId === p.id;
-              return (
-                <div
+            {inEventBench.length === 0 ? (
+              <p className="px-5 py-3 text-xs text-zinc-600">
+                {benchQuery.trim() ? "No matches." : "Everyone who entered this event is on a team."}
+              </p>
+            ) : (
+              inEventBench.map((p) => (
+                <BenchRow
                   key={p.id}
-                  onClick={() => handleSelect(selection, false)}
-                  className={`flex items-center justify-between px-5 py-2.5 cursor-pointer hover:bg-zinc-800 transition-colors ${
-                    isSelected ? "bg-indigo-950/50 ring-1 ring-inset ring-indigo-600" : ""
-                  }`}
-                >
-                  <span className="text-sm text-zinc-300">{p.display_name ?? p.username}</span>
-                  <span className="text-xs text-zinc-500">{peak.toLocaleString()} RV</span>
-                </div>
-              );
-            })}
+                  player={p}
+                  isSelected={swapSource?.playerId === p.id}
+                  onSelect={() => handleSelect({ kind: "bench", playerId: p.id, name: p.display_name ?? p.username }, false)}
+                  action={lateEntriesOpen ? { label: "Remove", onClick: () => handleEventMembership(p.id, false) } : null}
+                  disabled={isPending}
+                />
+              ))
+            )}
           </div>
+
+          <button
+            onClick={() => setShowOutsiders((v) => !v)}
+            className="w-full px-5 py-2 border-t border-zinc-800 flex items-center gap-2 text-left hover:bg-zinc-800 transition-colors"
+          >
+            <span className="text-xs font-semibold text-zinc-400">Not in this event</span>
+            <span className="text-xs text-zinc-600">{outsiderBench.length}</span>
+            <span className="ml-auto text-xs text-zinc-500">{showOutsiders ? "↑ Hide" : "Show"}</span>
+          </button>
+          {showOutsiders && (
+            <div className="divide-y divide-zinc-800 max-h-72 overflow-y-auto border-t border-zinc-800">
+              {outsiderBench.length === 0 ? (
+                <p className="px-5 py-3 text-xs text-zinc-600">
+                  {benchQuery.trim()
+                    ? "No matches."
+                    : "Only approved players appear here — approve a late registration first."}
+                </p>
+              ) : (
+                outsiderBench.map((p) => (
+                  <BenchRow
+                    key={p.id}
+                    player={p}
+                    isSelected={swapSource?.playerId === p.id}
+                    onSelect={() => handleSelect({ kind: "bench", playerId: p.id, name: p.display_name ?? p.username }, false)}
+                    action={lateEntriesOpen ? { label: "Add to event", onClick: () => handleEventMembership(p.id, true) } : null}
+                    disabled={isPending}
+                  />
+                ))
+              )}
+            </div>
+          )}
+          {showOutsiders && (
+            <p className="px-5 py-2.5 text-xs text-zinc-600 border-t border-zinc-800">
+              Swapping one of these onto a team enters them in the event automatically. Add
+              to event enters them without taking anyone off a team, which is also what makes
+              them requestable as a sub.
+            </p>
+          )}
         </div>
       )}
     </div>
