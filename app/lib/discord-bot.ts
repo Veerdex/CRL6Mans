@@ -2698,10 +2698,15 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean; repairOnl
   roleNames: string[];
   roleIds: { label: string; id: string }[];
   warnings: string[];
+  notes: string[];
 }> {
   const syncRegistered = opts?.syncRegistered ?? true;
   const repairOnly = opts?.repairOnly ?? false;
   const warnings: string[] = [];
+  // Kept apart from warnings because a player who left the server is the normal
+  // state of a league that has run for a while, not something to act on. Folded
+  // in, it would mark every future sync as partial and bury a real failure.
+  const notes: string[] = [];
 
   const [{ data: teams }, { data: approved }, { data: allPlayers }, { data: settings }] = await Promise.all([
     supabaseAdmin.from("teams").select("id, name, discord_role_id"),
@@ -2821,7 +2826,7 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean; repairOnl
   const mentionList = (ids: string[]) =>
     ids.slice(0, 6).map(id => `<@${id}>`).join(", ") + (ids.length > 6 ? `, +${ids.length - 6} more` : "");
   if (notMembers.length) {
-    warnings.push(
+    notes.push(
       `${notMembers.length} player${notMembers.length > 1 ? "s" : ""} no longer in the server — roles left alone: ` +
       mentionList(notMembers)
     );
@@ -2854,7 +2859,7 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean; repairOnl
           .filter(([, t]) => t.roleId)
           .map(([, t]) => ({ label: t.name, id: t.roleId as string }))),
   ];
-  return { assigned, roleNames, roleIds, warnings };
+  return { assigned, roleNames, roleIds, warnings, notes };
 }
 
 async function syncRoles(userId: string, syncRegistered: boolean, repairOnly: boolean) {
@@ -2864,13 +2869,14 @@ async function syncRoles(userId: string, syncRegistered: boolean, repairOnly: bo
   const { data: teams } = await supabaseAdmin.from("teams").select("id").limit(1);
   if (!teams?.length) return ephemeralReply("❌ No teams found in the database.");
 
-  const { assigned, roleNames, roleIds, warnings } = await execSyncRoles({ syncRegistered, repairOnly });
+  const { assigned, roleNames, roleIds, warnings, notes } = await execSyncRoles({ syncRegistered, repairOnly });
   const lines = [
     `• Roles reconciled: ${roleNames.join(", ")}`,
     `• Role IDs used: ${roleIds.length ? roleIds.map(r => `${r.label} <@&${r.id}>`).join(", ") : "none (falling back to name lookup)"}`,
-    `• Players updated: **${assigned}**`,
+    `• Players on a team: **${assigned}**`,
     ...(syncRegistered ? [] : ["ℹ️ Registered role sync skipped (sync_registered: false)."]),
     ...(repairOnly ? ["ℹ️ Repair mode — missing roles were added, none were taken away."] : []),
+    ...notes.map(n => `ℹ️ ${n}`),
     ...warnings.map(w => `⚠️ ${w}`),
   ];
   return ephemeralReply((warnings.length ? "⚠️ Partial sync" : "✅ Roles synced") + "\n" + lines.join("\n"));
