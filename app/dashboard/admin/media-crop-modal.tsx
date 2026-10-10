@@ -69,7 +69,9 @@ function coverScale(natural: NaturalSize, win: Rect): number {
 //
 // The image is always rendered at its natural pixel size with a single
 // `scale()` transform applied — never independent width/height — so the
-// two axes can't desync and stretch the image.
+// two axes can't desync and stretch the image. That holds only while the
+// element's `max-width: none` stands (see the style below); preflight's
+// clamp is what breaks it.
 function computeImgTransform(crop: MediaCrop, natural: NaturalSize, frame: Rect, win: Rect): ImgTransform | null {
   const baseScale = coverScale(natural, win);
   if (!isFinite(baseScale) || baseScale <= 0) return null;
@@ -240,6 +242,13 @@ export function MediaCropModal({
                 ? {
                     width: natural.w,
                     height: natural.h,
+                    // Tailwind's preflight sets `img { max-width: 100% }`, which an
+                    // inline `width` does not override. Left in, it clamps the box to
+                    // the frame's width while the inline height stands — desyncing the
+                    // two axes the scale() below assumes are still in natural
+                    // proportion, so any image wider than the frame previewed as a
+                    // squashed vertical sliver.
+                    maxWidth: "none",
                     transformOrigin: "0 0",
                     transform: `translate(${imgTransform.left}px, ${imgTransform.top}px) scale(${imgTransform.scale})`,
                   }
