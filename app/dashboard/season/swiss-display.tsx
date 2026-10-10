@@ -6,152 +6,8 @@ import { SWISS_ADVANCE_WINS, SWISS8_ADVANCE_WINS } from "@/app/lib/bracket";
 import { BracketCanvas } from "./bracket-canvas";
 import { LiveClock } from "./live-clock";
 import { isMatchLive } from "@/app/lib/match-live";
-
-// ── Layout constants ───────────────────────────────────────────────────────────
-
-const MW = 210;  // match / group box width
-const MH = 28;   // match row height (single horizontal row)
-const MG = 0;    // no gap between match rows (dividers handle separation)
-const GH = 28;   // group header height
-const GP = 6;    // group vertical padding (top + bottom)
-const CG = 48;   // horizontal connector gap between round columns
-const BW = 148;  // badge column width
-const BG = 28;   // gap between badge column and next round column
-const TH = 36;   // top header row height (round labels)
-
-const UNIT = MW + CG;  // 258 — one round-column + connector gap
-const BCOL = BW + BG;  // 176 — one badge column + gap
-
-// group height given n matches
-function gH(n: number) { return GH + 2 * GP + n * MH + Math.max(0, n - 1) * MG; }
-
-// ── Connector transition type ──────────────────────────────────────────────────
-
-type Trans = {
-  sR: number; sW: number; sL: number;
-  dR: number; dW: number; dL: number;
-  kind: "winner" | "loser";
-  badge: boolean;
-};
-
-// ── Per-variant layout (16-team 3W/3L Swiss vs 8-team 2W/2L Swiss) ──────────────
-
-type SwissLayout = {
-  threshold: number;                 // wins to qualify / losses to eliminate
-  rounds: number[];                  // round columns to label
-  RX: Record<number, number>;        // X by round
-  BX: Record<number, number>;        // X of badge column by "after round R"
-  GCNT: Record<string, number>;      // match count per "round-w-l"
-  GROUP_CY: Record<string, number>;  // group center-Y by "w-l"
-  BADGE_CY: Record<string, number>;  // badge center-Y by "w-l"
-  TRANS: Trans[];
-  CW: number;
-  CH: number;
-};
-
-// 16-team Swiss: 3 wins qualify, 3 losses eliminate. R1–R5, badges after R3/R4/R5.
-const RX16: Record<number, number> = {
-  1: 0,
-  2: UNIT,
-  3: 2 * UNIT,
-  4: 3 * UNIT + BCOL,
-  5: 3 * UNIT + BCOL + UNIT + BCOL,
-};
-const BX16: Record<number, number> = {
-  3: 3 * UNIT,
-  4: RX16[4] + MW + CG,
-  5: RX16[5] + MW + CG,
-};
-const LAYOUT_16: SwissLayout = {
-  threshold: SWISS_ADVANCE_WINS,
-  rounds: [1, 2, 3, 4, 5],
-  RX: RX16,
-  BX: BX16,
-  GCNT: {
-    "1-0-0": 8,
-    "2-1-0": 4, "2-0-1": 4,
-    "3-2-0": 2, "3-1-1": 4, "3-0-2": 2,
-    "4-2-1": 3, "4-1-2": 3,
-    "5-2-2": 3,
-  },
-  GROUP_CY: {
-    "0-0": 240,
-    "1-0": 158, "0-1": 322,
-    "2-0": 104, "1-1": 240, "0-2": 376,
-    "2-1": 172, "1-2": 308,
-    "2-2": 240,
-  },
-  BADGE_CY: {
-    "3-0":  85, "0-3": 395,
-    "3-1": 147, "1-3": 333,
-    "3-2": 178, "2-3": 302,
-  },
-  TRANS: [
-    { sR:1,sW:0,sL:0, dR:2,dW:1,dL:0, kind:"winner", badge:false },
-    { sR:1,sW:0,sL:0, dR:2,dW:0,dL:1, kind:"loser",  badge:false },
-    { sR:2,sW:1,sL:0, dR:3,dW:2,dL:0, kind:"winner", badge:false },
-    { sR:2,sW:1,sL:0, dR:3,dW:1,dL:1, kind:"loser",  badge:false },
-    { sR:2,sW:0,sL:1, dR:3,dW:1,dL:1, kind:"winner", badge:false },
-    { sR:2,sW:0,sL:1, dR:3,dW:0,dL:2, kind:"loser",  badge:false },
-    { sR:3,sW:2,sL:0, dR:3,dW:3,dL:0, kind:"winner", badge:true  },
-    { sR:3,sW:2,sL:0, dR:4,dW:2,dL:1, kind:"loser",  badge:false },
-    { sR:3,sW:1,sL:1, dR:4,dW:2,dL:1, kind:"winner", badge:false },
-    { sR:3,sW:1,sL:1, dR:4,dW:1,dL:2, kind:"loser",  badge:false },
-    { sR:3,sW:0,sL:2, dR:4,dW:1,dL:2, kind:"winner", badge:false },
-    { sR:3,sW:0,sL:2, dR:3,dW:0,dL:3, kind:"loser",  badge:true  },
-    { sR:4,sW:2,sL:1, dR:4,dW:3,dL:1, kind:"winner", badge:true  },
-    { sR:4,sW:2,sL:1, dR:5,dW:2,dL:2, kind:"loser",  badge:false },
-    { sR:4,sW:1,sL:2, dR:5,dW:2,dL:2, kind:"winner", badge:false },
-    { sR:4,sW:1,sL:2, dR:4,dW:1,dL:3, kind:"loser",  badge:true  },
-    { sR:5,sW:2,sL:2, dR:5,dW:3,dL:2, kind:"winner", badge:true  },
-    { sR:5,sW:2,sL:2, dR:5,dW:2,dL:3, kind:"loser",  badge:true  },
-  ],
-  CW: BX16[5] + BW + 20,
-  CH: 460,
-};
-
-// 8-team Swiss (hybrid_8): 2 wins qualify, 2 losses eliminate. R1–R3, badges after R2/R3.
-const RX8: Record<number, number> = {
-  1: 0,
-  2: UNIT,
-  3: 2 * UNIT + BCOL,
-};
-const BX8: Record<number, number> = {
-  2: 2 * UNIT,
-  3: RX8[3] + MW + CG,
-};
-const LAYOUT_8: SwissLayout = {
-  threshold: SWISS8_ADVANCE_WINS,
-  rounds: [1, 2, 3],
-  RX: RX8,
-  BX: BX8,
-  GCNT: {
-    "1-0-0": 4,
-    "2-1-0": 2, "2-0-1": 2,
-    "3-1-1": 2,
-  },
-  GROUP_CY: {
-    "0-0": 200,
-    "1-0": 110, "0-1": 290,
-    "1-1": 200,
-  },
-  BADGE_CY: {
-    "2-0": 85, "0-2": 315,
-    "2-1": 140, "1-2": 260,
-  },
-  TRANS: [
-    { sR:1,sW:0,sL:0, dR:2,dW:1,dL:0, kind:"winner", badge:false },
-    { sR:1,sW:0,sL:0, dR:2,dW:0,dL:1, kind:"loser",  badge:false },
-    { sR:2,sW:1,sL:0, dR:2,dW:2,dL:0, kind:"winner", badge:true  },
-    { sR:2,sW:1,sL:0, dR:3,dW:1,dL:1, kind:"loser",  badge:false },
-    { sR:2,sW:0,sL:1, dR:3,dW:1,dL:1, kind:"winner", badge:false },
-    { sR:2,sW:0,sL:1, dR:2,dW:0,dL:2, kind:"loser",  badge:true  },
-    { sR:3,sW:1,sL:1, dR:3,dW:2,dL:1, kind:"winner", badge:true  },
-    { sR:3,sW:1,sL:1, dR:3,dW:1,dL:2, kind:"loser",  badge:true  },
-  ],
-  CW: BX8[3] + BW + 20,
-  CH: 400,
-};
+import { DefaultLogo } from "@/app/lib/team-logo";
+import { MW, MH, GH, GP, TH, BW, EXIT_FRAC, gH, LAYOUT_8, LAYOUT_16 } from "./swiss-layout";
 
 // ── Colours ────────────────────────────────────────────────────────────────────
 
@@ -175,6 +31,20 @@ export type Team       = { id: string; name: string; logo_url: string | null };
 type GMatch     = DBMatch & { w: number; l: number };
 type MatchGroup = { round: number; w: number; l: number; matches: GMatch[] };
 type BadgeGroup = { afterRound: number; w: number; l: number; type: "qualified" | "eliminated"; teamIds: string[] };
+
+// ── Crest ──────────────────────────────────────────────────────────────────────
+
+// Squares off against the match row and bleeds back over the row's px-2 so it
+// sits flush on the group box's inner edge — home on the left, away on the
+// right. A team with no crest gets the number tile the teams tab shows; an
+// unassigned slot (TBD) gets nothing, so the label stands alone as before.
+function SwissCrest({ team, side }: { team: Team | undefined; side: "home" | "away" }) {
+  if (!team) return null;
+  const box = `self-stretch w-auto h-auto aspect-square shrink-0 ${side === "home" ? "-ml-2" : "-mr-2"}`;
+  if (!team.logo_url) return <DefaultLogo name={team.name} className={`${box} text-[11px]`} />;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={team.logo_url} alt="" className={`${box} object-cover`} />;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -202,6 +72,7 @@ export function SwissBracketDisplay({
   isHybrid8: boolean;
 }) {
   const L = isHybrid8 ? LAYOUT_8 : LAYOUT_16;
+  const threshold = isHybrid8 ? SWISS8_ADVANCE_WINS : SWISS_ADVANCE_WINS;
   const { RX, BX, TRANS, CW, CH } = L;
   const gMatchCnt = (r: number, w: number, l: number) => L.GCNT[`${r}-${w}-${l}`] ?? 4;
   const gCY = (w: number, l: number) => L.GROUP_CY[`${w}-${l}`] ?? L.CH / 2;
@@ -238,10 +109,10 @@ export function SwissBracketDisplay({
       const homeWon = (m.home_score ?? 0) > (m.away_score ?? 0);
       if ((isHome && homeWon) || (!isHome && !homeWon)) w++; else l++;
       finalR = m.round;
-      if (w >= L.threshold || l >= L.threshold) break;
+      if (w >= threshold || l >= threshold) break;
     }
-    if (w < L.threshold && l < L.threshold) continue;
-    const type = w >= L.threshold ? "qualified" : "eliminated";
+    if (w < threshold && l < threshold) continue;
+    const type = w >= threshold ? "qualified" : "eliminated";
     const key  = `${finalR}-${w}-${l}`;
     if (!badgeMap.has(key)) badgeMap.set(key, { afterRound: finalR, w, l, type, teamIds: [] });
     badgeMap.get(key)!.teamIds.push(tid);
@@ -292,7 +163,7 @@ export function SwissBracketDisplay({
             {TRANS.map((t, i) => {
               const srcN  = gMatchCnt(t.sR, t.sW, t.sL);
               const srcCY = gCY(t.sW, t.sL);
-              const yOff  = gH(srcN) * 0.2;
+              const yOff  = gH(srcN) * EXIT_FRAC;
               const exitY = t.kind === "winner" ? srcCY - yOff : srcCY + yOff;
               const srcX  = RX[t.sR] + MW;
               const dstX  = t.badge ? BX[t.sR] : RX[t.dR];
@@ -374,10 +245,8 @@ export function SwissBracketDisplay({
                         {idx > 0 && <div className="h-px bg-zinc-700/25 mx-2" />}
                         <div style={{ height: MH }} className="flex items-center gap-1 px-2">
                           {/* Home */}
-                          <div className={`flex-1 min-w-0 flex items-center gap-1 text-xs ${homeWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
-                            {m.home_team_id && teams[m.home_team_id]?.logo_url ? (
-                              <img src={teams[m.home_team_id].logo_url!} alt="" className="w-3.5 h-3.5 rounded shrink-0 object-cover" />
-                            ) : null}
+                          <div className={`flex-1 min-w-0 flex self-stretch items-center gap-1.5 text-xs ${homeWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
+                            <SwissCrest team={m.home_team_id ? teams[m.home_team_id] : undefined} side="home" />
                             {m.home_team_id ? (
                               <a href={`/dashboard/teams?search=${encodeURIComponent(hn)}&from=season`} title={teamTitles[m.home_team_id]} className="truncate hover:underline">{hn}</a>
                             ) : (
@@ -386,7 +255,7 @@ export function SwissBracketDisplay({
                           </div>
                           {/* Series score / live clock / vs — the row has no space
                               above it, so the clock takes the slot the "vs" sits in. */}
-                          <span className={`shrink-0 text-[11px] font-mono tabular-nums w-10 text-center ${done ? "font-bold text-white" : live ? "text-cyan-300" : "text-zinc-600"}`}>
+                          <span className={`shrink-0 text-[11px] font-mono tabular-nums w-14 text-center ${done ? "font-bold text-white" : live ? "text-cyan-300" : "text-zinc-600"}`}>
                             {done
                               ? `${m.home_score} – ${m.away_score}`
                               : live && m.started_at
@@ -394,15 +263,13 @@ export function SwissBracketDisplay({
                                 : "vs"}
                           </span>
                           {/* Away */}
-                          <div className={`flex-1 min-w-0 flex items-center justify-end gap-1 text-xs ${awayWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
+                          <div className={`flex-1 min-w-0 flex self-stretch items-center justify-end gap-1.5 text-xs ${awayWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
                             {m.away_team_id ? (
                               <a href={`/dashboard/teams?search=${encodeURIComponent(an)}&from=season`} title={teamTitles[m.away_team_id]} className="truncate hover:underline">{an}</a>
                             ) : (
                               <span className="truncate">{an}</span>
                             )}
-                            {m.away_team_id && teams[m.away_team_id]?.logo_url ? (
-                              <img src={teams[m.away_team_id].logo_url!} alt="" className="w-3.5 h-3.5 rounded shrink-0 object-cover" />
-                            ) : null}
+                            <SwissCrest team={m.away_team_id ? teams[m.away_team_id] : undefined} side="away" />
                           </div>
                         </div>
                       </div>
@@ -434,14 +301,16 @@ export function SwissBracketDisplay({
                   {b.teamIds.map(id => (
                     <div key={id} className="flex items-center gap-1.5 px-1 py-0.5 rounded text-xs">
                       {teams[id]?.logo_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
                         <img src={teams[id].logo_url!} alt="" className="w-4 h-4 rounded shrink-0 object-cover" />
                       ) : (
-                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isQual ? "bg-emerald-400" : "bg-red-400"}`} />
+                        <DefaultLogo name={teams[id]?.name ?? ""} className="w-4 h-4 rounded text-[8px]" />
                       )}
-                      <span className="truncate flex-1 font-medium text-black">
+                      {/* These were text-black on a near-black box, i.e. unreadable. */}
+                      <span className={`truncate flex-1 font-medium ${isQual ? "text-emerald-100" : "text-red-100"}`}>
                         {teams[id]?.name ?? "?"}
                       </span>
-                      <span className="text-[10px] shrink-0 ml-1 text-black/60">{b.w}–{b.l}</span>
+                      <span className="text-[10px] shrink-0 ml-1 text-zinc-400">{b.w}–{b.l}</span>
                     </div>
                   ))}
                 </div>

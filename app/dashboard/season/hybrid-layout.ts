@@ -11,10 +11,17 @@ export const HEAD_H = 22; // badge/status header strip
 export const LABEL_H = 22; // group label above the first card of a column
 export const UNIT = MW + 80; // 290 — one column + gap
 
-const Y0      = MH / 2 + 37;  // first Upper Bracket card, leaving its label room
-const UB_GAP  = MH + 34;      // UB M1 → UB M2
-const SEC_GAP = MH + 64;      // UB M2 → Lower Bracket R1 M1, that label included
-const CH_PAD  = 40;           // below the lowest card
+const CH_PAD = 40;  // below the lowest card
+
+// Clear space, not centre-to-centre distance, so a taller card cannot eat it.
+// `mh` is injectable only so the test can rebuild the layout at the pre-port
+// card height and check it against the pixel values that used to be hardcoded;
+// every caller in the app uses the default.
+const gaps = (mh: number) => ({
+  Y0: mh / 2 + 37,  // first Upper Bracket card, leaving its label room
+  UB: mh + 34,      // UB M1 → UB M2
+  SEC: mh + 64,     // UB M2 → Lower Bracket R1 M1, that label included
+});
 
 export type Node = {
   key: string;          // `${stage}-${round}-${mn}` — links to the DB match
@@ -34,9 +41,10 @@ export type Layout = { nodes: Node[]; edges: Edge[]; CW: number; CH: number };
 // Bracket down into the Lower Bracket (the loser drops) — those use clickable
 // "Loser of X" labels instead, like Double Elimination.
 
-export function buildLayout12(UB: string, LB: string, SF: string, GF: string): Layout {
+export function buildLayout12(UB: string, LB: string, SF: string, GF: string, mh: number = MH): Layout {
   const X = (c: number) => c * UNIT;
-  const LB_GAP = MH + 24;
+  const { Y0, UB: UB_GAP, SEC: SEC_GAP } = gaps(mh);
+  const LB_GAP = mh + 24;
   const ub   = [Y0, Y0 + UB_GAP];
   const lb1  = [0, 1, 2, 3].map((i) => ub[1] + SEC_GAP + i * LB_GAP);
   const lb2  = [(lb1[0] + lb1[1]) / 2, (lb1[2] + lb1[3]) / 2];
@@ -80,12 +88,13 @@ export function buildLayout12(UB: string, LB: string, SF: string, GF: string): L
     { f: `${SF}-1-1`, t: `${GF}-1-1` },
     { f: `${SF}-1-2`, t: `${GF}-1-1` },
   ];
-  return { nodes, edges, CW: X(4) + MW + 48, CH: lb1[3] + MH / 2 + CH_PAD };
+  return { nodes, edges, CW: X(4) + MW + 48, CH: lb1[3] + mh / 2 + CH_PAD };
 }
 
-export function buildLayout8(UB: string, LB: string, SF: string, GF: string): Layout {
+export function buildLayout8(UB: string, LB: string, SF: string, GF: string, mh: number = MH): Layout {
   const X = (c: number) => c * UNIT;
-  const LB_GAP = MH + 44;
+  const { Y0, UB: UB_GAP, SEC: SEC_GAP } = gaps(mh);
+  const LB_GAP = mh + 44;
   const ub  = [Y0, Y0 + UB_GAP];
   const lb1 = [ub[1] + SEC_GAP, ub[1] + SEC_GAP + LB_GAP];
   const gf  = (lb1[0] + lb1[1]) / 2;
@@ -117,5 +126,5 @@ export function buildLayout8(UB: string, LB: string, SF: string, GF: string): La
     { f: `${SF}-1-1`, t: `${GF}-1-1` },
     { f: `${SF}-1-2`, t: `${GF}-1-1` },
   ];
-  return { nodes, edges, CW: X(3) + MW + 48, CH: lb1[1] + MH / 2 + CH_PAD };
+  return { nodes, edges, CW: X(3) + MW + 48, CH: lb1[1] + mh / 2 + CH_PAD };
 }
