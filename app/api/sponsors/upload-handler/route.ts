@@ -19,10 +19,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         }
 
         return {
-          // Raster formats only — the inputs are accept="image/*", so whatever a
-          // browser will hand over has to be listed here or the token request
-          // fails before a byte is uploaded. SVG stays out deliberately: it can
-          // carry embedded <script> and these blobs are served public.
+          // SVG stays off this list deliberately: it can carry embedded
+          // <script> and these blobs are served public.
           allowedContentTypes: [
             "image/jpeg",
             "image/png",
