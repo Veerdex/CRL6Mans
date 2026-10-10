@@ -204,7 +204,7 @@ export default async function AdminPage() {
 
   const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors, publicDesigns] = await Promise.all([
     getAllPendingPlayers(),
-    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, team_size, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, accolade_prize_mvp, accolade_prize_offensive, accolade_prize_defensive, accolade_prize_rookie, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, season_design_id, replay_analysis_mode, join_gate_enabled").maybeSingle(),
+    supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, team_size, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, accolade_prize_mvp, accolade_prize_offensive, accolade_prize_defensive, accolade_prize_rookie, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, season_design_id, replay_analysis_mode, stats_enabled, join_gate_enabled").maybeSingle(),
     supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
@@ -705,6 +705,8 @@ export default async function AdminPage() {
   function matchBestOf(stage: string, round: number): number {
     return resolveBestOf(stage, round, maxRoundByStage, sfFormat?.roundBestOf, fallbackBestOf);
   }
+
+  const statsEnabled = settings?.stats_enabled ?? true;
 
   const matchRows = (scheduledMatches ?? []).map(m => ({
     id: m.id,
@@ -1241,9 +1243,11 @@ export default async function AdminPage() {
         notification={matchesUnderReviewCount || undefined}
         isDefaultTab
         defaultOpen={false}
-        description="Report scores for scheduled matches, including per-game replay uploads that get parsed for scoreboard stats. Only matches with both teams already assigned show up here. The grey count is matches waiting to be reported; the blue count is matches with a submitted replay awaiting identity review."
+        description={statsEnabled
+          ? "Report scores for scheduled matches, including per-game replay uploads that get parsed for scoreboard stats. Only matches with both teams already assigned show up here. The grey count is matches waiting to be reported; the blue count is matches with a submitted replay awaiting identity review."
+          : "Report scores for scheduled matches. This event isn't tracking player stats, so there are no replay uploads — just the series score. Only matches with both teams already assigned show up here."}
       >
-        <MatchReporter matches={matchRows} />
+        <MatchReporter matches={matchRows} statsEnabled={statsEnabled} />
       </AdminSubSection>
 
       {/* ── Sub Requests ── */}

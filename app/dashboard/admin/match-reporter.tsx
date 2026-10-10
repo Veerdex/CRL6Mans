@@ -382,9 +382,11 @@ function ReplaySection({
 
 function MatchEntry({
   match,
+  statsEnabled,
   onReported,
 }: {
   match: MatchData;
+  statsEnabled: boolean;
   onReported: (id: string, summary: string) => void;
 }) {
   const [homeScore, setHomeScore] = useState(
@@ -435,7 +437,9 @@ function MatchEntry({
     if (h === a) { setError("Scores can't be equal."); return; }
     setError(null);
 
-    if (!replaysComplete) {
+    // Nothing to warn about when the event isn't tracking stats — no replays are
+    // expected, so the prompt would stand between the admin and every match.
+    if (statsEnabled && !replaysComplete) {
       setShowWarning(true);
       return;
     }
@@ -551,23 +555,26 @@ function MatchEntry({
             >
               {isPending ? "Saving…" : "Submit"}
             </button>
-            {/* Replay toggle */}
-            <button
-              onClick={() => setShowReplays(r => !r)}
-              title="Upload replays for stat tracking"
-              className={`flex items-center gap-1 text-[10px] font-medium rounded px-1.5 py-1 transition-colors ${
-                showReplays
-                  ? "text-indigo-300 bg-indigo-900/40"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-              Replays
-            </button>
+            {/* Replay toggle — absent when the event isn't tracking stats, since
+                adminAnalyzeGameReplay refuses the upload anyway. */}
+            {statsEnabled && (
+              <button
+                onClick={() => setShowReplays(r => !r)}
+                title="Upload replays for stat tracking"
+                className={`flex items-center gap-1 text-[10px] font-medium rounded px-1.5 py-1 transition-colors ${
+                  showReplays
+                    ? "text-indigo-300 bg-indigo-900/40"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                Replays
+              </button>
+            )}
           </div>
         </div>
 
@@ -634,7 +641,7 @@ function MatchEntry({
       </div>
 
       {/* Replay upload section */}
-      {showReplays && (
+      {statsEnabled && showReplays && (
         <ReplaySection
           matchId={match.id}
           bestOf={match.bestOf}
@@ -647,10 +654,11 @@ function MatchEntry({
 }
 
 function StageGroup({
-  stage, matches, onReported,
+  stage, matches, statsEnabled, onReported,
 }: {
   stage: string;
   matches: MatchData[];
+  statsEnabled: boolean;
   onReported: (id: string, summary: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -672,7 +680,7 @@ function StageGroup({
         </svg>
       </button>
       {!collapsed && matches.map(m => (
-        <MatchEntry key={m.id} match={m} onReported={onReported} />
+        <MatchEntry key={m.id} match={m} statsEnabled={statsEnabled} onReported={onReported} />
       ))}
     </div>
   );
@@ -680,8 +688,10 @@ function StageGroup({
 
 export function MatchReporter({
   matches: initialMatches,
+  statsEnabled,
 }: {
   matches: MatchData[];
+  statsEnabled: boolean;
 }) {
   const [pending, setPending] = useState(initialMatches);
   const [reported, setReported] = useState<{ id: string; summary: string }[]>([]);
@@ -705,8 +715,15 @@ export function MatchReporter({
 
   return (
     <div className="space-y-3">
+      {!statsEnabled && (
+        <p className="text-xs text-zinc-500">
+          This event isn&apos;t tracking player stats, so there are no replays to upload — enter the
+          series score for each match.
+        </p>
+      )}
+
       {sortedStages.map(stage => (
-        <StageGroup key={stage} stage={stage} matches={byStage[stage]} onReported={onReported} />
+        <StageGroup key={stage} stage={stage} matches={byStage[stage]} statsEnabled={statsEnabled} onReported={onReported} />
       ))}
 
       {reported.length > 0 && (

@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { execReportMatchResult, getBestOfForMatch, validateSeriesScore } from "@/app/lib/discord-bot";
+import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
@@ -74,6 +75,14 @@ export async function adminAnalyzeGameReplay(
   akaNames: Record<string, string>,
 ): Promise<{ homeTeamWon?: boolean; replayId?: string | null; stats?: AnalyzedGameStat[]; unmatched?: string[]; error?: string }> {
   await verifyAdmin();
+
+  // The same refusal uploadGameReplay gives a captain, and it has to be here and
+  // not only in the reporter UI: this call persists a certification row, so one
+  // admin replay with an unrecognised name is enough to make
+  // matchHasUnmatchedPlayers true — which on strict mode diverts the match to
+  // admin review instead of finalizing it, even after both teams agree the score.
+  if (!(await isStatsTrackingEnabled()))
+    return { error: "This event doesn't track stats — report the series score instead." };
 
   const file = formData.get("replay") as File | null;
   if (!file) return { error: "No file provided" };
@@ -307,6 +316,11 @@ export async function reportMatchResult(
   const bestOf = await getBestOfForMatch(matchId);
   const boError = validateSeriesScore(homeScore, awayScore, bestOf);
   if (boError) return { ok: false, message: boError };
+
+  // A stats-disabled event records the series score only, same as
+  // submitSeriesResult. Dropped here rather than refused so an admin whose page
+  // was open from before the setting changed still reports a plain score.
+  if (!(await isStatsTrackingEnabled())) games = [];
 
   // Guard against a replay already committed to a different match.
   const replayIds = games.map((g) => g.replayId).filter((id): id is string => !!id);
