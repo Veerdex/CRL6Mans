@@ -4,7 +4,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { playerRatingFromRow, initialTeamRating } from "@/app/lib/rating";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import {
   getRoundName, getMatchLabel,
@@ -360,8 +360,8 @@ export default async function MyTeamPage() {
     return peakMmr(b) - peakMmr(a);
   });
 
-  const avgMmr = sortedRoster.length
-    ? Math.round(sortedRoster.reduce((s, p) => s + peakMmr(p), 0) / sortedRoster.length)
+  const teamRv = sortedRoster.length
+    ? Math.round(initialTeamRating(sortedRoster.map(peakMmr)))
     : 0;
 
   // Completed real matches (both teams + scores)
@@ -535,7 +535,7 @@ export default async function MyTeamPage() {
 
     const mySeriesTeam: SeriesTeamInfo = {
       id: team.id, name: team.name, logo_url: team.logo_url,
-      logo_offset_x: team.logo_offset_x, logo_offset_y: team.logo_offset_y, avgMmr,
+      logo_offset_x: team.logo_offset_x, logo_offset_y: team.logo_offset_y, teamRv,
       players: myPlayingList,
     };
     if (nextMatch) {
@@ -543,8 +543,8 @@ export default async function MyTeamPage() {
       if (oppId) {
         const oppTeamData = teamMap[oppId] ?? null;
         const oppPlayers = (oppRoster ?? []) as SubPlayerRow[];
-        const oppAvgMmr = oppPlayers.length
-          ? Math.round(oppPlayers.reduce((s, p) => s + peakMmrSub(p), 0) / oppPlayers.length)
+        const oppTeamRv = oppPlayers.length
+          ? Math.round(initialTeamRating(oppPlayers.map(peakMmrSub)))
           : 0;
 
         const oppSubDetails = Object.fromEntries(
@@ -557,7 +557,7 @@ export default async function MyTeamPage() {
           opponentSeriesTeam = {
             id: oppTeamData.id, name: oppTeamData.name, logo_url: oppTeamData.logo_url,
             logo_offset_x: oppTeamData.logo_offset_x, logo_offset_y: oppTeamData.logo_offset_y,
-            avgMmr: oppAvgMmr, players: oppPlayingList,
+            teamRv: oppTeamRv, players: oppPlayingList,
           };
         }
       }
@@ -776,7 +776,11 @@ export default async function MyTeamPage() {
                 )}
               </>
             )}
-            {avgMmr > 0 && <span className="text-zinc-400">avg {avgMmr.toLocaleString()} RV</span>}
+            {teamRv > 0 && (
+              <span className="text-zinc-400" title="Team rating — carry-weighted, not a roster average">
+                Team RV {teamRv.toLocaleString()}
+              </span>
+            )}
           </div>
           {seasonActive && form.length > 0 && (
             <div className="flex items-center gap-1.5">

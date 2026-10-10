@@ -57,7 +57,7 @@ type AvailablePlayer = {
 interface Props {
   teams: Team[];
   byTeam: Record<string, Player[]>;
-  avgMmr: Record<string, number>;
+  teamRv: Record<string, number>;
   availablePlayers?: AvailablePlayer[];
   initialQuery?: string;
   joinMode?: "players" | "teams";
@@ -132,7 +132,7 @@ function isValidTarget(source: SwapSelection, candidate: SwapSelection): boolean
   return true;
 }
 
-export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = [], initialQuery = "", joinMode = "players", teamSize = 3, lateEntriesOpen = false }: Props) {
+export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = [], initialQuery = "", joinMode = "players", teamSize = 3, lateEntriesOpen = false }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmDqTeamId, setConfirmDqTeamId] = useState<string | null>(null);
@@ -307,7 +307,9 @@ export function AdminTeamsManager({ teams, byTeam, avgMmr, availablePlayers = []
               <div className="min-w-0 flex-1">
                 <h2 className="text-base font-bold text-white truncate">{team.name}</h2>
                 <p className="text-xs text-zinc-500">
-                  avg {(avgMmr[team.id] ?? 0).toLocaleString()} RV
+                  <span title="Team rating — carry-weighted, not a roster average">
+                    Team RV {(teamRv[team.id] ?? 0).toLocaleString()}
+                  </span>
                   {team.is_locked && <span className="ml-2 text-amber-400">🔒</span>}
                 </p>
               </div>

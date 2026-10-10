@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { playerRatingFromRow, initialTeamRating } from "@/app/lib/rating";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { AdminTeamsManager } from "./admin-teams-manager";
 import { TeamsGrid } from "./teams-grid";
@@ -105,14 +105,16 @@ export default async function TeamsPage({
     });
   });
 
-  // Sort teams by average rating
-  const teamAvgMmr = (teamId: string): number => {
+  // The carry-weighted team rating, not the roster mean — the same value bracket
+  // seeding uses, so the grid order matches the seeds. The length guard stays
+  // because initialTeamRating answers 1200 for an empty roster, and the callers
+  // hide the label on 0.
+  const teamRv = (teamId: string): number => {
     const roster = byTeam[teamId] ?? [];
     if (!roster.length) return 0;
-    const total = roster.reduce((sum, p) => sum + ratingOf(p), 0);
-    return total / roster.length;
+    return initialTeamRating(roster.map(ratingOf));
   };
-  teams.sort((a, b) => teamAvgMmr(b.id) - teamAvgMmr(a.id));
+  teams.sort((a, b) => teamRv(b.id) - teamRv(a.id));
 
   // Mirrors eventAcceptsLateEntries in actions.ts — the server is the gate, this
   // only decides whether the buttons are worth rendering. Rostered teams stand in
@@ -147,7 +149,7 @@ export default async function TeamsPage({
               peak_1v1: string | null; current_1v1: string | null; tracker_url: string;
               is_captain: boolean | null; team_id: string | null;
             }[]>}
-            avgMmr={Object.fromEntries(teams.map(t => [t.id, Math.round(teamAvgMmr(t.id))]))}
+            teamRv={Object.fromEntries(teams.map(t => [t.id, Math.round(teamRv(t.id))]))}
             availablePlayers={availablePlayers}
             initialQuery={initialSearch ?? ""}
             joinMode={joinMode}
@@ -163,7 +165,7 @@ export default async function TeamsPage({
               peak_1v1: string | null; current_1v1: string | null; tracker_url: string;
               is_captain: boolean | null; team_id: string | null;
             }[]>}
-            avgMmr={Object.fromEntries(teams.map((t) => [t.id, Math.round(teamAvgMmr(t.id))]))}
+            teamRv={Object.fromEntries(teams.map((t) => [t.id, Math.round(teamRv(t.id))]))}
             myTeamId={myTeamId}
             initialQuery={initialSearch ?? ""}
           />

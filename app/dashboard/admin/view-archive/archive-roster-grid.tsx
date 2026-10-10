@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { PlayerName } from "@/app/dashboard/player-name";
+import { initialTeamRating } from "@/app/lib/rating";
 import type { TournamentArchive } from "../tournament-archive";
 
 // Roster/logo card grid in the style of TeamsGrid (app/dashboard/teams/teams-grid.tsx),
@@ -37,8 +38,8 @@ export function ArchiveRosterGrid({ teams }: { teams: TournamentArchive["teams"]
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map((team) => {
             const roster = [...team.roster].sort((a, b) => b.rating - a.rating);
-            const avgRating = roster.length
-              ? Math.round(roster.reduce((sum, p) => sum + p.rating, 0) / roster.length)
+            const teamRv = roster.length
+              ? Math.round(initialTeamRating(roster.map((p) => p.rating)))
               : 0;
             return (
               <div key={team.id} className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
@@ -53,7 +54,10 @@ export function ArchiveRosterGrid({ teams }: { teams: TournamentArchive["teams"]
                   <div className="min-w-0">
                     <h2 className="text-base font-bold text-white truncate">{team.name}</h2>
                     <p className="text-xs text-zinc-500">
-                      {team.wins}-{team.losses} · avg {avgRating.toLocaleString()} RV
+                      {team.wins}-{team.losses} ·{" "}
+                      <span title="Team rating — carry-weighted, not a roster average">
+                        Team RV {teamRv.toLocaleString()}
+                      </span>
                     </p>
                   </div>
                 </div>

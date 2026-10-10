@@ -47,7 +47,7 @@ export type SeriesTeamInfo = {
   logo_url: string | null;
   logo_offset_x: number;
   logo_offset_y: number;
-  avgMmr: number;
+  teamRv: number;
   players: { id: string; name: string; rv: number }[];
 };
 
@@ -212,7 +212,11 @@ function TeamColumn({ team, side }: { team: SeriesTeamInfo | null; side: "home" 
         {team?.name ?? "TBD"}
       </p>
       <p className="text-xs text-zinc-500">
-        {team && team.avgMmr > 0 ? `avg ${team.avgMmr.toLocaleString()} RV` : "—"}
+        {team && team.teamRv > 0 ? (
+          <span title="Team rating — carry-weighted, not a roster average">
+            Team RV {team.teamRv.toLocaleString()}
+          </span>
+        ) : "—"}
       </p>
       {team && team.players.length > 0 && (
         <div className={`flex flex-col gap-0.5 ${align}`}>

@@ -145,7 +145,7 @@ function buildPlayedSet(
 }
 
 // Compute each team's initial rating (see rating.ts) from its roster's player rows.
-function computeAvgRV(
+function computeTeamRatings(
   teamIds: string[],
   players: {
     team_id: string | null;
@@ -215,7 +215,7 @@ const PRESET_MAX_TEAMS: Record<string, number> = {
 async function buildGroupMatches(
   seeded: { id: string }[],
   format: SeasonFormatConfig,
-  avgMmr?: Record<string, number>,
+  teamRv?: Record<string, number>,
 ): Promise<{ error?: string; ok?: boolean }> {
   const n = seeded.length;
   const numGroups = getNumGroups(n);
@@ -224,7 +224,7 @@ async function buildGroupMatches(
   const teams = format.groupSeedingMethod === "random"
     ? [...seeded].sort(() => Math.random() - 0.5)
     : seeded;
-  const groups = snakeDraftGroups(teams, numGroups, avgMmr ? (t) => avgMmr[t.id] ?? 0 : undefined);
+  const groups = snakeDraftGroups(teams, numGroups, teamRv ? (t) => teamRv[t.id] ?? 0 : undefined);
 
   // Rounds per group size: single round-robin for groups of 6+, padded with
   // rematch rounds for small groups so they still get enough games. Keyed by the
@@ -610,7 +610,7 @@ export async function buildAndSaveSwissFromSEQualifier(): Promise<{ error?: stri
     .from("players")
     .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
     .in("team_id", qualifiedIds);
-  const rvByTeam = computeAvgRV(qualifiedIds, rvPlayers ?? []);
+  const rvByTeam = computeTeamRatings(qualifiedIds, rvPlayers ?? []);
   const seeded = [...qualified].sort((a, b) => (rvByTeam[b.id] ?? 0) - (rvByTeam[a.id] ?? 0));
 
   // Avoid rematches from the SE qualifier stage.
@@ -673,7 +673,7 @@ export async function buildAndSaveSwissFromDEQualifier(): Promise<{ error?: stri
     .from("players")
     .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
     .in("team_id", allIds);
-  const rvByTeam = computeAvgRV(allIds, rvPlayers ?? []);
+  const rvByTeam = computeTeamRatings(allIds, rvPlayers ?? []);
   const seeded = [
     ...wbSurvivors.sort((a, b) => (rvByTeam[b.id] ?? 0) - (rvByTeam[a.id] ?? 0)),
     ...lbSurvivors.sort((a, b) => (rvByTeam[b.id] ?? 0) - (rvByTeam[a.id] ?? 0)),
@@ -928,15 +928,15 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
   const { data: teamsRaw } = await supabaseAdmin
     .from("teams").select("id, name, wins").in("id", activeTeamIds);
 
-  const avgMmr: Record<string, number> = {};
+  const teamRv: Record<string, number> = {};
   (teamsRaw ?? []).forEach((t) => {
     const roster = players?.filter((p) => p.team_id === t.id) ?? [];
-    avgMmr[t.id] = initialTeamRating(roster.map(playerRatingFromRow));
+    teamRv[t.id] = initialTeamRating(roster.map(playerRatingFromRow));
   });
 
   let seeded = [...(teamsRaw ?? [])].sort((a, b) => {
     const diff = (b.wins ?? 0) - (a.wins ?? 0);
-    return diff !== 0 ? diff : (avgMmr[b.id] ?? 0) - (avgMmr[a.id] ?? 0);
+    return diff !== 0 ? diff : (teamRv[b.id] ?? 0) - (teamRv[a.id] ?? 0);
   });
 
   const format = settings.season_format as SeasonFormatConfig | null;
@@ -960,7 +960,7 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
   const isDESwissSE     = format?.preset === "de_swiss_single_elimination";
 
   if (isGroup) {
-    const groupResult = await buildGroupMatches(seeded, format!, avgMmr);
+    const groupResult = await buildGroupMatches(seeded, format!, teamRv);
     return groupResult.ok ? { ok: true, cutTeams } : groupResult;
   }
 

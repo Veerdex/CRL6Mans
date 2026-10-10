@@ -33,7 +33,7 @@ type Player = {
 interface Props {
   teams: Team[];
   byTeam: Record<string, Player[]>;
-  avgMmr: Record<string, number>;
+  teamRv: Record<string, number>;
   myTeamId?: string | null;
   initialQuery?: string;
 }
@@ -55,7 +55,7 @@ function DefaultLogo({ name }: { name: string }) {
   );
 }
 
-export function TeamsGrid({ teams, byTeam, avgMmr, myTeamId, initialQuery = "" }: Props) {
+export function TeamsGrid({ teams, byTeam, teamRv, myTeamId, initialQuery = "" }: Props) {
   const [query, setQuery] = useState(initialQuery);
 
   const filtered = query.trim()
@@ -123,7 +123,9 @@ export function TeamsGrid({ teams, byTeam, avgMmr, myTeamId, initialQuery = "" }
                       )}
                     </div>
                     <p className="text-xs text-zinc-500">
-                      avg {(avgMmr[team.id] ?? 0).toLocaleString()} RV
+                      <span title="Team rating — carry-weighted, not a roster average">
+                        Team RV {(teamRv[team.id] ?? 0).toLocaleString()}
+                      </span>
                       {team.is_locked && <span className="ml-2 text-amber-400">🔒</span>}
                     </p>
                   </div>
