@@ -1789,19 +1789,22 @@ export async function execPregenerateBracket(round1PlayAt?: string): Promise<{ o
 // not matches, so round 1's check-in window still opens at the start exactly as it
 // does today. A row would also re-point openReadyMatchChannels at a season-shaped
 // schedule for an event that doesn't use one.
-async function stampOpeningRoundTime(playAt: string): Promise<void> {
+export async function stampOpeningRoundTime(playAt: string): Promise<void> {
   const { data: built } = await supabaseAdmin
-    .from("matches").select("id, stage, round, status").not("stage", "is", null);
+    .from("matches").select("id, stage, round, status").not("stage", "is", null)
+    .eq("status", "scheduled");
   if (!built?.length) return;
 
+  // Scheduled rows only, which is also why the stage search runs over them: the
+  // qualifier formats scaffold their downstream stages at build time, and a
+  // placeholder stage that sorted ahead of the real opener would otherwise be
+  // picked as the first stage and leave nothing to stamp.
   const presentStages = new Set(built.map((m) => canonicalStage(m.stage as string)));
   const firstStage = STAGE_ORDER.find((s) => presentStages.has(s));
   if (!firstStage) return;
 
-  // Only "scheduled" rows: a bye is inserted completed and has no one to bet on,
-  // and the group/Swiss/DE formats pre-create their later rows as pending.
   const ids = built
-    .filter((m) => canonicalStage(m.stage as string) === firstStage && m.round === 1 && m.status === "scheduled")
+    .filter((m) => canonicalStage(m.stage as string) === firstStage && m.round === 1)
     .map((m) => m.id as string);
   if (!ids.length) return;
 

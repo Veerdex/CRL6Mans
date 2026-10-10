@@ -147,9 +147,10 @@ export default async function WagersPage() {
   // an out-of-window one can still be wiped by an admin. A tournament has no round
   // schedules at all — those are a season mechanism — so its only stamped time is the
   // opening round's, written by execPregenerateBracket from the event's start time;
-  // that one is admin-stamped and qualifies immediately. Later tournament rounds are
-  // unbettable by construction: a matchup becomes known and its check-in opens in the
-  // same call, leaving no window.
+  // that one is admin-stamped and qualifies immediately. Nothing else in a tournament
+  // is bettable, including the later group rounds that are inserted with both teams
+  // known at build time — not by any rule here, just because no code gives them a
+  // time.
   //
   // Every clause here must mirror isBettingClosed in actions.ts — a match rendered as
   // bettable that the server then rejects is a dead-end for the player.

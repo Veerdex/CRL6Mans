@@ -20,7 +20,7 @@ import {
   buildAndSaveSwissFromGroupsHybrid8,
   buildAndSaveHybrid8FromSwiss,
 } from "@/app/lib/bracket-server";
-import { openReadyMatchChannels, voidAllPendingWagers } from "@/app/lib/discord-bot";
+import { openReadyMatchChannels, stampOpeningRoundTime, voidAllPendingWagers } from "@/app/lib/discord-bot";
 
 // Director-gated stage/round advance: runs the bracket-server builder, then opens
 // Discord channels for any newly-ready matches (so rounds flow without /openround).
@@ -98,6 +98,23 @@ export async function generateBracketForSeason(): Promise<{ error?: string; ok?:
   await voidAllPendingWagers();
 
   const result = await buildAndSaveBracket();
+
+  // The rebuild gives the opening round new match IDs, so the stamp
+  // execPregenerateBracket wrote died with the old rows. Re-apply it while the start
+  // is still ahead: a tournament has no other source of scheduled_at, so a regenerate
+  // inside the pre-generation window would otherwise end round-1 betting for good.
+  if (result.ok) {
+    const { data: settings } = await supabaseAdmin
+      .from("league_settings").select("active_tournament_id").single();
+    if (settings?.active_tournament_id) {
+      const { data: tournament } = await supabaseAdmin
+        .from("tournaments").select("season_start_at")
+        .eq("id", settings.active_tournament_id).maybeSingle();
+      const startAt = tournament?.season_start_at as string | null | undefined;
+      if (startAt && new Date(startAt).getTime() > Date.now()) await stampOpeningRoundTime(startAt);
+    }
+  }
+
   revalidatePath("/dashboard/season");
   return result;
 }
