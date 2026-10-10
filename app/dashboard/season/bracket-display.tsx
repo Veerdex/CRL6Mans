@@ -3,6 +3,8 @@
 // bracket-view.tsx and directly from the client-side archive viewer.
 
 import { BracketCanvas } from "./bracket-canvas";
+import { LiveClock } from "./live-clock";
+import { isMatchLive } from "@/app/lib/match-live";
 import {
   getRoundName, getMatchLabel, getLBMatchLabel, getFeederLabel,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -26,13 +28,16 @@ export type DBMatch = {
   away_team_id: string | null;
   home_score: number | null;
   away_score: number | null;
+  // Set once both teams have checked in. Optional because the archive viewer's
+  // snapshot rows have no such column and are never live.
+  started_at?: string | null;
 };
 
 export type Team = { id: string; name: string; logo_url: string | null };
 
 // ── Match state ───────────────────────────────────────────────────────────────
 
-type MatchState = "bye" | "pending" | "waiting" | "ready" | "completed";
+type MatchState = "bye" | "pending" | "waiting" | "ready" | "live" | "completed";
 
 function getMatchState(m: DBMatch): MatchState {
   const hasScores = m.home_score !== null && m.away_score !== null;
@@ -41,6 +46,7 @@ function getMatchState(m: DBMatch): MatchState {
 
   if (hasScores && (!homeSet || !awaySet)) return "bye";      // auto-win, one slot empty
   if (hasScores) return "completed";                           // result recorded
+  if (isMatchLive(m)) return "live";                           // both checked in, being played
   if (homeSet && awaySet) return "ready";                      // both teams, no result yet
   if (homeSet || awaySet) return "waiting";                    // one team advanced, other TBD
   return "pending";                                            // both TBD
@@ -66,6 +72,7 @@ const STATE_STYLES: Record<MatchState, { card: string; label: string }> = {
   pending:   { card: "border-red-700/50 bg-red-950/20",                                      label: "text-[10px] font-semibold text-red-500 uppercase tracking-widest" },
   waiting:   { card: "border-amber-700/50 bg-amber-950/20",                                  label: "text-[10px] font-semibold text-amber-500 uppercase tracking-widest" },
   ready:     { card: "border-indigo-500/60 bg-indigo-950/25 shadow-indigo-900/30 shadow-md", label: "text-[10px] font-semibold text-indigo-400 uppercase tracking-widest" },
+  live:      { card: "border-cyan-500/70 bg-cyan-950/30 shadow-cyan-900/30 shadow-md",       label: "text-[10px] font-semibold text-cyan-400 uppercase tracking-widest" },
   completed: { card: "border-emerald-600/70 bg-emerald-950/30",                              label: "text-[10px] font-semibold text-emerald-400 uppercase tracking-widest" },
 };
 
@@ -74,8 +81,23 @@ const STATE_LABELS: Record<MatchState, string> = {
   pending:   "TBD",
   waiting:   "WAITING",
   ready:     "UPCOMING",
+  live:      "LIVE",
   completed: "FINAL",
 };
+
+// The label row above every card already carries the match id and the state, so
+// the clock goes beside them — the bracket has no spare vertical space to give it
+// a row of its own.
+function StateLabel({ match, state }: { match: DBMatch; state: MatchState }) {
+  return (
+    <>
+      <span className={STATE_STYLES[state].label}>{STATE_LABELS[state]}</span>
+      {state === "live" && match.started_at && (
+        <LiveClock startedAt={match.started_at} className="text-[10px] font-semibold text-cyan-300" />
+      )}
+    </>
+  );
+}
 
 // Small logo (or fallback dot) placed at the start of a team slot row.
 function TeamLogo({ team, faded }: { team: Team | null; faded: boolean }) {
@@ -190,6 +212,7 @@ function matchTop(round: number, matchNum: number): number {
 
 const LEGEND_ITEMS: { state: MatchState; label: string }[] = [
   { state: "completed", label: "Completed" },
+  { state: "live",      label: "Live" },
   { state: "ready",     label: "Upcoming" },
   { state: "waiting",   label: "Waiting" },
   { state: "pending",   label: "TBD" },
@@ -255,9 +278,7 @@ export function SEBracketDisplay({ matches: matchesRaw, teams }: { matches: DBMa
                                 {matchId}
                               </span>
                             )}
-                            <span className={STATE_STYLES[state].label}>
-                              {STATE_LABELS[state]}
-                            </span>
+                            <StateLabel match={match} state={state} />
                           </div>
                           <MatchBox match={match} teams={teams} numR1={numR1Matches} matchId={isBye ? undefined : matchId ?? undefined} />
                         </div>
@@ -448,7 +469,7 @@ function DESectionView({
                           {matchId && (
                             <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 rounded px-1.5 py-0.5">{matchId}</span>
                           )}
-                          <span className={STATE_STYLES[state].label}>{STATE_LABELS[state]}</span>
+                          <StateLabel match={match} state={state} />
                         </div>
                         <DEMatchBox match={match} teams={teams} size={size} matchId={isBye ? undefined : matchId ?? undefined} wbR1ByeNums={wbR1ByeNums} />
                       </div>
@@ -519,7 +540,7 @@ function DESectionView({
                   <div className="absolute" style={{ top: gfTop, left: 0 }}>
                     <div className="flex items-center gap-2 mb-1 px-1">
                       <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 rounded px-1.5 py-0.5">GF</span>
-                      <span className={STATE_STYLES[gfState].label}>{STATE_LABELS[gfState]}</span>
+                      <StateLabel match={gfMain} state={gfState} />
                     </div>
                     <DEMatchBox match={gfMain} teams={teams} size={size} matchId="GF" />
                   </div>
@@ -543,7 +564,7 @@ function DESectionView({
                         <div className="flex items-center gap-2 mb-1 px-1">
                           <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 rounded px-1.5 py-0.5">GF Reset</span>
                           {resetActive && resetState
-                            ? <span className={STATE_STYLES[resetState].label}>{STATE_LABELS[resetState]}</span>
+                            ? <StateLabel match={gfReset} state={resetState} />
                             : <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">IF NEEDED</span>
                           }
                         </div>

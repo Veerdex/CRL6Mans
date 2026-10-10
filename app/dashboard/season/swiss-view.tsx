@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { SWISS_STAGE } from "@/app/lib/bracket";
 import { buildTeamTitles } from "@/app/lib/team-titles";
+import { attachStartedAt } from "@/app/lib/match-live-server";
 import { SwissBracketDisplay, type Team } from "./swiss-display";
 
 export async function SwissBracketView() {
@@ -31,5 +32,5 @@ export async function SwissBracketView() {
     teamTitles = buildTeamTitles(swissPlayers ?? []);
   }
 
-  return <SwissBracketDisplay matches={raw} teams={teams} teamTitles={teamTitles} isHybrid8={isHybrid8} />;
+  return <SwissBracketDisplay matches={await attachStartedAt(raw)} teams={teams} teamTitles={teamTitles} isHybrid8={isHybrid8} />;
 }

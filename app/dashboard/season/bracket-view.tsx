@@ -5,6 +5,7 @@ import {
   GROUP_STAGE_PREFIX, parseGroupNum,
 } from "@/app/lib/bracket";
 import { buildTeamTitles } from "@/app/lib/team-titles";
+import { attachStartedAt } from "@/app/lib/match-live-server";
 import { GroupStageClient } from "./group-stage-client";
 import { SEBracketDisplay, DEBracketDisplay, DEQualifierBracketDisplay, type Team } from "./bracket-display";
 
@@ -28,7 +29,7 @@ export async function SEBracketView({ stage = "single_elimination" }: { stage?: 
   const teams: Record<string, Team> = {};
   teamsRaw?.forEach((t) => { teams[t.id] = t; });
 
-  return <SEBracketDisplay matches={matchesRaw} teams={teams} />;
+  return <SEBracketDisplay matches={await attachStartedAt(matchesRaw)} teams={teams} />;
 }
 
 export async function DEBracketView() {
@@ -47,7 +48,7 @@ export async function DEBracketView() {
   const teams: Record<string, Team> = {};
   teamsRaw?.forEach((t) => { teams[t.id] = t; });
 
-  return <DEBracketDisplay matches={matchesRaw} teams={teams} />;
+  return <DEBracketDisplay matches={await attachStartedAt(matchesRaw)} teams={teams} />;
 }
 
 export async function DEQualifierBracketView() {
@@ -66,7 +67,7 @@ export async function DEQualifierBracketView() {
   const teams: Record<string, Team> = {};
   teamsRaw?.forEach((t) => { teams[t.id] = t; });
 
-  return <DEQualifierBracketDisplay matches={matchesRaw} teams={teams} />;
+  return <DEQualifierBracketDisplay matches={await attachStartedAt(matchesRaw)} teams={teams} />;
 }
 
 // ── Group Bracket View ────────────────────────────────────────────────────────
@@ -101,7 +102,7 @@ export async function GroupBracketView({ qualifiersPerGroup, topDirectQualifiers
   const groupNums = [...new Set(matchesRaw.map((m) => parseGroupNum(m.stage)!))].sort((a, b) => a - b);
 
   // Attach groupNum to each match so the client component doesn't need to re-parse stage strings
-  const matches = matchesRaw.map((m) => ({ ...m, groupNum: parseGroupNum(m.stage)! }));
+  const matches = (await attachStartedAt(matchesRaw)).map((m) => ({ ...m, groupNum: parseGroupNum(m.stage)! }));
 
   return (
     <GroupStageClient

@@ -4,6 +4,8 @@
 
 import { HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF } from "@/app/lib/bracket";
 import { BracketCanvas } from "./bracket-canvas";
+import { LiveClock } from "./live-clock";
+import { isMatchLive } from "@/app/lib/match-live";
 
 // ── Layout constants ───────────────────────────────────────────────────────────
 
@@ -23,6 +25,7 @@ export type MatchRow = {
   home_score: number | null;
   away_score: number | null;
   status: string;
+  started_at?: string | null;
 };
 export type TeamMap = Record<string, { name: string; logo_url: string | null }>;
 
@@ -124,8 +127,9 @@ function buildLayout8(UB: string, LB: string, SF: string, GF: string): Layout {
 
 // ── Match card ──────────────────────────────────────────────────────────────────
 
-function statusStyle(status: string, hasTeams: boolean) {
+function statusStyle(status: string, hasTeams: boolean, live = false) {
   if (status === "completed") return { border: "border-emerald-600/70 bg-emerald-950/30", tag: "text-emerald-400", label: "FINAL" };
+  if (live)                   return { border: "border-cyan-500/70 bg-cyan-950/30",       tag: "text-cyan-400",    label: "LIVE" };
   if (hasTeams)               return { border: "border-indigo-500/60 bg-indigo-950/25",  tag: "text-indigo-400",  label: "UPCOMING" };
   return                             { border: "border-zinc-700/60 bg-zinc-900/40",       tag: "text-zinc-600",    label: "TBD" };
 }
@@ -152,7 +156,8 @@ function MatchCard({ node, match, teams, teamTitles, isLeft }: { node: Node; mat
   const done = match?.status === "completed";
   const homeWon = done && (match!.home_score ?? 0) > (match!.away_score ?? 0);
   const awayWon = done && (match!.away_score ?? 0) > (match!.home_score ?? 0);
-  const { border, tag, label } = statusStyle(match?.status ?? "pending", !!(home && away));
+  const live = !!match && isMatchLive(match);
+  const { border, tag, label } = statusStyle(match?.status ?? "pending", !!(home && away), live);
 
   const rows = [
     { teamId: match?.home_team_id ?? null, team: home, score: match?.home_score ?? null, won: homeWon, feeder: node.homeFeeder },
@@ -167,7 +172,12 @@ function MatchCard({ node, match, teams, teamTitles, isLeft }: { node: Node; mat
     >
       <div className="flex items-center justify-between px-2.5 border-b border-zinc-700/40" style={{ height: 22 }}>
         <span className="text-[10px] font-bold text-zinc-400 tracking-wide">{node.badge}</span>
-        <span className={`text-[9px] font-semibold uppercase tracking-widest ${tag}`}>{label}</span>
+        <span className={`text-[9px] font-semibold uppercase tracking-widest ${tag}`}>
+          {label}
+          {live && match?.started_at && (
+            <LiveClock startedAt={match.started_at} className="ml-1.5 text-cyan-300 tracking-normal" />
+          )}
+        </span>
       </div>
       {rows.map(({ teamId, team, score, won, feeder }, i) => (
         <div

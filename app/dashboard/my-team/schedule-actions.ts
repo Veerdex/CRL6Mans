@@ -326,6 +326,21 @@ export async function checkInForMatch(
     .update({ [isHome ? "home_checked_in" : "away_checked_in"]: true })
     .eq("id", matchId);
 
+  // The match goes live the moment the second team is in. Stamped by its own
+  // conditional update rather than inside the bothNow branch below: bothNow reads
+  // the row from *before* this write, so two captains checking in at the same
+  // moment would each see the other as false and nobody would stamp. Here
+  // whichever update lands second matches the filter and wins; a repeat is a
+  // no-op against the is-null guard. Kept separate from the boolean write so a
+  // deploy that lands before the migration breaks the clock, not check-in itself.
+  await supabaseAdmin
+    .from("matches")
+    .update({ started_at: new Date().toISOString() })
+    .eq("id", matchId)
+    .eq("home_checked_in", true)
+    .eq("away_checked_in", true)
+    .is("started_at", null);
+
   // If this completes the pair, create the match channel immediately.
   const bothNow = isHome ? !!m.away_checked_in : !!m.home_checked_in;
   if (bothNow) await createChannelIfCheckedIn(matchId).catch(() => {});

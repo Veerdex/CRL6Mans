@@ -4,6 +4,8 @@
 
 import { SWISS_ADVANCE_WINS, SWISS8_ADVANCE_WINS } from "@/app/lib/bracket";
 import { BracketCanvas } from "./bracket-canvas";
+import { LiveClock } from "./live-clock";
+import { isMatchLive } from "@/app/lib/match-live";
 
 // ── Layout constants ───────────────────────────────────────────────────────────
 
@@ -167,6 +169,7 @@ export type DBMatch = {
   stage: string; status: string;
   home_team_id: string | null; away_team_id: string | null;
   home_score: number | null; away_score: number | null;
+  started_at?: string | null;
 };
 export type Team       = { id: string; name: string; logo_url: string | null };
 type GMatch     = DBMatch & { w: number; l: number };
@@ -361,6 +364,7 @@ export function SwissBracketDisplay({
                 <div style={{ paddingTop: GP, paddingBottom: GP }}>
                   {g.matches.map((m, idx) => {
                     const done    = m.status === "completed";
+                    const live    = isMatchLive(m);
                     const homeWon = done && (m.home_score ?? 0) > (m.away_score ?? 0);
                     const awayWon = done && (m.away_score ?? 0) > (m.home_score ?? 0);
                     const hn = m.home_team_id ? (teams[m.home_team_id]?.name ?? "?") : "TBD";
@@ -380,9 +384,14 @@ export function SwissBracketDisplay({
                               <span className="truncate">{hn}</span>
                             )}
                           </div>
-                          {/* Series score / vs */}
-                          <span className={`shrink-0 text-[11px] font-mono tabular-nums w-10 text-center ${done ? "font-bold text-white" : "text-zinc-600"}`}>
-                            {done ? `${m.home_score} – ${m.away_score}` : "vs"}
+                          {/* Series score / live clock / vs — the row has no space
+                              above it, so the clock takes the slot the "vs" sits in. */}
+                          <span className={`shrink-0 text-[11px] font-mono tabular-nums w-10 text-center ${done ? "font-bold text-white" : live ? "text-cyan-300" : "text-zinc-600"}`}>
+                            {done
+                              ? `${m.home_score} – ${m.away_score}`
+                              : live && m.started_at
+                                ? <LiveClock startedAt={m.started_at} />
+                                : "vs"}
                           </span>
                           {/* Away */}
                           <div className={`flex-1 min-w-0 flex items-center justify-end gap-1 text-xs ${awayWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>

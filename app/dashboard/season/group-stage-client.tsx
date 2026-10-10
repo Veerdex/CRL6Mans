@@ -2,6 +2,8 @@
 
 import { useState, useMemo, useCallback } from "react";
 import { computeGroupStandings, type GroupStanding } from "@/app/lib/bracket";
+import { LiveClock } from "./live-clock";
+import { isMatchLive } from "@/app/lib/match-live";
 
 export type GroupMatchRow = {
   id: string;
@@ -14,6 +16,7 @@ export type GroupMatchRow = {
   away_team_id: string | null;
   home_score: number | null;
   away_score: number | null;
+  started_at?: string | null;
 };
 
 export type GroupTeam = { id: string; name: string; logo_url: string | null };
@@ -167,6 +170,7 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
             {!collapsedRounds.has(round) && <div className="p-3 space-y-1.5">
               {roundMatches.map((m, idx) => {
                 const done = m.status === "completed";
+                const live = isMatchLive(m);
                 const homeWon = done && (m.home_score ?? 0) > (m.away_score ?? 0);
                 const awayWon = done && (m.away_score ?? 0) > (m.home_score ?? 0);
                 return (
@@ -196,6 +200,9 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
                       <span className="shrink-0 font-mono font-bold text-white text-[11px] tabular-nums px-1">
                         {m.home_score} – {m.away_score}
                       </span>
+                    ) : live && m.started_at ? (
+                      // A single row has nothing above it, so the clock takes the "vs" slot.
+                      <LiveClock startedAt={m.started_at} className="shrink-0 text-cyan-300 text-[11px] px-1" />
                     ) : (
                       <span className="shrink-0 text-zinc-600 px-2">vs</span>
                     )}
