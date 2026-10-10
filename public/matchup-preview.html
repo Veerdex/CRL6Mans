@@ -137,6 +137,22 @@
   .card.hybrid .score { color: var(--zinc-500); }
   .card.hybrid .score.won { color: var(--emerald-400); }
 
+  /* ── The label row production already draws above every bracket card ───────
+     flex / items-center / gap-2 / mb-1 / px-1, carrying the match id and the
+     state. The live clock joins it there rather than getting a row of its own. */
+  .cardlabel { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; padding: 0 4px; }
+  .cardlabel .idbadge {
+    font-size: 10px; font-weight: 700; color: var(--zinc-400); background: var(--zinc-800);
+    border-radius: 4px; padding: 2px 6px;
+  }
+  .cardlabel .st { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+
+  /* LiveClock ships with font-mono + tabular-nums baked in, so every placement
+     inherits those and overrides only size, weight and tracking. */
+  .clock { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--cyan-300); }
+  .cardlabel .clock { font-size: 10px; font-weight: 600; }
+  .hybridhead .clock { margin-left: 6px; letter-spacing: normal; }
+
   /* Group row — bordered, fluid width in production, 30px tall (py-1.5 + text-xs,
      whose line-height is 1rem, not the body's 1.5). */
   .subname { font-size: 10px; color: var(--zinc-600); margin: 0 0 6px; font-family: var(--mono); }
@@ -156,6 +172,9 @@
   .grouprow .glogo { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto; background: var(--zinc-700); object-fit: cover; }
   .grouprow .mid { flex: 0 0 auto; padding: 0 6px; color: var(--zinc-600); }
   .grouprow .mid.final { font-family: var(--mono); font-weight: 700; color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; }
+  /* The clock takes the slot the "vs" sits in — a 30px row has nothing above it.
+     px-1 like the score, not the "vs"'s px-2. */
+  .grouprow .mid.live { font-size: 11px; padding: 0 4px; }
   .grouprow .gbadge { flex: 0 0 auto; font-size: 9px; font-weight: 700; color: var(--zinc-500); text-transform: uppercase; width: 24px; }
 
   /* Swiss row — no border or background of its own; it sits in a 210px box and is
@@ -174,6 +193,10 @@
     font-variant-numeric: tabular-nums; color: var(--zinc-600);
   }
   .swissrow .mid.final { font-weight: 700; color: #fff; }
+  /* Unlike the group row this slot keeps its fixed 40px — the clock has to fit
+     the width the score was sized for, and h:mm:ss does not. overflow stays
+     visible so the preview shows the spill instead of hiding it. */
+  .swissrow .mid.live { color: var(--cyan-300); }
 
   /* ── Proposed +25% on both rows ────────────────────────────────────────────
      30 → 38 and 28 → 35, and the crest stretches to the row as on the cards. */
@@ -245,6 +268,11 @@
       <div class="states" id="states"></div>
     </div>
 
+    <div class="group" id="elapsedGroup">
+      <label class="hd">Elapsed <span style="text-transform:none;letter-spacing:0;font-weight:400">(Active only)</span></label>
+      <div class="states" id="elapsed"></div>
+    </div>
+
     <div class="group">
       <label class="hd">Teams</label>
       <div class="row" style="margin-bottom:8px">
@@ -270,6 +298,7 @@
     <div class="group">
       <label class="hd">Options</label>
       <label class="check"><input type="checkbox" id="logos" checked /> Team logos set</label>
+      <label class="check"><input type="checkbox" id="livedot" /> Pulsing live dot <span style="color:var(--amber-400)">(proposed)</span></label>
       <label class="check"><input type="checkbox" id="reduce" /> Freeze the live pulse</label>
     </div>
 
@@ -285,7 +314,10 @@
     <div class="view" id="v1">
       <p class="viewname">Bracket match box<span class="na" id="na1"></span></p>
       <p class="viewsrc">season/bracket-display.tsx &middot; MatchBox &middot; <span id="dim1"></span></p>
-      <div class="holder" id="h1"><div class="card bracket" id="bracketCard"></div></div>
+      <div class="holder" id="h1">
+        <div class="cardlabel" id="bracketLabel"></div>
+        <div class="card bracket" id="bracketCard"></div>
+      </div>
     </div>
 
     <div class="view" id="v2">
@@ -300,7 +332,7 @@
       <div class="holder" id="h3">
         <p class="subname">group &mdash; bordered, fluid width in production</p>
         <div class="grouprow" id="groupRow"></div>
-        <p class="subname second">swiss &mdash; borderless, fixed width, hairline-separated<span class="squeeze" id="squeeze"></span></p>
+        <p class="subname second">swiss &mdash; borderless, fixed width, hairline-separated<span class="squeeze" id="squeeze"></span><span class="squeeze" id="clockfit"></span></p>
         <div class="swissbox">
           <div class="swissdiv"></div>
           <div class="swissrow" id="swissRow"></div>

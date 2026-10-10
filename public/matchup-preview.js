@@ -1,6 +1,7 @@
 // Every style below is lifted from the real components so this previews what
-// ships, not a lookalike. STATE_STYLES / STATE_LABELS mirror bracket-display.tsx;
-// "live" is the one entry with no counterpart in the codebase.
+// ships, not a lookalike. STATE_STYLES / STATE_LABELS mirror bracket-display.tsx,
+// "live" included — it has a real counterpart now. The pulsing dot is the one
+// thing on this page with none, so it is off by default and labelled proposed.
 const STATES = {
   completed: {
     name: "Completed", tag: "FINAL", real: true,
@@ -15,10 +16,18 @@ const STATES = {
     desc: "Both teams assigned, no scores yet. This is <code>ready</code> in bracket-display's own vocabulary.",
   },
   live: {
-    name: "Active", tag: "LIVE", real: false,
-    card: { border: "rgba(8,145,178,.75)", bg: "rgba(8,51,68,.35)", shadow: "0 0 0 1px rgba(34,211,238,.15)" },
+    name: "Active", tag: "LIVE", real: true,
+    // border-cyan-500/70 bg-cyan-950/30 shadow-cyan-900/30 shadow-md
+    card: { border: "rgba(6,182,212,.7)", bg: "rgba(8,51,68,.3)", shadow: "0 4px 6px -1px rgba(22,78,99,.3)" },
     tagColor: "var(--cyan-400)",
-    desc: "<strong>Proposed — does not exist yet.</strong> No table column or render path distinguishes a match being played from one not yet started.",
+    desc: "Both teams checked in, no scores yet. The clock counts up from <code>matches.started_at</code>, " +
+      "stamped the instant the second team checks in. Check-in is tournament-only, so a season match never reaches this.",
+    foot: "<code>isMatchLive</code> in <code>app/lib/match-live.ts</code> is the one predicate all four views share: " +
+      "stamped, still <code>scheduled</code>, no scores. The stamp is never cleared — a match stops being live because it " +
+      "has scores — so the read also requires both check-in booleans to still be true, which is what ends the state if a " +
+      "check-in is cleared by hand. Every clock on a page ticks off one shared interval " +
+      "(<code>season/live-clock.tsx</code> via <code>useSyncExternalStore</code>) and renders nothing during SSR, so no " +
+      "elapsed time is ever baked into the HTML. The schedule row below is the one surface not wired up.",
   },
   waiting: {
     name: "Waiting", tag: "WAITING", real: true,
@@ -40,13 +49,14 @@ const STATES = {
   },
 };
 
-// hybrid-display.tsx's statusStyle has only three branches — completed, hasTeams,
-// else — so it does not share bracket-display.tsx's five. Several bracket states
-// collapse into one treatment here, and pending is zinc there, not red.
+// hybrid-display.tsx's statusStyle has only four branches — completed, live,
+// hasTeams, else — so it does not share bracket-display.tsx's six. Several bracket
+// states collapse into one treatment here, and pending is zinc there, not red.
+// live sits above hasTeams, so a live match with both slots filled reads LIVE.
 const HYBRID = {
   completed: { border: "rgba(5,150,105,.7)",  bg: "rgba(2,44,34,.3)",   tag: "var(--emerald-400)", label: "FINAL" },
   upcoming:  { border: "rgba(99,102,241,.6)", bg: "rgba(30,27,75,.25)", tag: "var(--indigo-400)",  label: "UPCOMING" },
-  live:      { border: "rgba(8,145,178,.75)", bg: "rgba(8,51,68,.35)",  tag: "var(--cyan-400)",    label: "LIVE" },
+  live:      { border: "rgba(6,182,212,.7)",  bg: "rgba(8,51,68,.3)",   tag: "var(--cyan-400)",    label: "LIVE" },
   waiting:   { border: "rgba(63,63,70,.6)",   bg: "rgba(24,24,27,.4)",  tag: "var(--zinc-600)",    label: "TBD", via: "collapses to TBD" },
   pending:   { border: "rgba(63,63,70,.6)",   bg: "rgba(24,24,27,.4)",  tag: "var(--zinc-600)",    label: "TBD" },
   bye:       { border: "rgba(5,150,105,.7)",  bg: "rgba(2,44,34,.3)",   tag: "var(--emerald-400)", label: "FINAL", via: "collapses to FINAL" },
@@ -63,11 +73,21 @@ const SCHED = {
 
 // Which states each view can actually reach. The schedule page queries
 // .eq("status", "scheduled"), so a completed match is never listed there at all.
+// It is also the one view the clock was not wired into, so it omits live.
 const REACH = {
-  v1: ["completed", "upcoming", "waiting", "pending", "bye"],
-  v2: ["completed", "upcoming", "waiting", "pending", "bye"],
-  v3: ["completed", "upcoming"],
+  v1: ["completed", "upcoming", "live", "waiting", "pending", "bye"],
+  v2: ["completed", "upcoming", "live", "waiting", "pending", "bye"],
+  v3: ["completed", "upcoming", "live"],
   v4: ["upcoming", "waiting", "pending"],
+};
+
+// How long the previewed match has been going. The point of the switcher is the
+// last one: h:mm:ss is seven glyphs and the Swiss slot is a fixed 40px, sized for
+// a "2 – 1" score, so this is where the placement is actually load-bearing.
+const ELAPSED = {
+  fresh: { name: "Just kicked off", tag: "0:07",    secs: 7 },
+  mid:   { name: "Mid-series",      tag: "12:34",   secs: 754 },
+  long:  { name: "Past an hour",    tag: "1:02:33", secs: 3753 },
 };
 
 // The shipped heights and the proposed one. MATCH_H/MH are read by the bracket's
@@ -81,6 +101,21 @@ let state = "completed";
 let schedState = "confirmed";
 let size = "tall";
 let zoom = 1;
+let elapsedKey = "mid";
+// The ISO string a real row would hold, derived from the preset so the clock
+// below ticks forward from it exactly as it does in production.
+let startedAt = new Date(Date.now() - ELAPSED[elapsedKey].secs * 1000).toISOString();
+
+// Copied verbatim from app/lib/match-live.ts — if the two ever disagree, this
+// page is lying about what ships.
+function formatElapsed(iso, now) {
+  const total = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 1000));
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? h + ":" + String(m).padStart(2, "0") + ":" + ss : m + ":" + ss;
+}
 
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -89,8 +124,10 @@ function read() {
   const s = STATES[state];
   const done = state === "completed" || state === "bye";
   const live = state === "live";
-  // A live match shows a running score; the bracket only ever shows a final one.
-  const showScore = done || live;
+  // No running score: isMatchLive requires both scores to still be null, so a
+  // match with any score reported has left the live state by definition. The
+  // clock is what fills the slot a final score would occupy.
+  const showScore = done;
   const hs = +el("homeScore").value || 0;
   const as = +el("awayScore").value || 0;
   return {
@@ -144,6 +181,20 @@ function render() {
   const v = read();
   const s = v.s;
 
+  // The clock element every placement shares. Its text is rewritten in place by
+  // tick() rather than re-rendered, so a typed team name never loses focus.
+  const clock = () => '<span class="clock" data-clock>' + formatElapsed(startedAt, Date.now()) + "</span>";
+  const dot = () => el("livedot").checked
+    ? '<span class="livedot" style="display:inline-block;margin-right:5px;vertical-align:1px"></span>' : "";
+
+  // ── Bracket label row ── id badge + state, and the clock beside them. This row
+  // is production's own (bracket-display.tsx, above every MatchBox); the bracket
+  // card has no spare vertical space to give the clock a line of its own.
+  el("bracketLabel").innerHTML =
+    '<span class="idbadge">W1-M1</span>' +
+    '<span class="st" style="color:' + s.tagColor + '">' + dot() + s.tag + "</span>" +
+    (v.live ? clock() : "");
+
   // ── Bracket match box ──
   const bc = el("bracketCard");
   bc.style.borderColor = s.card.border;
@@ -162,9 +213,10 @@ function render() {
   hc.style.boxShadow = "none";
   hc.innerHTML =
     '<div class="hybridhead"><span class="badge">GF-1-1</span>' +
-    '<span class="st" style="color:' + hy.tag + '">' +
-      (v.live ? '<span class="livedot" style="display:inline-block;margin-right:5px"></span>' : "") +
-      hy.label +
+    '<span class="st" style="color:' + hy.tag + '">' + dot() + hy.label +
+      // Inside the 22px header's 9px tag span, so the clock inherits that size
+      // and only resets the tag's letter-spacing.
+      (v.live ? clock() : "") +
     "</span></div>" +
     '<div class="teamrow' + (v.homeWon ? " won" : "") + '">' + slot(v, "home") + "</div>" +
     '<div class="teamrow' + (v.awayWon ? " won" : "") + '">' + slot(v, "away") + "</div>";
@@ -182,7 +234,9 @@ function render() {
     '<div class="side ' + hSide + '">' + gl + "<span>" + hName + "</span></div>" +
     (v.showScore
       ? '<span class="mid final">' + v.hs + " &ndash; " + v.as + "</span>"
-      : '<span class="mid">vs</span>') +
+      : v.live
+        ? '<span class="mid live">' + clock() + "</span>"
+        : '<span class="mid">vs</span>') +
     '<div class="side away ' + aSide + '"><span>' + aName + "</span>" + gl + "</div>";
 
   // ── Swiss row ── same shape, but the winner goes white and the score sits in a
@@ -190,8 +244,8 @@ function render() {
   const sl = crest("slogo");
   el("swissRow").innerHTML =
     '<div class="side ' + hSide + '">' + sl + "<span>" + hName + "</span></div>" +
-    '<span class="mid' + (v.showScore ? " final" : "") + '">' +
-      (v.showScore ? v.hs + " &ndash; " + v.as : "vs") + "</span>" +
+    '<span class="mid' + (v.showScore ? " final" : v.live ? " live" : "") + '">' +
+      (v.showScore ? v.hs + " &ndash; " + v.as : v.live ? clock() : "vs") + "</span>" +
     '<div class="side away ' + aSide + '"><span>' + aName + "</span>" + sl + "</div>";
 
   // ── Schedule row ── The pill comes from the Scheduling control, not the state
@@ -210,23 +264,20 @@ function render() {
             .find((p) => p.type === "timeZoneName").value + "</span>"
         : "") +
       '<span class="pill" style="color:' + pill.fg + ";background:" + pill.bg + ";border-color:" + pill.bd + '">' +
-        (v.live ? '<span class="livedot" style="display:inline-block;margin-right:5px;vertical-align:1px"></span>' : "") +
-        pill.t +
+        (v.live ? dot() : "") + pill.t +
       "</span>" +
     "</div>";
 
   // ── Notes + chrome ──
   el("note").innerHTML = s.desc;
-  el("foot").innerHTML = s.real
+  el("foot").innerHTML = s.foot ?? (s.real
     ? "This state ships today, though each view derives it differently: the bracket's " +
       "<code>getMatchState()</code> reads score and slot presence and ignores <code>status</code> outright; " +
       "the hybrid card branches on <code>status === \"completed\"</code> then on both slots being filled; " +
       "group and Swiss rows only ask whether <code>status === \"completed\"</code>. " +
       "<code>matches.status</code> itself is only ever <code>scheduled</code> or <code>completed</code>, and the " +
       "schedule row's pill is a separate axis — whether the play time is agreed."
-    : "Nothing in <code>matches</code> records that a series is underway, so no view can draw this yet. " +
-      "Showing it would need a new column (a <code>started_at</code>, or <code>status = 'active'</code>) plus a writer — " +
-      "the Discord <code>/score</code> flow is the natural place.";
+    : "Nothing in <code>matches</code> records this, so no view can draw it yet.");
 
   // Not every state can occur in every view. A group or Swiss row always has both
   // teams, so it never reaches waiting/pending/bye, and the schedule page only
@@ -234,13 +285,14 @@ function render() {
   // dim, rather than passing off a placeholder as something that ships.
   [1, 2, 3, 4].forEach((n) => {
     const ok = REACH["v" + n].includes(state);
-    el("na" + n).textContent = v.live
-      ? "proposed"
-      : ok
-        ? (n === 2 ? HYBRID[state].via ?? "" : "")
-        : n === 4 ? "never listed here" : "not in this view";
-    el("v" + n).className = "view" + (ok || v.live ? "" : " dim");
+    el("na" + n).textContent = ok
+      ? (n === 2 ? HYBRID[state].via ?? "" : "")
+      : n === 4
+        ? (v.live ? "not wired yet" : "never listed here")
+        : "not in this view";
+    el("v" + n).className = "view" + (ok ? "" : " dim");
   });
+  el("elapsedGroup").style.opacity = v.live ? "1" : ".4";
 
   document.querySelectorAll("#states button").forEach((b) => {
     b.setAttribute("aria-pressed", String(b.dataset.k === state));
@@ -270,6 +322,26 @@ function render() {
     h.style.transform = "scale(" + zoom + ")";
     h.style.height = natural * zoom + "px";
   });
+  fitNote();
+}
+
+// Rewrite the clocks in place once a second. A full render() would rebuild the
+// inputs' siblings every tick and is unnecessary — only this text changes.
+function tick() {
+  const txt = formatElapsed(startedAt, Date.now());
+  document.querySelectorAll("[data-clock]").forEach((c) => { c.textContent = txt; });
+  fitNote();
+}
+
+// The Swiss slot is the only placement with a hard width: 40px, chosen for a
+// "2 – 1" score. Report the overflow rather than letting the preview hide it,
+// since this is the one thing the placement can actually get wrong.
+function fitNote() {
+  const c = el("swissRow").querySelector("[data-clock]");
+  const n = el("clockfit");
+  if (!c) { n.innerHTML = ""; return; }
+  const w = Math.ceil(c.getBoundingClientRect().width / zoom);
+  n.innerHTML = w > 40 ? " &middot; clock wants " + w + "px in a 40px slot" : "";
 }
 
 // Build the state switcher, then the legend, which reuses the same swatches the
@@ -288,6 +360,15 @@ el("size").innerHTML = Object.entries(SIZES).map(([k, s]) =>
       Math.round(s.bracket / 7) + 'px"></span>' +
     esc(s.name) +
     '<span class="tag" style="color:var(--zinc-500)">' + esc(s.tag) + "</span>" +
+  "</button>"
+).join("");
+
+el("elapsed").innerHTML = Object.entries(ELAPSED).map(([k, s]) =>
+  '<button data-e="' + k + '" aria-pressed="' + (k === elapsedKey) + '">' +
+    '<span class="swatch" style="border-color:rgba(6,182,212,.7);background:rgba(8,51,68,.3)"></span>' +
+    esc(s.name) +
+    '<span class="tag" style="color:var(--cyan-300);letter-spacing:0;font-family:' +
+      'ui-monospace,Menlo,Consolas,monospace">' + esc(s.tag) + "</span>" +
   "</button>"
 ).join("");
 
@@ -321,6 +402,17 @@ el("size").addEventListener("click", (e) => {
   document.querySelectorAll("#size button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.sz === size)));
   render();
 });
+el("elapsed").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-e]");
+  if (!b) return;
+  elapsedKey = b.dataset.e;
+  startedAt = new Date(Date.now() - ELAPSED[elapsedKey].secs * 1000).toISOString();
+  document.querySelectorAll("#elapsed button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.e === elapsedKey)));
+  // Jumping to a preset while sitting on another state is how you line the three
+  // widths up, so switch to live rather than making it a two-click move.
+  state = "live";
+  render();
+});
 el("sched").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-s]");
   if (!b) return;
@@ -335,8 +427,9 @@ el("zoom").addEventListener("click", (e) => {
   document.querySelectorAll("#zoom button").forEach((x) => x.setAttribute("aria-pressed", String(+x.dataset.z === zoom)));
   render();
 });
-["homeName", "awayName", "homeScore", "awayScore", "logos", "reduce"].forEach((id) => {
+["homeName", "awayName", "homeScore", "awayScore", "logos", "reduce", "livedot"].forEach((id) => {
   el(id).addEventListener("input", render);
 });
 
 render();
+setInterval(tick, 1000);
