@@ -6,6 +6,7 @@ const IMAGE_TYPES: Record<string, string> = {
   "image/png":  "png",
   "image/jpeg": "jpg",
   "image/webp": "webp",
+  "image/avif": "avif",
   "image/gif":  "gif",
 };
 
@@ -24,6 +25,7 @@ const TYPE_BY_EXT: Record<string, string> = {
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   webp: "image/webp",
+  avif: "image/avif",
   gif: "image/gif",
   pdf: "application/pdf",
 };
@@ -44,6 +46,17 @@ function checkMagicBytes(header: Uint8Array, type: string): boolean {
       return (
         header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46 &&
         header[8] === 0x57 && header[9] === 0x45 && header[10] === 0x42 && header[11] === 0x50
+      );
+    // AVIF and HEIC are the same ISO BMFF container, so "ftyp" alone would let a
+    // .heic renamed .avif through the one check that catches a lying extension.
+    // The major brand is what separates them: "avif" for a still, "avis" for a
+    // sequence. An encoder that writes "mif1" there instead is rejected — rare
+    // enough to be worth the certainty about HEIC.
+    case "image/avif":
+      return (
+        header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70 &&
+        header[8] === 0x61 && header[9] === 0x76 && header[10] === 0x69 &&
+        (header[11] === 0x66 || header[11] === 0x73)
       );
     case "application/pdf":
       return header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46;
@@ -104,9 +117,9 @@ async function validateUpload(
 }
 
 export function validateImageUpload(file: File): Promise<UploadResult> {
-  return validateUpload(file, IMAGE_TYPES, "Only PNG, JPG, WEBP, or GIF images are allowed.");
+  return validateUpload(file, IMAGE_TYPES, "Only PNG, JPG, WEBP, AVIF, or GIF images are allowed.");
 }
 
 export function validateDocumentUpload(file: File): Promise<UploadResult> {
-  return validateUpload(file, DOCUMENT_TYPES, "Only PNG, JPG, WEBP, GIF, or PDF files are allowed.");
+  return validateUpload(file, DOCUMENT_TYPES, "Only PNG, JPG, WEBP, AVIF, GIF, or PDF files are allowed.");
 }

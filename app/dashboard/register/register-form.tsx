@@ -67,8 +67,8 @@ export function RegisterForm({ isResubmit, existing }: Props) {
       return;
     }
 
-    if (!["png", "jpg", "jpeg", "webp", "gif", "pdf"].includes(ext)) {
-      setFileError("Upload a PNG, JPG, WEBP, GIF, or PDF.");
+    if (!["png", "jpg", "jpeg", "webp", "avif", "gif", "pdf"].includes(ext)) {
+      setFileError("Upload a PNG, JPG, WEBP, AVIF, GIF, or PDF.");
       e.target.value = "";
       return;
     }
@@ -145,7 +145,7 @@ export function RegisterForm({ isResubmit, existing }: Props) {
         <input
           type="file"
           name="college_image"
-          accept="image/*,.png,.jpg,.jpeg,.webp,.gif,.pdf"
+          accept="image/*,.png,.jpg,.jpeg,.webp,.avif,.gif,.pdf"
           required={!isResubmit || !existing?.college_image_url}
           onChange={handleFileChange}
           className="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-zinc-700 file:text-white hover:file:bg-zinc-600 cursor-pointer"
