@@ -73,8 +73,8 @@ const REACH = {
 // The shipped heights and the proposed one. MATCH_H/MH are read by the bracket's
 // own layout math, not just the card, so the ported change is more than a number.
 const SIZES = {
-  tall:    { name: "210×100", tag: "PROPOSED", bracket: 100, hybrid: 100 },
-  current: { name: "Ships today",  tag: "68 / 66",  bracket: 68,  hybrid: 66 },
+  tall:    { name: "Proposed",    tag: "+25%",    bracket: 100, hybrid: 100, group: 38, swiss: 35 },
+  current: { name: "Ships today", tag: "CURRENT", bracket: 68,  hybrid: 66,  group: 30, swiss: 28 },
 };
 
 let state = "completed";
@@ -169,18 +169,30 @@ function render() {
     '<div class="teamrow' + (v.homeWon ? " won" : "") + '">' + slot(v, "home") + "</div>" +
     '<div class="teamrow' + (v.awayWon ? " won" : "") + '">' + slot(v, "away") + "</div>";
 
-  // ── Group / Swiss row ──
-  const gl = v.logos ? '<img class="glogo" alt="" src="data:image/svg+xml;utf8,' +
+  // ── Group row ── emerald/red on the result, unlike Swiss below.
+  const crest = (cls) => v.logos ? '<img class="' + cls + '" alt="" src="data:image/svg+xml;utf8,' +
     encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#575ce8"/></svg>') + '" />' : "";
+  const gl = crest("glogo");
   const hSide = v.done ? (v.homeWon ? "win" : "loss") : "";
   const aSide = v.done ? (v.awayWon ? "win" : "loss") : "";
+  const hName = esc(v.homeSet ? v.homeName : "?");
+  const aName = esc(v.awaySet ? v.awayName : "?");
   el("groupRow").innerHTML =
     '<span class="gbadge">G1</span>' +
-    '<div class="side ' + hSide + '">' + gl + "<span>" + esc(v.homeSet ? v.homeName : "?") + "</span></div>" +
+    '<div class="side ' + hSide + '">' + gl + "<span>" + hName + "</span></div>" +
     (v.showScore
       ? '<span class="mid final">' + v.hs + " &ndash; " + v.as + "</span>"
       : '<span class="mid">vs</span>') +
-    '<div class="side away ' + aSide + '"><span>' + esc(v.awaySet ? v.awayName : "?") + "</span>" + gl + "</div>";
+    '<div class="side away ' + aSide + '"><span>' + aName + "</span>" + gl + "</div>";
+
+  // ── Swiss row ── same shape, but the winner goes white and the score sits in a
+  // fixed 40px column rather than hugging the names.
+  const sl = crest("slogo");
+  el("swissRow").innerHTML =
+    '<div class="side ' + hSide + '">' + sl + "<span>" + hName + "</span></div>" +
+    '<span class="mid' + (v.showScore ? " final" : "") + '">' +
+      (v.showScore ? v.hs + " &ndash; " + v.as : "vs") + "</span>" +
+    '<div class="side away ' + aSide + '"><span>' + aName + "</span>" + sl + "</div>";
 
   // ── Schedule row ── The pill comes from the Scheduling control, not the state
   // switcher. Unassigned slots fall back to the literal "TBD" team name.
@@ -238,6 +250,16 @@ function render() {
   const sz = SIZES[size];
   el("dim1").innerHTML = "210&times;" + sz.bracket + (size === "tall" ? " &middot; proposed, ships 210&times;68" : "");
   el("dim2").innerHTML = "210&times;" + sz.hybrid + (size === "tall" ? " &middot; proposed, ships 210&times;66" : "");
+  el("dim3").innerHTML = "group " + sz.group + "px &middot; swiss " + sz.swiss + "px" +
+    (size === "tall" ? " &middot; proposed, ships 30 / 28" : "");
+  // The Swiss row is the only one of the four holding two teams in a fixed 210px,
+  // so a crest that grows with the row eats the name column. 208 inside the
+  // border, less 16 padding, less the 40px score and the two 4px gaps, halved —
+  // plus the 8px the crest bleeds back when it stretches.
+  const crestPx = size === "tall" ? sz.swiss : 14;
+  const bleed = size === "tall" ? 8 : 0;
+  el("squeeze").innerHTML = " &middot; " + ((208 - 16 - 40 - 8) / 2 + bleed - crestPx - 4) +
+    "px left for each name" + (size === "tall" ? " (54px today)" : "");
   // A scaled element still occupies its unscaled box, so each holder's height is
   // measured unscaled and reserved at scale — otherwise the next view overlaps it.
   [1, 2, 3, 4].forEach((i) => {

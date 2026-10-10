@@ -137,10 +137,16 @@
   .card.hybrid .score { color: var(--zinc-500); }
   .card.hybrid .score.won { color: var(--emerald-400); }
 
-  /* Group / Swiss row */
+  /* Group row — bordered, fluid width in production, 30px tall (py-1.5 + text-xs,
+     whose line-height is 1rem, not the body's 1.5). */
+  .subname { font-size: 10px; color: var(--zinc-600); margin: 0 0 6px; font-family: var(--mono); }
+  .subname.second { margin-top: 16px; }
+  .squeeze { color: var(--amber-400); }
+  .squeeze:empty { display: none; }
   .grouprow {
     display: flex; align-items: center; gap: 8px; border-radius: 8px; padding: 6px 12px;
-    border: 1px solid var(--zinc-700); background: var(--zinc-800); font-size: 12px; width: 420px;
+    border: 1px solid var(--zinc-700); background: var(--zinc-800);
+    font-size: 12px; line-height: 16px; width: 420px;
   }
   .grouprow .side { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 4px; font-weight: 500; color: var(--zinc-300); }
   .grouprow .side.away { justify-content: flex-end; }
@@ -151,6 +157,40 @@
   .grouprow .mid { flex: 0 0 auto; padding: 0 6px; color: var(--zinc-600); }
   .grouprow .mid.final { font-family: var(--mono); font-weight: 700; color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; }
   .grouprow .gbadge { flex: 0 0 auto; font-size: 9px; font-weight: 700; color: var(--zinc-500); text-transform: uppercase; width: 24px; }
+
+  /* Swiss row — no border or background of its own; it sits in a 210px box and is
+     separated from its neighbours by a hairline. Winner is white, not emerald. */
+  .swissbox { width: 210px; border: 1px solid var(--zinc-800); border-radius: 8px; background: var(--zinc-900); overflow: hidden; }
+  .swissdiv { height: 1px; background: rgba(63,63,70,.25); margin: 0 8px; }
+  .swissrow { display: flex; align-items: center; gap: 4px; padding: 0 8px; height: 28px; font-size: 12px; line-height: 16px; }
+  .swissrow .side { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 4px; color: var(--zinc-300); }
+  .swissrow .side.away { justify-content: flex-end; }
+  .swissrow .side.win { color: #fff; font-weight: 600; }
+  .swissrow .side.loss { color: var(--zinc-500); }
+  .swissrow .side span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .swissrow .slogo { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto; background: var(--zinc-700); object-fit: cover; }
+  .swissrow .mid {
+    flex: 0 0 40px; width: 40px; text-align: center; font-family: var(--mono); font-size: 11px;
+    font-variant-numeric: tabular-nums; color: var(--zinc-600);
+  }
+  .swissrow .mid.final { font-weight: 700; color: #fff; }
+
+  /* ── Proposed +25% on both rows ────────────────────────────────────────────
+     30 → 38 and 28 → 35, and the crest stretches to the row as on the cards. */
+  body.tall .grouprow { height: 38px; padding: 0 12px; }
+  body.tall .swissrow { height: 35px; }
+  body.tall .grouprow .side, body.tall .swissrow .side { align-self: stretch; }
+  body.tall .grouprow .glogo, body.tall .swissrow .slogo {
+    align-self: stretch; width: auto; height: auto; aspect-ratio: 1;
+  }
+  /* The group row's home crest sits next to the G1 badge rather than on an edge,
+     so neither crest bleeds and both keep their radius. */
+  body.tall .grouprow .glogo { border-radius: 3px; }
+  /* Both Swiss crests are the row's outermost elements, so they bleed flush to
+     the box the way the card crests do, and go square to match. */
+  body.tall .swissrow .slogo { border-radius: 0; }
+  body.tall .swissrow .side:not(.away) .slogo { margin-left: -8px; }
+  body.tall .swissrow .side.away .slogo { margin-right: -8px; }
 
   /* Schedule row */
   .schedrow {
@@ -216,7 +256,7 @@
     </div>
 
     <div class="group">
-      <label class="hd">Card size <span style="text-transform:none;letter-spacing:0;font-weight:400">(bracket + hybrid)</span></label>
+      <label class="hd">Card size <span style="text-transform:none;letter-spacing:0;font-weight:400">(all match rows)</span></label>
       <div class="states" id="size"></div>
     </div>
 
@@ -253,9 +293,17 @@
     </div>
 
     <div class="view" id="v3">
-      <p class="viewname">Group &amp; Swiss row<span class="na" id="na3"></span></p>
-      <p class="viewsrc">season/group-stage-client.tsx &middot; season/swiss-display.tsx</p>
-      <div class="holder" id="h3"><div class="grouprow" id="groupRow"></div></div>
+      <p class="viewname">Group &amp; Swiss rows<span class="na" id="na3"></span></p>
+      <p class="viewsrc">season/group-stage-client.tsx &middot; season/swiss-display.tsx &middot; <span id="dim3"></span></p>
+      <div class="holder" id="h3">
+        <p class="subname">group &mdash; bordered, fluid width in production</p>
+        <div class="grouprow" id="groupRow"></div>
+        <p class="subname second">swiss &mdash; borderless, 210px, hairline-separated<span class="squeeze" id="squeeze"></span></p>
+        <div class="swissbox">
+          <div class="swissdiv"></div>
+          <div class="swissrow" id="swissRow"></div>
+        </div>
+      </div>
     </div>
 
     <div class="view" id="v4">
