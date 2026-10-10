@@ -90,9 +90,16 @@ export async function editRole(roleId: string, updates: { name?: string; color?:
   }
 }
 
-export async function addRoleById(userId: string, roleId: string, attempt = 0): Promise<void> {
-  if (!GUILD_ID || !BOT_TOKEN) return;
-  if (userId.startsWith("test_")) return;
+// Returns { ok, status, message } for the same reason removeRoleById does.
+// Returning void here let a dropped assignment pass for a successful one: a
+// sync could strip a role, fail to re-add it, and still report success.
+export async function addRoleById(
+  userId: string,
+  roleId: string,
+  attempt = 0,
+): Promise<{ ok: boolean; status: number; message?: string }> {
+  if (!GUILD_ID || !BOT_TOKEN) return { ok: false, status: 0, message: "Missing guild/bot config" };
+  if (userId.startsWith("test_")) return { ok: true, status: 204 };
   try {
     const res = await fetch(`${API}/guilds/${GUILD_ID}/members/${userId}/roles/${roleId}`, {
       method: "PUT",
@@ -106,14 +113,16 @@ export async function addRoleById(userId: string, roleId: string, attempt = 0): 
         return addRoleById(userId, roleId, attempt + 1);
       }
       console.error(`[addRoleById] user=${userId} role=${roleId} rate limited (retry_after: ${retryAfter}s)`);
-      return;
+      return { ok: false, status: 429, message: "You are being rate limited." };
     }
-    if (!res.ok && res.status !== 204) {
-      const text = await res.text();
-      console.error(`[addRoleById] user=${userId} role=${roleId} status=${res.status}`, text);
-    }
+    if (res.ok || res.status === 204) return { ok: true, status: res.status };
+    let message: string | undefined;
+    try { message = (await res.json())?.message; } catch { /* no body */ }
+    console.error(`[addRoleById] user=${userId} role=${roleId} status=${res.status} ${message ?? ""}`);
+    return { ok: false, status: res.status, message };
   } catch (err) {
     console.error(`[addRoleById] network error user=${userId} role=${roleId}`, err);
+    return { ok: false, status: 0, message: err instanceof Error ? err.message : "network error" };
   }
 }
 
@@ -393,6 +402,90 @@ export async function stripRoleIdsFromMembers(userIds: string[], roleIds: string
       if (roleSet.has(rid)) await removeRoleById(uid, rid);
     }
   }
+}
+
+export type RoleReconcileFailure = {
+  userId: string;
+  roleId: string;
+  action: "add" | "remove";
+  message: string;
+};
+
+// Brings each member's managed roles in line with what they should hold, issuing
+// only the difference. `desiredByUser` must cover every member to reconcile —
+// one whose managed roles should all be gone maps to an empty set.
+//
+// This replaced a strip-everything-then-re-add pass, which was wrong twice over.
+// The strip was sequential and reliable while the re-add was an unbounded
+// Promise.all of one PUT per player per role — on a 33-player league that is
+// ~75 simultaneous writes into Discord's per-guild member-role bucket, straight
+// after the strip had already drained it. addRoleById gives up after 4 retries,
+// so roughly 40% of assignments were silently dropped and every run re-rolled
+// the dice: observed leaving 9 of 12 rostered players without their team role.
+// Diffing is also what makes it cheap — a league already in the right state
+// costs one GET per member and no writes at all, where the old pass rewrote
+// every role every time.
+//
+// Sequential on purpose. Parallelism is what broke this, and getMemberRoleIds
+// already backs off on 429, so the pacing is the point rather than a cost.
+export async function reconcileManagedRoles(
+  desiredByUser: Map<string, Set<string>>,
+  managedRoleIds: string[],
+  opts?: { strip?: boolean },
+): Promise<{
+  added: number;
+  removed: number;
+  failures: RoleReconcileFailure[];
+  unreachable: string[];
+}> {
+  const strip = opts?.strip ?? true;
+  const managed = new Set(managedRoleIds.filter(Boolean));
+  let added = 0;
+  let removed = 0;
+  const failures: RoleReconcileFailure[] = [];
+  const unreachable: string[] = [];
+  if (managed.size === 0) return { added, removed, failures, unreachable };
+
+  for (const [userId, desired] of desiredByUser) {
+    if (!userId || userId.startsWith("test_")) continue;
+    const have = await getMemberRoleIds(userId);
+    // null is "not in the guild, or the fetch failed" — both mean there is
+    // nothing to diff against, and guessing would re-add roles to a member who
+    // left. Reported separately so a departed player doesn't read as a failure.
+    if (!have) { unreachable.push(userId); continue; }
+    const held = new Set(have);
+
+    for (const roleId of desired) {
+      if (held.has(roleId)) continue;
+      const res = await addRoleById(userId, roleId);
+      if (res.ok) added++;
+      else failures.push({ userId, roleId, action: "add", message: res.message ?? `status ${res.status}` });
+    }
+    if (!strip) continue;
+    for (const roleId of held) {
+      if (!managed.has(roleId) || desired.has(roleId)) continue;
+      const res = await removeRoleById(userId, roleId);
+      if (res.ok) removed++;
+      else failures.push({ userId, roleId, action: "remove", message: res.message ?? `status ${res.status}` });
+    }
+  }
+
+  // One retry round. The per-call backoff handles a busy bucket; this catches
+  // the calls that exhausted it, which is exactly the case that used to vanish.
+  if (failures.length) {
+    await new Promise(r => setTimeout(r, 2000));
+    const retried: RoleReconcileFailure[] = [];
+    for (const f of failures) {
+      const res = f.action === "add"
+        ? await addRoleById(f.userId, f.roleId)
+        : await removeRoleById(f.userId, f.roleId);
+      if (!res.ok) { retried.push({ ...f, message: res.message ?? `status ${res.status}` }); continue; }
+      if (f.action === "add") added++; else removed++;
+    }
+    return { added, removed, failures: retried, unreachable };
+  }
+
+  return { added, removed, failures, unreachable };
 }
 
 export type GuildMembership = "member" | "not_member" | "unknown";

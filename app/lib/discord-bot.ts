@@ -4,7 +4,7 @@ import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfaEnabled, type StaffRole } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
-import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView } from "./discord-api";
+import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -2693,13 +2693,14 @@ export async function processExpiredScoreConfirmations(): Promise<void> {
 // removes stale/incorrect ones (e.g. a player who switched teams, left a team, or
 // rejoined the server). Every approved player is processed, not just rostered ones,
 // so free agents get leftover team/Drafted/Captain roles cleared.
-export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promise<{
+export async function execSyncRoles(opts?: { syncRegistered?: boolean; repairOnly?: boolean }): Promise<{
   assigned: number;
   roleNames: string[];
   roleIds: { label: string; id: string }[];
   warnings: string[];
 }> {
   const syncRegistered = opts?.syncRegistered ?? true;
+  const repairOnly = opts?.repairOnly ?? false;
   const warnings: string[] = [];
 
   const [{ data: teams }, { data: approved }, { data: allPlayers }, { data: settings }] = await Promise.all([
@@ -2769,37 +2770,61 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
     return id && !id.startsWith("test_");
   });
 
-  // 1) Strip every managed role off every player (clears stale/wrong roles).
-  if (managedRoleIds.length) {
-    await stripRoleIdsFromMembers(realPlayers.map(p => p.discord_id as string), managedRoleIds);
+  // 1) What every player should hold. A player who should hold none of the
+  // managed roles still belongs here with an empty set — that is what tells the
+  // reconciler to take stale ones away.
+  let assigned = 0;
+  const desiredByUser = new Map<string, Set<string>>(
+    realPlayers.map(p => [p.discord_id as string, new Set<string>()])
+  );
+  for (const player of approved ?? []) {
+    const discordId = player.discord_id as string;
+    if (!discordId || discordId.startsWith("test_")) continue;
+    // approved comes from a separate query than allPlayers, so a row missing
+    // from the map still has to get its roles.
+    const desired = desiredByUser.get(discordId) ?? new Set<string>();
+    desiredByUser.set(discordId, desired);
+
+    // All approved players get the registered role
+    if (registeredRoleId) desired.add(registeredRoleId);
+
+    // Team-specific roles (drafted/team/captain) only if on a team
+    const team = player.team_id ? teamById[player.team_id as string] : null;
+    if (team) {
+      assigned++;
+      if (roleMap["Drafted"]) desired.add(roleMap["Drafted"]);
+      // Additive above 1v1: the shared role says "in the running event", the
+      // team role says which team. At 1v1 there is no team role to add.
+      if (tournamentRole) desired.add(tournamentRole.id);
+      if (!solo && team.roleId) desired.add(team.roleId);
+      if (player.is_captain && roleMap["Captain"]) desired.add(roleMap["Captain"]);
+    }
   }
 
-  // 2) Re-add only the roles each player should have per the DB.
-  let assigned = 0;
-  await Promise.all(
-    (approved ?? []).map(player => {
-      const discordId = player.discord_id as string;
-      const promises: Promise<void>[] = [];
-
-      // All approved players get the registered role
-      if (registeredRoleId) promises.push(addRoleById(discordId, registeredRoleId));
-
-      // Team-specific roles (drafted/team/captain) only if on a team
-      const team = player.team_id ? teamById[player.team_id as string] : null;
-      if (team) {
-        assigned++;
-        if (roleMap["Drafted"]) promises.push(addRoleById(discordId, roleMap["Drafted"]));
-        // Additive above 1v1: the shared role says "in the running event", the
-        // team role says which team. At 1v1 there is no team role to add.
-        if (tournamentRole) promises.push(addRoleById(discordId, tournamentRole.id));
-        if (!solo && team.roleId) promises.push(addRoleById(discordId, team.roleId));
-        if (player.is_captain && roleMap["Captain"])
-          promises.push(addRoleById(discordId, roleMap["Captain"]));
-      }
-
-      return Promise.all(promises);
-    })
+  // 2) Issue only the difference. repairOnly never takes a role away, so a
+  // sync can be run to restore what a previous one dropped without betting the
+  // current roster state against Discord's.
+  const { failures, unreachable } = await reconcileManagedRoles(
+    desiredByUser,
+    managedRoleIds,
+    { strip: !repairOnly },
   );
+  if (failures.length) {
+    const shown = failures.slice(0, 6)
+      .map(f => `<@${f.userId}> ${f.action} <@&${f.roleId}> (${f.message})`)
+      .join(", ");
+    warnings.push(
+      `${failures.length} role change${failures.length > 1 ? "s" : ""} failed after a retry: ${shown}` +
+      (failures.length > 6 ? `, +${failures.length - 6} more` : "")
+    );
+  }
+  if (unreachable.length) {
+    warnings.push(
+      `${unreachable.length} player${unreachable.length > 1 ? "s" : ""} not in the server — roles left alone: ` +
+      unreachable.slice(0, 6).map(id => `<@${id}>`).join(", ") +
+      (unreachable.length > 6 ? `, +${unreachable.length - 6} more` : "")
+    );
+  }
 
   // At 1v1 the team names are player names, so listing them back as "roles"
   // would be noise — the one shared role is the whole story there.
@@ -2823,19 +2848,20 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean }): Promis
   return { assigned, roleNames, roleIds, warnings };
 }
 
-async function syncRoles(userId: string, syncRegistered: boolean) {
+async function syncRoles(userId: string, syncRegistered: boolean, repairOnly: boolean) {
   const denied = await directorGuard(userId);
   if (denied) return denied;
 
   const { data: teams } = await supabaseAdmin.from("teams").select("id").limit(1);
   if (!teams?.length) return ephemeralReply("❌ No teams found in the database.");
 
-  const { assigned, roleNames, roleIds, warnings } = await execSyncRoles({ syncRegistered });
+  const { assigned, roleNames, roleIds, warnings } = await execSyncRoles({ syncRegistered, repairOnly });
   const lines = [
     `• Roles reconciled: ${roleNames.join(", ")}`,
     `• Role IDs used: ${roleIds.length ? roleIds.map(r => `${r.label} <@&${r.id}>`).join(", ") : "none (falling back to name lookup)"}`,
     `• Players updated: **${assigned}**`,
     ...(syncRegistered ? [] : ["ℹ️ Registered role sync skipped (sync_registered: false)."]),
+    ...(repairOnly ? ["ℹ️ Repair mode — missing roles were added, none were taken away."] : []),
     ...warnings.map(w => `⚠️ ${w}`),
   ];
   return ephemeralReply((warnings.length ? "⚠️ Partial sync" : "✅ Roles synced") + "\n" + lines.join("\n"));
@@ -4045,7 +4071,7 @@ export async function handleCommand(interaction: Interaction) {
 
     switch (sub.name) {
       case "setdraftchannel": return setDraftChannel(userId, interaction.channel_id ?? "");
-      case "syncroles":         return syncRoles(userId, sOpt("sync_registered") === true);
+      case "syncroles":         return syncRoles(userId, sOpt("sync_registered") === true, sOpt("repair") === true);
       case "diagroles":         return diagRoles(userId);
       case "setmoderatorid":    return setStaffRoleId(userId, String(sOpt("role")), "moderator");
       case "setdirectorid":     return setStaffRoleId(userId, String(sOpt("role")), "director");

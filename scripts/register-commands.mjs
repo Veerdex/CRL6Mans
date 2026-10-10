@@ -57,6 +57,7 @@ const commands = [
         description: "Create missing Discord roles and assign them to all players based on current DB state",
         options: [
           { name: "sync_registered", description: "Also reconcile the Registered role", type: BOOLEAN, required: true },
+          { name: "repair", description: "Only add missing roles, never remove any", type: BOOLEAN, required: false },
         ],
       },
       {
