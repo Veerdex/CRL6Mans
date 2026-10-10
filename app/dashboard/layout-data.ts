@@ -158,11 +158,22 @@ async function claimGrants(
   }
 
   if (playerInfo.status === "approved") {
-    const { data: playerFlags } = await supabaseAdmin
+    const flagCols = "id, team_signup_not_selected, team_signup_too_few_players";
+    // Pre-migration, naming draft_not_selected_reason fails the whole statement,
+    // which would silently take the two team-signup messages below with it.
+    const withReason = await supabaseAdmin
       .from("players")
-      .select("id, team_signup_not_selected, team_signup_too_few_players")
+      .select(`${flagCols}, draft_not_selected_reason`)
       .eq("discord_id", userId)
       .single();
+    const playerFlags: {
+      id: string;
+      team_signup_not_selected?: boolean | null;
+      team_signup_too_few_players?: boolean | null;
+      draft_not_selected_reason?: string | null;
+    } | null = withReason.error
+      ? ((await supabaseAdmin.from("players").select(flagCols).eq("discord_id", userId).single()).data ?? null)
+      : withReason.data;
 
     if (playerFlags?.team_signup_not_selected) {
       grants.teamSignupMessage = "Your team didn't make the cutoff for the last tournament you signed up for.";
@@ -172,6 +183,11 @@ async function claimGrants(
       // which point league_settings has already reset to the league default.
       grants.teamSignupMessage = "Your team didn't reach the required roster size in time, so it wasn't entered in the last tournament.";
       await supabaseAdmin.from("players").update({ team_signup_too_few_players: false }).eq("id", playerFlags.id);
+    } else if (playerFlags?.draft_not_selected_reason) {
+      // Already a finished sentence with the numbers baked in — notifyPoolCutoff
+      // wrote it while the event's settings were still live.
+      grants.teamSignupMessage = `You weren't placed on a team. ${playerFlags.draft_not_selected_reason}`;
+      await supabaseAdmin.from("players").update({ draft_not_selected_reason: null }).eq("id", playerFlags.id);
     }
   }
 

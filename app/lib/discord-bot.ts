@@ -938,6 +938,47 @@ export async function setDraftChannelVisibility(
   return failed ? { ok: false, reason: failed.message } : { ok: true };
 }
 
+// Both formation paths cut the pool to the first numTeams × teamSize by sign-up
+// time; without this the cut player is simply never told. The explanation is
+// baked into text at write time rather than rendered on read, because by the
+// time they next open the dashboard league_settings has reset team_size and
+// num_teams to the league defaults and the numbers no longer reconstruct.
+//
+// draft_not_selected_reason gets its own statements and is never folded into the
+// blanket roster updates: pre-migration, PostgREST rejects a whole statement
+// that names an unknown column, which would stop team_id from being cleared.
+async function notifyPoolCutoff(
+  enteredAll: Array<{ id: string; discord_id: string | null }>,
+  enteredIds: string[],
+  teamSize: number,
+  numTeams: number,
+  isTournament: boolean,
+) {
+  await supabaseAdmin.from("players").update({ draft_not_selected_reason: null }).in("id", enteredIds);
+
+  const spots = numTeams * teamSize;
+  const cut = enteredAll.slice(spots);
+  if (!cut.length) return;
+
+  const event = isTournament ? "tournament" : "season";
+  const tail = "Spots go to the earliest sign-ups, not the highest ranks, and yours came in after the last one was taken.";
+  const reason = numTeams < Math.floor(enteredAll.length / teamSize)
+    ? `${enteredAll.length} players entered the pool, but this ${event} was capped at ${numTeams} teams of ${teamSize} — ${spots} spots. ${tail}`
+    : `${enteredAll.length} players entered the pool, which fills ${numTeams} teams of ${teamSize} (${spots} spots) with ${cut.length} left over. ${tail}`;
+
+  await supabaseAdmin
+    .from("players")
+    .update({ draft_not_selected_reason: reason })
+    .in("id", cut.map(p => p.id));
+
+  await pushToDiscordIds(cut.map(p => p.discord_id).filter((id): id is string => !!id), {
+    title: "Not Selected",
+    body: reason,
+    url: "/dashboard",
+    tag: "draft-not-selected",
+  });
+}
+
 export async function execStartDraft(maxTeams?: number | "max" | null): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin.from("league_settings").select("*").single();
   if (!settings?.draft_channel_id)
@@ -1057,6 +1098,11 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
     return { ok: false, message: `❌ DB error activating draft: ${activateError.message}` };
   if (!activateRows?.length)
     return { ok: false, message: "❌ draft_active write matched 0 rows — check league_settings table (may be empty or id is null)." };
+
+  // Past the point of no return, and before the Discord phase: the two early
+  // returns above mean an admin can reach the cutoff, fail, fix it and retry,
+  // and a notice sent any earlier would go out twice for one draft.
+  await notifyPoolCutoff(enteredAll, entered.map(p => p.id), teamSize, numTeams, !!settings.active_tournament_id);
 
   // ── Phase 2: Discord (best-effort, won't block draft if slow) ────────────
 
@@ -1269,6 +1315,8 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
     draft_open: false, draft_active: false, draft_phase: null,
     num_teams: numTeams, updated_at: new Date().toISOString(),
   }).not("id", "is", null);
+
+  await notifyPoolCutoff(enteredAll, entered.map(p => p.id), teamSize, numTeams, !!settings.active_tournament_id);
 
   // ── Phase 2: Discord roles (best-effort) ─────────────────────────────────
   await deleteMatchChannels();
