@@ -98,6 +98,24 @@
   .divider { height: 1px; background: rgba(63,63,70,.5); margin: 0 8px; }
   .logo { width: 16px; height: 16px; border-radius: 4px; flex: 0 0 auto; background: var(--zinc-700); object-fit: cover; }
   .card.hybrid .logo { width: 16px; height: 16px; }
+
+  /* ── Proposed 210×100 ──────────────────────────────────────────────────────
+     Both cards switch to a flex column so the rows split whatever height is
+     left after the divider or header, instead of being pinned to a pixel
+     count that has to be re-derived every time the card resizes. */
+  body.tall .card.bracket, body.tall .card.hybrid { height: 100px; display: flex; flex-direction: column; }
+  body.tall .card .teamrow { flex: 1 1 0; height: auto; min-height: 0; }
+  body.tall .card .divider { flex: 0 0 1px; margin: 0; }
+  body.tall .card .hybridhead { flex: 0 0 22px; }
+  /* The crest stretches to the row and bleeds past the row's own padding to sit
+     flush on the card edge, which the card's overflow:hidden rounds for us. */
+  body.tall .card .logo {
+    align-self: stretch; width: auto; height: auto; aspect-ratio: 1;
+    border-radius: 0; margin-left: -8px;
+  }
+  body.tall .card.hybrid .logo { margin-left: -10px; }
+  /* A winner row inset 4px would leave the flush crest sitting proud of it. */
+  body.tall .card.bracket .teamrow.won { margin: 0; border-radius: 0; }
   .dot { width: 8px; height: 8px; border-radius: 999px; flex: 0 0 auto; background: var(--zinc-400); }
   .dot.empty { background: var(--zinc-700); }
   .tname { flex: 1 1 auto; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--zinc-300); }
@@ -198,13 +216,18 @@
     </div>
 
     <div class="group">
+      <label class="hd">Card size <span style="text-transform:none;letter-spacing:0;font-weight:400">(bracket + hybrid)</span></label>
+      <div class="states" id="size"></div>
+    </div>
+
+    <div class="group">
       <label class="hd">Scheduling <span style="text-transform:none;letter-spacing:0;font-weight:400">(schedule row only)</span></label>
       <div class="states" id="sched"></div>
     </div>
 
     <div class="group">
       <label class="hd">Options</label>
-      <label class="check"><input type="checkbox" id="logos" /> Team logos set</label>
+      <label class="check"><input type="checkbox" id="logos" checked /> Team logos set</label>
       <label class="check"><input type="checkbox" id="reduce" /> Freeze the live pulse</label>
     </div>
 
@@ -219,13 +242,13 @@
   <main class="stage">
     <div class="view" id="v1">
       <p class="viewname">Bracket match box<span class="na" id="na1"></span></p>
-      <p class="viewsrc">season/bracket-display.tsx &middot; MatchBox &middot; 210&times;68</p>
+      <p class="viewsrc">season/bracket-display.tsx &middot; MatchBox &middot; <span id="dim1"></span></p>
       <div class="holder" id="h1"><div class="card bracket" id="bracketCard"></div></div>
     </div>
 
     <div class="view" id="v2">
       <p class="viewname">Hybrid / grand-final card<span class="na" id="na2"></span></p>
-      <p class="viewsrc">season/hybrid-display.tsx &middot; MatchCard &middot; 210&times;66</p>
+      <p class="viewsrc">season/hybrid-display.tsx &middot; MatchCard &middot; <span id="dim2"></span></p>
       <div class="holder" id="h2"><div class="card hybrid" id="hybridCard"></div></div>
     </div>
 

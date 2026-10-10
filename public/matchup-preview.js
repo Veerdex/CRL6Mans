@@ -70,8 +70,16 @@ const REACH = {
   v4: ["upcoming", "waiting", "pending"],
 };
 
+// The shipped heights and the proposed one. MATCH_H/MH are read by the bracket's
+// own layout math, not just the card, so the ported change is more than a number.
+const SIZES = {
+  tall:    { name: "210×100", tag: "PROPOSED", bracket: 100, hybrid: 100 },
+  current: { name: "Ships today",  tag: "68 / 66",  bracket: 68,  hybrid: 66 },
+};
+
 let state = "completed";
 let schedState = "confirmed";
+let size = "tall";
 let zoom = 1;
 
 const el = (id) => document.getElementById(id);
@@ -226,6 +234,10 @@ function render() {
     b.setAttribute("aria-pressed", String(b.dataset.k === state));
   });
   document.body.classList.toggle("reduce", el("reduce").checked);
+  document.body.classList.toggle("tall", size === "tall");
+  const sz = SIZES[size];
+  el("dim1").innerHTML = "210&times;" + sz.bracket + (size === "tall" ? " &middot; proposed, ships 210&times;68" : "");
+  el("dim2").innerHTML = "210&times;" + sz.hybrid + (size === "tall" ? " &middot; proposed, ships 210&times;66" : "");
   // A scaled element still occupies its unscaled box, so each holder's height is
   // measured unscaled and reserved at scale — otherwise the next view overlaps it.
   [1, 2, 3, 4].forEach((i) => {
@@ -245,6 +257,15 @@ el("states").innerHTML = Object.entries(STATES).map(([k, s]) =>
     '<span class="swatch" style="border-color:' + s.card.border + ";background:" + s.card.bg + '"></span>' +
     esc(s.name) + (s.real ? "" : " *") +
     '<span class="tag" style="color:' + s.tagColor + '">' + s.tag + "</span>" +
+  "</button>"
+).join("");
+
+el("size").innerHTML = Object.entries(SIZES).map(([k, s]) =>
+  '<button data-sz="' + k + '" aria-pressed="' + (k === size) + '">' +
+    '<span class="swatch" style="border-color:var(--zinc-600);background:var(--zinc-800);height:' +
+      Math.round(s.bracket / 7) + 'px"></span>' +
+    esc(s.name) +
+    '<span class="tag" style="color:var(--zinc-500)">' + esc(s.tag) + "</span>" +
   "</button>"
 ).join("");
 
@@ -269,6 +290,13 @@ el("states").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-k]");
   if (!b) return;
   state = b.dataset.k;
+  render();
+});
+el("size").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-sz]");
+  if (!b) return;
+  size = b.dataset.sz;
+  document.querySelectorAll("#size button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.sz === size)));
   render();
 });
 el("sched").addEventListener("click", (e) => {
