@@ -4,6 +4,11 @@ import { useState, useMemo, useCallback } from "react";
 import { computeGroupStandings, type GroupStanding } from "@/app/lib/bracket";
 import { LiveClock } from "./live-clock";
 import { isMatchLive } from "@/app/lib/match-live";
+import { DefaultLogo } from "@/app/lib/team-logo";
+
+// The row is a fixed height so the crest can square off against it. Without a
+// height the crest would size the row and the row would size the crest.
+const ROW_H = 38;
 
 export type GroupMatchRow = {
   id: string;
@@ -20,6 +25,17 @@ export type GroupMatchRow = {
 };
 
 export type GroupTeam = { id: string; name: string; logo_url: string | null };
+
+// Squares off against the row height rather than sitting at a fixed 14px. It
+// keeps its corner radius and does not bleed to the row edge the way a bracket
+// card's crest does, because the group badge and the row padding are beside it.
+function GroupCrest({ team }: { team: GroupTeam | undefined }) {
+  if (!team) return null;
+  const box = "self-stretch w-auto h-auto aspect-square shrink-0 rounded-[3px]";
+  if (!team.logo_url) return <DefaultLogo name={team.name} className={`${box} text-[10px]`} />;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={team.logo_url} alt="" className={`${box} object-cover`} />;
+}
 
 interface GroupStageClientProps {
   groupNums: number[];
@@ -176,11 +192,12 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
                 return (
                   <div
                     key={m.id}
-                    className={`flex items-center gap-2 rounded-lg px-3 py-1.5 border text-xs ${
+                    className={`flex items-center gap-2 rounded-lg px-3 border text-xs ${
                       idx % 2 === 0
                         ? "border-zinc-700 bg-zinc-800"
                         : "border-zinc-700 bg-zinc-900"
                     }`}
+                    style={{ height: ROW_H }}
                   >
                     {/* Optional group badge */}
                     {showGroupBadge && (
@@ -188,12 +205,10 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
                         G{m.groupNum}
                       </span>
                     )}
-                    <div className={`flex-1 min-w-0 flex items-center gap-1 font-medium ${
+                    <div className={`flex-1 min-w-0 flex self-stretch items-center gap-1.5 font-medium ${
                       !done ? "text-zinc-300" : homeWon ? "text-emerald-400" : "text-red-400"
                     }`}>
-                      {teams[m.home_team_id ?? ""]?.logo_url ? (
-                        <img src={teams[m.home_team_id ?? ""].logo_url!} alt="" className="w-3.5 h-3.5 rounded shrink-0 object-cover" />
-                      ) : null}
+                      <GroupCrest team={teams[m.home_team_id ?? ""]} />
                       <span className="truncate">{teams[m.home_team_id ?? ""]?.name ?? "?"}</span>
                     </div>
                     {done ? (
@@ -206,13 +221,11 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
                     ) : (
                       <span className="shrink-0 text-zinc-600 px-2">vs</span>
                     )}
-                    <div className={`flex-1 min-w-0 flex items-center justify-end gap-1 font-medium ${
+                    <div className={`flex-1 min-w-0 flex self-stretch items-center justify-end gap-1.5 font-medium ${
                       !done ? "text-zinc-300" : awayWon ? "text-emerald-400" : "text-red-400"
                     }`}>
                       <span className="truncate">{teams[m.away_team_id ?? ""]?.name ?? "?"}</span>
-                      {teams[m.away_team_id ?? ""]?.logo_url ? (
-                        <img src={teams[m.away_team_id ?? ""].logo_url!} alt="" className="w-3.5 h-3.5 rounded shrink-0 object-cover" />
-                      ) : null}
+                      <GroupCrest team={teams[m.away_team_id ?? ""]} />
                     </div>
                   </div>
                 );
@@ -264,9 +277,10 @@ function StandingsTable({
                 <td className={`py-0.5 font-medium ${nameColor}`}>
                   <div className="flex items-center gap-1">
                     {teams[s.teamId]?.logo_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img src={teams[s.teamId].logo_url!} alt="" className="w-4 h-4 rounded shrink-0 object-cover" />
                     ) : (
-                      <div className="w-4 h-4 rounded shrink-0 bg-zinc-800 border border-zinc-700/50" />
+                      <DefaultLogo name={teams[s.teamId]?.name ?? ""} className="w-4 h-4 rounded text-[8px]" />
                     )}
                     <a
                       href={`/dashboard/teams?search=${encodeURIComponent(teams[s.teamId]?.name ?? "")}&from=season`}

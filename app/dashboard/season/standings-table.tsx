@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { DefaultLogo } from "@/app/lib/team-logo";
 
 export type StandingsRow = {
   id: string;
@@ -98,9 +99,10 @@ export function StandingsClient({ rows, highlightTeamId }: { rows: StandingsRow[
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 min-w-0">
                         {team.logo_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
                           <img src={team.logo_url} alt="" className="w-5 h-5 rounded shrink-0 object-cover" />
                         ) : (
-                          <div className="w-5 h-5 rounded shrink-0 bg-zinc-800 border border-zinc-700" />
+                          <DefaultLogo name={team.name} className="w-5 h-5 rounded text-[9px]" />
                         )}
                         <span
                           title={team.name}
