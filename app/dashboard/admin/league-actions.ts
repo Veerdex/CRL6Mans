@@ -7,7 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, deleteMatchChannels, execSyncRoles, voidAllPendingWagers, setDraftChannelVisibility } from "@/app/lib/discord-bot";
 import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app/lib/discord-api";
-import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
+import { pushToAllApproved, pushToAdmins, pushToEnteredDraft, pushToRosteredPlayers } from "@/app/lib/push";
 import { APP_NAME } from "@/app/lib/constants";
 import { computeTopStats } from "@/app/lib/game-stats";
 import { rollUpCareerStats } from "@/app/lib/career-stats";
@@ -418,6 +418,21 @@ export async function adminAutoBalance(code: string, maxTeamsRaw?: string) {
     revalidatePath("/dashboard/teams");
     revalidatePath("/dashboard/players");
     revalidatePath("/dashboard/draft");
+    // Same message the cron sends when it auto-balances, so a hand-run formation
+    // isn't the one path that notifies nobody.
+    pushToRosteredPlayers({
+      title: "Teams Generated!",
+      body: "Teams are set. Head to the My Team tab to see who you're teamed up with.",
+      url: "/dashboard/my-team",
+      tag: "teams-generated",
+      category: "draft",
+    }).catch(() => {});
+    pushToAdmins({
+      title: "Teams Generated!",
+      body: "Teams have been auto-balanced.",
+      url: "/dashboard/teams",
+      tag: "teams-generated-admin",
+    }).catch(() => {});
   }
   return result;
 }

@@ -273,3 +273,108 @@ export async function pushToEnteredDraft(payload: PushPayload) {
   const { data } = await supabaseAdmin.from("push_subscriptions").select("endpoint, p256dh, auth").in("discord_id", ids);
   if (data?.length) await sendToSubscriptions(data, payload);
 }
+
+// Shared tail for the audiences that resolve to an explicit set of players.
+// Routed through pushToDiscordIds so the feed row lands as a "users" audience:
+// a "draft" row is visible only to players.draft_entered, which is precisely the
+// column these audiences exist to avoid, so recording one would hide the notice
+// from the people it was sent to.
+async function pushToPlayerIds(playerIds: string[], payload: PushPayload) {
+  if (!playerIds.length) return;
+  const { data: players, error } = await supabaseAdmin
+    .from("players")
+    .select("discord_id, notification_prefs")
+    .eq("status", "approved")
+    .in("id", playerIds);
+  let ids: string[];
+  if (error) {
+    const { data: fb } = await supabaseAdmin.from("players").select("discord_id").eq("status", "approved").in("id", playerIds);
+    ids = (fb ?? []).map((p) => p.discord_id as string).filter(Boolean);
+  } else {
+    ids = filterByCategory(players ?? [], payload.category);
+  }
+  await pushToDiscordIds(ids, payload);
+}
+
+async function tournamentEntrantPlayerIds(
+  tournamentId: string,
+  joinMode: string | null | undefined
+): Promise<string[]> {
+  if (joinMode === "teams") {
+    const { data: signups } = await supabaseAdmin
+      .from("team_signups")
+      .select("team_signup_members(player_id, status)")
+      .eq("tournament_id", tournamentId);
+    return (signups ?? []).flatMap((s) =>
+      ((s.team_signup_members as { player_id: string; status: string }[] | null) ?? [])
+        .filter((m) => m.status === "accepted")
+        .map((m) => m.player_id)
+    );
+  }
+  const { data: entries } = await supabaseAdmin
+    .from("tournament_entries")
+    .select("player_id")
+    .eq("tournament_id", tournamentId);
+  return (entries ?? []).map((e) => e.player_id as string);
+}
+
+/**
+ * The players signed up for a tournament, read from the sign-up tables instead of
+ * `players.draft_entered`.
+ *
+ * draft_entered is only populated when activateTournamentRuntime bridges the pool
+ * in at draft_start_at, so anything sent before that moment — sign-ups closing,
+ * the 24h reminder — reaches nobody if it goes through pushToEnteredDraft. Teams
+ * mode never sets the column at all.
+ */
+export async function pushToTournamentEntrants(
+  tournamentId: string,
+  joinMode: string | null | undefined,
+  payload: PushPayload
+) {
+  await pushToPlayerIds(await tournamentEntrantPlayerIds(tournamentId, joinMode), payload);
+}
+
+/**
+ * A tournament's sign-ups, narrowed to the ones holding a roster spot once any of
+ * them does.
+ *
+ * For notices that can land on either side of team formation. `status` is not the
+ * discriminator it looks like: a tournament is `active` from activation onward,
+ * which happens before the formation step and leaves the previous event's team_ids
+ * in place — so keying off it would send to last season's rosters. Asking the
+ * sign-ups themselves can't go stale that way: before formation none of them is on
+ * a team and everyone hears about it, after it whoever was left out doesn't.
+ */
+export async function pushToTournamentRoster(
+  tournamentId: string,
+  joinMode: string | null | undefined,
+  payload: PushPayload
+) {
+  const entrantIds = await tournamentEntrantPlayerIds(tournamentId, joinMode);
+  if (!entrantIds.length) return;
+  const { data: rostered } = await supabaseAdmin
+    .from("players")
+    .select("id")
+    .eq("status", "approved")
+    .in("id", entrantIds)
+    .not("team_id", "is", null);
+  await pushToPlayerIds(rostered?.length ? rostered.map((p) => p.id as string) : entrantIds, payload);
+}
+
+/**
+ * Every approved player who ended up on a team.
+ *
+ * The audience for "your roster exists now" messages. draft_entered still
+ * includes whoever a formation step left out — an odd pool at team size 2 drops
+ * the last sign-up — and pointing those players at a team they don't have is
+ * worse than sending them nothing.
+ */
+export async function pushToRosteredPlayers(payload: PushPayload) {
+  const { data: players } = await supabaseAdmin
+    .from("players")
+    .select("id")
+    .eq("status", "approved")
+    .not("team_id", "is", null);
+  await pushToPlayerIds((players ?? []).map((p) => p.id as string), payload);
+}

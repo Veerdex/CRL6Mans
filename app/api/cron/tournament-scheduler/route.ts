@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
 import { execStartDraft, execAutoBalanceTeams, execStartSeason, execFinalizeTeamSignups, processExpiredCheckIns, processExpiredScoreConfirmations, openReadyMatchChannels } from "@/app/lib/discord-bot";
-import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
+import { pushToAllApproved, pushToAdmins, pushToEnteredDraft, pushToTournamentEntrants, pushToTournamentRoster, pushToRosteredPlayers } from "@/app/lib/push";
 import { freezeUnfrozenMatchPredictions } from "@/app/lib/match-predictions";
 import { cleanupOrphanedVerificationReplays } from "@/app/lib/platform-account-cleanup";
 import { stampCronHeartbeat } from "@/app/lib/cron-heartbeat";
@@ -65,9 +65,13 @@ export async function GET(request: Request) {
       await supabaseAdmin.from("tournaments")
         .update({ signups_open: false, updated_at: new Date().toISOString() }).eq("id", s.id);
       fired.push(`signups_closed:${s.name}`);
-      pushToEnteredDraft({
+      // Awaited: a push left in flight when the cron response returns is not
+      // guaranteed to finish, and this one now has a real audience to reach.
+      await pushToTournamentEntrants(s.id, s.join_mode, {
         title: `${s.name} Signups Closed`,
-        body: "Signups have closed. The draft will begin soon.",
+        body: s.team_assignment === "auto_balance"
+          ? "Signups have closed. Teams will be generated soon."
+          : "Signups have closed. The draft will begin soon.",
         url: "/dashboard",
         tag: "signups-closed",
         category: "tournament",
@@ -151,6 +155,56 @@ export async function GET(request: Request) {
     } catch { /* best-effort */ }
   }
 
+  // ── 2b. "Starts soon" reminder, once, 24h before a tournament's first matches ──
+  // Anchored on season_start_at: the sign-up and team-formation milestones already
+  // have their own notifications, and this is the one players actually have to
+  // show up for. Runs ahead of the activeId return because a tournament is
+  // usually still `scheduled` a day out.
+  //
+  // Claimed with a conditional update rather than read-then-write: maxDuration is
+  // 300s against a per-minute pinger, so two ticks can overlap inside one send.
+  // Only the tick whose update returns a row sends.
+  //
+  // Before the migration the filter errors and nothing is selected, so the
+  // reminder is skipped entirely — the opposite failure (reading a missing column
+  // as "not yet sent") would re-send every single minute.
+  const reminderWindowEnd = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+  const { data: dueReminders } = await supabaseAdmin
+    .from("tournaments")
+    .select("id, name, join_mode, season_start_at")
+    .in("status", ["scheduled", "active"])
+    .is("reminder_24h_sent_at", null)
+    .not("season_start_at", "is", null)
+    .lte("season_start_at", reminderWindowEnd)
+    .gt("season_start_at", new Date(now).toISOString());
+
+  for (const r of dueReminders ?? []) {
+    const { data: claimed } = await supabaseAdmin
+      .from("tournaments")
+      .update({ reminder_24h_sent_at: new Date().toISOString() })
+      .eq("id", r.id)
+      .is("reminder_24h_sent_at", null)
+      .select("id");
+    if (!claimed?.length) continue;
+
+    const hoursOut = Math.max(
+      1,
+      Math.round((new Date(r.season_start_at as string).getTime() - now) / (60 * 60 * 1000))
+    );
+    const payload = {
+      title: `${r.name} Starts Soon`,
+      body: `First matches start in about ${hoursOut} ${hoursOut === 1 ? "hour" : "hours"}. Check the schedule so you don't miss yours.`,
+      url: "/dashboard/schedule",
+      tag: "tournament-24h",
+      category: "tournament" as const,
+    };
+    // Awaited, not fire-and-forget: this runs in a cron response and the sends
+    // would otherwise be left in flight when the route returns.
+    await pushToTournamentRoster(r.id, r.join_mode, payload)
+      .catch(() => { /* the claim is already stored, so this never retries */ });
+    fired.push(`reminder_24h:${r.name}`);
+  }
+
   if (!activeId) return NextResponse.json({ ok: true, fired });
 
   // ── 3. Advance the active tournament ──
@@ -193,23 +247,38 @@ export async function GET(request: Request) {
     // assignments before forming new ones, and leftover ids from a past season would
     // permanently block the auto-start.
     if (passed(t.draft_start_at) && !draftActive && !seasonActive) {
-      const res = t.team_assignment === "auto_balance"
+      const isAutoBalance = t.team_assignment === "auto_balance";
+      const res = isAutoBalance
         ? await execAutoBalanceTeams()
         : await execStartDraft();
       fired.push(res.ok ? `teams_formed:${t.team_assignment}` : `teams_form_failed:${res.message}`);
       if (res.ok) {
-        pushToEnteredDraft({
-          title: "Draft Starting!",
-          body: "The draft is now live. Head to the draft page to watch your team get picked.",
-          url: "/dashboard/draft",
-          tag: "draft-start",
-          category: "draft",
-        }).catch(() => {});
+        // Auto-balance has no draft to watch — the rosters already exist — so it
+        // gets its own message, and goes to the players who actually landed on a
+        // team rather than to everyone who signed up.
+        // Awaited for the same reason as the close push above.
+        if (isAutoBalance) {
+          await pushToRosteredPlayers({
+            title: "Teams Generated!",
+            body: "Teams are set. Head to the My Team tab to see who you're teamed up with.",
+            url: "/dashboard/my-team",
+            tag: "teams-generated",
+            category: "draft",
+          }).catch(() => {});
+        } else {
+          await pushToEnteredDraft({
+            title: "Draft Starting!",
+            body: "The draft is now live. Head to the draft page to watch your team get picked.",
+            url: "/dashboard/draft",
+            tag: "draft-start",
+            category: "draft",
+          }).catch(() => {});
+        }
         pushToAdmins({
-          title: "Draft Starting!",
-          body: "The draft is now live.",
-          url: "/dashboard/draft",
-          tag: "draft-start-admin",
+          title: isAutoBalance ? "Teams Generated!" : "Draft Starting!",
+          body: isAutoBalance ? "Teams have been auto-balanced." : "The draft is now live.",
+          url: isAutoBalance ? "/dashboard/teams" : "/dashboard/draft",
+          tag: isAutoBalance ? "teams-generated-admin" : "draft-start-admin",
         }).catch(() => {});
       } else {
         pushToAdmins({

@@ -12,7 +12,7 @@ import { fetchAllRows } from "@/app/lib/paginate";
 import { computeFullArchive } from "./tournament-archive";
 import { recordEventResults } from "@/app/lib/event-results";
 import { resetSeason } from "./league-actions";
-import { pushToAllApproved, pushToAdmins, pushToEnteredDraft } from "@/app/lib/push";
+import { pushToAllApproved, pushToAdmins, pushToTournamentEntrants } from "@/app/lib/push";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "@/app/lib/team-size";
 import { prizePoolTotal } from "@/app/lib/career-points";
 
@@ -442,7 +442,7 @@ export async function openSignups(id: string) {
 
 export async function closeSignups(id: string) {
   await verifyAdmin();
-  const { data: tName } = await supabaseAdmin.from("tournaments").select("name").eq("id", id).single();
+  const { data: tName } = await supabaseAdmin.from("tournaments").select("name, join_mode, team_assignment").eq("id", id).single();
 
   const { error } = await supabaseAdmin
     .from("tournaments")
@@ -453,9 +453,11 @@ export async function closeSignups(id: string) {
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
 
-  pushToEnteredDraft({
+  pushToTournamentEntrants(id, tName?.join_mode, {
     title: `${tName?.name ?? "Tournament"} Signups Closed`,
-    body: "Signups have closed. The draft will begin soon.",
+    body: tName?.team_assignment === "auto_balance"
+      ? "Signups have closed. Teams will be generated soon."
+      : "Signups have closed. The draft will begin soon.",
     url: "/dashboard",
     tag: "signups-closed",
     category: "tournament",
