@@ -5,6 +5,7 @@
 import { BracketCanvas } from "./bracket-canvas";
 import { LiveClock } from "./live-clock";
 import { isMatchLive } from "@/app/lib/match-live";
+import { DefaultLogo } from "@/app/lib/team-logo";
 import {
   getRoundName, getMatchLabel, getLBMatchLabel, getFeederLabel,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -13,9 +14,12 @@ import {
   getDEWBFeederLabel, getDELBFeederLabel,
 } from "@/app/lib/bracket";
 
-const MATCH_H = 68;
+const MATCH_H = 100;
 const MATCH_W = 210;
-const BASE_SLOT = 108;
+// 108 + the 32px MATCH_H grew. The slot has to absorb the taller card or the
+// label row above each card would start above the round header and the gutter
+// between cards in the first round would go negative.
+const BASE_SLOT = 140;
 const CONN_W = 48;
 
 export type DBMatch = {
@@ -99,17 +103,15 @@ function StateLabel({ match, state }: { match: DBMatch; state: MatchState }) {
   );
 }
 
-// Small logo (or fallback dot) placed at the start of a team slot row.
+// The crest fills its row and bleeds back over the row's px-2 so it sits flush
+// on the card edge, which the card's overflow-hidden rounds for us. A team with
+// no crest gets the teams tab's number tile at the same size; an empty slot —
+// TBD, or the other side of a bye — keeps a dot, since there is no team to show.
 function TeamLogo({ team, faded }: { team: Team | null; faded: boolean }) {
   if (!team) return <div className="w-2 h-2 rounded-full shrink-0 bg-zinc-700" />;
-  if (!team.logo_url) return <div className="w-2 h-2 rounded-full shrink-0 bg-zinc-400" />;
-  return (
-    <img
-      src={team.logo_url}
-      alt=""
-      className={`w-4 h-4 rounded shrink-0 object-cover ${faded ? "opacity-40" : ""}`}
-    />
-  );
+  const fill = `self-stretch w-auto h-auto aspect-square shrink-0 -ml-2 ${faded ? "opacity-40" : ""}`;
+  if (!team.logo_url) return <DefaultLogo name={team.name} className={`${fill} text-base`} />;
+  return <img src={team.logo_url} alt="" className={`${fill} object-cover`} />;
 }
 
 // Renders a slot that has no team set.
@@ -151,12 +153,12 @@ function MatchBox({ match, teams, numR1, matchId }: { match: DBMatch; teams: Rec
 
   return (
     <div
-      className={`rounded-lg overflow-hidden border ${card}`}
+      className={`flex flex-col rounded-lg overflow-hidden border ${card}`}
       style={{ width: MATCH_W, height: MATCH_H }}
       data-match-id={matchId}
     >
       {/* Home row */}
-      <div className={`flex items-center gap-2 px-2 py-0.5 ${homeWon ? "bg-white/5 rounded mx-1" : ""}`} style={{ height: 33 }}>
+      <div className={`flex flex-1 min-h-0 items-center gap-2 px-2 ${homeWon ? "bg-white/5" : ""}`}>
         <TeamLogo team={match.home_team_id ? teams[match.home_team_id] : null} faded={homeFaded} />
         {match.home_team_id ? (
           <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.home_team_id]?.name ?? "")}&from=season`}
@@ -168,9 +170,9 @@ function MatchBox({ match, teams, numR1, matchId }: { match: DBMatch; teams: Rec
           <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${homeWon ? "text-white" : "text-zinc-500"}`}>{match.home_score}</span>
         )}
       </div>
-      <div className="h-px bg-zinc-700/50 mx-2" />
+      <div className="h-px shrink-0 bg-zinc-700/50 mx-2" />
       {/* Away row */}
-      <div className={`flex items-center gap-2 px-2 py-0.5 ${awayWon ? "bg-white/5 rounded mx-1" : ""}`} style={{ height: 33 }}>
+      <div className={`flex flex-1 min-h-0 items-center gap-2 px-2 ${awayWon ? "bg-white/5" : ""}`}>
         <TeamLogo team={match.away_team_id ? teams[match.away_team_id] : null} faded={awayFaded} />
         {match.away_team_id ? (
           <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.away_team_id]?.name ?? "")}&from=season`}
@@ -382,9 +384,9 @@ function DEMatchBox({
     : card;
 
   return (
-    <div className={`rounded-lg overflow-hidden border ${cardClass}`} style={{ width: MATCH_W, height: MATCH_H }}
+    <div className={`flex flex-col rounded-lg overflow-hidden border ${cardClass}`} style={{ width: MATCH_W, height: MATCH_H }}
       data-match-id={matchId}>
-      <div className={`flex items-center gap-2 px-2 py-0.5 ${homeWon ? "bg-white/5 rounded mx-1" : ""}`} style={{ height: 33 }}>
+      <div className={`flex flex-1 min-h-0 items-center gap-2 px-2 ${homeWon ? "bg-white/5" : ""}`}>
         <TeamLogo team={match.home_team_id ? teams[match.home_team_id] : null} faded={homeFaded} />
         {match.home_team_id ? (
           <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.home_team_id]?.name ?? "")}&from=season`}
@@ -396,8 +398,8 @@ function DEMatchBox({
           <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${homeWon ? "text-white" : "text-zinc-500"}`}>{match.home_score}</span>
         )}
       </div>
-      <div className="h-px bg-zinc-700/50 mx-2" />
-      <div className={`flex items-center gap-2 px-2 py-0.5 ${awayWon ? "bg-white/5 rounded mx-1" : ""}`} style={{ height: 33 }}>
+      <div className="h-px shrink-0 bg-zinc-700/50 mx-2" />
+      <div className={`flex flex-1 min-h-0 items-center gap-2 px-2 ${awayWon ? "bg-white/5" : ""}`}>
         <TeamLogo team={match.away_team_id ? teams[match.away_team_id] : null} faded={awayFaded} />
         {match.away_team_id ? (
           <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.away_team_id]?.name ?? "")}&from=season`}

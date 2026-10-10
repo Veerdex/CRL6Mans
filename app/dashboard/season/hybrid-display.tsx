@@ -6,12 +6,8 @@ import { HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, HYBRID8_UB, HYBRID8_LB, HYB
 import { BracketCanvas } from "./bracket-canvas";
 import { LiveClock } from "./live-clock";
 import { isMatchLive } from "@/app/lib/match-live";
-
-// ── Layout constants ───────────────────────────────────────────────────────────
-
-const MW = 210;  // match card width
-const MH = 66;   // match card height (header + 2 team rows)
-const UNIT = MW + 80; // 290 — one column + gap
+import { DefaultLogo } from "@/app/lib/team-logo";
+import { MW, MH, HEAD_H, LABEL_H, buildLayout8, buildLayout12, type Node } from "./hybrid-layout";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -29,101 +25,6 @@ export type MatchRow = {
 };
 export type TeamMap = Record<string, { name: string; logo_url: string | null }>;
 
-type Node = {
-  key: string;          // `${stage}-${round}-${mn}` — links to the DB match
-  x: number;            // left
-  y: number;            // center-Y
-  badge: string;        // short ID — doubles as the click-to-pan target (data-match-id)
-  label?: string;       // group title rendered above this node
-  homeFeeder?: string;  // "Winner of X" / "Loser of X" shown when home slot is empty
-  awayFeeder?: string;
-};
-type Edge = { f: string; t: string };  // f/t are node keys
-type Layout = { nodes: Node[]; edges: Edge[]; CW: number; CH: number };
-
-// ── Per-variant layouts ─────────────────────────────────────────────────────────
-// LB Round 1 → LB QF → Semifinals → Grand Final are aligned in one horizontal row.
-// The Upper Bracket sits on top of the column that feeds the Semifinals, so UB → SF
-// lines drop cleanly in the gap. There are deliberately NO lines from the Upper
-// Bracket down into the Lower Bracket (the loser drops) — those use clickable
-// "Loser of X" labels instead, like Double Elimination.
-
-function buildLayout12(UB: string, LB: string, SF: string, GF: string): Layout {
-  const X = (c: number) => c * UNIT;
-  const nodes: Node[] = [
-    { key: `${UB}-1-1`, x: X(0), y: 70,  badge: "UB M1", label: "Upper Bracket" },
-    { key: `${UB}-1-2`, x: X(0), y: 170, badge: "UB M2" },
-
-    { key: `${LB}-1-1`, x: X(0), y: 300, badge: "LB1 M1", label: "Lower Bracket R1" },
-    { key: `${LB}-1-2`, x: X(0), y: 390, badge: "LB1 M2" },
-    { key: `${LB}-1-3`, x: X(0), y: 480, badge: "LB1 M3" },
-    { key: `${LB}-1-4`, x: X(0), y: 570, badge: "LB1 M4" },
-
-    { key: `${LB}-2-1`, x: X(1), y: 345, badge: "LB2 M1", label: "Lower Bracket R2",
-      homeFeeder: "Winner of LB1 M1", awayFeeder: "Winner of LB1 M2" },
-    { key: `${LB}-2-2`, x: X(1), y: 525, badge: "LB2 M2",
-      homeFeeder: "Winner of LB1 M3", awayFeeder: "Winner of LB1 M4" },
-
-    { key: `${LB}-3-1`, x: X(2), y: 345, badge: "LBQF M1", label: "Lower Bracket QF",
-      homeFeeder: "Winner of LB2 M1", awayFeeder: "Loser of UB M1" },
-    { key: `${LB}-3-2`, x: X(2), y: 525, badge: "LBQF M2",
-      homeFeeder: "Winner of LB2 M2", awayFeeder: "Loser of UB M2" },
-
-    { key: `${SF}-1-1`, x: X(3), y: 345, badge: "SF M1", label: "Semifinals",
-      homeFeeder: "Winner of UB M1", awayFeeder: "Winner of LBQF M1" },
-    { key: `${SF}-1-2`, x: X(3), y: 525, badge: "SF M2",
-      homeFeeder: "Winner of UB M2", awayFeeder: "Winner of LBQF M2" },
-
-    { key: `${GF}-1-1`, x: X(4), y: 435, badge: "GF", label: "Grand Final",
-      homeFeeder: "Winner of SF M1", awayFeeder: "Winner of SF M2" },
-  ];
-  const edges: Edge[] = [
-    { f: `${LB}-1-1`, t: `${LB}-2-1` },
-    { f: `${LB}-1-2`, t: `${LB}-2-1` },
-    { f: `${LB}-1-3`, t: `${LB}-2-2` },
-    { f: `${LB}-1-4`, t: `${LB}-2-2` },
-    { f: `${LB}-2-1`, t: `${LB}-3-1` },
-    { f: `${LB}-2-2`, t: `${LB}-3-2` },
-    { f: `${LB}-3-1`, t: `${SF}-1-1` },
-    { f: `${LB}-3-2`, t: `${SF}-1-2` },
-    { f: `${SF}-1-1`, t: `${GF}-1-1` },
-    { f: `${SF}-1-2`, t: `${GF}-1-1` },
-  ];
-  return { nodes, edges, CW: X(4) + MW + 48, CH: 660 };
-}
-
-function buildLayout8(UB: string, LB: string, SF: string, GF: string): Layout {
-  const X = (c: number) => c * UNIT;
-  const nodes: Node[] = [
-    { key: `${UB}-1-1`, x: X(0), y: 70,  badge: "UB M1", label: "Upper Bracket" },
-    { key: `${UB}-1-2`, x: X(0), y: 170, badge: "UB M2" },
-
-    { key: `${LB}-1-1`, x: X(0), y: 300, badge: "LB1 M1", label: "Lower Bracket R1" },
-    { key: `${LB}-1-2`, x: X(0), y: 410, badge: "LB1 M2" },
-
-    { key: `${LB}-2-1`, x: X(1), y: 300, badge: "LBQF M1", label: "Lower Bracket QF",
-      homeFeeder: "Winner of LB1 M1", awayFeeder: "Loser of UB M1" },
-    { key: `${LB}-2-2`, x: X(1), y: 410, badge: "LBQF M2",
-      homeFeeder: "Winner of LB1 M2", awayFeeder: "Loser of UB M2" },
-
-    { key: `${SF}-1-1`, x: X(2), y: 300, badge: "SF M1", label: "Semifinals",
-      homeFeeder: "Winner of UB M1", awayFeeder: "Winner of LBQF M1" },
-    { key: `${SF}-1-2`, x: X(2), y: 410, badge: "SF M2",
-      homeFeeder: "Winner of UB M2", awayFeeder: "Winner of LBQF M2" },
-
-    { key: `${GF}-1-1`, x: X(3), y: 355, badge: "GF", label: "Grand Final",
-      homeFeeder: "Winner of SF M1", awayFeeder: "Winner of SF M2" },
-  ];
-  const edges: Edge[] = [
-    { f: `${LB}-1-1`, t: `${LB}-2-1` },
-    { f: `${LB}-1-2`, t: `${LB}-2-2` },
-    { f: `${LB}-2-1`, t: `${SF}-1-1` },
-    { f: `${LB}-2-2`, t: `${SF}-1-2` },
-    { f: `${SF}-1-1`, t: `${GF}-1-1` },
-    { f: `${SF}-1-2`, t: `${GF}-1-1` },
-  ];
-  return { nodes, edges, CW: X(3) + MW + 48, CH: 490 };
-}
 
 // ── Match card ──────────────────────────────────────────────────────────────────
 
@@ -166,11 +67,11 @@ function MatchCard({ node, match, teams, teamTitles, isLeft }: { node: Node; mat
 
   return (
     <div
-      className={`absolute rounded-lg overflow-hidden border ${border}`}
+      className={`absolute flex flex-col rounded-lg overflow-hidden border ${border}`}
       style={{ left: node.x, top: Math.round(node.y - MH / 2), width: MW, height: MH }}
       data-match-id={node.badge}
     >
-      <div className="flex items-center justify-between px-2.5 border-b border-zinc-700/40" style={{ height: 22 }}>
+      <div className="flex shrink-0 items-center justify-between px-2.5 border-b border-zinc-700/40" style={{ height: HEAD_H }}>
         <span className="text-[10px] font-bold text-zinc-400 tracking-wide">{node.badge}</span>
         <span className={`text-[9px] font-semibold uppercase tracking-widest ${tag}`}>
           {label}
@@ -182,13 +83,17 @@ function MatchCard({ node, match, teams, teamTitles, isLeft }: { node: Node; mat
       {rows.map(({ teamId, team, score, won, feeder }, i) => (
         <div
           key={i}
-          className={`flex items-center gap-2 px-2.5 ${won ? "bg-white/5" : ""}`}
-          style={{ height: 21 }}
+          className={`flex flex-1 min-h-0 items-center gap-2 px-2.5 ${won ? "bg-white/5" : ""}`}
         >
+          {/* Same treatment as the bracket card: the crest fills the row and
+              bleeds over px-2.5 to sit flush on the card edge, a team with no
+              crest gets its number tile, and an empty slot keeps a dot. */}
           {team?.logo_url ? (
-            <img src={team.logo_url} alt="" className="w-4 h-4 rounded object-cover shrink-0" />
+            <img src={team.logo_url} alt="" className="self-stretch w-auto h-auto aspect-square shrink-0 -ml-2.5 object-cover" />
+          ) : team ? (
+            <DefaultLogo name={team.name} className="self-stretch w-auto h-auto aspect-square -ml-2.5 text-sm" />
           ) : (
-            <div className={`w-2 h-2 rounded-full shrink-0 ${team ? "bg-zinc-400" : "bg-zinc-700"}`} />
+            <div className="w-2 h-2 rounded-full shrink-0 bg-zinc-700" />
           )}
           {team ? (
             <a
@@ -282,7 +187,7 @@ export function HybridBracketDisplay({
           {nodes.filter(n => n.label).map(n => (
             <div
               key={`lbl-${n.key}`}
-              style={{ position: "absolute", left: n.x, top: Math.round(n.y - MH / 2 - 22), width: MW }}
+              style={{ position: "absolute", left: n.x, top: Math.round(n.y - MH / 2 - LABEL_H), width: MW }}
               className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider whitespace-nowrap"
             >
               {n.label}
