@@ -1,8 +1,8 @@
-// Upload limits, as a pure leaf with no "server-only" marker — the server
-// validators in uploads.ts and the client forms that pick the file both need
-// these numbers, and uploads.ts cannot be imported into a client component.
+// Upload limits and type resolution, as a pure leaf with no "server-only"
+// marker — the server validators in uploads.ts and the client forms that pick
+// the file both need these, and uploads.ts cannot be imported into a form.
 //
-// The ceiling is the platform's, not ours: a Vercel Function rejects any
+// The size ceiling is the platform's, not ours: a Vercel Function rejects any
 // request body over 4.5 MB with 413 FUNCTION_PAYLOAD_TOO_LARGE before the
 // handler runs, so `serverActions.bodySizeLimit` in next.config.ts (5mb) never
 // actually binds in production. Checking the size server-side is therefore
@@ -14,11 +14,39 @@
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 export const MAX_UPLOAD_LABEL = "4 MB";
 
-// Raster only. SVG is excluded deliberately — it can carry embedded <script>,
-// and these files land in public Supabase buckets. Mirrors IMAGE_TYPES in
-// uploads.ts; the drop zones list this so they stop promising SVG.
-export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "avif", "gif"];
-export const DOCUMENT_EXTENSIONS = [...IMAGE_EXTENSIONS, "pdf"];
+// Raster image types only. SVG is intentionally excluded — it can carry
+// embedded <script>, and these files land in public Supabase buckets.
+export const IMAGE_TYPES: Record<string, string> = {
+  "image/png":  "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/avif": "avif",
+  "image/gif":  "gif",
+};
+
+// Enrollment proof only. The registration form asks for a student ID *or a
+// class schedule*, and a schedule is usually a PDF; the admin card renders the
+// proof as a link rather than an <img>, so a PDF reviews just as well. Team
+// logos must stay images, which is why this is a separate allowlist and not a
+// widening of IMAGE_TYPES.
+export const DOCUMENT_TYPES: Record<string, string> = {
+  ...IMAGE_TYPES,
+  "application/pdf": "pdf",
+};
+
+const TYPE_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  avif: "image/avif",
+  gif: "image/gif",
+  pdf: "application/pdf",
+};
+
+// For the `accept` attribute and the format hints under each input.
+export const IMAGE_EXTENSIONS = Object.keys(TYPE_BY_EXT).filter((e) => TYPE_BY_EXT[e] !== "application/pdf");
+export const DOCUMENT_EXTENSIONS = Object.keys(TYPE_BY_EXT);
 
 // Not phrased as "wrong file type" anywhere: an iPhone photo copied off a
 // desktop keeps its HEIC container, and a flat rejection gives no way out.
@@ -31,27 +59,48 @@ export function formatBytes(bytes: number): string {
 }
 
 export function fileExtension(name: string): string {
-  return name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
+  return name?.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
 }
 
-export function isHeicName(name: string): boolean {
-  return /\.(heic|heif)$/i.test(name);
+export function isHeicFile(file: { name?: string; type?: string }): boolean {
+  const declared = file.type?.toLowerCase() ?? "";
+  if (declared === "image/heic" || declared === "image/heif") return true;
+  return /\.(heic|heif)$/i.test(file.name ?? "");
+}
+
+/**
+ * Browsers do not always report a type. A .pdf on a Windows machine with no
+ * PDF handler registered, and a .heic on several browsers, both arrive as "".
+ * Fall back to the extension in that case — the magic-byte check in uploads.ts
+ * is the real authority either way, so a lie here is caught, not trusted.
+ *
+ * The declared type wins when there is one, which is what lets a .jfif saved
+ * as image/jpeg through: Windows Chrome writes web JPEGs that way, and the
+ * extension is not in TYPE_BY_EXT. Both the browser gate and the server
+ * validator call this, so neither can end up stricter than the other.
+ */
+export function resolveUploadType(
+  file: { name?: string; type?: string },
+  allowed: Record<string, string>
+): string | null {
+  const declared = file.type?.toLowerCase() ?? "";
+  if (declared) return allowed[declared] ? declared : null;
+
+  const guessed = TYPE_BY_EXT[fileExtension(file.name ?? "")];
+  return guessed && allowed[guessed] ? guessed : null;
 }
 
 // Shared browser-side gate. Returns the message to show, or null to accept.
-// Checked by extension rather than file.type: browsers report an empty type for
-// a .pdf with no registered handler, and rejecting on that would refuse a file
-// the server would have taken. The magic-byte check in uploads.ts stays the
-// real authority — this only has to stop a request that cannot be delivered.
+// This only has to stop a request the platform would refuse to deliver, or one
+// the server would reject anyway; the magic-byte check stays the authority.
 export function checkUploadFile(
   file: File,
-  allowed: string[] = IMAGE_EXTENSIONS
+  allowed: Record<string, string> = IMAGE_TYPES
 ): string | null {
-  if (isHeicName(file.name) || /^image\/hei[cf]$/i.test(file.type)) return HEIC_MESSAGE;
+  if (isHeicFile(file)) return HEIC_MESSAGE;
 
-  const ext = fileExtension(file.name);
-  if (!allowed.includes(ext)) {
-    const names = allowed.map((e) => e.toUpperCase()).join(", ");
+  if (!resolveUploadType(file, allowed)) {
+    const names = [...new Set(Object.values(allowed))].map((e) => e.toUpperCase()).join(", ");
     return `Unsupported file type. Use one of: ${names}.`;
   }
 

@@ -1,43 +1,14 @@
 import "server-only";
 
-import { HEIC_MESSAGE, MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "./upload-limits";
+// The allowlists, the limit and the type resolution live in upload-limits.ts
+// so the browser forms gate on exactly what this validator will accept — a
+// client check that is stricter refuses files the server would have taken.
+import {
+  DOCUMENT_TYPES, HEIC_MESSAGE, IMAGE_TYPES, MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL,
+  isHeicFile, resolveUploadType,
+} from "./upload-limits";
 
 export { HEIC_MESSAGE };
-
-// Raster image types only. SVG is intentionally excluded — it can carry
-// embedded <script>, and these files land in public Supabase buckets.
-const IMAGE_TYPES: Record<string, string> = {
-  "image/png":  "png",
-  "image/jpeg": "jpg",
-  "image/webp": "webp",
-  "image/avif": "avif",
-  "image/gif":  "gif",
-};
-
-// Enrollment proof only. The registration form asks for a student ID *or a
-// class schedule*, and a schedule is usually a PDF; the admin card renders the
-// proof as a link rather than an <img>, so a PDF reviews just as well. Team
-// logos must stay images, which is why this is a separate allowlist and not a
-// widening of IMAGE_TYPES.
-const DOCUMENT_TYPES: Record<string, string> = {
-  ...IMAGE_TYPES,
-  "application/pdf": "pdf",
-};
-
-const TYPE_BY_EXT: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  webp: "image/webp",
-  avif: "image/avif",
-  gif: "image/gif",
-  pdf: "application/pdf",
-};
-
-// A backstop, not the gate. Vercel 413s a body over 4.5 MB before this handler
-// is ever entered, so an oversized file never reaches here — the browser has to
-// reject it first (checkUploadFile in upload-limits.ts). This still runs for a
-// caller that is not a browser form.
 
 function checkMagicBytes(header: Uint8Array, type: string): boolean {
   switch (type) {
@@ -70,27 +41,6 @@ function checkMagicBytes(header: Uint8Array, type: string): boolean {
   }
 }
 
-/**
- * Browsers do not always report a type. A .pdf on a Windows machine with no
- * PDF handler registered, and a .heic on several browsers, both arrive as "".
- * Fall back to the extension in that case — the magic-byte check below is the
- * real authority either way, so a lie here is caught, not trusted.
- */
-function resolveType(file: File, allowed: Record<string, string>): string | null {
-  const declared = file.type?.toLowerCase() ?? "";
-  if (declared) return allowed[declared] ? declared : null;
-
-  const ext = file.name?.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
-  const guessed = ext ? TYPE_BY_EXT[ext] : undefined;
-  return guessed && allowed[guessed] ? guessed : null;
-}
-
-function isHeic(file: File): boolean {
-  const declared = file.type?.toLowerCase() ?? "";
-  if (declared === "image/heic" || declared === "image/heif") return true;
-  return /\.(heic|heif)$/i.test(file.name ?? "");
-}
-
 export type UploadResult =
   | { ext: string; contentType: string; bytes: ArrayBuffer }
   | { error: string };
@@ -100,10 +50,15 @@ async function validateUpload(
   allowed: Record<string, string>,
   rejectMessage: string
 ): Promise<UploadResult> {
-  if (isHeic(file)) return { error: HEIC_MESSAGE };
+  if (isHeicFile(file)) return { error: HEIC_MESSAGE };
 
-  const type = resolveType(file, allowed);
+  const type = resolveUploadType(file, allowed);
   if (!type) return { error: rejectMessage };
+
+  // A backstop, not the gate. Vercel 413s a body over 4.5 MB before this
+  // handler is ever entered, so an oversized file never reaches here — the
+  // browser has to reject it first (checkUploadFile in upload-limits.ts). This
+  // still runs for a caller that is not one of those forms.
   if (file.size > MAX_UPLOAD_BYTES) return { error: `File must be ${MAX_UPLOAD_LABEL} or smaller.` };
 
   const bytes = await file.arrayBuffer();

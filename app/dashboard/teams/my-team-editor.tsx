@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { updateTeamInfo, toggleTeamLock } from "./actions";
 import { checkUploadFile, IMAGE_EXTENSIONS, MAX_UPLOAD_LABEL } from "@/app/lib/upload-limits";
 
+// image/* keeps the picker showing everything the server would take, including
+// a .jfif that Windows Chrome writes as image/jpeg; the explicit extensions are
+// for the browsers that ignore a wildcard.
+const LOGO_ACCEPT = ["image/*", ...IMAGE_EXTENSIONS.map((e) => `.${e}`)].join(",");
+
 interface Team {
   id: string;
   name: string;
@@ -196,7 +201,7 @@ export function MyTeamEditor({
               <input
                 id={`logo-input-${team.id}`}
                 type="file"
-                accept={IMAGE_EXTENSIONS.map((e) => `.${e}`).join(",")}
+                accept={LOGO_ACCEPT}
                 className="hidden"
                 // Cleared so re-picking the same file after a rejection still
                 // fires onChange.

@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, HEIC_MESSAGE,
-  IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS,
-  checkUploadFile, formatBytes, fileExtension, isHeicName,
+  IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, IMAGE_TYPES, DOCUMENT_TYPES,
+  checkUploadFile, formatBytes, fileExtension, isHeicFile, resolveUploadType,
 } from "../app/lib/upload-limits";
 
 // A File of a given size without allocating the bytes twice.
@@ -58,20 +58,44 @@ test("every accepted extension passes, and PDF only for documents", () => {
     assert.equal(checkUploadFile(fileOf(10, `logo.${ext}`)), null, `image .${ext}`);
   }
   assert.ok(checkUploadFile(fileOf(10, "proof.pdf")), "PDF is not an image");
-  assert.equal(checkUploadFile(fileOf(10, "proof.pdf"), DOCUMENT_EXTENSIONS), null);
+  assert.equal(checkUploadFile(fileOf(10, "proof.pdf"), DOCUMENT_TYPES), null);
   // a browser reporting no type at all must not be rejected on that alone
-  assert.equal(checkUploadFile(fileOf(10, "proof.pdf", ""), DOCUMENT_EXTENSIONS), null);
+  assert.equal(checkUploadFile(fileOf(10, "proof.pdf", ""), DOCUMENT_TYPES), null);
+  assert.deepEqual(DOCUMENT_EXTENSIONS, [...IMAGE_EXTENSIONS, "pdf"]);
 });
 
-test("a file with no extension is rejected rather than sent", () => {
-  assert.ok(checkUploadFile(fileOf(10, "screenshot")));
-  assert.equal(fileExtension("screenshot"), "");
-  assert.equal(fileExtension("a.b.PNG"), "png");
+// The gate exists to stop a request the platform would refuse to deliver. One
+// that is *stricter* than the server is its own bug: it refuses a file that
+// would have uploaded fine. Both sides call resolveUploadType for exactly this.
+test("the browser gate accepts whatever the server would accept", () => {
+  // Windows Chrome writes web JPEGs as .jfif with type image/jpeg. The
+  // extension is unknown to us; the declared type is not, and it wins.
+  assert.equal(checkUploadFile(fileOf(10, "logo.jfif", "image/jpeg")), null);
+  // A gallery or screenshot pick can arrive with no extension at all.
+  assert.equal(checkUploadFile(fileOf(10, "screenshot", "image/png")), null);
+  // Nothing to go on from either side — reject rather than send a 413's worth
+  // of bytes at a validator that will reject it too.
+  assert.ok(checkUploadFile(fileOf(10, "screenshot", "")));
+  // A declared type outside the allowlist is still a rejection, extension or no.
+  assert.ok(checkUploadFile(fileOf(10, "logo.svg", "image/svg+xml")));
+  assert.ok(checkUploadFile(fileOf(10, "logo.png", "image/svg+xml")),
+    "a declared type that is not allowed must not be rescued by the extension");
+});
+
+test("resolveUploadType returns the type the server will store under", () => {
+  assert.equal(resolveUploadType({ name: "a.jfif", type: "image/jpeg" }, IMAGE_TYPES), "image/jpeg");
+  assert.equal(resolveUploadType({ name: "a.JPG", type: "" }, IMAGE_TYPES), "image/jpeg");
+  assert.equal(resolveUploadType({ name: "a.pdf", type: "" }, IMAGE_TYPES), null);
+  assert.equal(resolveUploadType({ name: "a.pdf", type: "" }, DOCUMENT_TYPES), "application/pdf");
 });
 
 test("helpers", () => {
   assert.equal(formatBytes(1024 * 1024), "1.0 MB");
   assert.equal(formatBytes(MAX_UPLOAD_BYTES), "4.0 MB");
   assert.equal(MAX_UPLOAD_LABEL, formatBytes(MAX_UPLOAD_BYTES).replace(".0", ""));
-  assert.ok(isHeicName("x.heic") && isHeicName("x.HEIF") && !isHeicName("x.png"));
+  assert.equal(fileExtension("screenshot"), "");
+  assert.equal(fileExtension("a.b.PNG"), "png");
+  assert.ok(isHeicFile({ name: "x.heic" }) && isHeicFile({ name: "x.HEIF" }));
+  assert.ok(isHeicFile({ name: "x", type: "image/heif" }));
+  assert.ok(!isHeicFile({ name: "x.png", type: "image/png" }));
 });

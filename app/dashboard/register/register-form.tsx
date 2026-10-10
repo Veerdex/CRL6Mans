@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { registerPlayer } from "./actions";
 import { SensitiveInfoModal } from "./sensitive-info-modal";
-import { checkUploadFile, DOCUMENT_EXTENSIONS, MAX_UPLOAD_LABEL } from "@/app/lib/upload-limits";
+import { checkUploadFile, DOCUMENT_TYPES, MAX_UPLOAD_LABEL } from "@/app/lib/upload-limits";
 
 export type ExistingPlayerData = {
   tracker_url: string;
@@ -54,7 +54,7 @@ export function RegisterForm({ isResubmit, existing }: Props) {
     // Matched to validateDocumentUpload, and checked by extension rather than
     // file.type: browsers report an empty type for a .pdf with no registered
     // handler, and rejecting on that would refuse a file the server would take.
-    const problem = checkUploadFile(file, DOCUMENT_EXTENSIONS);
+    const problem = checkUploadFile(file, DOCUMENT_TYPES);
     if (problem) {
       setFileError(problem);
       e.target.value = "";
