@@ -436,23 +436,31 @@ export async function reconcileManagedRoles(
   added: number;
   removed: number;
   failures: RoleReconcileFailure[];
-  unreachable: string[];
+  notMembers: string[];
+  lookupFailed: string[];
 }> {
   const strip = opts?.strip ?? true;
   const managed = new Set(managedRoleIds.filter(Boolean));
   let added = 0;
   let removed = 0;
   const failures: RoleReconcileFailure[] = [];
-  const unreachable: string[] = [];
-  if (managed.size === 0) return { added, removed, failures, unreachable };
+  const notMembers: string[] = [];
+  const lookupFailed: string[] = [];
+  if (managed.size === 0) return { added, removed, failures, notMembers, lookupFailed };
 
   for (const [userId, desired] of desiredByUser) {
     if (!userId || userId.startsWith("test_")) continue;
     const have = await getMemberRoleIds(userId);
-    // null is "not in the guild, or the fetch failed" — both mean there is
-    // nothing to diff against, and guessing would re-add roles to a member who
-    // left. Reported separately so a departed player doesn't read as a failure.
-    if (!have) { unreachable.push(userId); continue; }
+    // getMemberRoleIds answers null for a member who left, for 429 exhaustion
+    // and for a network error alike, and those need different reporting: the
+    // first is expected and fine, the second means this member was skipped
+    // entirely and someone has to know. Only the failures pay for the recheck.
+    if (!have) {
+      const membership = await guildMembership(userId);
+      if (membership === "not_member") notMembers.push(userId);
+      else lookupFailed.push(userId);
+      continue;
+    }
     const held = new Set(have);
 
     for (const roleId of desired) {
@@ -482,10 +490,10 @@ export async function reconcileManagedRoles(
       if (!res.ok) { retried.push({ ...f, message: res.message ?? `status ${res.status}` }); continue; }
       if (f.action === "add") added++; else removed++;
     }
-    return { added, removed, failures: retried, unreachable };
+    return { added, removed, failures: retried, notMembers, lookupFailed };
   }
 
-  return { added, removed, failures, unreachable };
+  return { added, removed, failures, notMembers, lookupFailed };
 }
 
 export type GuildMembership = "member" | "not_member" | "unknown";

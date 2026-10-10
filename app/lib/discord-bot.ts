@@ -2804,7 +2804,7 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean; repairOnl
   // 2) Issue only the difference. repairOnly never takes a role away, so a
   // sync can be run to restore what a previous one dropped without betting the
   // current roster state against Discord's.
-  const { failures, unreachable } = await reconcileManagedRoles(
+  const { failures, notMembers, lookupFailed } = await reconcileManagedRoles(
     desiredByUser,
     managedRoleIds,
     { strip: !repairOnly },
@@ -2818,11 +2818,20 @@ export async function execSyncRoles(opts?: { syncRegistered?: boolean; repairOnl
       (failures.length > 6 ? `, +${failures.length - 6} more` : "")
     );
   }
-  if (unreachable.length) {
+  const mentionList = (ids: string[]) =>
+    ids.slice(0, 6).map(id => `<@${id}>`).join(", ") + (ids.length > 6 ? `, +${ids.length - 6} more` : "");
+  if (notMembers.length) {
     warnings.push(
-      `${unreachable.length} player${unreachable.length > 1 ? "s" : ""} not in the server — roles left alone: ` +
-      unreachable.slice(0, 6).map(id => `<@${id}>`).join(", ") +
-      (unreachable.length > 6 ? `, +${unreachable.length - 6} more` : "")
+      `${notMembers.length} player${notMembers.length > 1 ? "s" : ""} no longer in the server — roles left alone: ` +
+      mentionList(notMembers)
+    );
+  }
+  // Distinct from the above on purpose: these members were skipped without ever
+  // being read, so their roles are whatever they were. Re-run to pick them up.
+  if (lookupFailed.length) {
+    warnings.push(
+      `${lookupFailed.length} player${lookupFailed.length > 1 ? "s" : ""} could not be read from Discord and were skipped — re-run to reconcile: ` +
+      mentionList(lookupFailed)
     );
   }
 
