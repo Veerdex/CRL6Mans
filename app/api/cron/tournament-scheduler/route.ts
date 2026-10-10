@@ -62,8 +62,14 @@ export async function GET(request: Request) {
         category: "tournament",
       }).catch(() => {});
     } else if (s.signups_open && passed(s.draft_close_at)) {
+      // signups_closed, not just signups_open: false. The two are not the same
+      // flag read back — eventAcceptsLateEntries refuses to add a player unless
+      // signups_closed is true, so closing by cron without it left a running
+      // event unable to take late entries while an admin-closed one could.
+      // It also stops the open branch above from reopening sign-ups if an admin
+      // later pushes draft_close_at out.
       await supabaseAdmin.from("tournaments")
-        .update({ signups_open: false, updated_at: new Date().toISOString() }).eq("id", s.id);
+        .update({ signups_open: false, signups_closed: true, updated_at: new Date().toISOString() }).eq("id", s.id);
       fired.push(`signups_closed:${s.name}`);
       // Awaited: a push left in flight when the cron response returns is not
       // guaranteed to finish, and this one now has a real audience to reach.
@@ -226,10 +232,41 @@ export async function GET(request: Request) {
     return (count ?? 0) > 0;
   };
 
+  // Forming teams is a one-time milestone, so it gets a stored claim rather than
+  // being inferred from runtime state. The snake draft happens to self-guard by
+  // setting league_settings.draft_active, but execAutoBalanceTeams ends with
+  // draft_active: false — so nothing stopped the window between draft_start_at
+  // and the season start from re-forming teams on every tick, re-shuffling
+  // rosters, deleting matches and re-syncing every Discord team role once a
+  // minute for as long as the window stayed open.
+  //
+  // Claimed before the work rather than after it: maxDuration is 300s against a
+  // per-minute pinger, so two ticks can overlap inside one formation and only
+  // the one whose update returns a row may proceed. Released again on failure,
+  // so a transient error still retries on the next tick.
+  //
+  // Before the migration the filter errors and no row comes back, so teams never
+  // auto-form and an admin forms them by hand — deliberately the safe direction,
+  // since reading a missing column as "not yet claimed" is the bug this fixes.
+  const claimTeamFormation = async () => {
+    const { data: claimed } = await supabaseAdmin
+      .from("tournaments")
+      .update({ teams_formed_at: new Date().toISOString() })
+      .eq("id", t.id)
+      .is("teams_formed_at", null)
+      .select("id");
+    return !!claimed?.length;
+  };
+  const releaseTeamFormation = async () => {
+    await supabaseAdmin.from("tournaments").update({ teams_formed_at: null }).eq("id", t.id);
+  };
+
   if (t.join_mode === "teams") {
     const teamsFormed = await teamsFormedCheck();
-    if (passed(t.draft_close_at) && !seasonActive && !teamsFormed) {
+    if (passed(t.draft_close_at) && !t.teams_formed_at && !seasonActive && !teamsFormed
+        && (await claimTeamFormation())) {
       const res = await execFinalizeTeamSignups();
+      if (!res.ok) await releaseTeamFormation();
       fired.push(res.ok ? "teams_finalized" : `teams_finalize_failed:${res.message}`);
       if (!res.ok) {
         pushToAdmins({
@@ -246,11 +283,13 @@ export async function GET(request: Request) {
     // We intentionally do NOT gate on team_id here — execStartDraft clears all team
     // assignments before forming new ones, and leftover ids from a past season would
     // permanently block the auto-start.
-    if (passed(t.draft_start_at) && !draftActive && !seasonActive) {
+    if (passed(t.draft_start_at) && !t.teams_formed_at && !draftActive && !seasonActive
+        && (await claimTeamFormation())) {
       const isAutoBalance = t.team_assignment === "auto_balance";
       const res = isAutoBalance
         ? await execAutoBalanceTeams()
         : await execStartDraft();
+      if (!res.ok) await releaseTeamFormation();
       fired.push(res.ok ? `teams_formed:${t.team_assignment}` : `teams_form_failed:${res.message}`);
       if (res.ok) {
         // Auto-balance has no draft to watch — the rosters already exist — so it
