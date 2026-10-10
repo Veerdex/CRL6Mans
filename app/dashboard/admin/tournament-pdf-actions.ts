@@ -7,6 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { APP_NAME } from "@/app/lib/constants";
+import { fetchEventWinner } from "@/app/lib/bracket-server";
 
 export type PdfStanding = {
   place: number;
@@ -182,18 +183,20 @@ export async function fetchActiveTournamentPdfData(): Promise<TournamentPdfData 
   }));
 
   const sf = t.season_format as { preset?: string } | null;
-  const champion = standings[0]?.name ?? null;
-  const runnerUp = standings[1]?.name ?? null;
+  // The deciding match outranks the standings — see computeSummary in
+  // tournament-actions.ts for why a win/loss record can't name the champion.
+  // Null until a final has actually been played, which is the normal state for
+  // a mid-event report, so the standings still answer then.
+  const decided = await fetchEventWinner();
+  const championId = decided?.championId ?? (allTeams ?? []).find((t) => t.name === standings[0]?.name)?.id;
+  const runnerUpId = decided?.runnerUpId ?? (allTeams ?? []).find((t) => t.name === standings[1]?.name)?.id;
+  const champion = (championId ? teamById[championId]?.name : null) ?? null;
+  const runnerUp = (runnerUpId ? teamById[runnerUpId]?.name : null) ?? null;
 
-  const topIds = standings.slice(0, 2)
-    .map((s) => (allTeams ?? []).find((t) => t.name === s.name)?.id)
-    .filter((id): id is string => !!id);
+  const topIds = [championId, runnerUpId].filter((id): id is string => !!id);
   const { data: rosterPlayers } = topIds.length
     ? await supabaseAdmin.from("players").select("username, display_name, team_id").in("team_id", topIds)
     : { data: [] as { username: string; display_name: string | null; team_id: string }[] };
-
-  const championId = (allTeams ?? []).find((t) => t.name === champion)?.id;
-  const runnerUpId = (allTeams ?? []).find((t) => t.name === runnerUp)?.id;
   const byTeam = (id: string | undefined): PdfPlayer[] =>
     (rosterPlayers ?? []).filter((p) => p.team_id === id).map((p) => ({ username: p.username, displayName: p.display_name ?? null }));
 
@@ -204,10 +207,10 @@ export async function fetchActiveTournamentPdfData(): Promise<TournamentPdfData 
     startedAt: t.started_at,
     endedAt: null,
     champion,
-    championLogoUrl: standings[0]?.logoUrl ?? null,
+    championLogoUrl: (championId ? teamById[championId]?.logoUrl : null) ?? null,
     championPlayers: byTeam(championId),
     runnerUp,
-    runnerUpLogoUrl: standings[1]?.logoUrl ?? null,
+    runnerUpLogoUrl: (runnerUpId ? teamById[runnerUpId]?.logoUrl : null) ?? null,
     runnerUpPlayers: byTeam(runnerUpId),
     standings,
     matches,
@@ -273,18 +276,20 @@ export async function fetchActiveSeasonPdfData(): Promise<TournamentPdfData | nu
   }));
 
   const sf = settings.season_format as { preset?: string } | null;
-  const champion = standings[0]?.name ?? null;
-  const runnerUp = standings[1]?.name ?? null;
+  // The deciding match outranks the standings — see computeSummary in
+  // tournament-actions.ts for why a win/loss record can't name the champion.
+  // Null until a final has actually been played, which is the normal state for
+  // a mid-event report, so the standings still answer then.
+  const decided = await fetchEventWinner();
+  const championId = decided?.championId ?? (allTeams ?? []).find((t) => t.name === standings[0]?.name)?.id;
+  const runnerUpId = decided?.runnerUpId ?? (allTeams ?? []).find((t) => t.name === standings[1]?.name)?.id;
+  const champion = (championId ? teamById[championId]?.name : null) ?? null;
+  const runnerUp = (runnerUpId ? teamById[runnerUpId]?.name : null) ?? null;
 
-  const topIds = standings.slice(0, 2)
-    .map((s) => (allTeams ?? []).find((t) => t.name === s.name)?.id)
-    .filter((id): id is string => !!id);
+  const topIds = [championId, runnerUpId].filter((id): id is string => !!id);
   const { data: rosterPlayers } = topIds.length
     ? await supabaseAdmin.from("players").select("username, display_name, team_id").in("team_id", topIds)
     : { data: [] as { username: string; display_name: string | null; team_id: string }[] };
-
-  const championId = (allTeams ?? []).find((t) => t.name === champion)?.id;
-  const runnerUpId = (allTeams ?? []).find((t) => t.name === runnerUp)?.id;
   const byTeam = (id: string | undefined): PdfPlayer[] =>
     (rosterPlayers ?? []).filter((p) => p.team_id === id).map((p) => ({ username: p.username, displayName: p.display_name ?? null }));
 
@@ -295,10 +300,10 @@ export async function fetchActiveSeasonPdfData(): Promise<TournamentPdfData | nu
     startedAt: null,
     endedAt: new Date().toISOString(),
     champion,
-    championLogoUrl: standings[0]?.logoUrl ?? null,
+    championLogoUrl: (championId ? teamById[championId]?.logoUrl : null) ?? null,
     championPlayers: byTeam(championId),
     runnerUp,
-    runnerUpLogoUrl: standings[1]?.logoUrl ?? null,
+    runnerUpLogoUrl: (runnerUpId ? teamById[runnerUpId]?.logoUrl : null) ?? null,
     runnerUpPlayers: byTeam(runnerUpId),
     standings,
     matches,

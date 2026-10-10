@@ -9,6 +9,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
 import { computeTopStats, type TopStats } from "@/app/lib/game-stats";
 import { fetchAllRows } from "@/app/lib/paginate";
+import { fetchEventWinner } from "@/app/lib/bracket-server";
 import { computeFullArchive } from "./tournament-archive";
 import { recordEventResults } from "@/app/lib/event-results";
 import { resetSeason } from "./league-actions";
@@ -569,7 +570,7 @@ export async function activateTournament(id: string) {
 
 /** Champion + final standings derived from completed matches. Snapshots rosters, logos, and stat leaders before reset. */
 async function computeSummary(statsEnabled: boolean): Promise<TournamentSummary> {
-  const [allTeams, completedMatches, topStats] = await Promise.all([
+  const [allTeams, completedMatches, topStats, decided] = await Promise.all([
     fetchAllRows((from, to) =>
       supabaseAdmin.from("teams").select("id, name, logo_url").order("id").range(from, to)
     ),
@@ -588,6 +589,7 @@ async function computeSummary(statsEnabled: boolean): Promise<TournamentSummary>
     // A stats-disabled tournament has no replays behind it, so leaving topStats
     // undefined is what suppresses the podium's stat leaders and MVP crown.
     statsEnabled ? computeTopStats() : Promise.resolve(undefined),
+    fetchEventWinner(),
   ]);
 
   const records: Record<string, { wins: number; losses: number }> = {};
@@ -613,8 +615,12 @@ async function computeSummary(statsEnabled: boolean): Promise<TournamentSummary>
     .filter((t) => t.wins + t.losses > 0)
     .sort((a, b) => b.wins - a.wins || a.losses - b.losses || a.name.localeCompare(b.name));
 
-  const championTeam = (allTeams ?? []).find((t) => t.name === standings[0]?.name) ?? null;
-  const runnerUpTeam = (allTeams ?? []).find((t) => t.name === standings[1]?.name) ?? null;
+  // The deciding match outranks the standings: a DE bracket reset leaves the
+  // runner-up with more series wins than the champion. Standings stay as the
+  // record table, so they can legitimately disagree with first place.
+  const byId = (id: string | null | undefined) => (allTeams ?? []).find((t) => t.id === id) ?? null;
+  const championTeam = decided ? byId(decided.championId) : byId((allTeams ?? []).find((t) => t.name === standings[0]?.name)?.id);
+  const runnerUpTeam = decided ? byId(decided.runnerUpId) : byId((allTeams ?? []).find((t) => t.name === standings[1]?.name)?.id);
   const topIds = [championTeam?.id, runnerUpTeam?.id].filter((id): id is string => !!id);
 
   const { data: rosterPlayers } = topIds.length
@@ -627,8 +633,8 @@ async function computeSummary(statsEnabled: boolean): Promise<TournamentSummary>
       .map((p) => ({ username: p.username, displayName: p.display_name ?? null }));
 
   return {
-    champion: standings[0]?.name ?? null,
-    runnerUp: standings[1]?.name ?? null,
+    champion: championTeam?.name ?? standings[0]?.name ?? null,
+    runnerUp: runnerUpTeam?.name ?? standings[1]?.name ?? null,
     finalStandings: standings,
     championLogoUrl: (championTeam?.logo_url as string | null) ?? null,
     runnerUpLogoUrl: (runnerUpTeam?.logo_url as string | null) ?? null,

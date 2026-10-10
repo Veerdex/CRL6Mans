@@ -929,3 +929,65 @@ export function getStageSlotKey(stage: string): StageSlotKey | null {
   if (stage.startsWith("hybrid")) return "hybrid";
   return null;
 }
+
+// ── Who actually won ───────────────────────────────────────────────────────────
+
+// The stages a championship can be decided in. Everything else — groups, Swiss,
+// qualifiers, winners/losers rounds — feeds one of these.
+export const TERMINAL_STAGES: ReadonlySet<string> = new Set([
+  "single_elimination", DE_GF, HYBRID_GF, HYBRID8_GF,
+]);
+
+export type DecidingMatch = {
+  stage: string | null;
+  round: number | null;
+  match_number: number | null;
+  status?: string | null;
+  home_team_id: string | null;
+  away_team_id: string | null;
+  home_score: number | null;
+  away_score: number | null;
+};
+
+/**
+ * Champion and runner-up from the match that actually decided the event.
+ *
+ * Win/loss order cannot answer this. An 8-team double elimination that goes to a
+ * bracket reset leaves the *loser* of the reset with more series wins than the
+ * champion — their losers-bracket run is four matches longer than the winners-
+ * bracket path — so ranking by record crowns the wrong team. Multi-stage formats
+ * are worse still: a team that sweeps Swiss and loses the final out-wins whoever
+ * lifted the trophy.
+ *
+ * The decider is the last match of the deepest round in a terminal stage, which
+ * for a DE grand final is the highest `match_number` (the reset is match 2).
+ * Passing the stage's unplayed rows in too is what makes it safe: a round with a
+ * match that has both teams and no score yet is a round still being played — the
+ * activated DE reset is exactly that — so this returns null and the caller falls
+ * back to the record-based standings rather than crowning a leader mid-final. A
+ * row with no teams is the dormant reset and doesn't count as pending.
+ */
+export function decideEventWinner(
+  matches: DecidingMatch[]
+): { championId: string; runnerUpId: string | null } | null {
+  const terminal = matches.filter((m) => TERMINAL_STAGES.has(m.stage ?? ""));
+  if (!terminal.length) return null;
+
+  const deepest = Math.max(...terminal.map((m) => m.round ?? 0));
+  const inRound = terminal.filter((m) => (m.round ?? 0) === deepest);
+  const scored = (m: DecidingMatch) => m.home_score !== null && m.away_score !== null;
+  const assigned = (m: DecidingMatch) => !!m.home_team_id && !!m.away_team_id;
+
+  if (inRound.some((m) => assigned(m) && !scored(m))) return null;
+
+  const decider = inRound
+    .filter((m) => assigned(m) && scored(m))
+    .sort((a, b) => (b.match_number ?? 0) - (a.match_number ?? 0))[0];
+  if (!decider) return null;
+
+  const homeWon = (decider.home_score ?? 0) > (decider.away_score ?? 0);
+  return {
+    championId: (homeWon ? decider.home_team_id : decider.away_team_id)!,
+    runnerUpId: (homeWon ? decider.away_team_id : decider.home_team_id) ?? null,
+  };
+}

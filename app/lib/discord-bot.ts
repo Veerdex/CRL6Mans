@@ -13,6 +13,7 @@ import {
   HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF,
   wbLoserTarget, lbWinnerTarget,
   getRoundName, GROUP_STAGE_PREFIX, parseGroupNum,
+  TERMINAL_STAGES,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow, calculatePlayerRating } from "./rating";
@@ -3556,7 +3557,6 @@ export async function execReportMatchResult(
   // and the just-reported winner is the champion. (For a DE grand final, a
   // lower-bracket win has already scheduled the reset match above, so the count
   // stays > 0 until the bracket is truly decided.)
-  const TERMINAL_STAGES = new Set(["single_elimination", DE_GF, HYBRID_GF, HYBRID8_GF]);
   try {
     if (TERMINAL_STAGES.has(match.stage ?? "") && winnerName) {
       const { count: remaining } = await supabaseAdmin

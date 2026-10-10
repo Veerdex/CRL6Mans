@@ -12,6 +12,7 @@ import { APP_NAME } from "@/app/lib/constants";
 import { computeTopStats } from "@/app/lib/game-stats";
 import { rollUpCareerStats } from "@/app/lib/career-stats";
 import { fetchAllRows } from "@/app/lib/paginate";
+import { fetchEventWinner } from "@/app/lib/bracket-server";
 import { computeFullArchive } from "./tournament-archive";
 import { recordEventResults } from "@/app/lib/event-results";
 import { ACCOLADE_PRIZE_COLUMNS, SEASON_ACCOLADES } from "@/app/lib/accolades";
@@ -663,7 +664,7 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
   if (!settings?.season_active) return { error: "No active season to complete." };
 
   // Snapshot standings, logos, rosters, and stat leaders BEFORE resetSeason wipes matches/teams.
-  const [allTeams, completedMatches, topStats] = await Promise.all([
+  const [allTeams, completedMatches, topStats, decided] = await Promise.all([
     fetchAllRows((from, to) =>
       supabaseAdmin.from("teams").select("id, name, logo_url").order("id").range(from, to)
     ),
@@ -680,6 +681,7 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
         .range(from, to)
     ),
     computeTopStats(),
+    fetchEventWinner(),
   ]);
 
   const records: Record<string, { wins: number; losses: number }> = {};
@@ -701,8 +703,11 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     .filter((t) => t.wins + t.losses > 0)
     .sort((a, b) => b.wins - a.wins || a.losses - b.losses || a.name.localeCompare(b.name));
 
-  const championTeam = (allTeams ?? []).find((t) => t.name === finalStandings[0]?.name) ?? null;
-  const runnerUpTeam = (allTeams ?? []).find((t) => t.name === finalStandings[1]?.name) ?? null;
+  // The deciding match outranks the standings — see computeSummary in
+  // tournament-actions.ts for why a record can't name the champion.
+  const byId = (id: string | null | undefined) => (allTeams ?? []).find((t) => t.id === id) ?? null;
+  const championTeam = decided ? byId(decided.championId) : byId((allTeams ?? []).find((t) => t.name === finalStandings[0]?.name)?.id);
+  const runnerUpTeam = decided ? byId(decided.runnerUpId) : byId((allTeams ?? []).find((t) => t.name === finalStandings[1]?.name)?.id);
   const topIds = [championTeam?.id, runnerUpTeam?.id].filter((id): id is string => !!id);
   const { data: rosterPlayers } = topIds.length
     ? await supabaseAdmin.from("players").select("username, display_name, team_id").in("team_id", topIds)
@@ -743,8 +748,8 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     season_format: settings.season_format ?? null,
     team_count: finalStandings.length,
     summary: {
-      champion: finalStandings[0]?.name ?? null,
-      runnerUp: finalStandings[1]?.name ?? null,
+      champion: championTeam?.name ?? finalStandings[0]?.name ?? null,
+      runnerUp: runnerUpTeam?.name ?? finalStandings[1]?.name ?? null,
       finalStandings,
       championLogoUrl: (championTeam?.logo_url as string | null) ?? null,
       runnerUpLogoUrl: (runnerUpTeam?.logo_url as string | null) ?? null,

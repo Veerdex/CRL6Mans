@@ -16,6 +16,7 @@ import {
   DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS, generateDEQualifierInserts,
   HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, generateHybridMatchInserts, generateHybridPlaceholderInserts,
   HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF, generateHybrid8MatchInserts, generateHybrid8PlaceholderInserts,
+  TERMINAL_STAGES, decideEventWinner,
   type BracketMatchInsert,
 } from "./bracket";
 import type { SeasonFormatConfig } from "@/app/dashboard/season/format-editor";
@@ -1112,4 +1113,19 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
   }
 
   return { ok: true, cutTeams };
+}
+
+/**
+ * The live event's champion and runner-up, read off the deciding match.
+ *
+ * Every unplayed terminal-stage row comes back with the played ones on purpose —
+ * see decideEventWinner: that is what lets it tell "the final is over" from
+ * "the final hasn't happened yet" and return null for the latter.
+ */
+export async function fetchEventWinner(): Promise<{ championId: string; runnerUpId: string | null } | null> {
+  const { data } = await supabaseAdmin
+    .from("matches")
+    .select("stage, round, match_number, home_team_id, away_team_id, home_score, away_score")
+    .in("stage", [...TERMINAL_STAGES]);
+  return decideEventWinner(data ?? []);
 }
