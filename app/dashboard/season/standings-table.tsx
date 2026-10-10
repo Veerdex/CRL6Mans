@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { DefaultLogo } from "@/app/lib/team-logo";
+import { TeamLink } from "@/app/dashboard/team-link";
 
 export type StandingsRow = {
   id: string;
@@ -104,12 +105,14 @@ export function StandingsClient({ rows, highlightTeamId }: { rows: StandingsRow[
                         ) : (
                           <DefaultLogo name={team.name} className="w-5 h-5 rounded text-[9px]" />
                         )}
-                        <span
+                        <TeamLink
+                          teamId={team.id}
+                          name={team.name}
                           title={team.name}
                           className={`font-medium truncate max-w-[150px] sm:max-w-[280px] ${isFirst ? "text-amber-300" : "text-white"}`}
                         >
                           {team.name}
-                        </span>
+                        </TeamLink>
                         {isMine && (
                           <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-indigo-300 bg-indigo-500/20 border border-indigo-500/40 rounded px-1.5 py-0.5">
                             You

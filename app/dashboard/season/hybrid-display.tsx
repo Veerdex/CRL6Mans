@@ -8,6 +8,7 @@ import { LiveClock } from "./live-clock";
 import { isMatchLive } from "@/app/lib/match-live";
 import { DefaultLogo } from "@/app/lib/team-logo";
 import { MW, MH, HEAD_H, LABEL_H, buildLayout8, buildLayout12, type Node } from "./hybrid-layout";
+import { TeamLink } from "@/app/dashboard/team-link";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -95,14 +96,15 @@ function MatchCard({ node, match, teams, teamTitles, isLeft }: { node: Node; mat
           ) : (
             <div className="w-2 h-2 rounded-full shrink-0 bg-zinc-700" />
           )}
-          {team ? (
-            <a
-              href={`/dashboard/teams?search=${encodeURIComponent(team.name)}&from=season`}
-              title={teamId ? teamTitles[teamId] : undefined}
-              className={`flex-1 truncate text-xs hover:underline ${won ? "text-white font-semibold" : "text-zinc-300"}`}
+          {team && teamId ? (
+            <TeamLink
+              teamId={teamId}
+              name={team.name}
+              title={teamTitles[teamId]}
+              className={`flex-1 truncate text-xs ${won ? "text-white font-semibold" : "text-zinc-300"}`}
             >
               {team.name}
-            </a>
+            </TeamLink>
           ) : (
             <SlotText feeder={feeder} />
           )}

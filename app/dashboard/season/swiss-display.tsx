@@ -8,6 +8,7 @@ import { LiveClock } from "./live-clock";
 import { isMatchLive } from "@/app/lib/match-live";
 import { DefaultLogo } from "@/app/lib/team-logo";
 import { MW, MH, GH, GP, TH, BW, EXIT_FRAC, gH, LAYOUT_8, LAYOUT_16 } from "./swiss-layout";
+import { TeamLink } from "@/app/dashboard/team-link";
 
 // ── Colours ────────────────────────────────────────────────────────────────────
 
@@ -248,7 +249,7 @@ export function SwissBracketDisplay({
                           <div className={`flex-1 min-w-0 flex self-stretch items-center gap-1.5 text-xs ${homeWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
                             <SwissCrest team={m.home_team_id ? teams[m.home_team_id] : undefined} side="home" />
                             {m.home_team_id ? (
-                              <a href={`/dashboard/teams?search=${encodeURIComponent(hn)}&from=season`} title={teamTitles[m.home_team_id]} className="truncate hover:underline">{hn}</a>
+                              <TeamLink teamId={m.home_team_id} name={hn} title={teamTitles[m.home_team_id]} className="truncate">{hn}</TeamLink>
                             ) : (
                               <span className="truncate">{hn}</span>
                             )}
@@ -265,7 +266,7 @@ export function SwissBracketDisplay({
                           {/* Away */}
                           <div className={`flex-1 min-w-0 flex self-stretch items-center justify-end gap-1.5 text-xs ${awayWon ? "text-white font-semibold" : done ? "text-zinc-500" : "text-zinc-300"}`}>
                             {m.away_team_id ? (
-                              <a href={`/dashboard/teams?search=${encodeURIComponent(an)}&from=season`} title={teamTitles[m.away_team_id]} className="truncate hover:underline">{an}</a>
+                              <TeamLink teamId={m.away_team_id} name={an} title={teamTitles[m.away_team_id]} className="truncate">{an}</TeamLink>
                             ) : (
                               <span className="truncate">{an}</span>
                             )}

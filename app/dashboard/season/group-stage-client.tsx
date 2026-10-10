@@ -5,6 +5,7 @@ import { computeGroupStandings, type GroupStanding } from "@/app/lib/bracket";
 import { LiveClock } from "./live-clock";
 import { isMatchLive } from "@/app/lib/match-live";
 import { DefaultLogo } from "@/app/lib/team-logo";
+import { TeamLink } from "@/app/dashboard/team-link";
 
 // The row is a fixed height so the crest can square off against it. Without a
 // height the crest would size the row and the row would size the crest.
@@ -282,13 +283,13 @@ function StandingsTable({
                     ) : (
                       <DefaultLogo name={teams[s.teamId]?.name ?? ""} className="w-4 h-4 rounded text-[8px]" />
                     )}
-                    <a
-                      href={`/dashboard/teams?search=${encodeURIComponent(teams[s.teamId]?.name ?? "")}&from=season`}
+                    <TeamLink
+                      teamId={s.teamId}
+                      name={teams[s.teamId]?.name ?? ""}
                       title={teamTitles[s.teamId]}
-                      className="hover:underline"
                     >
                       {teams[s.teamId]?.name ?? "—"}
-                    </a>
+                    </TeamLink>
                   </div>
                 </td>
                 <td className="py-0.5 text-right px-1 tabular-nums text-emerald-400">{s.wins}</td>

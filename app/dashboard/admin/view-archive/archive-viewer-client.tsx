@@ -22,6 +22,7 @@ import type { TournamentArchive } from "../tournament-archive";
 import { ARCHIVE_SCHEMA_VERSION } from "../archive-schema";
 import { toDbMatch, toTeamMap, toHybridTeamMap, toGroupMatches, buildArchiveTeamTitles } from "./archive-mappers";
 import { ArchiveRosterGrid } from "./archive-roster-grid";
+import { TeamViewerDisabled } from "@/app/dashboard/profile-viewer";
 
 function isValidArchive(value: unknown): value is TournamentArchive {
   if (!value || typeof value !== "object") return false;
@@ -257,6 +258,11 @@ export function ArchiveViewerClient() {
   }
 
   return (
+    // An archived team id still resolves to a live `teams` row — resetSeason
+    // keeps the slots and only clears their rosters — so the popup would show
+    // whichever roster holds that slot now. The names fall back to the Teams
+    // page search they linked to before.
+    <TeamViewerDisabled>
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
@@ -275,5 +281,6 @@ export function ArchiveViewerClient() {
 
       <SeasonTabs tabs={buildTabs(archive)} defaultTab="standings" />
     </div>
+    </TeamViewerDisabled>
   );
 }

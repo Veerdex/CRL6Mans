@@ -13,6 +13,7 @@ import {
   getDEWBRounds, getDELBRounds,
   getDEWBFeederLabel, getDELBFeederLabel,
 } from "@/app/lib/bracket";
+import { TeamLink } from "@/app/dashboard/team-link";
 
 const MATCH_H = 100;
 const MATCH_W = 210;
@@ -161,10 +162,10 @@ function MatchBox({ match, teams, numR1, matchId }: { match: DBMatch; teams: Rec
       <div className={`flex flex-1 min-h-0 items-center gap-2 px-2 ${homeWon ? "bg-white/5" : ""}`}>
         <TeamLogo team={match.home_team_id ? teams[match.home_team_id] : null} faded={homeFaded} />
         {match.home_team_id ? (
-          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.home_team_id]?.name ?? "")}&from=season`}
-            className={`flex-1 text-xs truncate hover:underline ${homeWon ? "text-white font-semibold" : "text-zinc-300"}`}>
+          <TeamLink teamId={match.home_team_id} name={teams[match.home_team_id]?.name ?? ""}
+            className={`flex-1 text-xs truncate ${homeWon ? "text-white font-semibold" : "text-zinc-300"}`}>
             {homeLabel}
-          </a>
+          </TeamLink>
         ) : <SlotText label={homeLabel} faded={homeFaded} />}
         {completed && match.home_score !== null && (
           <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${homeWon ? "text-white" : "text-zinc-500"}`}>{match.home_score}</span>
@@ -175,10 +176,10 @@ function MatchBox({ match, teams, numR1, matchId }: { match: DBMatch; teams: Rec
       <div className={`flex flex-1 min-h-0 items-center gap-2 px-2 ${awayWon ? "bg-white/5" : ""}`}>
         <TeamLogo team={match.away_team_id ? teams[match.away_team_id] : null} faded={awayFaded} />
         {match.away_team_id ? (
-          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.away_team_id]?.name ?? "")}&from=season`}
-            className={`flex-1 text-xs truncate hover:underline ${awayWon ? "text-white font-semibold" : "text-zinc-300"}`}>
+          <TeamLink teamId={match.away_team_id} name={teams[match.away_team_id]?.name ?? ""}
+            className={`flex-1 text-xs truncate ${awayWon ? "text-white font-semibold" : "text-zinc-300"}`}>
             {awayLabel}
-          </a>
+          </TeamLink>
         ) : <SlotText label={awayLabel} faded={awayFaded} />}
         {completed && match.away_score !== null && (
           <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${awayWon ? "text-white" : "text-zinc-500"}`}>{match.away_score}</span>
@@ -389,10 +390,10 @@ function DEMatchBox({
       <div className={`flex flex-1 min-h-0 items-center gap-2 px-2 ${homeWon ? "bg-white/5" : ""}`}>
         <TeamLogo team={match.home_team_id ? teams[match.home_team_id] : null} faded={homeFaded} />
         {match.home_team_id ? (
-          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.home_team_id]?.name ?? "")}&from=season`}
-            className={`flex-1 text-xs truncate hover:underline ${homeWon ? "text-white font-semibold" : "text-zinc-300"}`}>
+          <TeamLink teamId={match.home_team_id} name={teams[match.home_team_id]?.name ?? ""}
+            className={`flex-1 text-xs truncate ${homeWon ? "text-white font-semibold" : "text-zinc-300"}`}>
             {homeLabel}
-          </a>
+          </TeamLink>
         ) : <SlotText label={homeLabel} faded={homeFaded} />}
         {completed && match.home_score !== null && (
           <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${homeWon ? "text-white" : "text-zinc-500"}`}>{match.home_score}</span>
@@ -402,10 +403,10 @@ function DEMatchBox({
       <div className={`flex flex-1 min-h-0 items-center gap-2 px-2 ${awayWon ? "bg-white/5" : ""}`}>
         <TeamLogo team={match.away_team_id ? teams[match.away_team_id] : null} faded={awayFaded} />
         {match.away_team_id ? (
-          <a href={`/dashboard/teams?search=${encodeURIComponent(teams[match.away_team_id]?.name ?? "")}&from=season`}
-            className={`flex-1 text-xs truncate hover:underline ${awayWon ? "text-white font-semibold" : "text-zinc-300"}`}>
+          <TeamLink teamId={match.away_team_id} name={teams[match.away_team_id]?.name ?? ""}
+            className={`flex-1 text-xs truncate ${awayWon ? "text-white font-semibold" : "text-zinc-300"}`}>
             {awayLabel}
-          </a>
+          </TeamLink>
         ) : <SlotText label={awayLabel} faded={awayFaded} />}
         {completed && match.away_score !== null && (
           <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${awayWon ? "text-white" : "text-zinc-500"}`}>{match.away_score}</span>
