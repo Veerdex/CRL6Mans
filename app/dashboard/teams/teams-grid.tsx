@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
+import { DefaultLogo } from "@/app/lib/team-logo";
 
 type Team = {
   id: string;
@@ -36,23 +37,6 @@ interface Props {
   teamRv: Record<string, number>;
   myTeamId?: string | null;
   initialQuery?: string;
-}
-
-const gradients = [
-  "from-indigo-600 to-indigo-800", "from-rose-600 to-rose-800",
-  "from-emerald-600 to-emerald-800", "from-amber-600 to-amber-800",
-  "from-cyan-600 to-cyan-800", "from-purple-600 to-purple-800",
-  "from-orange-600 to-orange-800", "from-teal-600 to-teal-800",
-];
-
-function DefaultLogo({ name }: { name: string }) {
-  const num = name.replace(/\D+/g, "");
-  const g = gradients[(parseInt(num) - 1) % gradients.length] ?? gradients[0];
-  return (
-    <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${g} flex items-center justify-center text-white font-bold text-lg shrink-0`}>
-      {num}
-    </div>
-  );
 }
 
 export function TeamsGrid({ teams, byTeam, teamRv, myTeamId, initialQuery = "" }: Props) {
