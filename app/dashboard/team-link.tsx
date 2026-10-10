@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { useTeamViewer } from "./profile-viewer";
 
 interface Props {
@@ -24,6 +25,7 @@ interface Props {
  */
 export function TeamLink({ teamId, name, className = "", title, children }: Props) {
   const openTeam = useTeamViewer();
+  const downAt = useRef<{ x: number; y: number } | null>(null);
 
   if (!openTeam) {
     return (
@@ -52,7 +54,17 @@ export function TeamLink({ teamId, name, className = "", title, children }: Prop
       // rely on, and would be invalid markup inside an enclosing anchor.
       role="button"
       tabIndex={0}
-      onClick={open}
+      onMouseDown={(e) => { downAt.current = { x: e.clientX, y: e.clientY }; }}
+      onClick={(e) => {
+        const down = downAt.current;
+        downAt.current = null;
+        // A bracket pan that starts and ends on the same name still fires a
+        // click — BracketCanvas only guards its own data-goto navigation, so
+        // dragging off a team name would otherwise open the popup. Same 4px
+        // threshold the canvas uses to call a drag a drag.
+        if (down && (Math.abs(e.clientX - down.x) > 4 || Math.abs(e.clientY - down.y) > 4)) return;
+        open(e);
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") open(e);
       }}
