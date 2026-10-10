@@ -9,15 +9,16 @@
 // unreachable for an oversized file — the request never arrives — which is why
 // every form has to check it in the browser before submitting.
 //
-// Bytes here are decimal MB, matching the conservative reading of the 4.5 MB in
-// Vercel's docs — if it means 4,500,000 and we had assumed MiB, the limit would
-// sit above the cap and be inert again.
+// Sizes here are MiB, which is what Windows Explorer shows under the label
+// "MB". Quoting a file's size in decimal MB would tell a player their 3.9 MB
+// file is 4.1 MB. Both limits are compared against the smaller reading of the
+// docs' 4.5 MB (4,500,000), so the units can't push one over the real cap.
 //
-// 4 MB rather than 4.5: the limit is on the whole multipart body, so the other
-// form fields and the encoding overhead count against it too. An image can
-// afford that slack — 4 MB is already absurd for a 96px crest, and a player can
+// 4 rather than 4.5: the limit is on the whole multipart body, so the other form
+// fields and the encoding overhead count against it too. An image can afford
+// that slack — 4 MB is already absurd for a 96px crest, and a player can
 // re-export a smaller one.
-export const MAX_UPLOAD_BYTES = 4_000_000;
+export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 export const MAX_UPLOAD_LABEL = "4 MB";
 
 // A replay gets its own, closer to the cap, because it is not something a player
@@ -25,8 +26,8 @@ export const MAX_UPLOAD_LABEL = "4 MB";
 // replays refused are ones the platform would refuse anyway, so no file that
 // uploads today stops working. The four server actions that parse replays all
 // carried their own unreachable 5 MB check; they read this now.
-export const MAX_REPLAY_BYTES = 4_400_000;
-export const MAX_REPLAY_LABEL = "4.4 MB";
+export const MAX_REPLAY_BYTES = Math.round(4.2 * 1024 * 1024);
+export const MAX_REPLAY_LABEL = "4.2 MB";
 
 // Raster image types only. SVG is intentionally excluded — it can carry
 // embedded <script>, and these files land in public Supabase buckets.
@@ -69,7 +70,7 @@ export const HEIC_MESSAGE =
   "or switch Settings → Camera → Formats to \"Most Compatible\" and retake it.";
 
 export function formatBytes(bytes: number): string {
-  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function fileExtension(name: string): string {

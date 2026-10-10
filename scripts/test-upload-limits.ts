@@ -18,8 +18,9 @@ function fileOf(bytes: number, name: string, type = ""): File {
 // oversized file throws out of the server action instead of being rejected —
 // which is the bug this module exists to prevent.
 //
-// Read as decimal MB, the smaller of the two readings of "4.5 MB". Assuming MiB
-// and being wrong would put a limit above the real cap and make it inert again.
+// Read as 4,500,000 — the smaller of the two readings of "4.5 MB", so a limit
+// that passes here is under the cap on either reading. The limits themselves are
+// MiB, to match the sizes Windows shows; this is where the two units meet.
 const VERCEL_BODY_CAP = 4_500_000;
 
 test("both limits stay under Vercel's request body cap", () => {
@@ -54,7 +55,7 @@ test("the replay gate accepts at the limit and names the size over it", () => {
   assert.equal(checkReplayFile(fileOf(MAX_REPLAY_BYTES, "match.replay")), null);
   const over = checkReplayFile(fileOf(MAX_REPLAY_BYTES + 1, "match.replay"));
   assert.ok(over?.includes(MAX_REPLAY_LABEL), `should name the limit: ${over}`);
-  assert.ok(checkReplayFile(fileOf(5 * 1000 * 1000, "match.replay"))?.includes("5.0 MB"),
+  assert.ok(checkReplayFile(fileOf(5 * 1024 * 1024, "match.replay"))?.includes("5.0 MB"),
     "should state the file's actual size");
 });
 
@@ -67,7 +68,7 @@ test("accepts a file at the limit and rejects one byte over", () => {
 });
 
 test("the oversize message names the file's own size", () => {
-  const msg = checkUploadFile(fileOf(6 * 1000 * 1000, "huge.png", "image/png"));
+  const msg = checkUploadFile(fileOf(6 * 1024 * 1024, "huge.png", "image/png"));
   assert.ok(msg?.includes("6.0 MB"), `message should state the actual size: ${msg}`);
 });
 
@@ -122,11 +123,11 @@ test("resolveUploadType returns the type the server will store under", () => {
 });
 
 test("helpers", () => {
-  // Decimal MB, so a limit set in round decimal bytes renders as the label it
-  // is advertised under — "4 MB" for 4,000,000, not MiB's "3.8 MB".
-  assert.equal(formatBytes(1_000_000), "1.0 MB");
+  // Each limit has to render as the label it is advertised under, or a message
+  // reads "That file is 4.2 MB. It must be 4 MB or smaller."
+  assert.equal(formatBytes(1024 * 1024), "1.0 MB");
   assert.equal(formatBytes(MAX_UPLOAD_BYTES), "4.0 MB");
-  assert.equal(formatBytes(MAX_REPLAY_BYTES), "4.4 MB");
+  assert.equal(formatBytes(MAX_REPLAY_BYTES), "4.2 MB");
   assert.equal(MAX_UPLOAD_LABEL, formatBytes(MAX_UPLOAD_BYTES).replace(".0", ""));
   assert.equal(MAX_REPLAY_LABEL, formatBytes(MAX_REPLAY_BYTES));
   assert.equal(fileExtension("screenshot"), "");
