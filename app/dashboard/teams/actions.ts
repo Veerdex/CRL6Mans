@@ -384,10 +384,10 @@ export async function swapRosterPlayerWithBenchPlayer(rosterPlayerId: string, be
 }
 
 /**
- * Takes a team apart instead of disqualifying it. A team that holds no match has
- * nothing to forfeit, so execDisqualifyTeam would do nothing but set a flag and
- * leave a dead team on the page — removal is the honest action, and the one the
- * Teams tab offers until the bracket seeds it.
+ * Takes a team apart instead of disqualifying it. Before a bracket exists there
+ * is nothing to forfeit, so execDisqualifyTeam would do nothing but set a flag
+ * and leave a dead team on the page — removal is the honest action, and the one
+ * the Teams tab offers until the bracket is generated.
  *
  * The slot survives: it is what the draft and the bracket builders map onto, and
  * it is what createTeam claims next. Only its occupants and its identity go.
@@ -396,13 +396,12 @@ export async function removeTeam(teamId: string) {
   const session = await getSession();
   if (!session?.userId || !(await isModeratorVerified(session.userId))) return { error: "Not authorized." };
 
-  // Same test claimTeamSlot uses for "this slot holds a bracket position", not a
-  // global "has any bracket been built": a team created after generation has no
-  // seed and no results, so it is still removable.
-  const { count: ownMatches } = await supabaseAdmin
-    .from("matches").select("*", { count: "exact", head: true })
-    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
-  if (ownMatches) return { error: "This team has matches — disqualify it instead." };
+  // Deliberately "any bracket at all" rather than "this team holds a match": the
+  // qualifier formats pre-create downstream stages with empty slots and fill the
+  // seeds in later, so a team can be in a live bracket with no row of its own yet.
+  const { count: bracketMatches } = await supabaseAdmin
+    .from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null);
+  if (bracketMatches) return { error: "The bracket is generated — disqualify the team instead." };
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings").select("draft_active").single();
@@ -439,17 +438,12 @@ export async function removeTeam(teamId: string) {
     if (p.is_captain) removeRole(p.discord_id, "Captain").catch(() => {});
   }
 
-  // num_teams is what the later stage builders size their brackets off. Shrinking
-  // it is only safe while no bracket exists at all — a partially built one reads it
-  // back when it generates its next stage.
-  const { count: anyBracketMatches } = await supabaseAdmin
-    .from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null);
-  if (!anyBracketMatches) {
-    const { data: rosters } = await supabaseAdmin.from("players").select("team_id").not("team_id", "is", null);
-    const rosteredTeams = new Set((rosters ?? []).map((r) => r.team_id as string)).size;
-    await supabaseAdmin.from("league_settings")
-      .update({ num_teams: rosteredTeams, updated_at: new Date().toISOString() }).not("id", "is", null);
-  }
+  // num_teams is what the later stage builders size their brackets off, and the
+  // guard above already established there is no bracket to resize.
+  const { data: rosters } = await supabaseAdmin.from("players").select("team_id").not("team_id", "is", null);
+  const rosteredTeams = new Set((rosters ?? []).map((r) => r.team_id as string)).size;
+  await supabaseAdmin.from("league_settings")
+    .update({ num_teams: rosteredTeams, updated_at: new Date().toISOString() }).not("id", "is", null);
 
   revalidatePath("/dashboard/teams");
   revalidatePath("/dashboard/my-team");

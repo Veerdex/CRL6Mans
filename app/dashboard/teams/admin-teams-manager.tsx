@@ -65,7 +65,7 @@ interface Props {
   joinMode?: "players" | "teams";
   teamSize?: number;
   lateEntriesOpen?: boolean;
-  teamsWithMatches?: string[];
+  bracketGenerated?: boolean;
 }
 
 function rv(p: Parameters<typeof playerRatingFromRow>[0]) {
@@ -295,13 +295,12 @@ function isValidTarget(source: SwapSelection, candidate: SwapSelection): boolean
   return true;
 }
 
-export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = [], initialQuery = "", joinMode = "players", teamSize = 3, lateEntriesOpen = false, teamsWithMatches = [] }: Props) {
+export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = [], initialQuery = "", joinMode = "players", teamSize = 3, lateEntriesOpen = false, bracketGenerated = false }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmDqTeamId, setConfirmDqTeamId] = useState<string | null>(null);
   const [dqConfirmText, setDqConfirmText] = useState("");
   const [dqError, setDqError] = useState<string | null>(null);
-  const seeded = new Set(teamsWithMatches);
   const [swapSource, setSwapSource] = useState<SwapSelection | null>(null);
   const [swapTarget, setSwapTarget] = useState<SwapSelection | null>(null);
   const [swapError, setSwapError] = useState<string | null>(null);
@@ -484,9 +483,9 @@ export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = []
         const offsetY = team.logo_offset_y ?? 50;
         const isConfirmingDq = confirmDqTeamId === team.id;
         const isDqd = !!team.is_disqualified;
-        // Nothing to forfeit until the team holds a match, so until then the red
-        // action takes the team apart instead of marking it disqualified.
-        const removeMode = !seeded.has(team.id);
+        // Nothing to forfeit until a bracket exists, so until then the red action
+        // takes the team apart instead of marking it disqualified.
+        const removeMode = !bracketGenerated;
         const verb = removeMode ? "Remove" : "Disqualify";
 
         return (
