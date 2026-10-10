@@ -492,12 +492,24 @@ export async function createTeam(playerIds: string[]) {
   if (ids.length !== teamSize)
     return { error: `Pick exactly ${teamSize} player${teamSize === 1 ? "" : "s"}.` };
 
-  // Captains are seated by slot number before pick 0 and getTeamNumberForPick is
-  // fixed snake math off the team count — a slot appearing mid-draft would move
-  // the picks already made onto different teams.
+  // Both formation paths open by clearing team_id for every approved player, so
+  // a hand-built team made before one runs is simply erased. Captains are also
+  // seated by slot number before pick 0, which a slot appearing mid-draft would
+  // shift the picks already made off.
   const { data: settings } = await supabaseAdmin
-    .from("league_settings").select("draft_active").single();
+    .from("league_settings").select("draft_active, draft_open").single();
   if (settings?.draft_active) return { error: "Finish or end the draft before adding a team." };
+  if (settings?.draft_open) return { error: "Close draft sign-ups first — starting the draft would wipe a hand-built team." };
+
+  // The only way to give a new team a seed is buildAndSaveBracket, which opens by
+  // deleting every bracket match — scored ones included. Refusing here is the
+  // difference between "regenerate the bracket" being advice and being a way to
+  // erase the results so far.
+  const { count: playedMatches } = await supabaseAdmin
+    .from("matches").select("*", { count: "exact", head: true })
+    .not("stage", "is", null).eq("status", "completed");
+  if (playedMatches)
+    return { error: "The bracket is already underway — adding a team now would mean regenerating it over played matches." };
 
   const slot = await claimTeamSlot(session.userId);
   if ("error" in slot) return { error: slot.error };
@@ -513,10 +525,24 @@ export async function createTeam(playerIds: string[]) {
     .eq("status", "approved")
     .select("id, discord_id");
 
-  if ((claimed?.length ?? 0) !== ids.length) {
+  const revert = async () => {
     if (claimed?.length)
       await supabaseAdmin.from("players").update({ team_id: null, is_captain: false }).in("id", claimed.map((p) => p.id));
+  };
+
+  if ((claimed?.length ?? 0) !== ids.length) {
+    await revert();
     return { error: "One of those players is no longer available. Refresh and try again." };
+  }
+
+  // Claiming the slot is a read-then-write, so two creates with disjoint picks
+  // can land on the same free slot and build one oversized roster. Counting after
+  // the fact is what catches that; the later caller is the one that backs out.
+  const { count: onSlot } = await supabaseAdmin
+    .from("players").select("*", { count: "exact", head: true }).eq("team_id", slot.id);
+  if ((onSlot ?? 0) > teamSize) {
+    await revert();
+    return { error: `Team ${slot.num} was just filled by someone else. Refresh and try again.` };
   }
 
   const tournamentRole = await resolveTournamentRole({ create: true });

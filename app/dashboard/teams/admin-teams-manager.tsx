@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { swapPlayersBetweenTeams, swapRosterPlayerWithBenchPlayer, disqualifyTeam, addPlayerToEvent, removePlayerFromEvent, createTeam } from "./actions";
 import { MyTeamEditor } from "./my-team-editor";
@@ -190,9 +191,12 @@ function NewTeamDialog({
     });
   }
 
-  return (
+  // Portaled to the body, same as the profile modal: <main> is isolated, so an
+  // overlay rendered inside it sits under the z-20 sidebar and the z-40 mobile
+  // tab bar — which would cover the footer holding Create.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4"
       onClick={onClose}
     >
       <div
@@ -275,7 +279,8 @@ function NewTeamDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
