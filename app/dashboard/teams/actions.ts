@@ -571,15 +571,15 @@ export async function createTeam(playerIds: string[]) {
   if (settings?.draft_active) return { error: "Finish or end the draft before adding a team." };
   if (settings?.draft_open) return { error: "Close draft sign-ups first — starting the draft would wipe a hand-built team." };
 
-  // The only way to give a new team a seed is buildAndSaveBracket, which opens by
-  // deleting every bracket match — scored ones included. Refusing here is the
-  // difference between "regenerate the bracket" being advice and being a way to
-  // erase the results so far.
-  const { count: playedMatches } = await supabaseAdmin
-    .from("matches").select("*", { count: "exact", head: true })
-    .not("stage", "is", null).eq("status", "completed");
-  if (playedMatches)
-    return { error: "The bracket is already underway — adding a team now would mean regenerating it over played matches." };
+  // Once a bracket exists the field is settled. The only way to give a new team a
+  // seed is buildAndSaveBracket, which opens by deleting every bracket match, so
+  // "add a team" would really mean "rebuild the bracket" — and a bracket is now
+  // built up to 30 minutes before the first matches, so this closes at the same
+  // moment the admin's seeding does. Swapping a player in stays available.
+  const { count: bracketMatches } = await supabaseAdmin
+    .from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null);
+  if (bracketMatches)
+    return { error: "The bracket is generated — swap a player in instead of adding a team." };
 
   const slot = await claimTeamSlot(session.userId);
   if ("error" in slot) return { error: slot.error };
@@ -632,29 +632,19 @@ export async function createTeam(playerIds: string[]) {
   for (const id of ids) await enrollInEvent(id);
 
   // num_teams is what the later stage builders size their brackets off, and
-  // between events it is 0. Realigning it to the rostered-team count is only
-  // safe while no bracket exists — once one does, the admin has to regenerate it
-  // for the new team to get a seed anyway.
-  const { count: bracketMatches } = await supabaseAdmin
-    .from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null);
-  if (!bracketMatches) {
-    const { data: rosters } = await supabaseAdmin.from("players").select("team_id").not("team_id", "is", null);
-    const rosteredTeams = new Set((rosters ?? []).map((r) => r.team_id as string)).size;
-    await supabaseAdmin.from("league_settings")
-      .update({ num_teams: rosteredTeams, updated_at: new Date().toISOString() }).not("id", "is", null);
-  }
+  // between events it is 0. The guard above already established there is no
+  // bracket, so realigning it to the rostered-team count is unconditional here.
+  const { data: rosters } = await supabaseAdmin.from("players").select("team_id").not("team_id", "is", null);
+  const rosteredTeams = new Set((rosters ?? []).map((r) => r.team_id as string)).size;
+  await supabaseAdmin.from("league_settings")
+    .update({ num_teams: rosteredTeams, updated_at: new Date().toISOString() }).not("id", "is", null);
 
   revalidatePath("/dashboard/teams");
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/subs");
   revalidatePath("/dashboard/season");
   revalidatePath("/dashboard/admin");
-  return {
-    success: true,
-    message: bracketMatches
-      ? `Team ${slot.num} created. Regenerate the bracket to give it a seed.`
-      : `Team ${slot.num} created.`,
-  };
+  return { success: true, message: `Team ${slot.num} created.` };
 }
 
 export async function toggleTeamLock(teamId: string) {

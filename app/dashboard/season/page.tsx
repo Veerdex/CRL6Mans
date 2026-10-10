@@ -18,7 +18,7 @@ export default async function SeasonPage() {
   const userIsAdmin = session?.userId ? await isDirectorVerified(session.userId) : false;
   const testingMode = userIsAdmin && cookieStore.get("testing_mode")?.value === "1";
 
-  const [{ data: me }, { data: settings }] = await Promise.all([
+  const [{ data: me }, { data: settings }, { count: bracketMatchCount }] = await Promise.all([
     session?.userId
       ? supabaseAdmin.from("players").select("team_id").eq("discord_id", session.userId).single()
       : Promise.resolve({ data: null }),
@@ -26,12 +26,18 @@ export default async function SeasonPage() {
       .from("league_settings")
       .select("season_format, season_participants, season_active, num_teams, active_tournament_id")
       .single(),
+    supabaseAdmin.from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null),
   ]);
   const myTeamId: string | null = (me?.team_id as string | null) ?? null;
 
   const format = (settings?.season_format as SeasonFormatConfig) ?? null;
   const participants = (settings?.season_participants as number) ?? 16;
   const seasonActive = settings?.season_active ?? false;
+  // The bracket is built up to 30 minutes before the first matches, so the stage
+  // and standings tabs key off the bracket existing rather than the event having
+  // started — otherwise the whole point of settling the seeding early is invisible.
+  // The "in progress" badge below stays on seasonActive, because it isn't yet.
+  const bracketLive = seasonActive || !!bracketMatchCount;
   const numTeams = (settings?.num_teams as number) ?? 0;
   const isTournament = !!settings?.active_tournament_id;
 
@@ -65,7 +71,7 @@ export default async function SeasonPage() {
 
   let standingsRows: StandingsRow[] = [];
 
-  if (seasonActive) {
+  if (bracketLive) {
     // Group/Swiss/Hybrid/qualifier stage checks below are all gated by mutually-independent
     // boolean flags derived from `format` — several can be true at once for multi-stage
     // presets (e.g. group_swiss_hybrid runs group + swiss + hybrid checks), so they all fire
@@ -241,7 +247,7 @@ export default async function SeasonPage() {
   // Build tabs
   const tabs: SeasonTab[] = [];
 
-  if (seasonActive) {
+  if (bracketLive) {
     tabs.push({
       key: "standings",
       label: "Standings",
@@ -420,7 +426,7 @@ export default async function SeasonPage() {
   });
 
   // Default to the most current active stage
-  const defaultTab = seasonActive ? "standings" : "format";
+  const defaultTab = bracketLive ? "standings" : "format";
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">

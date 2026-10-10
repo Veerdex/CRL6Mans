@@ -1700,6 +1700,74 @@ const GROUP_PRESETS = new Set(["group_single_elimination", "group_swiss_single_e
  * replaced by the admin Scheduling panel (round_schedules table).
  */
 
+/**
+ * Builds the bracket ahead of the start time without starting the event.
+ *
+ * Deliberately does none of what execStartSeason does besides the build: it does
+ * not set season_active, rename team roles, lock team info, or open a single
+ * channel or check-in window. That is the point — the seeding is settled and
+ * visible early, while nothing reaches Discord until the event actually starts.
+ *
+ * Reads its own state rather than trusting a caller's: the scheduler's locals are
+ * sampled before team formation runs on that same tick, so a draft that started
+ * seconds ago would still look inactive and the bracket would be built from
+ * captain-only rosters.
+ */
+export async function execPregenerateBracket(): Promise<{ ok: boolean; message: string }> {
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings")
+    .select("season_format, num_teams, team_size, draft_active, season_active")
+    .single();
+
+  if (settings?.season_active) return { ok: false, message: "A season is already active." };
+  if (settings?.draft_active) return { ok: false, message: "A draft is still in progress." };
+
+  const format = settings?.season_format as { preset?: string } | null;
+  if (!format?.preset) return { ok: false, message: "No season format selected." };
+
+  const min = PRESET_MIN_TEAMS[format.preset] ?? 4;
+  const numTeams: number = settings?.num_teams ?? 0;
+  if (numTeams < min)
+    return { ok: false, message: `${format.preset.replace(/_/g, " ")} requires at least ${min} teams (current: ${numTeams}).` };
+  if (GROUP_PRESETS.has(format.preset) && numTeams > 64)
+    return { ok: false, message: `Group stage formats support a maximum of 64 teams (current: ${numTeams}).` };
+
+  // buildAndSaveBracket seeds from teams that have a rostered player, not from
+  // num_teams, so an empty or half-filled pool produces a bracket of two or three
+  // teams rather than failing. Counting the real rosters is what catches a window
+  // that opened before teams were formed.
+  const { data: rosters } = await supabaseAdmin.from("players").select("team_id").not("team_id", "is", null);
+  const perTeam = new Map<string, number>();
+  (rosters ?? []).forEach((r) => {
+    const id = r.team_id as string;
+    perTeam.set(id, (perTeam.get(id) ?? 0) + 1);
+  });
+  const rosteredTeams = perTeam.size;
+  if (rosteredTeams < min)
+    return { ok: false, message: `Only ${rosteredTeams} team${rosteredTeams === 1 ? "" : "s"} have a roster; ${min} are needed.` };
+
+  // Every team holding exactly one player is the signature of a draft that has
+  // seated its captains but not yet set draft_active — execStartDraft writes them
+  // in that order, so an overlapping tick would otherwise read the pool as formed
+  // and seed a bracket of captains. A real roster has someone else on it, except
+  // in 1v1 where one player is the whole team.
+  const teamSize = normalizeTeamSize(settings?.team_size);
+  if (teamSize > 1 && Math.max(...perTeam.values()) < 2)
+    return { ok: false, message: "Teams are still being formed — every team has only its captain." };
+
+  // Moved here from execStartSeason, which now skips it on the pre-generated path:
+  // it clears a previous season's past-deadline entries so the channel gate can't
+  // open everything at once, and doing it now leaves the window free for the admin
+  // to set this event's round times.
+  await supabaseAdmin.from("round_schedules").delete().not("id", "is", null);
+
+  const bracketResult = await buildAndSaveBracket();
+  if (!bracketResult.ok)
+    return { ok: false, message: `Bracket generation error — ${bracketResult.error}` };
+
+  return { ok: true, message: `Bracket generated for ${rosteredTeams} teams.` };
+}
+
 export async function execStartSeason(): Promise<{ ok: boolean; message: string }> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
@@ -1728,22 +1796,55 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
     return { ok: false, message: `❌ Group stage formats support a maximum of **64 teams** (current: ${numTeams}).` };
   }
 
-  // Clear any stale round schedules left over from a previous season; otherwise the
-  // channel gate sees old (past-deadline) entries and opens every channel instantly,
-  // before the admin can set new times.
-  await supabaseAdmin.from("round_schedules").delete().not("id", "is", null);
+  // A bracket built ahead of the start time must not be rebuilt over:
+  // buildAndSaveBracket opens by deleting every stage match, which would discard
+  // any reseeding or swapping the admin did during that window. Both conditions
+  // are required — the stamp alone would skip the build for an event whose
+  // matches were since wiped, leaving a live season with no bracket at all.
+  const preGeneratedId = settings?.active_tournament_id as string | null;
+  let preGenerated = false;
+  if (preGeneratedId) {
+    const [{ data: tRow }, { count: existingBracketMatches }] = await Promise.all([
+      supabaseAdmin.from("tournaments").select("bracket_generated_at").eq("id", preGeneratedId).maybeSingle(),
+      supabaseAdmin.from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null),
+    ]);
+    preGenerated = !!tRow?.bracket_generated_at && !!existingBracketMatches;
+  }
+
+  // Clearing stale round schedules belongs with the build, not with the start:
+  // it exists so the channel gate can't see a previous season's past-deadline
+  // entries, and on the pre-generated path execPregenerateBracket already did it
+  // 30 minutes ago. Repeating it here would delete the times the admin set during
+  // that window.
+  if (!preGenerated) await supabaseAdmin.from("round_schedules").delete().not("id", "is", null);
 
   await supabaseAdmin.from("league_settings")
     .update({ season_active: true, round1_manual_start_pending: true, updated_at: new Date().toISOString() })
     .not("id", "is", null);
 
-  const bracketResult = await buildAndSaveBracket();
-  if (!bracketResult.ok) {
-    // Roll back season_active so the admin knows something went wrong
-    await supabaseAdmin.from("league_settings")
-      .update({ season_active: false, updated_at: new Date().toISOString() })
-      .not("id", "is", null);
-    return { ok: false, message: `❌ Season start failed: bracket generation error — ${bracketResult.error}` };
+  // Teams a format's size limit left out. The build reports them; a pre-generated
+  // bracket reports them by omission, so count the teams it actually seeded —
+  // which keeps `playing` below equal to the field either way.
+  let cutTeams = 0;
+  if (preGenerated) {
+    const { data: seeded } = await supabaseAdmin
+      .from("matches").select("home_team_id, away_team_id").not("stage", "is", null);
+    const seededIds = new Set<string>();
+    (seeded ?? []).forEach((m) => {
+      if (m.home_team_id) seededIds.add(m.home_team_id as string);
+      if (m.away_team_id) seededIds.add(m.away_team_id as string);
+    });
+    cutTeams = Math.max(0, numTeams - seededIds.size);
+  } else {
+    const bracketResult = await buildAndSaveBracket();
+    if (!bracketResult.ok) {
+      // Roll back season_active so the admin knows something went wrong
+      await supabaseAdmin.from("league_settings")
+        .update({ season_active: false, updated_at: new Date().toISOString() })
+        .not("id", "is", null);
+      return { ok: false, message: `❌ Season start failed: bracket generation error — ${bracketResult.error}` };
+    }
+    cutTeams = bracketResult.cutTeams ?? 0;
   }
 
   // Rename each Discord role to match the team's current name (set by captains pre-season).
@@ -1847,7 +1948,7 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
         },
   ).catch(() => {});
 
-  const cut = bracketResult.cutTeams ?? 0;
+  const cut = cutTeams;
   const playing = numTeams - cut;
   const base = `🏆 **Season has officially started!** ${playing} teams · ${format.preset.replace(/_/g, " ")} · Bracket generated.`;
   const cutoffNote = cut > 0
@@ -2307,6 +2408,16 @@ async function openRound(userId: string, roundOverride?: number) {
 // match report and every round/stage generation, replacing the need for /openround.
 export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: boolean }): Promise<void> {
   const ignoreScheduleDeadline = opts?.ignoreScheduleDeadline ?? false;
+
+  // Nothing opens before the event actually starts. The bracket is built up to 30
+  // minutes early, and this is reached from execReportMatchResult — so without
+  // this a team disqualified during that window would open a 10-minute check-in
+  // window for the whole opening round, which expires before the start time and
+  // has processExpiredCheckIns disqualify everyone on the first live tick.
+  // execStartSeason sets season_active before its own call below, so a real start
+  // is unaffected, as is a manual season, which is always active by this point.
+  if (!(await isSeasonActive())) return;
+
   const { data: allMatches } = await supabaseAdmin
     .from("matches")
     .select("id, home_team_id, away_team_id, round, match_number, stage, status, discord_channel_id, scheduled_at, admin_scheduled, home_checked_in, away_checked_in, checkin_deadline");
@@ -2454,6 +2565,13 @@ const CHECKIN_WINDOW_MS = 10 * 60 * 1000;
 async function isTournamentActive(): Promise<boolean> {
   const { data } = await supabaseAdmin.from("league_settings").select("active_tournament_id").maybeSingle();
   return !!(data?.active_tournament_id as string | null | undefined);
+}
+
+// The gate on every channel and check-in window: a bracket can exist before the
+// event starts, and nothing may reach Discord until it does.
+async function isSeasonActive(): Promise<boolean> {
+  const { data } = await supabaseAdmin.from("league_settings").select("season_active").maybeSingle();
+  return !!(data?.season_active as boolean | null | undefined);
 }
 
 // Scheduled start time of a stage (round 1's play time), if an admin set one.
@@ -3217,6 +3335,10 @@ async function getDEQBracketSizes() {
 async function maybeCreateChannelForMatch(
   stage: string, round: number, matchNum: number,
 ): Promise<void> {
+  // Same pre-start gate as openReadyMatchChannels — a slot filled during the
+  // pre-generation window must not open a check-in or a channel.
+  if (!(await isSeasonActive())) return;
+
   const { data: m } = await supabaseAdmin
     .from("matches")
     .select("id, home_team_id, away_team_id, scheduled_at")

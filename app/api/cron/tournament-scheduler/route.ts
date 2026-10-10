@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
-import { execStartDraft, execAutoBalanceTeams, execStartSeason, execFinalizeTeamSignups, processExpiredCheckIns, processExpiredScoreConfirmations, openReadyMatchChannels } from "@/app/lib/discord-bot";
+import { execStartDraft, execAutoBalanceTeams, execStartSeason, execPregenerateBracket, execFinalizeTeamSignups, processExpiredCheckIns, processExpiredScoreConfirmations, openReadyMatchChannels } from "@/app/lib/discord-bot";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft, pushToTournamentEntrants, pushToTournamentRoster, pushToRosteredPlayers } from "@/app/lib/push";
 import { freezeUnfrozenMatchPredictions } from "@/app/lib/match-predictions";
 import { cleanupOrphanedVerificationReplays } from "@/app/lib/platform-account-cleanup";
@@ -11,6 +11,9 @@ export const runtime = "nodejs";
 // Draft start / team finalize can do many sequential Discord role calls, so give
 // it well beyond the old 60s ceiling.
 export const maxDuration = 300;
+
+// How far ahead of a tournament's first matches the bracket is built.
+const BRACKET_PREGEN_LEAD_MS = 30 * 60 * 1000;
 
 // Runs frequently (external pinger every minute) to advance tournaments through
 // their lifecycle. "Open to join" (signups_open) is independent of the single
@@ -327,6 +330,48 @@ export async function GET(request: Request) {
           tag: "autostart-failed",
         }).catch(() => {});
       }
+    }
+  }
+
+  // ── 3b. Build the bracket 30 minutes before the first matches ──
+  // Settles the seeding while there is still time to check it, and locks adding
+  // teams. Nothing reaches Discord: execPregenerateBracket opens no channel and
+  // no check-in window, and both of those paths independently refuse while
+  // season_active is false.
+  //
+  // Gated on the formation trigger being absent or past, not on teams_formed_at:
+  // a field built by hand from the Teams tab never stamps that column and should
+  // pre-generate like any other, but a formation scheduled *inside* this window
+  // must not be pre-empted. Nothing clears a past event's team_id assignments
+  // (section 3 says so explicitly), so a window that opened first would seed the
+  // previous field, formation would then reshuffle the rosters underneath it, and
+  // execStartSeason would not rebuild over the stamp.
+  //
+  // execPregenerateBracket re-reads draft_active and counts the real rosters, so a
+  // formation that runs on this same tick — section 3 above, before this — either
+  // makes it refuse (a draft is now live) or hands it the finished rosters. The
+  // refusal releases the claim, so the next tick in the window tries again.
+  //
+  // Claimed before the work, like the formation claim above: maxDuration is 300s
+  // against a per-minute pinger, and buildAndSaveBracket opens by deleting every
+  // stage match, so two overlapping ticks would have the second wipe the first's
+  // bracket. Released again on failure so a transient error retries — a failure
+  // sends no push, because a 30-minute window against a per-minute pinger would
+  // notify thirty times, and the start itself still reports it the way it always has.
+  const formationTriggerAt = t.join_mode === "teams" ? t.draft_close_at : t.draft_start_at;
+  if (t.season_start_at && !t.bracket_generated_at && !seasonActive && !draftActive
+      && (!formationTriggerAt || passed(formationTriggerAt))
+      && passed(new Date(new Date(t.season_start_at).getTime() - BRACKET_PREGEN_LEAD_MS).toISOString())) {
+    const { data: claimed } = await supabaseAdmin
+      .from("tournaments")
+      .update({ bracket_generated_at: new Date().toISOString() })
+      .eq("id", t.id)
+      .is("bracket_generated_at", null)
+      .select("id");
+    if (claimed?.length) {
+      const res = await execPregenerateBracket();
+      if (!res.ok) await supabaseAdmin.from("tournaments").update({ bracket_generated_at: null }).eq("id", t.id);
+      fired.push(res.ok ? "bracket_pregenerated" : `bracket_pregen_skipped:${res.message}`);
     }
   }
 

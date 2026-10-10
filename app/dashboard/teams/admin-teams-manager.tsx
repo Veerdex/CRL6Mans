@@ -419,15 +419,20 @@ export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = []
           placeholder="Search teams or players…"
           className="w-full max-w-sm bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
         />
-        <button
-          type="button"
-          onClick={() => { setNewTeamNotice(null); setNewTeamOpen(true); }}
-          title={`Add a team (${teamSize} player${teamSize === 1 ? "" : "s"})`}
-          aria-label="Add a team"
-          className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white text-xl leading-none font-semibold transition-colors"
-        >
-          +
-        </button>
+        {/* Gone once the bracket is generated: the field is settled, and the only
+            way to seed a new team is rebuilding the bracket over it. Swapping a
+            player in stays available, which is the way to fill a gap from here. */}
+        {!bracketGenerated && (
+          <button
+            type="button"
+            onClick={() => { setNewTeamNotice(null); setNewTeamOpen(true); }}
+            title={`Add a team (${teamSize} player${teamSize === 1 ? "" : "s"})`}
+            aria-label="Add a team"
+            className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white text-xl leading-none font-semibold transition-colors"
+          >
+            +
+          </button>
+        )}
       </div>
       {newTeamNotice && <p className="text-xs text-emerald-400">{newTeamNotice}</p>}
       {newTeamOpen && (
@@ -443,7 +448,10 @@ export function AdminTeamsManager({ teams, byTeam, teamRv, availablePlayers = []
         />
       )}
       {teams.length === 0 ? (
-        <p className="text-zinc-400 text-sm">No teams yet — the draft hasn&apos;t started. Use ＋ to build one by hand.</p>
+        <p className="text-zinc-400 text-sm">
+          No teams yet — the draft hasn&apos;t started.
+          {!bracketGenerated && " Use ＋ to build one by hand."}
+        </p>
       ) : visibleTeams.length === 0 && query.trim() ? (
         <p className="text-zinc-500 text-sm">No teams match &quot;{query}&quot;.</p>
       ) : null}
