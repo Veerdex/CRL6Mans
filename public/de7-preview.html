@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>7-Team DE — Completed</title>
+<style>
+  /* Same hardcoded Tailwind ramps as matchup-preview.html: this file is served
+     straight out of public/ and never sees PostCSS. */
+  :root {
+    --zinc-950:#09090b; --zinc-900:#18181b; --zinc-800:#27272a; --zinc-700:#3f3f46;
+    --zinc-600:#52525b; --zinc-500:#71717a; --zinc-400:#a1a1aa; --zinc-300:#d4d4d8;
+    --emerald-400:#34d399; --indigo-500:#6366f1; --indigo-400:#818cf8;
+    --amber-700:#b45309; --amber-500:#f59e0b; --amber-400:#fbbf24;
+    --red-500:#ef4444; --red-400:#f87171;
+    --cyan-400:#22d3ee; --cyan-300:#67e8f9;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--zinc-950); color: var(--zinc-300);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { display: flex; min-height: 100vh; align-items: flex-start; }
+  .panel {
+    width: 320px; flex: 0 0 320px; padding: 20px 18px; border-right: 1px solid var(--zinc-800);
+    position: sticky; top: 0; max-height: 100vh; overflow-y: auto;
+  }
+  .stage { flex: 1 1 auto; padding: 20px 24px; min-width: 0; }
+  h1 { font-size: 15px; font-weight: 700; color: #fff; margin: 0 0 2px; }
+  .sub { font-size: 11px; color: var(--zinc-500); margin: 0 0 20px; }
+  .group { margin-bottom: 18px; }
+  .group > label.hd, .group > .hd {
+    display: block; font-size: 10px; font-weight: 700; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--zinc-500); margin-bottom: 7px;
+  }
+  .opts { display: flex; flex-direction: column; gap: 4px; }
+  .opts button {
+    display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left; cursor: pointer;
+    background: var(--zinc-900); border: 1px solid var(--zinc-800); border-radius: 8px;
+    padding: 7px 10px; color: var(--zinc-400); font-size: 12px; font-family: inherit;
+  }
+  .opts button:hover { border-color: var(--zinc-700); color: var(--zinc-300); }
+  .opts button[aria-pressed="true"] { background: var(--zinc-800); border-color: var(--indigo-500); color: #fff; }
+  .opts .tag { margin-left: auto; font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .opts .dims { display: block; font-size: 10px; color: var(--zinc-600); font-family: var(--mono); }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--zinc-400); cursor: pointer; margin-bottom: 6px; }
+  .check input { accent-color: var(--indigo-500); }
+  .check.off { opacity: .45; }
+  .zoom { display: flex; gap: 4px; align-items: center; }
+  .zoom button {
+    flex: 1; cursor: pointer; background: var(--zinc-900); border: 1px solid var(--zinc-800);
+    border-radius: 7px; padding: 6px 0; color: var(--zinc-400); font-size: 12px; font-family: inherit;
+  }
+  .zoom button[aria-pressed="true"] { background: var(--zinc-800); border-color: var(--indigo-500); color: #fff; }
+
+  /* ── Readout ───────────────────────────────────────────────────────────────
+     The whole point of the page: the numbers the layout math produces for the
+     selected step, next to the rendering they produce. */
+  table.geo { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 10px; }
+  table.geo th {
+    text-align: right; font-weight: 600; color: var(--zinc-600); padding: 2px 0 4px;
+    border-bottom: 1px solid var(--zinc-800); font-family: ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: .04em;
+  }
+  table.geo th:first-child { text-align: left; }
+  table.geo td { text-align: right; padding: 2px 0; color: var(--zinc-400); }
+  table.geo td:first-child { text-align: left; color: var(--zinc-500); }
+  table.geo td.bad { color: var(--red-400); font-weight: 700; }
+  table.geo td.warn { color: var(--amber-400); font-weight: 700; }
+  table.geo tr.sep td { border-top: 1px solid var(--zinc-800); padding-top: 5px; }
+  .verdict {
+    font-size: 11px; line-height: 1.55; margin-top: 10px;
+    background: var(--zinc-900); border: 1px solid var(--zinc-800); border-left: 2px solid var(--amber-700);
+    border-radius: 0 7px 7px 0; padding: 9px 11px; color: var(--zinc-500);
+  }
+  .verdict.ok { border-left-color: #047857; }
+  .verdict b { color: var(--amber-400); font-weight: 600; }
+  .verdict.ok b { color: var(--emerald-400); }
+  .verdict ul { margin: 5px 0 0; padding-left: 16px; }
+  .verdict li { margin-bottom: 3px; }
+  .verdict code { font-family: var(--mono); font-size: 10px; color: var(--zinc-400); }
+
+  /* ── Legend (bracket-display.tsx Legend) ───────────────────────────────── */
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 12px; height: 12px; border-radius: 4px; border: 1px solid; }
+  .legend span { font-size: 12px; color: var(--zinc-500); }
+
+  /* ── Canvas (bracket-canvas.tsx: fixed 580px window, 24/24 offset) ─────── */
+  .canvas {
+    position: relative; height: 580px; overflow: hidden; border-radius: 12px;
+    border: 1px solid var(--zinc-800); background-color: var(--zinc-950); cursor: grab;
+    user-select: none;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,.04) 1px, transparent 1px);
+  }
+  .canvas.grabbing { cursor: grabbing; }
+  .canvas .hint {
+    position: absolute; top: 12px; left: 12px; font-size: 11px; color: var(--zinc-700);
+    pointer-events: none; z-index: 2;
+  }
+  .canvas .zlabel {
+    position: absolute; bottom: 12px; right: 12px; font-size: 11px; color: var(--zinc-600);
+    font-variant-numeric: tabular-nums; pointer-events: none; z-index: 2;
+  }
+  .cvinner { position: absolute; transform-origin: 0 0; will-change: transform; }
+  .content { padding: 12px; display: flex; flex-direction: column; gap: 32px; }
+
+  /* ── Section / round columns (DESectionView) ───────────────────────────── */
+  .sec { display: flex; flex-direction: column; gap: 8px; }
+  .sectitle { font-size: 12px; font-weight: 600; color: var(--zinc-400); text-transform: uppercase; letter-spacing: .05em; margin: 0; }
+  .secbody { display: flex; }
+  .col { display: flex; flex: 0 0 auto; }
+  .col.inactive, .rcol.inactive { opacity: .4; }
+  .rcol { display: flex; flex-direction: column; width: 210px; }
+  .rhead { height: 36px; display: flex; align-items: center; justify-content: center; }
+  .rhead span { font-size: 12px; font-weight: 600; color: var(--zinc-400); text-transform: uppercase; letter-spacing: .05em; }
+  .rbody { position: relative; flex: 1 1 auto; }
+  .abs { position: absolute; left: 0; }
+  .spacer { flex: 0 0 auto; width: 48px; }
+  svg.conn { flex: 0 0 auto; }
+
+  /* ── Label row above every card ────────────────────────────────────────── */
+  .cardlabel { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; padding: 0 4px; }
+  .idbadge {
+    font-size: 10px; font-weight: 700; color: var(--zinc-400); background: var(--zinc-800);
+    border-radius: 4px; padding: 2px 6px; white-space: nowrap;
+  }
+  .st { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; white-space: nowrap; }
+  /* LiveClock bakes font-mono + tabular-nums into the component itself. */
+  .clock {
+    font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 10px;
+    font-weight: 600; color: var(--cyan-300); white-space: nowrap;
+  }
+
+  /* ── Match card (DEMatchBox) ───────────────────────────────────────────── */
+  .card { width: 210px; border: 1px solid; border-radius: 8px; overflow: hidden; }
+  .teamrow { display: flex; align-items: center; gap: 8px; padding: 2px 8px; }
+  .teamrow.won { background: rgba(255,255,255,.05); border-radius: 4px; margin: 0 4px; }
+  .divider { height: 1px; background: rgba(63,63,70,.5); margin: 0 8px; }
+  .logo { width: 16px; height: 16px; border-radius: 4px; flex: 0 0 auto; object-fit: cover; }
+  .logo.faded { opacity: .4; }
+  .dot { width: 8px; height: 8px; border-radius: 999px; flex: 0 0 auto; background: var(--zinc-400); }
+  .dot.empty { background: var(--zinc-700); }
+  .tname { flex: 1 1 auto; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--zinc-300); }
+  .tname.won { color: #fff; font-weight: 600; }
+  .tname.lost { color: var(--zinc-500); }
+  .tname.feeder { color: var(--zinc-600); font-style: italic; }
+  .score {
+    font-size: 12px; font-family: var(--mono); font-weight: 700; flex: 0 0 auto;
+    width: 16px; text-align: right; color: var(--zinc-500);
+  }
+  .score.won { color: #fff; }
+
+  /* ── Step 3: the full port ─────────────────────────────────────────────────
+     The rows split whatever height is left instead of being pinned to a pixel
+     count, and the crest stretches to the row and bleeds onto the card edge —
+     which the card's own overflow:hidden rounds for us. */
+  .port .card { display: flex; flex-direction: column; }
+  .port .teamrow { flex: 1 1 0; height: auto; min-height: 0; }
+  .port .divider { flex: 0 0 1px; margin: 0; }
+  .port .teamrow.won { margin: 0; border-radius: 0; }
+  .port .logo {
+    align-self: stretch; width: auto; height: auto; aspect-ratio: 1;
+    border-radius: 0; margin-left: -8px;
+  }
+  /* Opt-in: the no-crest fallback stretched the same way, so an 8px dot isn't
+     sitting beside a 45px crest on the row below it. */
+  .port.stretchdot .dot {
+    align-self: stretch; width: auto; height: auto; aspect-ratio: 1;
+    border-radius: 0; margin-left: -8px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>7-Team Double Elimination</h1>
+    <p class="sub">
+      15 matches, played to completion through the real bracket helpers.
+      <a href="/matchup-preview.html" style="color:var(--indigo-400)">single-card sandbox &rarr;</a>
+    </p>
+
+    <div class="group">
+      <label class="hd">Card format</label>
+      <div class="opts" id="steps"></div>
+    </div>
+
+    <div class="group">
+      <label class="hd">How it finished</label>
+      <div class="opts" id="finishes"></div>
+    </div>
+
+    <div class="group">
+      <label class="hd">Crests</label>
+      <label class="check"><input type="checkbox" id="allCrests" /> Give all 7 teams a crest</label>
+      <label class="check" id="stretchDotLabel"><input type="checkbox" id="stretchDot" /> Stretch the no-crest dot too</label>
+    </div>
+
+    <div class="group">
+      <label class="hd">Live clock</label>
+      <label class="check"><input type="checkbox" id="live" /> Rewind the deciding match to live</label>
+      <div class="opts" id="elapsed"></div>
+    </div>
+
+    <div class="group">
+      <label class="hd">Zoom</label>
+      <div class="zoom" id="zoom"></div>
+    </div>
+
+    <div class="group">
+      <div class="hd">Layout math</div>
+      <table class="geo" id="geo"></table>
+      <div class="verdict" id="verdict"></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="legend" id="legend"></div>
+    <div class="canvas" id="canvas">
+      <p class="hint">Drag to pan &middot; scroll to zoom</p>
+      <div class="cvinner" id="cvinner"><div class="content" id="content"></div></div>
+      <p class="zlabel" id="zlabel"></p>
+    </div>
+  </div>
+</div>
+<script src="/de7-data.js"></script>
+<script src="/de7-preview.js"></script>
+</body>
+</html>
