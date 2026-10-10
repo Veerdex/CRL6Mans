@@ -20,7 +20,7 @@ import {
   buildAndSaveSwissFromGroupsHybrid8,
   buildAndSaveHybrid8FromSwiss,
 } from "@/app/lib/bracket-server";
-import { openReadyMatchChannels, stampOpeningRoundTime, voidAllPendingWagers } from "@/app/lib/discord-bot";
+import { BRACKET_PREGEN_LEAD_MS, openReadyMatchChannels, stampOpeningRoundTime, voidAllPendingWagers } from "@/app/lib/discord-bot";
 
 // Director-gated stage/round advance: runs the bracket-server builder, then opens
 // Discord channels for any newly-ready matches (so rounds flow without /openround).
@@ -100,9 +100,13 @@ export async function generateBracketForSeason(): Promise<{ error?: string; ok?:
   const result = await buildAndSaveBracket();
 
   // The rebuild gives the opening round new match IDs, so the stamp
-  // execPregenerateBracket wrote died with the old rows. Re-apply it while the start
-  // is still ahead: a tournament has no other source of scheduled_at, so a regenerate
-  // inside the pre-generation window would otherwise end round-1 betting for good.
+  // execPregenerateBracket wrote died with the old rows. Re-apply it, or a regenerate
+  // inside the pre-generation window would end round-1 betting for good — a tournament
+  // has no other writer of scheduled_at.
+  //
+  // Only inside that window: a tournament is active from signups onward, so a director
+  // generating by hand days early would otherwise open betting for days on a bracket
+  // that the real pre-generation run will delete and reseed underneath it.
   if (result.ok) {
     const { data: settings } = await supabaseAdmin
       .from("league_settings").select("active_tournament_id").single();
@@ -111,7 +115,10 @@ export async function generateBracketForSeason(): Promise<{ error?: string; ok?:
         .from("tournaments").select("season_start_at")
         .eq("id", settings.active_tournament_id).maybeSingle();
       const startAt = tournament?.season_start_at as string | null | undefined;
-      if (startAt && new Date(startAt).getTime() > Date.now()) await stampOpeningRoundTime(startAt);
+      const msUntilStart = startAt ? new Date(startAt).getTime() - Date.now() : -1;
+      if (startAt && msUntilStart > 0 && msUntilStart <= BRACKET_PREGEN_LEAD_MS) {
+        await stampOpeningRoundTime(startAt);
+      }
     }
   }
 

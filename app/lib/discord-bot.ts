@@ -1700,6 +1700,11 @@ const GROUP_PRESETS = new Set(["group_single_elimination", "group_swiss_single_e
  * replaced by the admin Scheduling panel (round_schedules table).
  */
 
+// How far ahead of a tournament's first matches the bracket is built, and so also
+// how long the opening round is bettable. Lives here rather than in the scheduler
+// route because the manual regenerate path has to honour the same window.
+export const BRACKET_PREGEN_LEAD_MS = 30 * 60 * 1000;
+
 /**
  * Builds the bracket ahead of the start time without starting the event.
  *

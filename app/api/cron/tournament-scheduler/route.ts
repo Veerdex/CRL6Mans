@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
-import { execStartDraft, execAutoBalanceTeams, execStartSeason, execPregenerateBracket, execFinalizeTeamSignups, processExpiredCheckIns, processExpiredScoreConfirmations, openReadyMatchChannels } from "@/app/lib/discord-bot";
+import { execStartDraft, execAutoBalanceTeams, execStartSeason, execPregenerateBracket, execFinalizeTeamSignups, processExpiredCheckIns, processExpiredScoreConfirmations, openReadyMatchChannels, BRACKET_PREGEN_LEAD_MS } from "@/app/lib/discord-bot";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft, pushToTournamentEntrants, pushToTournamentRoster, pushToRosteredPlayers } from "@/app/lib/push";
 import { freezeUnfrozenMatchPredictions } from "@/app/lib/match-predictions";
 import { cleanupOrphanedVerificationReplays } from "@/app/lib/platform-account-cleanup";
@@ -11,9 +11,6 @@ export const runtime = "nodejs";
 // Draft start / team finalize can do many sequential Discord role calls, so give
 // it well beyond the old 60s ceiling.
 export const maxDuration = 300;
-
-// How far ahead of a tournament's first matches the bracket is built.
-const BRACKET_PREGEN_LEAD_MS = 30 * 60 * 1000;
 
 // Runs frequently (external pinger every minute) to advance tournaments through
 // their lifecycle. "Open to join" (signups_open) is independent of the single
