@@ -20,7 +20,7 @@ import {
   buildAndSaveSwissFromGroupsHybrid8,
   buildAndSaveHybrid8FromSwiss,
 } from "@/app/lib/bracket-server";
-import { openReadyMatchChannels } from "@/app/lib/discord-bot";
+import { openReadyMatchChannels, voidAllPendingWagers } from "@/app/lib/discord-bot";
 
 // Director-gated stage/round advance: runs the bracket-server builder, then opens
 // Discord channels for any newly-ready matches (so rounds flow without /openround).
@@ -90,6 +90,12 @@ export async function generateBracketForSeason(): Promise<{ error?: string; ok?:
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
+
+  // Regenerating deletes every stage match, so any bet standing against one can
+  // never settle — nothing will ever report a match row that no longer exists.
+  // Refund them here rather than inside buildAndSaveBracket, which cannot import
+  // discord-bot without closing a cycle.
+  await voidAllPendingWagers();
 
   const result = await buildAndSaveBracket();
   revalidatePath("/dashboard/season");
