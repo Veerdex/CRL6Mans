@@ -8,6 +8,7 @@ import { isModeratorVerified } from "@/app/lib/players";
 import { execReportMatchResult, getBestOfForMatch, validateSeriesScore } from "@/app/lib/discord-bot";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { parseReplay } from "@/app/lib/replay-parser";
+import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
 import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
 import { recordStaffAction } from "@/app/lib/staff-contributions";
@@ -78,8 +79,9 @@ export async function adminAnalyzeGameReplay(
   if (!file) return { error: "No file provided" };
   if (!file.name.toLowerCase().endsWith(".replay"))
     return { error: "File must be a .replay file" };
-  if (file.size > 5 * 1024 * 1024)
-    return { error: "File too large (max 5 MB)" };
+  // A backstop; Vercel 413s the request before this runs. See upload-limits.ts.
+  if (file.size > MAX_REPLAY_BYTES)
+    return { error: `File too large (max ${MAX_REPLAY_LABEL})` };
 
   let replayData;
   try {

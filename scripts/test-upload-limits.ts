@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, HEIC_MESSAGE,
+  MAX_REPLAY_BYTES, MAX_REPLAY_LABEL, REPLAY_TYPE_MESSAGE,
   IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, IMAGE_TYPES, DOCUMENT_TYPES,
-  checkUploadFile, formatBytes, fileExtension, isHeicFile, resolveUploadType,
+  checkUploadFile, checkReplayFile, formatBytes, fileExtension, isHeicFile, resolveUploadType,
 } from "../app/lib/upload-limits";
 
 // A File of a given size without allocating the bytes twice.
@@ -12,18 +13,49 @@ function fileOf(bytes: number, name: string, type = ""): File {
 }
 
 // The platform ceiling, from vercel.com/docs/functions/limitations: a Vercel
-// Function 413s any request body over this before the handler runs. Our limit
+// Function 413s any request body over this before the handler runs. Our limits
 // must sit under it with room for the rest of the multipart body, or an
 // oversized file throws out of the server action instead of being rejected —
 // which is the bug this module exists to prevent.
-const VERCEL_BODY_CAP = 4.5 * 1024 * 1024;
+//
+// Read as decimal MB, the smaller of the two readings of "4.5 MB". Assuming MiB
+// and being wrong would put a limit above the real cap and make it inert again.
+const VERCEL_BODY_CAP = 4_500_000;
 
-test("the limit stays under Vercel's request body cap", () => {
-  assert.ok(MAX_UPLOAD_BYTES < VERCEL_BODY_CAP,
-    `${MAX_UPLOAD_BYTES} must be below the ${VERCEL_BODY_CAP} byte cap`);
-  // enough headroom for the other form fields and multipart encoding
-  assert.ok(VERCEL_BODY_CAP - MAX_UPLOAD_BYTES >= 256 * 1024,
-    "leave at least 256 KB for the rest of the body");
+test("both limits stay under Vercel's request body cap", () => {
+  for (const [name, limit] of [["upload", MAX_UPLOAD_BYTES], ["replay", MAX_REPLAY_BYTES]] as const) {
+    assert.ok(limit < VERCEL_BODY_CAP, `${name} limit ${limit} must be below ${VERCEL_BODY_CAP}`);
+    // The rest of a multipart body is the field names and boundaries — a few KB
+    // for the largest of these forms. 64 KB is already generous.
+    assert.ok(VERCEL_BODY_CAP - limit >= 64 * 1024,
+      `${name} limit leaves only ${VERCEL_BODY_CAP - limit} bytes for the rest of the body`);
+  }
+});
+
+// A replay is whatever the game wrote, so the limit sits near the cap: anything
+// it refuses, the platform would have refused too. A tighter one would reject
+// replays that upload successfully today, since the old server check was 5 MB.
+test("the replay limit only refuses what the platform would refuse", () => {
+  assert.ok(MAX_REPLAY_BYTES > MAX_UPLOAD_BYTES, "replays get the more generous limit");
+  assert.ok(MAX_REPLAY_BYTES >= 4_000_000,
+    "a replay that fits in a deliverable request body must not be refused");
+});
+
+test("the replay gate matches the server's extension check", () => {
+  assert.equal(checkReplayFile(fileOf(1000, "match.replay")), null);
+  // the server actions lowercase first; endsWith(".replay") did not
+  assert.equal(checkReplayFile(fileOf(1000, "MATCH.REPLAY")), null);
+  assert.equal(checkReplayFile(fileOf(1000, "match.replay.txt")), REPLAY_TYPE_MESSAGE);
+  assert.equal(checkReplayFile(fileOf(1000, "clip.mp4")), REPLAY_TYPE_MESSAGE);
+  assert.equal(checkReplayFile(fileOf(1000, "match")), REPLAY_TYPE_MESSAGE);
+});
+
+test("the replay gate accepts at the limit and names the size over it", () => {
+  assert.equal(checkReplayFile(fileOf(MAX_REPLAY_BYTES, "match.replay")), null);
+  const over = checkReplayFile(fileOf(MAX_REPLAY_BYTES + 1, "match.replay"));
+  assert.ok(over?.includes(MAX_REPLAY_LABEL), `should name the limit: ${over}`);
+  assert.ok(checkReplayFile(fileOf(5 * 1000 * 1000, "match.replay"))?.includes("5.0 MB"),
+    "should state the file's actual size");
 });
 
 test("accepts a file at the limit and rejects one byte over", () => {
@@ -35,7 +67,7 @@ test("accepts a file at the limit and rejects one byte over", () => {
 });
 
 test("the oversize message names the file's own size", () => {
-  const msg = checkUploadFile(fileOf(6 * 1024 * 1024, "huge.png", "image/png"));
+  const msg = checkUploadFile(fileOf(6 * 1000 * 1000, "huge.png", "image/png"));
   assert.ok(msg?.includes("6.0 MB"), `message should state the actual size: ${msg}`);
 });
 
@@ -90,9 +122,13 @@ test("resolveUploadType returns the type the server will store under", () => {
 });
 
 test("helpers", () => {
-  assert.equal(formatBytes(1024 * 1024), "1.0 MB");
+  // Decimal MB, so a limit set in round decimal bytes renders as the label it
+  // is advertised under — "4 MB" for 4,000,000, not MiB's "3.8 MB".
+  assert.equal(formatBytes(1_000_000), "1.0 MB");
   assert.equal(formatBytes(MAX_UPLOAD_BYTES), "4.0 MB");
+  assert.equal(formatBytes(MAX_REPLAY_BYTES), "4.4 MB");
   assert.equal(MAX_UPLOAD_LABEL, formatBytes(MAX_UPLOAD_BYTES).replace(".0", ""));
+  assert.equal(MAX_REPLAY_LABEL, formatBytes(MAX_REPLAY_BYTES));
   assert.equal(fileExtension("screenshot"), "");
   assert.equal(fileExtension("a.b.PNG"), "png");
   assert.ok(isHeicFile({ name: "x.heic" }) && isHeicFile({ name: "x.HEIF" }));

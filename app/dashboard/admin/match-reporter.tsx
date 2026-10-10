@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useTransition, useRef, useCallback } from "react";
 import { reportMatchResult, dqTeamFromMatch, adminAnalyzeGameReplay, type AnalyzedGameStat, type SubmittedGame } from "./match-actions";
+import { checkReplayFile, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 
 export type PlayerOption = { id: string; label: string };
 
@@ -104,6 +105,19 @@ function ReplaySection({
 
   const processFile = useCallback(
     async (file: File, slotIndex: number, overrides: Record<string, string>) => {
+      // Before the upload: a body over 4.5 MB is 413'd before the action runs,
+      // so an oversized replay surfaced as a bare fetch failure instead of a
+      // message about the file.
+      const problem = checkReplayFile(file);
+      if (problem) {
+        setSlots((prev) => {
+          const next = [...prev];
+          next[slotIndex] = { status: "error", message: problem };
+          return next;
+        });
+        return;
+      }
+
       setSlots((prev) => {
         const next = [...prev];
         next[slotIndex] = { status: "analyzing" };
@@ -254,6 +268,7 @@ function ReplaySection({
               {slot.status === "idle" && (
                 <span className="text-zinc-400">
                   Drop <span className="font-mono text-indigo-300">.replay</span> or click to browse
+                  <span className="text-zinc-600"> · max {MAX_REPLAY_LABEL}</span>
                 </span>
               )}
 

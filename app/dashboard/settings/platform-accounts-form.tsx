@@ -8,6 +8,7 @@ import {
   withdrawPlatformAccount,
   type ClaimReplayCandidate,
 } from "./platform-account-actions";
+import { checkReplayFile, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 
 export type ClaimablePlatform = "steam" | "epic" | "playstation" | "xbox" | "switch";
 
@@ -159,15 +160,29 @@ function UnifiedClaimCard({ alert }: { alert: boolean }) {
     setReplayPath(null);
     setSelectedIndex(null);
 
+    // Before the file is sent, not after: Vercel 413s a body over 4.5 MB before
+    // the action is entered, so an oversized replay made previewClaimReplay
+    // throw inside the transition and took the page to the error boundary.
+    const problem = checkReplayFile(file);
+    if (problem) {
+      setPreviewError(problem);
+      e.target.value = "";
+      return;
+    }
+
     const fd = new FormData();
     fd.set("verification_replay", file);
     startPreview(async () => {
-      const res = await previewClaimReplay(undefined, fd);
-      if (res.error) {
-        setPreviewError(res.error);
-      } else {
-        setReplayPath(res.replayPath ?? null);
-        setCandidates(res.candidates ?? []);
+      try {
+        const res = await previewClaimReplay(undefined, fd);
+        if (res.error) {
+          setPreviewError(res.error);
+        } else {
+          setReplayPath(res.replayPath ?? null);
+          setCandidates(res.candidates ?? []);
+        }
+      } catch {
+        setPreviewError("Couldn't upload that replay. Check your connection and try again.");
       }
     });
     e.target.value = "";
@@ -210,7 +225,9 @@ function UnifiedClaimCard({ alert }: { alert: boolean }) {
       </p>
 
       <div className="space-y-1">
-        <label className="block text-xs font-medium text-zinc-400">Replay file (.replay)</label>
+        <label className="block text-xs font-medium text-zinc-400">
+          Replay file (.replay) · max {MAX_REPLAY_LABEL}
+        </label>
         <input
           type="file"
           accept=".replay"

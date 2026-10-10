@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { analyzeReplayFile } from "./actions";
+import { checkReplayFile, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 import type { ReplayAnalysis, PlayerMatchInfo } from "./actions";
 
 export function ReplayTester() {
@@ -13,7 +14,19 @@ export function ReplayTester() {
   const inputRef = useRef<HTMLInputElement>(null);
   const pendingFileRef = useRef<File | null>(null);
 
+  // Both the picker and the drop zone come through here, so the check only has
+  // to exist once. It has to happen before submit: Vercel 413s a body over
+  // 4.5 MB before the action runs, so an oversized replay rejected the request
+  // rather than returning the error the action would have.
   function loadFile(file: File) {
+    const problem = checkReplayFile(file);
+    if (problem) {
+      pendingFileRef.current = null;
+      setFilename(null);
+      setResult(null);
+      setError(problem);
+      return;
+    }
     pendingFileRef.current = file;
     setFilename(file.name);
     setResult(null);
@@ -31,11 +44,17 @@ export function ReplayTester() {
 
     const fd = new FormData();
     fd.append("replay", file);
-    const res = await analyzeReplayFile(fd);
-
-    setLoading(false);
-    if (res.error) setError(res.error);
-    else if (res.data) setResult(res.data);
+    // finally, not just catch: a request that fails before the action runs left
+    // the button reading "Analyzing…" with nothing to clear it.
+    try {
+      const res = await analyzeReplayFile(fd);
+      if (res.error) setError(res.error);
+      else if (res.data) setResult(res.data);
+    } catch {
+      setError("Couldn't upload that replay. Check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -86,7 +105,7 @@ export function ReplayTester() {
           ) : (
             <>
               <p className="text-sm text-zinc-400">Drag & drop or click to select a <span className="text-white">.replay</span> file</p>
-              <p className="text-xs text-zinc-600 mt-1">Max 5 MB</p>
+              <p className="text-xs text-zinc-600 mt-1">Max {MAX_REPLAY_LABEL}</p>
             </>
           )}
         </div>

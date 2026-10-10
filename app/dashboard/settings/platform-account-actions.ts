@@ -7,13 +7,13 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { isCurrentlyKicked } from "@/app/lib/players";
 import { parseReplay, type ReplayPlatform } from "@/app/lib/replay-parser";
+import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 
 const CLAIMABLE_PLATFORMS = ["steam", "epic", "playstation", "xbox", "switch"] as const;
 type ClaimablePlatform = typeof CLAIMABLE_PLATFORMS[number];
 
 const ACTIVE_STATUSES = ["claimed", "pending_verification", "verified"];
 
-const MAX_REPLAY_BYTES = 5 * 1024 * 1024;
 const MAX_REPLAY_AGE_DAYS = 30;
 
 export type ClaimReplayCandidate = {
@@ -88,7 +88,8 @@ export async function previewClaimReplay(
   const file = formData.get("verification_replay") as File | null;
   if (!file || file.size === 0) return { error: "Upload a .replay file from a match you played." };
   if (!file.name.toLowerCase().endsWith(".replay")) return { error: "File must be a .replay file." };
-  if (file.size > MAX_REPLAY_BYTES) return { error: "Replay file must be 5 MB or smaller." };
+  // A backstop; Vercel 413s the request before this runs. See upload-limits.ts.
+  if (file.size > MAX_REPLAY_BYTES) return { error: `Replay file must be ${MAX_REPLAY_LABEL} or smaller.` };
 
   const bytes = Buffer.from(await file.arrayBuffer());
 

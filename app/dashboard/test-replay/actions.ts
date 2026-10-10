@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { getPlayerInfo } from "@/app/lib/players";
 import { parseReplay } from "@/app/lib/replay-parser";
+import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
 import { fetchGlobalVerifiedAccounts } from "@/app/lib/replay-identity-context";
@@ -60,8 +61,10 @@ export async function analyzeReplayFile(
   if (!file) return { error: "No file provided." };
   if (!file.name.toLowerCase().endsWith(".replay"))
     return { error: "File must be a Rocket League .replay file." };
-  if (file.size > 5 * 1024 * 1024)
-    return { error: "File too large (max 5 MB)." };
+  // A backstop. Vercel 413s a body over 4.5 MB before this runs, so the browser
+  // has to reject an oversized replay first — checkReplayFile in upload-limits.
+  if (file.size > MAX_REPLAY_BYTES)
+    return { error: `File too large (max ${MAX_REPLAY_LABEL}).` };
 
   let replayData;
   try {

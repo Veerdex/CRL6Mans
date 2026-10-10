@@ -9,6 +9,7 @@ import { roleMention, notifyMatchChannel } from "@/app/lib/match-notifications";
 import { pushToAdmins } from "@/app/lib/push";
 import { getBestOfForMatch, validateSeriesScore, processExpiredScoreConfirmations, finalizeAcceptedSeries } from "@/app/lib/discord-bot";
 import { parseReplay } from "@/app/lib/replay-parser";
+import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
 import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
 import { evaluateAndPersistGameCertification, resolveSubmittedGames, resolvePlatformIdMatches } from "@/app/lib/replay-identity-certification";
@@ -263,8 +264,9 @@ export async function uploadGameReplay(
   if (!file) return { error: "No file provided" };
   if (!file.name.toLowerCase().endsWith(".replay"))
     return { error: "File must be a .replay file" };
-  if (file.size > 5 * 1024 * 1024)
-    return { error: "File too large (max 5 MB)" };
+  // A backstop; Vercel 413s the request before this runs. See upload-limits.ts.
+  if (file.size > MAX_REPLAY_BYTES)
+    return { error: `File too large (max ${MAX_REPLAY_LABEL})` };
 
   let replayData;
   let replayBytes: Buffer;

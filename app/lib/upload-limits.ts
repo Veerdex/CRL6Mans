@@ -9,10 +9,24 @@
 // unreachable for an oversized file — the request never arrives — which is why
 // every form has to check it in the browser before submitting.
 //
+// Bytes here are decimal MB, matching the conservative reading of the 4.5 MB in
+// Vercel's docs — if it means 4,500,000 and we had assumed MiB, the limit would
+// sit above the cap and be inert again.
+//
 // 4 MB rather than 4.5: the limit is on the whole multipart body, so the other
-// form fields and the encoding overhead count against it too.
-export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+// form fields and the encoding overhead count against it too. An image can
+// afford that slack — 4 MB is already absurd for a 96px crest, and a player can
+// re-export a smaller one.
+export const MAX_UPLOAD_BYTES = 4_000_000;
 export const MAX_UPLOAD_LABEL = "4 MB";
+
+// A replay gets its own, closer to the cap, because it is not something a player
+// can compress or re-export — it is whatever the game wrote. Set here, the only
+// replays refused are ones the platform would refuse anyway, so no file that
+// uploads today stops working. The four server actions that parse replays all
+// carried their own unreachable 5 MB check; they read this now.
+export const MAX_REPLAY_BYTES = 4_400_000;
+export const MAX_REPLAY_LABEL = "4.4 MB";
 
 // Raster image types only. SVG is intentionally excluded — it can carry
 // embedded <script>, and these files land in public Supabase buckets.
@@ -55,7 +69,7 @@ export const HEIC_MESSAGE =
   "or switch Settings → Camera → Formats to \"Most Compatible\" and retake it.";
 
 export function formatBytes(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
 
 export function fileExtension(name: string): string {
@@ -88,6 +102,24 @@ export function resolveUploadType(
 
   const guessed = TYPE_BY_EXT[fileExtension(file.name ?? "")];
   return guessed && allowed[guessed] ? guessed : null;
+}
+
+export const REPLAY_TYPE_MESSAGE =
+  "That isn't a .replay file. Rocket League saves them under " +
+  "Documents\\My Games\\Rocket League\\TAGame\\Demos.";
+
+// Replays take no allowlist — there is one extension, and the parser in
+// replay-parser.ts is the authority on whether the bytes are really a replay.
+export function checkReplayFile(file: File): string | null {
+  // Lower-cased, like all four server actions. `endsWith(".replay")` — which is
+  // what series-replay-panel checked locally — refuses a .REPLAY they accept.
+  if (fileExtension(file.name) !== "replay") return REPLAY_TYPE_MESSAGE;
+
+  if (file.size > MAX_REPLAY_BYTES) {
+    return `That replay is ${formatBytes(file.size)}. It must be ${MAX_REPLAY_LABEL} or smaller.`;
+  }
+
+  return null;
 }
 
 // Shared browser-side gate. Returns the message to show, or null to accept.

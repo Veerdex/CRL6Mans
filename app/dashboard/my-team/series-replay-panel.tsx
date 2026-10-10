@@ -10,6 +10,7 @@ import {
   processScoreConfirmationsNow,
 } from "./series-actions";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
+import { checkReplayFile, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 
 const TOURNAMENT_SCORE_CONFIRM_WINDOW_MS = 5 * 60 * 1000;
 const SEASON_SCORE_CONFIRM_WINDOW_MS = 15 * 60 * 1000;
@@ -537,10 +538,14 @@ export function SeriesReplayPanel({
   const handleFile = useCallback(async (file: File, slotIndex: number) => {
     if (!matchId) return;
 
-    if (!file.name.endsWith(".replay")) {
+    // Shared with the server actions, so a .REPLAY isn't refused here and
+    // accepted there, and so an oversized replay gets a message naming its size
+    // rather than the "Analysis failed" a 413 produced.
+    const problem = checkReplayFile(file);
+    if (problem) {
       setSlots(prev => {
         const next = [...prev];
-        next[slotIndex] = { status: "error", message: "File must be a .replay" };
+        next[slotIndex] = { status: "error", message: problem };
         return next;
       });
       return;
@@ -948,6 +953,7 @@ export function SeriesReplayPanel({
                 {isWaiting && (
                   <span className="text-xs text-zinc-400 flex-1">
                     Drop <span className="font-mono text-indigo-300">.replay</span> here or click to browse
+                    <span className="text-zinc-600"> · max {MAX_REPLAY_LABEL}</span>
                   </span>
                 )}
 
