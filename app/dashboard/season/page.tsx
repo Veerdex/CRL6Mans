@@ -26,7 +26,8 @@ export default async function SeasonPage() {
       .from("league_settings")
       .select("season_format, season_participants, season_active, num_teams, active_tournament_id")
       .single(),
-    supabaseAdmin.from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null),
+    supabaseAdmin.from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null)
+      .eq("status", "scheduled"),
   ]);
   const myTeamId: string | null = (me?.team_id as string | null) ?? null;
 
@@ -37,6 +38,9 @@ export default async function SeasonPage() {
   // and standings tabs key off the bracket existing rather than the event having
   // started — otherwise the whole point of settling the seeding early is invisible.
   // The "in progress" badge below stays on seasonActive, because it isn't yet.
+  // Only "scheduled" rows count: a finished event's matches stay "completed" until
+  // the next build deletes them and pre-created downstream slots sit at "pending",
+  // so anything looser would show the last event's bracket as the current one.
   const bracketLive = seasonActive || !!bracketMatchCount;
   const numTeams = (settings?.num_teams as number) ?? 0;
   const isTournament = !!settings?.active_tournament_id;

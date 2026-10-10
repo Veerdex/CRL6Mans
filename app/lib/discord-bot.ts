@@ -1808,12 +1808,15 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   // any reseeding or swapping the admin did during that window. Both conditions
   // are required — the stamp alone would skip the build for an event whose
   // matches were since wiped, leaving a live season with no bracket at all.
+  // Counts "scheduled" only: a pre-created downstream slot sits at "pending" and a
+  // bye is inserted "completed", so neither alone proves a bracket was built.
   const preGeneratedId = settings?.active_tournament_id as string | null;
   let preGenerated = false;
   if (preGeneratedId) {
     const [{ data: tRow }, { count: existingBracketMatches }] = await Promise.all([
       supabaseAdmin.from("tournaments").select("bracket_generated_at").eq("id", preGeneratedId).maybeSingle(),
-      supabaseAdmin.from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null).neq("status", "completed"),
+      supabaseAdmin.from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null)
+        .eq("status", "scheduled"),
     ]);
     preGenerated = !!tRow?.bracket_generated_at && !!existingBracketMatches;
   }
@@ -1823,19 +1826,29 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   // entries, and on the pre-generated path execPregenerateBracket already did it
   // 30 minutes ago. Repeating it here would delete the times the admin set during
   // that window.
-  if (!preGenerated) await supabaseAdmin.from("round_schedules").delete().not("id", "is", null);
+  // The build below deletes every stage match, and a bet whose match row is gone
+  // can never settle — the stake was debited when it was placed. Reachable with
+  // real action on it: a director who generated the bracket by hand from the Season
+  // tab and timed a round opens betting without ever stamping bracket_generated_at,
+  // so the start rebuilds over it. Refunded before season_active is written, so a
+  // failure here aborts outside the window where a live season has no bracket.
+  if (!preGenerated) {
+    await supabaseAdmin.from("round_schedules").delete().not("id", "is", null);
+    await voidAllPendingWagers();
+  }
 
   await supabaseAdmin.from("league_settings")
     .update({ season_active: true, round1_manual_start_pending: true, updated_at: new Date().toISOString() })
     .not("id", "is", null);
 
   // Teams a format's size limit left out. The build reports them; a pre-generated
-  // bracket reports them by omission, so count the teams it actually seeded —
+  // bracket reports them by omission, so count the teams it actually seeded
+  // (completed rows included — a bye is inserted completed and still seats a team) —
   // which keeps `playing` below equal to the field either way.
   let cutTeams = 0;
   if (preGenerated) {
     const { data: seeded } = await supabaseAdmin
-      .from("matches").select("home_team_id, away_team_id").not("stage", "is", null).neq("status", "completed");
+      .from("matches").select("home_team_id, away_team_id").not("stage", "is", null);
     const seededIds = new Set<string>();
     (seeded ?? []).forEach((m) => {
       if (m.home_team_id) seededIds.add(m.home_team_id as string);
@@ -1843,13 +1856,6 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
     });
     cutTeams = Math.max(0, numTeams - seededIds.size);
   } else {
-    // The build deletes every stage match first, and a bet whose match row is
-    // gone can never settle — the stake was debited when it was placed. Reachable
-    // with real action on it: a director who generated the bracket by hand from
-    // the Season tab and timed a round opens betting without ever stamping
-    // bracket_generated_at, so the start rebuilds over it.
-    await voidAllPendingWagers();
-
     const bracketResult = await buildAndSaveBracket();
     if (!bracketResult.ok) {
       // Roll back season_active so the admin knows something went wrong

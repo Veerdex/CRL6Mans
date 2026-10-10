@@ -29,12 +29,17 @@ export default async function TeamsPage({
       .eq("status", "approved")
       .not("team_id", "is", null),
     supabaseAdmin.from("league_settings").select("active_tournament_id, season_active, team_size, draft_open, draft_active").single(),
-    supabaseAdmin.from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null),
+    supabaseAdmin.from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null)
+      .eq("status", "scheduled"),
   ]);
 
   // Whether a bracket exists, which decides if a team card's red action removes
   // the team or disqualifies it. Same predicate removeTeam gates on — if the two
-  // drift the button offers an action the server refuses.
+  // drift the button offers an action the server refuses. "scheduled" is what makes
+  // it a live bracket: a finished event keeps its matches until the next build
+  // deletes them (completed), and the group/Swiss/DE formats pre-create their
+  // downstream rows teamless (pending) — counting either would leave the bracket
+  // reading as generated between events, hiding ＋ and refusing createTeam.
   const bracketGenerated = !!bracketMatchCount;
 
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;

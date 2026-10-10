@@ -213,7 +213,7 @@ export default async function AdminPage() {
     supabaseAdmin.from("tournaments").select("*").order("created_at", { ascending: false }),
     supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
     supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar, status, ban_reason, kick_reason, kicked_until, created_at, is_guest").order("username"),
-    supabaseAdmin.from("matches").select("stage, round, discord_channel_id"),
+    supabaseAdmin.from("matches").select("stage, round, discord_channel_id, status"),
     supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2"),
     getPublicSponsors(),
     getPublicDesigns(),
@@ -824,7 +824,11 @@ export default async function AdminPage() {
   // isRoundLocked refuses to edit it. Setting a round's time is also what makes its
   // matches bettable — syncRoundMatchPins stamps scheduled_at — so the wagers tab
   // has nothing to offer on round 1 until this panel is reachable before the start.
-  const bracketExists = (allMatchStages ?? []).some((m) => m.stage != null);
+  // "scheduled" is what makes it a live bracket, the same predicate the Teams tab
+  // uses: a finished event keeps its matches as "completed" until the next build
+  // deletes them, and pre-created downstream slots sit at "pending" — counting
+  // either would leave this panel open on an event that is over.
+  const bracketExists = (allMatchStages ?? []).some((m) => m.stage != null && m.status === "scheduled");
   const schedulingVisible = !!settings?.season_active || bracketExists;
   const [{ data: roundScheduleRows }, { data: schedulerMatchRows }] = await Promise.all([
     schedulingVisible

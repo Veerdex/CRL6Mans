@@ -399,8 +399,12 @@ export async function removeTeam(teamId: string) {
   // Deliberately "any bracket at all" rather than "this team holds a match": the
   // qualifier formats pre-create downstream stages with empty slots and fill the
   // seeds in later, so a team can be in a live bracket with no row of its own yet.
+  // Only "scheduled" rows count — those pre-created slots sit at "pending" until a
+  // team lands in one, and a finished event's rows stay "completed" in the table
+  // until the next build deletes them.
   const { count: bracketMatches } = await supabaseAdmin
-    .from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null);
+    .from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null)
+    .eq("status", "scheduled");
   if (bracketMatches) return { error: "The bracket is generated — disqualify the team instead." };
 
   const { data: settings } = await supabaseAdmin
@@ -576,8 +580,12 @@ export async function createTeam(playerIds: string[]) {
   // "add a team" would really mean "rebuild the bracket" — and a bracket is now
   // built up to 30 minutes before the first matches, so this closes at the same
   // moment the admin's seeding does. Swapping a player in stays available.
+  // Only "scheduled" rows are a bracket to protect: a finished event's matches
+  // linger as "completed" (completeTournament doesn't delete them) and pre-created
+  // downstream slots sit at "pending".
   const { count: bracketMatches } = await supabaseAdmin
-    .from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null);
+    .from("matches").select("*", { count: "exact", head: true }).not("stage", "is", null)
+    .eq("status", "scheduled");
   if (bracketMatches)
     return { error: "The bracket is generated — swap a player in instead of adding a team." };
 
