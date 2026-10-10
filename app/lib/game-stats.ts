@@ -3,7 +3,9 @@ import { isCurrentlyKicked } from "@/app/lib/players";
 import { fetchAllRows } from "@/app/lib/paginate";
 
 export type TopStatAccolade = { label: string; playerName: string; value: string; isMvp: boolean };
-export type TopStats = { accolades: TopStatAccolade[]; mvpUsername: string | null };
+// mvpPlayerId is what consumers should join on; mvpUsername is kept because
+// events archived before it existed have nothing else to go on.
+export type TopStats = { accolades: TopStatAccolade[]; mvpUsername: string | null; mvpPlayerId: string | null };
 
 type Agg = {
   username: string;
@@ -89,7 +91,7 @@ export async function computeTopStats(): Promise<TopStats> {
     return bestId ? { id: bestId, agg: agg.get(bestId)!, value: bestVal } : null;
   };
 
-  if (entries.length === 0) return { accolades: [], mvpUsername: null };
+  if (entries.length === 0) return { accolades: [], mvpUsername: null, mvpPlayerId: null };
 
   const mvp = leader(mvpScore);
   const points = leader((a) => (a.games > 0 ? a.score / a.games : 0));
@@ -99,9 +101,11 @@ export async function computeTopStats(): Promise<TopStats> {
 
   const accolades: TopStatAccolade[] = [];
   let mvpUsername: string | null = null;
+  let mvpPlayerId: string | null = null;
 
   if (mvp) {
     mvpUsername = usernameById[mvp.id] ?? null;
+    mvpPlayerId = mvp.id;
     accolades.push({ label: "MVP", playerName: mvp.agg.username, value: mvp.value.toFixed(3), isMvp: true });
   }
   if (points) accolades.push({ label: "Points Per Game", playerName: points.agg.username, value: Math.round(points.value).toString(), isMvp: false });
@@ -109,5 +113,5 @@ export async function computeTopStats(): Promise<TopStats> {
   if (assists) accolades.push({ label: "Assists Per Game", playerName: assists.agg.username, value: assists.value.toFixed(2), isMvp: false });
   if (demos) accolades.push({ label: "Demos Per Game", playerName: demos.agg.username, value: demos.value.toFixed(2), isMvp: false });
 
-  return { accolades, mvpUsername };
+  return { accolades, mvpUsername, mvpPlayerId };
 }

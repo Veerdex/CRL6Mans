@@ -85,8 +85,8 @@ export type TournamentSummary = {
   cancellationReason?: string;
   championLogoUrl?: string | null;
   runnerUpLogoUrl?: string | null;
-  championPlayers?: { username: string; displayName: string | null }[];
-  runnerUpPlayers?: { username: string; displayName: string | null }[];
+  championPlayers?: { id?: string | null; username: string; displayName: string | null }[];
+  runnerUpPlayers?: { id?: string | null; username: string; displayName: string | null }[];
   topStats?: TopStats;
 };
 
@@ -623,14 +623,17 @@ async function computeSummary(statsEnabled: boolean): Promise<TournamentSummary>
   const runnerUpTeam = decided ? byId(decided.runnerUpId) : byId((allTeams ?? []).find((t) => t.name === standings[1]?.name)?.id);
   const topIds = [championTeam?.id, runnerUpTeam?.id].filter((id): id is string => !!id);
 
+  // The id is what the podium joins on. A username is a Discord handle the player
+  // can change, and discord-sync rewrites the players row when they do, which used
+  // to leave the snapshot pointing at nobody — no avatar, no MVP crown.
   const { data: rosterPlayers } = topIds.length
-    ? await supabaseAdmin.from("players").select("username, display_name, team_id").in("team_id", topIds)
-    : { data: [] as { username: string; display_name: string | null; team_id: string }[] };
+    ? await supabaseAdmin.from("players").select("id, username, display_name, team_id").in("team_id", topIds)
+    : { data: [] as { id: string; username: string; display_name: string | null; team_id: string }[] };
 
   const byTeam = (id: string | undefined) =>
     (rosterPlayers ?? [])
       .filter((p) => p.team_id === id)
-      .map((p) => ({ username: p.username, displayName: p.display_name ?? null }));
+      .map((p) => ({ id: p.id, username: p.username, displayName: p.display_name ?? null }));
 
   return {
     champion: championTeam?.name ?? standings[0]?.name ?? null,

@@ -709,14 +709,16 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
   const championTeam = decided ? byId(decided.championId) : byId((allTeams ?? []).find((t) => t.name === finalStandings[0]?.name)?.id);
   const runnerUpTeam = decided ? byId(decided.runnerUpId) : byId((allTeams ?? []).find((t) => t.name === finalStandings[1]?.name)?.id);
   const topIds = [championTeam?.id, runnerUpTeam?.id].filter((id): id is string => !!id);
+  // Carries the id for the same reason computeSummary does — a username is a
+  // handle the player can change out from under the snapshot.
   const { data: rosterPlayers } = topIds.length
-    ? await supabaseAdmin.from("players").select("username, display_name, team_id").in("team_id", topIds)
-    : { data: [] as { username: string; display_name: string | null; team_id: string }[] };
+    ? await supabaseAdmin.from("players").select("id, username, display_name, team_id").in("team_id", topIds)
+    : { data: [] as { id: string; username: string; display_name: string | null; team_id: string }[] };
 
   const byTeam = (id: string | undefined) =>
     (rosterPlayers ?? [])
       .filter((p) => p.team_id === id)
-      .map((p) => ({ username: p.username, displayName: p.display_name ?? null }));
+      .map((p) => ({ id: p.id, username: p.username, displayName: p.display_name ?? null }));
 
   const year = new Date().getFullYear();
   const name = `${APP_NAME} Season ${year}`;

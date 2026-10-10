@@ -103,7 +103,9 @@ export async function syncSoloTeamIdentity(teamId: string, knownTeamSize?: numbe
     .from("teams")
     .update({
       name,
-      logo_url: avatarSrc(account.discord_id, account.avatar, 128),
+      // 512 rather than a card-sized 128: at 1v1 this is the image the podium
+      // blows up to 480px as the champion's crest. Every other surface downscales.
+      logo_url: avatarSrc(account.discord_id, account.avatar, 512),
       logo_offset_x: 50,
       logo_offset_y: 50,
     })

@@ -7,7 +7,7 @@ import type { TopStats } from "@/app/lib/game-stats";
 import { PodiumClient, type RichPlayer, type Accolade } from "./podium-client";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
-type SnapshotPlayer = { username: string; displayName: string | null };
+type SnapshotPlayer = { id?: string | null; username: string; displayName: string | null };
 type Summary = {
   champion: string | null;
   championLogoUrl?: string | null;
@@ -76,39 +76,50 @@ export default async function PodiumPage() {
   const isTournament = eventKind === "tournament";
 
   const mvpUsername = isTournament ? summary.topStats?.mvpUsername ?? null : null;
-  const rosterUsernames = summary.championPlayers?.map((p) => p.username) ?? [];
-  const lookupUsernames = mvpUsername && !rosterUsernames.includes(mvpUsername)
-    ? [...rosterUsernames, mvpUsername]
-    : rosterUsernames;
+  const snapshotMvpId = isTournament ? summary.topStats?.mvpPlayerId ?? null : null;
+  const roster = summary.championPlayers ?? [];
 
-  if (lookupUsernames.length) {
-    const { data: rows } = await supabaseAdmin
-      .from("players")
-      .select("id, username, display_name, discord_id, avatar, status, kick_reason, kicked_until")
-      .in("username", lookupUsernames);
+  // Ids are the real key; usernames are the fallback for events archived before
+  // the snapshot carried ids, and are matched only when no id resolves a row.
+  const lookupIds = [...new Set([...roster.map((p) => p.id), snapshotMvpId].filter((id): id is string => !!id))];
+  const lookupUsernames = [...new Set(
+    [...roster.filter((p) => !p.id).map((p) => p.username), snapshotMvpId ? null : mvpUsername]
+      .filter((n): n is string => !!n)
+  )];
 
-    const byUsername = Object.fromEntries((rows ?? []).map((r) => [r.username, r]));
+  const SELECT = "id, username, display_name, discord_id, avatar, status, kick_reason, kicked_until";
+  const [{ data: idRows }, { data: nameRows }] = await Promise.all([
+    lookupIds.length
+      ? supabaseAdmin.from("players").select(SELECT).in("id", lookupIds)
+      : Promise.resolve({ data: [] }),
+    lookupUsernames.length
+      ? supabaseAdmin.from("players").select(SELECT).in("username", lookupUsernames)
+      : Promise.resolve({ data: [] }),
+  ]);
 
-    if (summary.championPlayers?.length) {
-      players = summary.championPlayers
-        .filter((p) => {
-          const row = byUsername[p.username];
-          return !(row && (row.status === "banned" || isCurrentlyKicked(row.kick_reason, row.kicked_until)));
-        })
-        .map((p) => {
-          const row = byUsername[p.username];
-          return {
-            id: row?.id ?? null,
-            username: p.username,
-            displayName: p.displayName ?? row?.display_name ?? null,
-            discordId: row?.discord_id ?? null,
-            avatar: row?.avatar ?? null,
-          };
-        });
-    }
+  type Row = NonNullable<typeof idRows>[number];
+  const byId = Object.fromEntries(((idRows ?? []) as Row[]).map((r) => [r.id, r]));
+  const byUsername = Object.fromEntries(((nameRows ?? []) as Row[]).map((r) => [r.username, r]));
+  const rowFor = (p: SnapshotPlayer): Row | undefined =>
+    (p.id ? byId[p.id] : undefined) ?? byUsername[p.username];
 
-    mvpPlayerId = mvpUsername ? byUsername[mvpUsername]?.id ?? null : null;
-  }
+  players = roster
+    .filter((p) => {
+      const row = rowFor(p);
+      return !(row && (row.status === "banned" || isCurrentlyKicked(row.kick_reason, row.kicked_until)));
+    })
+    .map((p) => {
+      const row = rowFor(p);
+      return {
+        id: row?.id ?? p.id ?? null,
+        username: p.username,
+        displayName: p.displayName ?? row?.display_name ?? null,
+        discordId: row?.discord_id ?? null,
+        avatar: row?.avatar ?? null,
+      };
+    });
+
+  mvpPlayerId = snapshotMvpId ?? (mvpUsername ? byUsername[mvpUsername]?.id ?? null : null);
 
   // Stat leaders for this specific tournament, snapshotted at completion time
   const accolades: Accolade[] = isTournament ? summary.topStats?.accolades ?? [] : [];

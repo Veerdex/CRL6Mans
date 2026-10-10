@@ -234,7 +234,10 @@ export function PodiumClient({
         }}
       />
 
-      <div className="relative z-10 flex flex-col min-h-[calc(100svh-56px)] lg:min-h-screen">
+      {/* min-h-full, not a viewport unit: the dashboard shell already sizes the
+          scroll container to the space left over, and guessing at it with
+          100svh−56px gave the topbar nav layout a stray scrollbar. */}
+      <div className="relative z-10 flex flex-col min-h-full">
 
         {/* Title — full width, pinned to top */}
         <div
@@ -265,7 +268,12 @@ export function PodiumClient({
         {/* Main body: champion + roster, accolades in a right-hand column (desktop) */}
         <div className="relative flex-1 flex min-h-0">
 
-          {/* Champion column — centered on the full width */}
+          {/* Mirrors the accolade column so the champion stays centred under the
+              title. Only wide enough to afford it: below 2xl the 288px it costs
+              would start squeezing the logo, and off-centre beats shrunken. */}
+          {accolades.length > 0 && <div aria-hidden className="hidden 2xl:block shrink-0 w-72" />}
+
+          {/* Champion column */}
           <div
             className="flex-1 min-w-0 flex flex-col items-center justify-center gap-4 px-6 py-6"
             style={{ animation: "fade-up 0.65s 0.1s ease-out both" }}

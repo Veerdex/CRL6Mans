@@ -3575,10 +3575,14 @@ export async function execReportMatchResult(
           const { data: t } = await supabaseAdmin
             .from("tournaments").select("name").eq("id", tournamentId).single();
           const name = t?.name ?? "The tournament";
+          // Not /dashboard/podium: this fires on the final match report, and the
+          // podium is built from the summary completeTournament snapshots later.
+          // Until an admin runs it the podium still shows the *previous* event —
+          // a different champion than this notification just announced.
           pushToAllApproved({
             title: "Tournament Complete!",
             body: `${name} is over. Congratulations to ${winnerName} on winning!`,
-            url: "/dashboard/podium",
+            url: "/dashboard",
             tag: "tournament-complete",
             category: "tournament",
           }).catch(() => {});
