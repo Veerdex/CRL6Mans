@@ -51,9 +51,9 @@ export function RegisterForm({ isResubmit, existing }: Props) {
       return;
     }
 
-    // Matched to validateDocumentUpload, and checked by extension rather than
-    // file.type: browsers report an empty type for a .pdf with no registered
-    // handler, and rejecting on that would refuse a file the server would take.
+    // The same resolution validateDocumentUpload uses: the declared type when
+    // there is one, the extension only when the browser reports "" — which it
+    // does for a .pdf on a machine with no PDF handler registered.
     const problem = checkUploadFile(file, DOCUMENT_TYPES);
     if (problem) {
       setFileError(problem);
