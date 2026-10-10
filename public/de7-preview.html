@@ -137,10 +137,12 @@
 
   /* ── Match card (DEMatchBox) ───────────────────────────────────────────── */
   .card { width: 210px; border: 1px solid; border-radius: 8px; overflow: hidden; }
-  .teamrow { display: flex; align-items: center; gap: 8px; padding: 2px 8px; }
+  /* No vertical padding, as in matchup-preview.html: the stretched crest fills
+     the row's content box, so any padding here would stop it reaching the edge. */
+  .teamrow { display: flex; align-items: center; gap: 8px; padding: 0 8px; }
   .teamrow.won { background: rgba(255,255,255,.05); border-radius: 4px; margin: 0 4px; }
   .divider { height: 1px; background: rgba(63,63,70,.5); margin: 0 8px; }
-  .logo { width: 16px; height: 16px; border-radius: 4px; flex: 0 0 auto; object-fit: cover; }
+  .logo { width: 16px; height: 16px; border-radius: 4px; flex: 0 0 auto; background: var(--zinc-700); object-fit: cover; }
   .logo.faded { opacity: .4; }
   .dot { width: 8px; height: 8px; border-radius: 999px; flex: 0 0 auto; background: var(--zinc-400); }
   .dot.empty { background: var(--zinc-700); }

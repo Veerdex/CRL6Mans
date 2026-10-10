@@ -354,11 +354,16 @@ function applyPan() {
 // off the rendered DOM rather than assumed, because Tailwind's arbitrary
 // text-[10px] sets no line-height of its own and the badge adds py-0.5.
 
+// The tallest row, not the first: the first one in the DOM is W-A, which is a
+// bye and so carries no id badge — and it is the badge's padding that decides
+// how much vertical space the label row actually takes.
 function labelRowHeight() {
-  const node = el("content").querySelector(".cardlabel");
-  if (!node) return 23;
-  const mb = parseFloat(getComputedStyle(node).marginBottom) || 0;
-  return node.offsetHeight + mb;
+  let tallest = 0;
+  for (const node of el("content").querySelectorAll(".cardlabel")) {
+    const mb = parseFloat(getComputedStyle(node).marginBottom) || 0;
+    tallest = Math.max(tallest, node.offsetHeight + mb);
+  }
+  return tallest;
 }
 
 function colGeometry(name, centers, S, labelH, bodyH) {
@@ -409,9 +414,11 @@ function readout(all, S) {
       cell(g.over > 0 ? "+" + g.over : 0, false, g.over > 0) +
       "</tr>").join("");
 
-  // The canvas is a fixed 580px window, so a taller bracket is not wrong — it
-  // just stops fitting at 100%, which is worth knowing before it ships.
+  // The canvas is a fixed 580px window. The whole bracket overflows it at every
+  // step, today included — but the winners bracket on its own currently fits,
+  // and that is what the port costs.
   const contentH = el("content").offsetHeight;
+  const wbBlockH = wbH + HEAD_H + 38; // + section title, its gap, and the canvas's own padding
   const real = lines.filter((g) => !g.sep);
   const overlaps = real.filter((g) => g.minGap !== null && g.minGap < 0);
   const intrudes = real.filter((g) => g.firstTop < 0);
@@ -435,11 +442,10 @@ function readout(all, S) {
   const clean = !finds.length;
   if (clean) finds.push("No collisions. Every column keeps its label row, at today's spacing exactly.");
 
-  // Not a collision, so it doesn't make the step unclean — but the canvas is a
-  // hard 580px and a taller bracket starts below the fold at 100%.
-  if (contentH > 580)
-    finds.push("Content is <b>" + contentH + "px</b> tall against the canvas's fixed <code>580</code> &mdash; " +
-      (contentH - 580) + "px below the fold at 100%.");
+  // Not a collision, so it doesn't make the step unclean.
+  finds.push("Winners bracket alone: <b>" + wbBlockH + "px</b> in the canvas's fixed <code>580</code> &mdash; " +
+    (wbBlockH > 580 ? "<b>no longer fits</b> at 100%." : "still fits at 100%.") +
+    " Whole bracket " + contentH + "px, which overflows at every step, today included.");
 
   el("verdict").className = "verdict" + (clean ? " ok" : "");
   el("verdict").innerHTML =
