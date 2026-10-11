@@ -59,6 +59,9 @@ function Inner({
       // Stay open on a rejection: the join would re-check the min-MMR gate
       // against values that were never written.
       if (res.error) { setError(res.error); return; }
+      // Re-baseline, so a second press after a failed join doesn't re-send an
+      // unchanged save and get back "No changes to save".
+      setLoaded({ trackerUrl: loaded.trackerUrl, values });
     }
     onConfirm();
   }
