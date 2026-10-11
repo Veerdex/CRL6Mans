@@ -212,7 +212,7 @@ export async function applyChannelChanges(): Promise<{
 
       const { data: match } = await supabaseAdmin
         .from("matches")
-        .select("id, stage, round, home_team_id, away_team_id, scheduled_at, admin_scheduled")
+        .select("id, stage, round, match_number, home_team_id, away_team_id, scheduled_at, admin_scheduled")
         .eq("id", item.matchId)
         .single();
 
@@ -238,6 +238,7 @@ export async function applyChannelChanges(): Promise<{
         {
           round: match.round as number,
           stage: match.stage as string,
+          matchNumber: match.match_number as number,
           homeTeamId: match.home_team_id as string,
           awayTeamId: match.away_team_id as string,
           matchId: match.id as string,

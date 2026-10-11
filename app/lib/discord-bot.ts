@@ -2398,7 +2398,7 @@ async function openRound(userId: string, roundOverride?: number) {
   // Only consider matches that don't have a channel yet
   const { data: pending } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, round, stage, scheduled_at")
+    .select("id, home_team_id, away_team_id, round, match_number, stage, scheduled_at")
     .eq("status", "scheduled")
     .is("discord_channel_id", null)
     .not("home_team_id", "is", null)
@@ -2461,7 +2461,7 @@ async function openRound(userId: string, roundOverride?: number) {
     const a = teamNameById[m.away_team_id!];
     if (!h || !a) continue;
     const result = await createMatchChannel(h, a, targetRound, ctx, {
-      round: m.round, stage: m.stage,
+      round: m.round, stage: m.stage, matchNumber: m.match_number,
       homeTeamId: m.home_team_id!, awayTeamId: m.away_team_id!, matchId: m.id,
       scheduledAt: (m as { scheduled_at?: string | null }).scheduled_at ?? null,
     });
