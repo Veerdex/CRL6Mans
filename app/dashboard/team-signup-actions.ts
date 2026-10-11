@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { isModerator } from "@/app/lib/players";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import {
@@ -46,10 +47,10 @@ async function getContext(tournamentId: string): Promise<{ ctx?: Ctx; error?: st
 
   const { data: t } = await supabaseAdmin
     .from("tournaments")
-    .select("join_mode, signups_open, signups_closed, status, draft_open_at, draft_close_at, team_size, stats_enabled")
+    .select("join_mode, signups_open, signups_closed, status, draft_open_at, draft_close_at, team_size, stats_enabled, is_test")
     .eq("id", tournamentId)
     .single();
-  if (!t) return { error: "Tournament not found." };
+  if (!t || (t.is_test && !(await isModerator(session.userId)))) return { error: "Tournament not found." };
   if (t.join_mode !== "teams") return { error: "This tournament does not use team sign-ups." };
 
   return {

@@ -57,7 +57,7 @@ export default async function DashboardPage({
       .order("draft_entered_at", { ascending: true, nullsFirst: false }),
     supabaseAdmin
       .from("tournaments")
-      .select("id, name, status, signups_open, signups_closed, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, min_teams, team_limit, team_size, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th")
+      .select("id, name, status, signups_open, signups_closed, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, min_teams, team_limit, team_size, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, is_test")
       .in("status", ["scheduled", "active", "completed"])
       .order("created_at", { ascending: false }),
     supabaseAdmin
@@ -126,7 +126,11 @@ export default async function DashboardPage({
       }
     : null;
   const draftQueue = draftQueueRes.data ?? [];
-  const tournaments = tournamentsRes.data ?? [];
+  // Test tournaments are staff-only, and while one runs the league state it
+  // drives (draft, season) is hidden along with it.
+  const allTournaments = tournamentsRes.data ?? [];
+  const hideTestEvent = !moderator && allTournaments.some((t) => t.status === "active" && t.is_test);
+  const tournaments = moderator ? allTournaments : allTournaments.filter((t) => !t.is_test);
   const sponsorById = new Map(publicSponsors.map((s) => [s.id, s]));
   const designById = new Map(publicDesigns.map((d) => [d.id, d]));
   const activeTournament = tournaments.find((t) => t.status === "active") ?? null;
@@ -275,14 +279,14 @@ export default async function DashboardPage({
   };
 
   const draftCount = draftQueue.length;
-  const draftOpen = settings?.draft_open ?? false;
-  const draftActive = settings?.draft_active ?? false;
+  const draftOpen = !hideTestEvent && (settings?.draft_open ?? false);
+  const draftActive = !hideTestEvent && (settings?.draft_active ?? false);
   const signupsOpen = draftOpen && !draftActive && !(settings?.season_active ?? false);
   const inDraft = player?.draft_entered ?? false;
 
   // Compute current season stage label from active matches.
   const allMatchStages = matchStagesRes.data ?? [];
-  const seasonActive = settings?.season_active ?? false;
+  const seasonActive = !hideTestEvent && (settings?.season_active ?? false);
   const currentSeasonLabel = seasonActive ? computeSeasonStageLabel(allMatchStages) : null;
 
   // Active-event card view-model: covers both a tournament-driven active event and a

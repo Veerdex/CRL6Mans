@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirectIfTestTournamentHidden } from "@/app/lib/test-tournament";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -13,6 +14,7 @@ import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 import { getNumGroups, SWISS_STAGE, SWISS_ADVANCE_WINS, SWISS8_ADVANCE_WINS, SE_QUALIFIER, DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS, HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF } from "@/app/lib/bracket";
 
 export default async function SeasonPage() {
+  await redirectIfTestTournamentHidden();
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   const userIsAdmin = session?.userId ? await isDirectorVerified(session.userId) : false;

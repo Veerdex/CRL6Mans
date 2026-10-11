@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirectIfTestTournamentHidden } from "@/app/lib/test-tournament";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -14,6 +15,7 @@ export default async function TeamsPage({
 }: {
   searchParams: Promise<{ search?: string; from?: string }>;
 }) {
+  await redirectIfTestTournamentHidden();
   const { search: initialSearch, from } = await searchParams;
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);

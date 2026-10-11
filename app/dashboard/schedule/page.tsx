@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { redirectIfTestTournamentHidden } from "@/app/lib/test-tournament";
 import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { ScheduleView, type ScheduleMatch } from "./schedule-view";
 import { ScheduleCalendar } from "./schedule-calendar";
@@ -7,6 +8,7 @@ import { SeasonTabs } from "@/app/dashboard/season/season-tabs";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
 export default async function SchedulePage() {
+  await redirectIfTestTournamentHidden();
   const [{ data: matchRows }, { data: teamsRaw }, { data: settings }] = await Promise.all([
     supabaseAdmin
       .from("matches")

@@ -6,6 +6,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { creditCoins, debitCoins } from "@/app/lib/coins";
+import { hidesActiveTestTournament } from "@/app/lib/test-tournament";
 import { getBestOfForMatch } from "@/app/lib/discord-bot";
 import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
 import {
@@ -235,6 +236,7 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) return { error: "Not authenticated" };
+  if (await hidesActiveTestTournament(session.userId)) return { error: "No matches are open for betting." };
 
   for (const b of bets) {
     if (!VALID_BET_TYPES.has(b.betType)) return { error: `Invalid bet type: ${b.betType}` };
@@ -385,6 +387,7 @@ export async function placeParlayBet(
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) return { error: "Not authenticated" };
+  if (await hidesActiveTestTournament(session.userId)) return { error: "No matches are open for betting." };
 
   for (const l of legs) {
     if (!VALID_BET_TYPES.has(l.betType)) return { error: `Invalid bet type: ${l.betType}` };

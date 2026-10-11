@@ -244,6 +244,10 @@ const DEVELOPER_IDS = new Set(
     .filter(Boolean)
 );
 
+export function developerDiscordIds(): string[] {
+  return [...DEVELOPER_IDS];
+}
+
 export async function getStaffRole(discordId: string): Promise<StaffRole | null> {
   if (DEVELOPER_IDS.has(discordId)) return "ceo";
 
