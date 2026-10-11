@@ -220,8 +220,9 @@ export function seriesRejectedPost(args: { teamName: string; oppPing: Ping | nul
     color: WARN_AMBER,
     description:
       `**${args.teamName}** rejected the submitted result. Submit it again from My Team ` +
-      `if the score was wrong — or if it was right, dispute it there and staff will ` +
+      `if the score was wrong — or if it was right, stand by it and staff will ` +
       `record the result.`,
+    footer: { text: "Run /dispute target:series right here, or hit Dispute on My Team." },
   });
 }
 
@@ -401,6 +402,7 @@ export function subRejectedPost(teamName: string): ChannelPost {
     title: "Substitution rejected",
     color: BAD_RED,
     description: `The opposing team rejected the substitution requested by **${teamName}**.`,
+    footer: { text: "Run /dispute target:sub right here, or report it from My Team." },
   });
 }
 

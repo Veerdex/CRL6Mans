@@ -5,8 +5,12 @@ import {
   openMatchIds,
   seriesAwaitingTeam,
   subRequestsAwaitingTeam,
+  seriesDisputableByTeam,
+  subRequestsDisputableByTeam,
   type DecidableMatch,
   type PendingSubRow,
+  type DisputableMatch,
+  type DisputableSubRow,
 } from "../app/lib/decision-targets";
 
 const MINE = "team-mine";
@@ -86,4 +90,87 @@ test("nothing pending is an empty list, not a thrown error", () => {
   assert.deepEqual(seriesAwaitingTeam([], MINE), []);
   assert.deepEqual(subRequestsAwaitingTeam([], MINE), []);
   assert.deepEqual(openMatchIds([]), []);
+});
+
+// ── Disputes: the inverse narrowing ───────────────────────────────────────────
+
+const ELSEWHERE = "team-elsewhere";
+
+const disputable = (over: Partial<DisputableMatch> & { id: string }): DisputableMatch => ({
+  home_team_id: MINE,
+  away_team_id: THEIRS,
+  home_score: null,
+  pending_home_score: null,
+  score_rejected_by_team_id: null,
+  score_rejected_home: null,
+  score_rejected_away: null,
+  score_disputed_at: null,
+  ...over,
+});
+
+const REJECTED: DisputableMatch[] = [
+  // Ours to dispute: we submitted, they threw it out, nobody has escalated.
+  disputable({ id: "d-theirs", score_rejected_by_team_id: THEIRS, score_rejected_home: 2, score_rejected_away: 1 }),
+  // Theirs to dispute, not ours — we are the ones who rejected.
+  disputable({ id: "d-ours", score_rejected_by_team_id: MINE, score_rejected_home: 3, score_rejected_away: 0 }),
+  // Already with staff. Offering it again would push them a second time.
+  disputable({ id: "d-escalated", score_rejected_by_team_id: THEIRS, score_rejected_home: 2, score_rejected_away: 1, score_disputed_at: "2026-10-11T00:00:00Z" }),
+  // Resubmitted after the rejection: the new claim has its own round to go
+  // through, and submitSeriesResult should have cleared these columns anyway.
+  disputable({ id: "d-resubmitted", score_rejected_by_team_id: THEIRS, score_rejected_home: 2, score_rejected_away: 1, pending_home_score: 1 }),
+  // Staff already recorded a result, so there is nothing left to argue about.
+  disputable({ id: "d-final", home_score: 2, score_rejected_by_team_id: THEIRS, score_rejected_home: 2, score_rejected_away: 1 }),
+  // A rejection with no rejecter can't have been anyone's, and `!== teamId` is
+  // true for null — the strict null test is what keeps it out.
+  disputable({ id: "d-orphan", score_rejected_home: 2, score_rejected_away: 1 }),
+  // Two other teams' match. This is the row the inversion gets wrong without a
+  // membership test: `score_rejected_by_team_id !== MINE` is true here.
+  disputable({ id: "d-elsewhere", home_team_id: THEIRS, away_team_id: ELSEWHERE, score_rejected_by_team_id: THEIRS, score_rejected_home: 2, score_rejected_away: 1 }),
+];
+
+test("only our own rejected submission is ours to dispute", () => {
+  assert.deepEqual(seriesDisputableByTeam(REJECTED, MINE).map((m) => m.id), ["d-theirs"]);
+});
+
+test("dispute reads the other way round from the other bench", () => {
+  // d-elsewhere is THEIRS' match too, and THEIRS rejected it, so it stays out
+  // for them on the rejecter test rather than on membership.
+  assert.deepEqual(seriesDisputableByTeam(REJECTED, THEIRS).map((m) => m.id), ["d-ours"]);
+});
+
+test("dispute is the inverse of a decision, not the same filter", () => {
+  // The whole reason both live here: the row we owe an answer on and the row we
+  // can escalate are never the same row.
+  const submitted = match({
+    id: "x", pending_home_score: 2, pending_away_score: 1, score_submitted_by_team_id: THEIRS,
+  });
+  const rejected = disputable({ id: "x", score_rejected_by_team_id: THEIRS });
+  assert.deepEqual(seriesAwaitingTeam([submitted], MINE).map((m) => m.id), ["x"]);
+  assert.deepEqual(seriesDisputableByTeam([rejected], MINE).map((m) => m.id), ["x"]);
+  assert.deepEqual(seriesAwaitingTeam([submitted], THEIRS), []);
+  assert.deepEqual(seriesDisputableByTeam([rejected], THEIRS), []);
+});
+
+test("a 0–0 rejected score is still a rejected score", () => {
+  const nilNil = [disputable({
+    id: "x", score_rejected_by_team_id: THEIRS, score_rejected_home: 0, score_rejected_away: 0,
+  })];
+  assert.deepEqual(seriesDisputableByTeam(nilNil, MINE).map((m) => m.id), ["x"]);
+});
+
+test("only our own rejected sub request is ours to dispute", () => {
+  const rows: DisputableSubRow[] = [
+    { id: "r-ours", team_id: MINE, match_id: "m", status: "rejected" },
+    { id: "r-theirs", team_id: THEIRS, match_id: "m", status: "rejected" },
+    { id: "r-pending", team_id: MINE, match_id: "m", status: "pending" },
+    { id: "r-escalated", team_id: MINE, match_id: "m", status: "escalated" },
+    { id: "r-approved", team_id: MINE, match_id: "m", status: "approved" },
+  ];
+  assert.deepEqual(subRequestsDisputableByTeam(rows, MINE).map((r) => r.id), ["r-ours"]);
+  assert.deepEqual(subRequestsDisputableByTeam(rows, THEIRS).map((r) => r.id), ["r-theirs"]);
+});
+
+test("nothing rejected is an empty list, not a thrown error", () => {
+  assert.deepEqual(seriesDisputableByTeam([], MINE), []);
+  assert.deepEqual(subRequestsDisputableByTeam([], MINE), []);
 });

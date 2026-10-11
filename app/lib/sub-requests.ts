@@ -17,12 +17,14 @@ import { supabaseAdmin } from "./supabase";
 import { sendChannelMessage, getGuildRoles } from "./discord-api";
 import {
   teamPing,
+  rolePing,
   subRequestedPost,
   subAcceptedPost,
   subRejectedPost,
+  subEscalatedPost,
   type ChannelPost,
 } from "./match-embeds";
-import { pushToTeam } from "./push";
+import { pushToAdmins, pushToTeam } from "./push";
 import { playerRatingFromRow } from "./rating";
 
 export type SubRequestResult = { ok?: boolean; error?: string };
@@ -314,6 +316,65 @@ export async function rejectSubRequestByOpponentCore(args: {
     url: "/dashboard/my-team",
     tag: "sub-request",
   }).catch(() => {});
+
+  return { ok: true };
+}
+
+// ── Requesting team escalates a rejection to staff ───────────────────────────
+//
+// The mirror image of the two cores above: they are the opponent's to run, this
+// one is the requesting team's. Not loadRequestForOpponent, therefore — the
+// standing test is `caller.team_id === request.team_id`, the exact inverse of
+// that helper's, and the same inversion decision-targets.ts documents.
+export async function escalateSubRequestCore(args: {
+  requestId: string;
+  actorDiscordId: string;
+  staffOverride: boolean;
+}): Promise<SubRequestResult> {
+  const { data: request } = await supabaseAdmin
+    .from("sub_requests")
+    .select("id, team_id, match_id, player_out_id, status")
+    .eq("id", args.requestId)
+    .single();
+  if (!request) return { error: "Request not found." };
+  if (request.status !== "rejected") return { error: "Only a rejected request can be reported to staff." };
+
+  if (!args.staffOverride) {
+    const { data: caller } = await supabaseAdmin
+      .from("players").select("team_id").eq("discord_id", args.actorDiscordId).single();
+    if (!caller || caller.team_id !== request.team_id) return { error: "You cannot report this request." };
+  }
+
+  const { error } = await supabaseAdmin
+    .from("sub_requests")
+    .update({ status: "escalated", updated_at: new Date().toISOString() })
+    .eq("id", args.requestId);
+  if (error) return { error: "Failed to report request." };
+
+  // Admins are pinged only at escalation.
+  pushToAdmins({
+    title: "Sub Request Escalated",
+    body: "A team reported a rejected sub request for staff review.",
+    url: "/dashboard/admin",
+    tag: "sub-request",
+  }, "sub_requests").catch(() => {});
+
+  try {
+    const match = await getMatchTeams(request.match_id);
+    if (match?.discord_channel_id) {
+      const myName = await teamName(request.team_id);
+      const { data: ls } = await supabaseAdmin
+        .from("league_settings").select("moderator_role_id").single();
+      const modRoleId = ls?.moderator_role_id as string | null;
+      // The by-name fallback is kept, unlike the team pings: "moderator" is a league-
+      // owned role name, not a player-supplied one, so there's no @everyone hole here.
+      const modPing = rolePing(modRoleId) ?? teamPing("moderator", await getGuildRoles());
+      await postToChannel(match.discord_channel_id, subEscalatedPost({
+        teamName: myName ?? "A team",
+        modPing,
+      }));
+    }
+  } catch { /* best-effort */ }
 
   return { ok: true };
 }

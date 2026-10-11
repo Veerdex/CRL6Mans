@@ -15,6 +15,7 @@ import type { DiscordEmbed } from "./discord-api";
 const BRAND_ORANGE = 0xe88a24;
 const BRAND_BLUE = 0x3736ac;
 const OK_GREEN = 0x22c55e;
+const WARN_AMBER = 0xd97706;
 const BAD_RED = 0xdc2626;
 
 const TITLE_LIMIT = 256;
@@ -228,5 +229,20 @@ export function decisionAckEmbed(args: {
     title: `${noun} ${args.approved ? "approved" : "rejected"}`,
     color: args.approved ? OK_GREEN : BAD_RED,
     description: clamp(args.detail, 4096),
+  };
+}
+
+/**
+ * What `/dispute` escalated. Amber rather than red: nothing has gone wrong and
+ * nobody has been refused — the same colour the draft's auto-pick uses for "a
+ * clock ran out and the system stepped in".
+ */
+export function disputeAckEmbed(args: { target: DecisionTarget; detail: string }): DiscordEmbed {
+  const noun = args.target === "sub" ? "Substitution" : "Series result";
+  return {
+    title: `${noun} sent to staff`,
+    color: WARN_AMBER,
+    description: clamp(args.detail, 4096),
+    footer: { text: "Staff will settle it. Nothing more to do from here." },
   };
 }

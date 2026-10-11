@@ -255,8 +255,8 @@ const commands = [
       { name: "reason", description: "Shown to the opposing team", type: STRING, required: false },
     ],
   },
-  // `target` is required on both, so Discord makes the caller say which kind of
-  // decision they mean rather than the handler picking whichever is pending.
+  // `target` is required on all three, so Discord makes the caller say which kind
+  // of decision they mean rather than the handler picking whichever is pending.
   {
     name: "approve",
     description: "Accept a sub request or a series result the other team submitted",
@@ -280,6 +280,25 @@ const commands = [
       {
         name: "target",
         description: "What you're rejecting",
+        type: STRING,
+        required: true,
+        choices: [
+          { name: "sub request", value: "sub" },
+          { name: "series submission", value: "series" },
+        ],
+      },
+    ],
+  },
+  // The inverse of the two above: they answer the other team's claim, this one
+  // insists on your own after they rejected it, and it is the only step in either
+  // flow that notifies staff.
+  {
+    name: "dispute",
+    description: "Ask staff to rule on your sub request or series result after it was rejected",
+    options: [
+      {
+        name: "target",
+        description: "What was rejected",
         type: STRING,
         required: true,
         choices: [

@@ -5,12 +5,11 @@ import { handleCommand, handleAutocomplete, handleModalSubmit } from "@/app/lib/
 import type { DiscordEmbed } from "@/app/lib/discord-api";
 
 // Deferral forces the reply ephemeral, which is what every command here wants
-// anyway: /profile and /stats are private by design, and the public half of
-// /sub, /approve and /reject is the embed their handler posts into the match
-// channel, not the reply the invoker sees. /coins is deliberately absent — its
-// reply is public, so it has to answer inside Discord's three seconds.
+// anyway: /profile, /stats and /coins are private by design, and the public half
+// of /sub, /approve, /reject and /dispute is the embed their handler posts into
+// the match channel, not the reply the invoker sees.
 const DEFERRED_COMMANDS = new Set([
-  "openround", "postclip", "profile", "stats", "coins", "sub", "approve", "reject",
+  "openround", "postclip", "profile", "stats", "coins", "sub", "approve", "reject", "dispute",
 ]);
 // Subcommands of /admin that are slow enough to need deferral (matched against
 // interaction.data.options[0].name, since Discord nests subcommand names one level deep).

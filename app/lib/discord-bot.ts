@@ -38,19 +38,24 @@ import {
   type ChannelPost,
 } from "./match-embeds";
 import { announceClip, clipsChannelId, createClip } from "./clip-submit";
-import { profileEmbed, statsEmbed, coinsEmbed, subAckEmbed, decisionAckEmbed } from "./command-embeds";
+import { profileEmbed, statsEmbed, coinsEmbed, subAckEmbed, decisionAckEmbed, disputeAckEmbed } from "./command-embeds";
 import {
   teamName,
   submitSubRequestCore,
   acceptSubRequestCore,
   rejectSubRequestByOpponentCore,
+  escalateSubRequestCore,
 } from "./sub-requests";
 import {
   openMatchIds,
   seriesAwaitingTeam,
   subRequestsAwaitingTeam,
+  seriesDisputableByTeam,
+  subRequestsDisputableByTeam,
   type DecidableMatch,
   type PendingSubRow,
+  type DisputableMatch,
+  type DisputableSubRow,
 } from "./decision-targets";
 import { loadPlayerProfile } from "./player-profile";
 import { fetchAllTimeTotals, type CareerTotals } from "./career-stats";
@@ -2428,7 +2433,7 @@ async function decisionCmd(userId: string, channelId: string, target: string, ap
       target: "sub", approved: approve,
       detail: approve
         ? `You accepted **${them}**'s substitute. It's confirmed in the match channel.`
-        : `You rejected **${them}**'s substitute. They can request a different one or report it to staff.`,
+        : `You rejected **${them}**'s substitute. They can request a different one, or stand by it with \`/dispute target:sub\`.`,
     }));
   }
 
@@ -2458,12 +2463,132 @@ async function decisionCmd(userId: string, channelId: string, target: string, ap
   // match deletes its channel, so if this was run there, this receipt lands on a
   // channel that no longer exists; Discord drops it and nothing breaks.
   const detail = !approve
-    ? `You rejected the submitted result, ${line}. The pending score is cleared and either team can submit again.`
+    ? `You rejected the submitted result, ${line}. The pending score is cleared — either team can submit again, or they can stand by it with \`/dispute target:series\`.`
     : result.outcome === "pending_admin"
       ? `You confirmed ${line}. Its replays contain unrecognised players, so staff will review the series before it counts.`
       : `You confirmed ${line}. The match is final.`;
 
   return ephemeralEmbedReply(decisionAckEmbed({ target: "series", approved: approve, detail }));
+}
+
+// One literal rather than a concatenation: the client infers the row type from
+// the string, and `"a" + "b"` widens to plain string, which makes the cast below
+// an error instead of a narrowing.
+const DISPUTABLE_COLUMNS =
+  "id, home_team_id, away_team_id, home_score, pending_home_score, score_rejected_by_team_id, score_rejected_home, score_rejected_away, score_disputed_at";
+
+// Its own statement, scoped to the matches decidableMatches already narrowed to.
+// The dispute columns cannot join DECIDABLE_COLUMNS: an unknown column makes
+// PostgREST reject the whole select, so folding them in would take /approve and
+// /reject down with them on a database where score-dispute-migration.sql hasn't
+// run. Isolated here, that same failure leaves `data` null, which reads as
+// "nothing is disputable" — the truth on such a database.
+//
+// Returns the rows unfiltered so the caller can tell "nothing was rejected" from
+// "it's already with staff"; the narrowing itself lives in decision-targets.ts.
+async function rejectedSeriesRows(matches: DecidableMatch[]): Promise<DisputableMatch[]> {
+  const ids = openMatchIds(matches);
+  if (ids.length === 0) return [];
+  const { data } = await supabaseAdmin
+    .from("matches").select(DISPUTABLE_COLUMNS)
+    .in("id", ids)
+    .not("score_rejected_by_team_id", "is", null);
+  return (data ?? []) as DisputableMatch[];
+}
+
+// "escalated" comes back too, for the same reason: it is the difference between
+// having nothing to dispute and having already disputed it.
+async function rejectedSubRows(matches: DecidableMatch[]): Promise<DisputableSubRow[]> {
+  const ids = openMatchIds(matches);
+  if (ids.length === 0) return [];
+  const { data } = await supabaseAdmin
+    .from("sub_requests").select("id, team_id, match_id, status")
+    .in("status", ["rejected", "escalated"]).in("match_id", ids);
+  return (data ?? []) as DisputableSubRow[];
+}
+
+// The third sibling of /approve and /reject, and the inverse of both: those
+// answer the other team's claim, this one insists on your own after they threw
+// it out. Same shape throughout — channel-first scoping, both kinds resolved up
+// front so a miss can point at the other, and the cores do the real validating.
+async function disputeCmd(userId: string, channelId: string, target: string) {
+  const me = await subjectPlayer(userId);
+  if (!me?.team_id) return ephemeralReply("❌ You're not on a team.");
+  const teamId = me.team_id;
+
+  const scope = await decidableMatches(teamId, channelId);
+  if ("error" in scope) return ephemeralReply(`❌ ${scope.error}`);
+
+  const [seriesRows, subRows] = await Promise.all([
+    rejectedSeriesRows(scope.matches), rejectedSubRows(scope.matches),
+  ]);
+  const series = seriesDisputableByTeam(seriesRows, teamId);
+  const subs = subRequestsDisputableByTeam(subRows, teamId);
+
+  const mineAlreadyWithStaff = (kind: "sub" | "series") =>
+    kind === "sub"
+      ? subRows.some((r) => r.team_id === teamId && r.status === "escalated")
+      : seriesRows.some(
+          (m) => m.score_disputed_at !== null && m.score_rejected_by_team_id !== teamId && m.home_score === null,
+        );
+
+  const nothing = (what: string, hint: string, hintTarget: string) =>
+    ephemeralReply(
+      `ℹ️ Nothing to dispute — ${what}.` +
+      (hint ? ` A rejected ${hint} is, though: \`/dispute target:${hintTarget}\`.` : ""),
+    );
+
+  if (target === "sub") {
+    if (subs.length === 0) {
+      if (mineAlreadyWithStaff("sub"))
+        return ephemeralReply("ℹ️ Your sub request is already with staff — they'll rule on it.");
+      return nothing(
+        "none of your team's sub requests have been rejected",
+        series.length ? "series result" : "", "series",
+      );
+    }
+    if (subs.length > 1)
+      return ephemeralReply("❌ More than one of your rejected sub requests is open — run `/dispute` in the match's own channel.");
+
+    const result = await escalateSubRequestCore({
+      requestId: subs[0].id, actorDiscordId: userId, staffOverride: false,
+    });
+    if (result.error) return ephemeralReply(`❌ ${result.error}`);
+
+    return ephemeralEmbedReply(disputeAckEmbed({
+      target: "sub",
+      detail:
+        "Staff have been told your opponent rejected your substitute. " +
+        "They can approve it over that objection, and the match channel has been notified.",
+    }));
+  }
+
+  if (series.length === 0) {
+    if (mineAlreadyWithStaff("series"))
+      return ephemeralReply("ℹ️ That result is already disputed — staff will record it.");
+    return nothing(
+      "none of your team's submitted results have been rejected",
+      subs.length ? "sub request" : "", "sub",
+    );
+  }
+  if (series.length > 1)
+    return ephemeralReply("❌ More than one of your rejected results is open — run `/dispute` in the match's own channel.");
+
+  const match = series[0];
+  const result = await disputeSeriesResultCore({ matchId: match.id, actorDiscordId: userId });
+  if (result.error) return ephemeralReply(`❌ ${result.error}`);
+
+  const [homeName, awayName] = await Promise.all([
+    teamName(match.home_team_id), teamName(match.away_team_id),
+  ]);
+  const line = `**${homeName ?? "Home"} ${result.homeScore}–${result.awayScore} ${awayName ?? "Away"}**`;
+
+  return ephemeralEmbedReply(disputeAckEmbed({
+    target: "series",
+    detail:
+      `You're standing by ${line} after it was rejected. Staff have been notified and ` +
+      "will record the result — neither team can report this match until they do.",
+  }));
 }
 
 async function setDraftChannel(userId: string, channelId: string) {
@@ -3512,9 +3637,9 @@ export async function cancelSeriesSubmissionCore(args: {
 // usually a typo, so it stays between the teams, while a team insisting after a
 // rejection means they cannot settle it themselves.
 //
-// Deliberately not reachable from the bot — there is no /dispute command, so
-// nothing new has to be registered. It takes actorDiscordId anyway to match its
-// two siblings above.
+// Shared with the bot's /dispute, which is why it takes actorDiscordId like its
+// two siblings above: the standing check has to be the same whether the escalation
+// comes from the My Team panel or from a slash command.
 export async function disputeSeriesResultCore(args: {
   matchId: string;
   actorDiscordId: string;
@@ -5461,6 +5586,11 @@ export async function handleCommand(interaction: Interaction) {
       interaction.channel_id ?? interaction.channel?.id ?? "",
       String(opt(interaction, "target")),
       false,
+    );
+    case "dispute":       return disputeCmd(
+      userId,
+      interaction.channel_id ?? interaction.channel?.id ?? "",
+      String(opt(interaction, "target")),
     );
     case "postclip":      return postClip(
       userId,

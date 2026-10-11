@@ -9,13 +9,11 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { getGuildRoles } from "@/app/lib/discord-api";
 import {
   teamPing,
-  rolePing,
-  subEscalatedPost,
   subAdminApprovedPost,
   subCancelledPost,
 } from "@/app/lib/match-embeds";
-import { pushToAdmins, pushToTeam } from "@/app/lib/push";
-// The three flows the Discord bot shares live in app/lib/sub-requests.ts, since
+import { pushToTeam } from "@/app/lib/push";
+// The flows the Discord bot shares live in app/lib/sub-requests.ts, since
 // "use server" here would turn any helper this file exported into a server
 // action. The actions below are the web half: session, redirect, revalidate.
 import {
@@ -25,6 +23,7 @@ import {
   submitSubRequestCore,
   acceptSubRequestCore,
   rejectSubRequestByOpponentCore,
+  escalateSubRequestCore,
 } from "@/app/lib/sub-requests";
 
 async function getSession() {
@@ -87,54 +86,16 @@ export async function escalateSubRequest(requestId: string): Promise<{ ok?: bool
   const session = await getSession();
   if (!session?.userId) redirect("/login");
 
-  const { data: request } = await supabaseAdmin
-    .from("sub_requests")
-    .select("id, team_id, match_id, player_out_id, status")
-    .eq("id", requestId)
-    .single();
-  if (!request) return { error: "Request not found." };
-  if (request.status !== "rejected") return { error: "Only a rejected request can be reported to staff." };
-
-  if (!(await isModeratorVerified(session.userId))) {
-    const { data: caller } = await supabaseAdmin
-      .from("players").select("team_id").eq("discord_id", session.userId).single();
-    if (!caller || caller.team_id !== request.team_id) return { error: "You cannot report this request." };
+  const result = await escalateSubRequestCore({
+    requestId,
+    actorDiscordId: session.userId,
+    staffOverride: await isModeratorVerified(session.userId),
+  });
+  if (result.ok) {
+    revalidatePath("/dashboard/my-team");
+    revalidatePath("/dashboard/admin");
   }
-
-  const { error } = await supabaseAdmin
-    .from("sub_requests")
-    .update({ status: "escalated", updated_at: new Date().toISOString() })
-    .eq("id", requestId);
-  if (error) return { error: "Failed to report request." };
-
-  // Admins are pinged only at escalation.
-  pushToAdmins({
-    title: "Sub Request Escalated",
-    body: "A team reported a rejected sub request for staff review.",
-    url: "/dashboard/admin",
-    tag: "sub-request",
-  }, "sub_requests").catch(() => {});
-
-  try {
-    const match = await getMatchTeams(request.match_id);
-    if (match?.discord_channel_id) {
-      const myName = await teamName(request.team_id);
-      const { data: ls } = await supabaseAdmin
-        .from("league_settings").select("moderator_role_id").single();
-      const modRoleId = ls?.moderator_role_id as string | null;
-      // The by-name fallback is kept, unlike the team pings: "moderator" is a league-
-      // owned role name, not a player-supplied one, so there's no @everyone hole here.
-      const modPing = rolePing(modRoleId) ?? teamPing("moderator", await getGuildRoles());
-      await postToChannel(match.discord_channel_id, subEscalatedPost({
-        teamName: myName ?? "A team",
-        modPing,
-      }));
-    }
-  } catch { /* best-effort */ }
-
-  revalidatePath("/dashboard/my-team");
-  revalidatePath("/dashboard/admin");
-  return { ok: true };
+  return result;
 }
 
 // ── Admin approves an escalated request ──────────────────────────────────────

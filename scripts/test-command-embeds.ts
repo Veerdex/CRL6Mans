@@ -8,6 +8,7 @@ import {
   coinsEmbed,
   subAckEmbed,
   decisionAckEmbed,
+  disputeAckEmbed,
   type ProfileEmbedArgs,
   type StatsEmbedArgs,
 } from "../app/lib/command-embeds";
@@ -126,6 +127,23 @@ test("a decision embed names what it decided and colours it", () => {
   assert.equal(ok.title, "Substitution approved");
   assert.equal(no.title, "Series result rejected");
   assert.notEqual(ok.color, no.color);
+});
+
+test("a dispute embed reads as escalated, not as a refusal", () => {
+  // The colour carries the whole meaning here: a rejection and an escalation are
+  // both "bad news" to a player, and a dispute sharing red with /reject would say
+  // staff had turned them down rather than taken it on.
+  const sub = disputeAckEmbed({ target: "sub", detail: "x" });
+  const series = disputeAckEmbed({ target: "series", detail: "x" });
+  assert.equal(sub.title, "Substitution sent to staff");
+  assert.equal(series.title, "Series result sent to staff");
+  assert.notEqual(sub.color, decisionAckEmbed({ target: "sub", approved: false, detail: "x" }).color);
+  assert.notEqual(sub.color, decisionAckEmbed({ target: "sub", approved: true, detail: "x" }).color);
+});
+
+test("a dispute detail is clamped like every other player-facing description", () => {
+  const e = disputeAckEmbed({ target: "series", detail: "x".repeat(5000) });
+  assert.ok(e.description!.length <= 4096);
 });
 
 test("a sub acknowledgement omits the reason field when none was given", () => {

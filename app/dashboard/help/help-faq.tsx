@@ -67,7 +67,7 @@ const SECTIONS: Section[] = [
       },
       {
         q: "The other team rejected our score — what happens now?",
-        a: "Nothing is final, and staff aren't involved yet. If you got the score wrong, just submit it again. If your score was right and they rejected it anyway, hit Dispute: staff get notified, and they record the official result themselves. Neither team can report that match while it's disputed.",
+        a: "Nothing is final, and staff aren't involved yet. If you got the score wrong, just submit it again. If your score was right and they rejected it anyway, hit Dispute on the My Team page — or run /dispute target:series in Discord, which does the same thing. Staff get notified and record the official result themselves. Neither team can report that match while it's disputed.",
       },
       {
         q: "I need a substitute for an upcoming match — how does that work?",
