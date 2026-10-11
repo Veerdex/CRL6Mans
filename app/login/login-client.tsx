@@ -4,9 +4,10 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { APP_NAME } from "@/app/lib/constants";
 
 const VIDEO_ID = "NBFVztq7OlU";
-const IDLE_MS = 3000;
+const IDLE_MS = 3000;  // mouse-still delay before the login card fades out
 const MAX_VOLUME = 15; // 0–100 scale; 15 = 0.15×
-const FADE_MS = 1500;
+const RAMP_MS = 3000;  // 0 → MAX_VOLUME, once, the moment audio unlocks
+const FADE_MS = 1500;  // login card opacity transition
 
 export function LoginClient({ error }: { error?: string }) {
   const [cardVisible, setCardVisible] = useState(true);
@@ -14,7 +15,6 @@ export function LoginClient({ error }: { error?: string }) {
   const ytReadyRef = useRef(false);
   const unlockedRef = useRef(false);
   const currentVolRef = useRef(0);
-  const targetVolRef = useRef(0);
   const rafRef = useRef<number>(0);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -26,13 +26,11 @@ export function LoginClient({ error }: { error?: string }) {
   }, []);
 
   const animateVolumeTo = useCallback((targetVol: number) => {
-    targetVolRef.current = targetVol;
     cancelAnimationFrame(rafRef.current);
-    if (!ytReadyRef.current || !unlockedRef.current) return;
     const fromVol = currentVolRef.current;
     const startTime = performance.now();
     const step = (now: number) => {
-      const t = Math.min((now - startTime) / FADE_MS, 1);
+      const t = Math.min((now - startTime) / RAMP_MS, 1);
       const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
       const vol = fromVol + (targetVol - fromVol) * eased;
       currentVolRef.current = vol;
@@ -47,13 +45,14 @@ export function LoginClient({ error }: { error?: string }) {
   // and neither one alone is worth sending a volume command on. setVolume comes
   // before unMute because the player's own volume is whatever YouTube last
   // remembered (usually 100), and unmuting first would burst that before the
-  // ramp takes over.
+  // ramp takes over. Once it runs the volume is set for good: the mouse moves
+  // the card, not the sound.
   const applyAudio = useCallback(() => {
     if (!ytReadyRef.current || !unlockedRef.current) return;
     sendCommand("setVolume", [0]);
     sendCommand("unMute");
     currentVolRef.current = 0;
-    animateVolumeTo(targetVolRef.current);
+    animateVolumeTo(MAX_VOLUME);
   }, [animateVolumeTo, sendCommand]);
 
   // Unlock one: open the event channel. enablejsapi=1 is not enough on its own
@@ -115,29 +114,24 @@ export function LoginClient({ error }: { error?: string }) {
     };
   }, [applyAudio]);
 
-  // Mouse idle tracking
+  // Mouse idle tracking — card visibility only. Volume used to duck to 0 on
+  // every mousemove and ramp back up on the idle timer, which meant the sound
+  // came and went with the cursor; it now ramps once and stays put.
   useEffect(() => {
     const onMove = () => {
       setCardVisible(true);
-      animateVolumeTo(0);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-      idleTimerRef.current = setTimeout(() => {
-        setCardVisible(false);
-        animateVolumeTo(MAX_VOLUME);
-      }, IDLE_MS);
+      idleTimerRef.current = setTimeout(() => setCardVisible(false), IDLE_MS);
     };
 
     window.addEventListener("mousemove", onMove);
-    idleTimerRef.current = setTimeout(() => {
-      setCardVisible(false);
-      animateVolumeTo(MAX_VOLUME);
-    }, IDLE_MS);
+    idleTimerRef.current = setTimeout(() => setCardVisible(false), IDLE_MS);
 
     return () => {
       window.removeEventListener("mousemove", onMove);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
-  }, [animateVolumeTo]);
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-zinc-950">
