@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "crypto";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { createSession } from "@/app/lib/session";
+import { DEFAULT_NAV_LAYOUT, NAV_LAYOUT_COOKIE } from "@/app/lib/nav-layout";
 
 // Re-validates the token here (not just at the link-click) to close the gap
 // between viewing the welcome page and pressing Continue, during which the
@@ -48,7 +49,7 @@ export async function joinAsGuest(token: string) {
   cookieStore.set("theme", "crl6mans", {
     path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax", secure: isProduction,
   });
-  cookieStore.set("nav_layout", "sidebar", {
+  cookieStore.set(NAV_LAYOUT_COOKIE, DEFAULT_NAV_LAYOUT, {
     path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax", secure: isProduction,
   });
 

@@ -59,7 +59,7 @@ create table if not exists players (
   kick_reason         text,
   theme               text        not null default 'crl6mans'
                                   check (theme in ('light', 'dark', 'crl6mans')),
-  nav_layout          text        not null default 'sidebar'
+  nav_layout          text        not null default 'topbar'
                                   check (nav_layout in ('sidebar', 'topbar')),
   updated_at          timestamptz not null default now(),
   created_at          timestamptz not null default now()
@@ -91,7 +91,7 @@ alter table players add column if not exists ban_reason         text;
 alter table players add column if not exists kick_reason        text;
 alter table players add column if not exists kicked_until       timestamptz;
 alter table players add column if not exists theme              text not null default 'crl6mans';
-alter table players add column if not exists nav_layout         text not null default 'sidebar';
+alter table players add column if not exists nav_layout         text not null default 'topbar';
 alter table players add column if not exists updated_at         timestamptz not null default now();
 alter table players add column if not exists created_at         timestamptz not null default now();
 alter table players add column if not exists team_signup_not_selected boolean not null default false;

@@ -10,6 +10,7 @@ import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
 import { NavAlertBadge, NavCountBadge } from "./nav-alert-badge";
 import { getUnreadCount } from "@/app/lib/notifications";
 import { applyNavTabOverrides } from "@/app/lib/nav-tabs";
+import { NAV_LAYOUT_COOKIE, resolveNavLayout } from "@/app/lib/nav-layout";
 import { hasSeenWelcome, WELCOME_SEEN_COOKIE } from "./welcome/welcome-seen";
 import { AppTitle } from "./app-title";
 import MobileNav from "./mobile-nav";
@@ -225,7 +226,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
   const userId = session!.userId;
 
-  const navLayout = cookieStore.get("nav_layout")?.value === "topbar" ? "topbar" : "sidebar";
+  const navLayout = resolveNavLayout(cookieStore.get(NAV_LAYOUT_COOKIE)?.value);
 
   // Every fetch the chrome needs, in one bundle. app/dashboard/layout-data.ts
   // holds the LOAD_MODE switch that decides whether they run in stages or all

@@ -4,6 +4,7 @@ import { createSession } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { getBaseUrl } from "@/app/lib/base-url";
 import { hasSeenWelcome, WELCOME_SEEN_COOKIE, WELCOME_SEEN_MAX_AGE } from "@/app/dashboard/welcome/welcome-seen";
+import { NAV_LAYOUT_COOKIE, resolveNavLayout } from "@/app/lib/nav-layout";
 
 // This prevents host-header injection from affecting redirect destinations.
 function safeRedirect(request: NextRequest, path: string) {
@@ -115,8 +116,8 @@ export async function GET(request: NextRequest) {
       path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax",
       secure: isProduction,
     });
-    const navLayout = account?.nav_layout === "topbar" ? "topbar" : "sidebar";
-    cookieStore.set("nav_layout", navLayout, {
+    const navLayout = resolveNavLayout(account?.nav_layout as string | null | undefined);
+    cookieStore.set(NAV_LAYOUT_COOKIE, navLayout, {
       path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax",
       secure: isProduction,
     });

@@ -190,7 +190,7 @@ export default async function SettingsPage({
         />
       </div>
       <div className="mb-4">
-        <NavLayoutToggle initial={account?.nav_layout === "topbar" ? "topbar" : "sidebar"} />
+        <NavLayoutToggle initial={account?.nav_layout === "sidebar" ? "sidebar" : "topbar"} />
       </div>
       <div className="mb-4">
         <PatreonConnectCard

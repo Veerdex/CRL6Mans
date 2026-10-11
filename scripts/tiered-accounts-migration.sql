@@ -31,7 +31,7 @@ create table if not exists accounts (
                                          check (status in ('unregistered', 'pending', 'approved', 'rejected', 'banned')),
   theme                      text        not null default 'crl6mans'
                                          check (theme in ('light', 'dark', 'crl6mans')),
-  nav_layout                 text        not null default 'sidebar'
+  nav_layout                 text        not null default 'topbar'
                                          check (nav_layout in ('sidebar', 'topbar')),
   display_name               text,
   crl_coins                  integer     not null default 0,
