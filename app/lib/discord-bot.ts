@@ -11,7 +11,7 @@ import {
   DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS,
   HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF,
   HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF,
-  wbLoserTarget, lbWinnerTarget,
+  wbLoserTarget, lbWinnerTarget, dropMatchNum,
   getRoundName, GROUP_STAGE_PREFIX, parseGroupNum,
   TERMINAL_STAGES,
 } from "./bracket";
@@ -3311,6 +3311,10 @@ async function setMatchSlot(stage: string, round: number, matchNum: number, slot
 // waiting for a team that will never arrive (because its source was a bye).
 // Returns true if any byes were resolved (caller should loop until false).
 async function resolveDeByeMatches(): Promise<boolean> {
+  const sizes = await getDEBracketSizes();
+  if (!sizes) return false;
+  const { size } = sizes;
+
   const { data: lbMatches } = await supabaseAdmin
     .from("matches")
     .select("id, round, match_number, home_team_id, away_team_id")
@@ -3347,7 +3351,13 @@ async function resolveDeByeMatches(): Promise<boolean> {
       if (m.round === 1) {
         sourceStage = DE_WINNERS; sourceRound = 1; sourceMatchNum = 2 * m.match_number;
       } else if (m.round % 2 === 0) {
-        sourceStage = DE_WINNERS; sourceRound = m.round / 2 + 1; sourceMatchNum = m.match_number;
+        // Inverted through dropMatchNum, or this would read the feeder of the
+        // *un*crossed drop: a completed WB match whose loser went to the other
+        // side would look like a team that will never arrive, and this match
+        // would be byed out from under the loser still on its way.
+        const wbRound = m.round / 2 + 1;
+        sourceStage = DE_WINNERS; sourceRound = wbRound;
+        sourceMatchNum = dropMatchNum(wbRound, m.match_number, size);
       } else {
         sourceStage = DE_LOSERS; sourceRound = m.round - 1; sourceMatchNum = 2 * m.match_number;
       }

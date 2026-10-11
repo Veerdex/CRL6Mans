@@ -183,6 +183,27 @@ test("no dropper ever meets the team it beat in the round it dropped from", () =
   for (const size of [16, 32]) randomOutcomes(size, dropMatchNum, 20000).forEach(check);
 });
 
+// Three places have to invert the crossing — getDELBFeederLabel's drop-round
+// away label, resolveDeByeMatches' source lookup, and the test above. They all
+// just call dropMatchNum again, which is only correct because it is its own
+// inverse and a permutation of the round. Pin that down, since a scheme that
+// shifted instead of reversing would silently break all three.
+test("dropMatchNum is a self-inverse permutation of each drop round", () => {
+  for (const size of [4, 8, 16, 32, 64]) {
+    for (let wbRound = 2; wbRound <= getDEWBRounds(size); wbRound++) {
+      const count = size / 2 ** wbRound;
+      const targets = [];
+      for (let m = 1; m <= count; m++) {
+        const t = dropMatchNum(wbRound, m, size);
+        assert.ok(t >= 1 && t <= count, `size ${size} r${wbRound}m${m} → ${t} out of range`);
+        assert.equal(dropMatchNum(wbRound, t, size), m, "not self-inverse");
+        targets.push(t);
+      }
+      assert.deepEqual([...targets].sort((a, b) => a - b), targets.map((_, i) => i + 1));
+    }
+  }
+});
+
 test("feeder labels name the WB match the crossing actually sends down", () => {
   for (const size of [4, 8, 16, 32]) {
     const numWB = getDEWBRounds(size);
