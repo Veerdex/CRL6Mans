@@ -110,7 +110,39 @@ console.log(`All timestamps below are UTC.\n`);
 if (!match) {
   console.log("!! No matches row with this id.");
   console.log("   Either the id is wrong, or the event was already reset — and a reset");
-  console.log("   deletes every wager row too, so there may be nothing left to reconcile.\n");
+  console.log("   deletes every wager row too, so there may be nothing left to reconcile.");
+
+  // Which of the two it is shows in the wider state: a reset empties wagers and
+  // matches together, while a wrong id leaves both populated.
+  const allMatches = await rest("surveying matches", "matches?select=id");
+  const allWagers = await rest("surveying wagers", "wagers?select=match_id,status,amount");
+  const liveIds = new Set(allMatches.map((m) => m.id));
+  const orphans = allWagers.filter((w) => w.match_id && !liveIds.has(w.match_id));
+  const wageredIds = [...new Set(allWagers.map((w) => w.match_id).filter(Boolean))];
+
+  console.log(`\n   matches rows in the DB:  ${allMatches.length}`);
+  console.log(`   wagers rows in the DB:   ${allWagers.length}`);
+  console.log(`   distinct matches wagered on: ${wageredIds.length}`);
+  console.log(`   wagers pointing at a match that no longer exists: ${orphans.length}`);
+  if (allWagers.length) {
+    const byStatus = {};
+    for (const w of allWagers) byStatus[w.status] = (byStatus[w.status] ?? 0) + 1;
+    console.log(`   wager statuses: ${Object.entries(byStatus).map(([s, n]) => `${s} ${n}`).join(", ")}`);
+  }
+  if (!allWagers.length) {
+    console.log(`\n   wagers is empty, so a reset or wipe has already run. That path calls`);
+    console.log(`   voidAllPendingWagers first, which refunded everything still 'pending'.`);
+    console.log(`   Any wager already marked 'void' but never credited is no longer`);
+    console.log(`   recoverable from the database — Discord history or a Supabase`);
+    console.log(`   point-in-time backup would be the only remaining record.`);
+  } else if (wageredIds.length) {
+    console.log(`\n   wagers still holds rows, so nothing has been wiped and the id above`);
+    console.log(`   is simply not one of them. Re-run with a match id from this list:`);
+    for (const id of wageredIds.slice(0, 40)) {
+      console.log(`     ${id}${liveIds.has(id) ? "" : "  (match row already gone)"}`);
+    }
+  }
+  console.log("");
 } else {
   console.log(`  status      ${match.status}`);
   console.log(`  score       ${match.home_score ?? "—"} - ${match.away_score ?? "—"}`);
