@@ -5,13 +5,14 @@ import { APP_NAME } from "@/app/lib/constants";
 
 const VIDEO_ID = "NBFVztq7OlU";
 const IDLE_MS = 3000;
-const MAX_VOLUME = 25; // 0–100 scale; 25 = 0.25×
+const MAX_VOLUME = 15; // 0–100 scale; 15 = 0.15×
 const FADE_MS = 1500;
 
 export function LoginClient({ error }: { error?: string }) {
   const [cardVisible, setCardVisible] = useState(true);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const ytReadyRef = useRef(false);
+  const unlockedRef = useRef(false);
   const currentVolRef = useRef(0);
   const targetVolRef = useRef(0);
   const rafRef = useRef<number>(0);
@@ -27,7 +28,7 @@ export function LoginClient({ error }: { error?: string }) {
   const animateVolumeTo = useCallback((targetVol: number) => {
     targetVolRef.current = targetVol;
     cancelAnimationFrame(rafRef.current);
-    if (!ytReadyRef.current) return;
+    if (!ytReadyRef.current || !unlockedRef.current) return;
     const fromVol = currentVolRef.current;
     const startTime = performance.now();
     const step = (now: number) => {
@@ -42,28 +43,77 @@ export function LoginClient({ error }: { error?: string }) {
     rafRef.current = requestAnimationFrame(step);
   }, [sendCommand]);
 
-  // Listen for YouTube's onReady postMessage — fired automatically when
-  // enablejsapi=1 is in the embed URL. Using this as the ready signal
-  // avoids calling new YT.Player() which always reinitializes the player.
+  // Audio needs two independent unlocks — the API channel and a user gesture —
+  // and neither one alone is worth sending a volume command on. setVolume comes
+  // before unMute because the player's own volume is whatever YouTube last
+  // remembered (usually 100), and unmuting first would burst that before the
+  // ramp takes over.
+  const applyAudio = useCallback(() => {
+    if (!ytReadyRef.current || !unlockedRef.current) return;
+    sendCommand("setVolume", [0]);
+    sendCommand("unMute");
+    currentVolRef.current = 0;
+    animateVolumeTo(targetVolRef.current);
+  }, [animateVolumeTo, sendCommand]);
+
+  // Unlock one: open the event channel. enablejsapi=1 is not enough on its own
+  // — the iframe sends no messages at all, onReady included, until the parent
+  // posts `listening` to it. That handshake is the thing new YT.Player() does
+  // for you, so dropping the wrapper without replacing it left the ready flag
+  // permanently false and no volume command was ever sent. Retried on an
+  // interval because the iframe is in the SSR'd HTML and can finish loading
+  // either side of hydration, and the first reply stops it.
   useEffect(() => {
+    const openChannel = () =>
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ event: "listening", id: 1, channel: "widget" }),
+        "https://www.youtube.com"
+      );
+    const handshake = setInterval(openChannel, 500);
+    openChannel();
+
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== "https://www.youtube.com") return;
+      clearInterval(handshake);
       try {
         const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-        if (data?.event === "onReady" && !ytReadyRef.current) {
+        const ready =
+          data?.event === "onReady" ||
+          data?.event === "initialDelivery" ||
+          data?.event === "alreadyInitialized";
+        if (ready && !ytReadyRef.current) {
           ytReadyRef.current = true;
-          sendCommand("unMute");
-          sendCommand("setVolume", [0]);
-          animateVolumeTo(targetVolRef.current);
+          applyAudio();
         }
       } catch { /* ignore non-JSON */ }
     };
     window.addEventListener("message", onMessage);
     return () => {
+      clearInterval(handshake);
       window.removeEventListener("message", onMessage);
       cancelAnimationFrame(rafRef.current);
     };
-  }, [animateVolumeTo, sendCommand]);
+  }, [applyAudio]);
+
+  // Unlock two: a real gesture. Unmuting without user activation is not merely
+  // ignored — Chrome treats it as an autoplay violation and **pauses the
+  // video**, so ramping on the idle timer alone would freeze the background
+  // instead of adding sound to it. mousemove is not activation; a click, tap or
+  // keypress is. Until one lands the montage plays silently, which is the
+  // browser's call to make, not ours.
+  useEffect(() => {
+    const unlock = () => {
+      if (unlockedRef.current) return;
+      unlockedRef.current = true;
+      applyAudio();
+    };
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, [applyAudio]);
 
   // Mouse idle tracking
   useEffect(() => {
