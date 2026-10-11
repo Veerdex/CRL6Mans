@@ -126,6 +126,14 @@ async function getGlobalBettingMode(): Promise<BettingMode> {
   return data?.betting_mode === "pool" ? "pool" : "fixed";
 }
 
+// Which betting model isBettingClosed applies. matches rows carry no tournament_id —
+// a tournament's matches *are* the season machinery's rows — so the discriminator is
+// the same global one isTournamentActive uses in discord-bot.ts.
+async function isTournamentEvent(): Promise<boolean> {
+  const { data } = await supabaseAdmin.from("league_settings").select("active_tournament_id").maybeSingle();
+  return !!(data?.active_tournament_id as string | null | undefined);
+}
+
 // Backstop lock: matches are normally locked to a betting mode already by
 // freezeUnfrozenMatchPredictions (app/lib/match-predictions.ts), the moment
 // they get both teams assigned. This only does anything in the narrow window
@@ -140,6 +148,8 @@ async function lockMatchBettingMode(matchId: string, currentMode: string | null,
 
 type MatchBettingState = {
   status: string | null;
+  home_team_id: string | null;
+  away_team_id: string | null;
   scheduled_at: string | null;
   schedule_accepted: boolean | null;
   schedule_admin_required: boolean | null;
@@ -152,21 +162,26 @@ type MatchBettingState = {
   away_checked_in: boolean | null;
 };
 
-// Betting is only open for matches with a *locked-in* future time. Results are
-// player-reported and a single team can auto-finalize them, so an unscheduled match
-// (scheduled_at null — the default for most bracket matches) must NOT be bettable: its
-// outcome may already be known or self-reportable. Past start, a submitted/finalized
-// result, or both teams checked in also close betting as defense in depth.
+// Two models, because the two event types decide a matchup at opposite times.
 //
-// "Locked in" is the same condition /dashboard/schedule renders as confirmed: a time
-// exists, no admin sign-off is outstanding, and it came from either a team agreeing to
-// the opponent's proposal or an admin pinning it. A season match negotiated between
-// captains carries scheduled_at from the moment one side *proposes* — betting there
-// would run on a time the opponent can still reject, and rejectScheduleOverride wipes
-// scheduled_at outright. Tournament matches are unaffected: their times are fixed, and
-// both syncRoundMatchPins and pinMatchTime stamp schedule_accepted with
-// schedule_admin_required false, so they pass on the first try.
-function isBettingClosed(match: MatchBettingState): string | null {
+// A tournament match is bettable from the moment its matchup seats until a result is
+// submitted. Nothing stamps scheduled_at on a tournament match past the opening round
+// and check-in opens as soon as both teams are known, so the season clauses below
+// would leave every later round permanently unbettable. The trade is live betting: the
+// book stays open while the series is played, and the match channel shows the running
+// score — accepted deliberately, the close is the result, not the first whistle.
+//
+// A season match has a *locked-in* future time instead. Results are player-reported
+// and a single team can auto-finalize them, so an unscheduled season match
+// (scheduled_at null — the default for most bracket matches) must NOT be bettable: its
+// outcome may already be known or self-reportable, and a season has no fixed start to
+// anchor to. "Locked in" is the same condition /dashboard/schedule renders as
+// confirmed: a time exists, no admin sign-off is outstanding, and it came from either a
+// team agreeing to the opponent's proposal or an admin pinning it. A season match
+// negotiated between captains carries scheduled_at from the moment one side *proposes*
+// — betting there would run on a time the opponent can still reject, and
+// rejectScheduleOverride wipes scheduled_at outright.
+function isBettingClosed(match: MatchBettingState, isTournament: boolean): string | null {
   if (match.status === "completed" || match.home_score !== null) {
     return "Match is already completed";
   }
@@ -180,6 +195,12 @@ function isBettingClosed(match: MatchBettingState): string | null {
   ) {
     return "Betting is closed — a result has already been submitted for this match.";
   }
+  // Explicit rather than implied by the schedule clauses below, which is what used to
+  // keep the teamless pre-created bracket slots out.
+  if (!match.home_team_id || !match.away_team_id) {
+    return "Betting isn't open for this match yet — its teams aren't decided.";
+  }
+  if (isTournament) return null;
   if (match.home_checked_in && match.away_checked_in) {
     return "Betting is closed — this match has already started.";
   }
@@ -258,10 +279,12 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
     .select("id, status, scheduled_at, schedule_accepted, schedule_admin_required, admin_scheduled, home_team_id, away_team_id, home_score, pending_home_score, score_submitted_at, result_reported_at, home_checked_in, away_checked_in, betting_mode")
     .in("id", matchIds);
 
+  const isTournament = await isTournamentEvent();
+
   for (const matchId of matchIds) {
     const match = (matches ?? []).find((m) => m.id === matchId);
     if (!match) return { error: "Match not found" };
-    const closed = isBettingClosed(match);
+    const closed = isBettingClosed(match, isTournament);
     if (closed) return { error: closed };
     // Players cannot bet on a match their own team is in — they control its result reporting.
     if (teamId && (match.home_team_id === teamId || match.away_team_id === teamId)) {
@@ -400,11 +423,12 @@ export async function placeParlayBet(
   // Pool-mode matches have no fixed multiplier, so they can't be priced into a
   // parlay's combined multiplier — excluded from parlays entirely.
   const globalMode = await getGlobalBettingMode();
+  const isTournament = await isTournamentEvent();
 
   for (const matchId of matchIds) {
     const match = (matches ?? []).find((m) => m.id === matchId);
     if (!match) return { error: "Match not found" };
-    const closed = isBettingClosed(match);
+    const closed = isBettingClosed(match, isTournament);
     if (closed) return { error: closed };
     // Players cannot bet on a match their own team is in — they control its result reporting.
     if (teamId && (match.home_team_id === teamId || match.away_team_id === teamId)) {

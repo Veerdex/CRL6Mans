@@ -335,8 +335,8 @@ export async function GET(request: Request) {
   // teams. Nothing reaches Discord: execPregenerateBracket opens no channel and
   // no check-in window, and both of those paths independently refuse while
   // season_active is false. The start time is passed in because the opening round
-  // is stamped with it — the only time a tournament match gets, and what makes it
-  // bettable for this window.
+  // is stamped with it — the only time a tournament match gets, and so the only
+  // thing that puts a time on the event's first matches anywhere a player looks.
   //
   // Gated on the formation trigger being absent or past, not on teams_formed_at:
   // a field built by hand from the Teams tab never stamps that column and should

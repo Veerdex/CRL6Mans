@@ -140,36 +140,39 @@ export default async function WagersPage() {
     | null;
   const fallbackBestOf = (format?.best_of ?? 3) as BestOf;
 
-  // Only matches with a locked-in future time are bettable. Unscheduled matches
-  // (scheduled_at null) are hidden — their outcome may already be known or
-  // self-reportable, so betting on them must not be possible. A season time that one
-  // captain has merely proposed is not locked in: the opponent can still reject it and
-  // an out-of-window one can still be wiped by an admin. A tournament has no round
-  // schedules at all — those are a season mechanism — so its only stamped time is the
-  // opening round's, written by execPregenerateBracket from the event's start time;
-  // that one is admin-stamped and qualifies immediately. A later tournament round is
-  // bettable only once an admin times it in the Scheduling panel, which stamps every
-  // match of the round and holds its check-in until then — otherwise check-in opens
-  // the moment the matchup seats and no window exists.
+  // A tournament match is bettable from the moment its matchup seats until a result is
+  // submitted — nothing stamps a time on a tournament match past the opening round, and
+  // check-in opens as soon as both teams are known, so a scheduled-time gate would make
+  // every later round unbettable. A season match instead needs a locked-in future time:
+  // unscheduled season matches (scheduled_at null) are hidden because their outcome may
+  // already be known or self-reportable, and a time one captain has merely proposed is
+  // not locked in — the opponent can still reject it and an out-of-window one can still
+  // be wiped by an admin.
   //
   // Every clause here must mirror isBettingClosed in actions.ts — a match rendered as
   // bettable that the server then rejects is a dead-end for the player.
   const now = Date.now();
-  const bettable = (allMatches ?? []).filter(
-    (m) =>
-      m.status !== "completed" &&
-      m.home_score === null &&
-      m.pending_home_score === null &&
-      m.score_submitted_at === null &&
-      m.result_reported_at === null &&
+  const bettable = (allMatches ?? []).filter((m) => {
+    if (
+      m.status === "completed" ||
+      m.home_score !== null ||
+      m.pending_home_score !== null ||
+      m.score_submitted_at !== null ||
+      m.result_reported_at !== null ||
+      !m.home_team_id ||
+      !m.away_team_id
+    ) {
+      return false;
+    }
+    if (activeTournamentId) return true;
+    return (
       !(m.home_checked_in && m.away_checked_in) &&
-      m.home_team_id &&
-      m.away_team_id &&
-      m.scheduled_at &&
+      !!m.scheduled_at &&
       !m.schedule_admin_required &&
-      (m.schedule_accepted || m.admin_scheduled) &&
-      new Date(m.scheduled_at).getTime() > now,
-  );
+      !!(m.schedule_accepted || m.admin_scheduled) &&
+      new Date(m.scheduled_at).getTime() > now
+    );
+  });
 
   type MatchBO = {
     id: string;
@@ -210,12 +213,17 @@ export default async function WagersPage() {
   // scoping to scheduled_at > now (or completed) keeps the grid to a useful size.
   // Deliberately looser than `bettable`: the grid is an overview, and it takes
   // bettableMatchIds separately to decide which cells are actually actionable, so a
-  // match with an unconfirmed time still shows its odds without offering a bet.
+  // match with an unconfirmed time still shows its odds without offering a bet. Looser,
+  // not different: a bettable match always belongs here, which a time-based filter alone
+  // would miss for a tournament round that has no stamped time.
+  const bettableIdSet = new Set(bettableMatchIds);
   const gridMatchesRaw = (allMatches ?? []).filter(
     (m) =>
       m.home_team_id &&
       m.away_team_id &&
-      (m.status === "completed" || (m.scheduled_at && new Date(m.scheduled_at).getTime() > now)),
+      (m.status === "completed" ||
+        bettableIdSet.has(m.id) ||
+        (m.scheduled_at && new Date(m.scheduled_at).getTime() > now)),
   );
 
   // Current stage label

@@ -101,12 +101,13 @@ export async function generateBracketForSeason(): Promise<{ error?: string; ok?:
 
   // The rebuild gives the opening round new match IDs, so the stamp
   // execPregenerateBracket wrote died with the old rows. Re-apply it, or a regenerate
-  // inside the pre-generation window would end round-1 betting for good — a tournament
-  // has no other writer of scheduled_at.
+  // inside the pre-generation window would leave the first matches of the event with
+  // no time shown anywhere — a tournament has no other writer of scheduled_at.
   //
-  // Only inside that window: a tournament is active from signups onward, so a director
-  // generating by hand days early would otherwise open betting for days on a bracket
-  // that the real pre-generation run will delete and reseed underneath it.
+  // Only inside that window: a tournament is active from signups onward, and a
+  // director generating by hand days early is building a bracket that the real
+  // pre-generation run will delete and reseed underneath it, so stamping it would
+  // advertise a time for matchups that aren't the ones that will be played.
   if (result.ok) {
     const { data: settings } = await supabaseAdmin
       .from("league_settings").select("active_tournament_id").single();

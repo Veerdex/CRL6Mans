@@ -823,10 +823,10 @@ export default async function AdminPage() {
   // only chance to time round 1: once the season starts, round 1 is already live and
   // isRoundLocked refuses to edit it. That matters for a season, whose round times
   // are set here and are also what makes a round bettable; a tournament's opening
-  // round is stamped by execPregenerateBracket instead, and its later rounds open on
-  // check-in unless a round is timed here, which holds that round's check-in until
-  // the stamped time and is the only way a tournament round after the first becomes
-  // bettable.
+  // round is stamped by execPregenerateBracket instead, and timing a later round here
+  // holds that round's check-in until the stamped time rather than opening it the
+  // moment the matchup seats. Tournament betting is independent of all of it — it
+  // opens on seating and closes on the result.
   // "scheduled" is what makes it a live bracket, the same predicate the Teams tab
   // uses: a finished event keeps its matches as "completed" until the next build
   // deletes them, and pre-created downstream slots sit at "pending" — counting
@@ -1476,7 +1476,7 @@ export default async function AdminPage() {
           title="Scheduling"
           notification={schedulingUnscheduledCount || undefined}
           defaultOpen={schedulingUnscheduledCount > 0}
-          description="Set the play window and deadline for each round, per stage. Available from the moment the bracket is generated — a round given a specific time becomes bettable, and round 1 can only be timed before the event starts. The badge counts rounds that don't have a schedule set yet."
+          description="Set the play window and deadline for each round, per stage. Available from the moment the bracket is generated — a round given a specific time holds its check-in until then, and round 1 can only be timed before the event starts. The badge counts rounds that don't have a schedule set yet."
         >
           {schedulingSections.length === 0 ? (
             <p className="text-sm text-zinc-500">No rounds found — the bracket hasn&apos;t been generated yet.</p>
