@@ -1,14 +1,21 @@
 "use client";
 
+import { createPortal } from "react-dom";
+import { useMounted } from "./use-mounted";
+
 // Shown when a viewer who can't join presses Join anyway. The link is
 // unconditional because /dashboard/register self-gates: it bounces approved
 // players and guests back to the dashboard, and shows the Discord invite to
 // anyone not in the server yet.
+//
+// Portaled to the body for the same reasons as ModalShell in
+// mmr-confirm-panel.tsx — read that comment; this opens from the same card.
 export function RegisterPromptModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  if (!open) return null;
-  return (
+  const mounted = useMounted();
+  if (!open || !mounted) return null;
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
       onClick={(e) => { e.stopPropagation(); onClose(); }}
     >
       <div
@@ -36,6 +43,7 @@ export function RegisterPromptModal({ open, onClose }: { open: boolean; onClose:
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

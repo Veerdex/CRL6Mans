@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { useMounted } from "./use-mounted";
 
 /** Season Peak is `current_*`, All Time Peak is `peak_*` — see settings/actions.ts. */
 export type MmrValues = {
@@ -21,10 +23,23 @@ export function mmrChanged(a: MmrValues, b: MmrValues): boolean {
   );
 }
 
+// Portaled to the body, for two reasons. The join card this opens from has
+// `hover:-translate-y-1`, and a transformed ancestor becomes the containing block
+// for a `fixed` child — so the overlay would size and centre itself on the card
+// and then get clipped by its `overflow-hidden`. Worse, hovering the overlay
+// counts as hovering the card, so the transform turned on, the overlay shrank out
+// from under the cursor, the hover dropped, and it flipped back: a flicker between
+// the two positions, animated by the card's `transition-all`. Second, `<main>` is
+// `isolate`, so a z-50 inside it still sat under the z-20 sidebar and topbar.
+// The stopPropagation calls below are not redundant under a portal — React events
+// bubble along the React tree, so without them a click in the modal reaches the
+// card's onClick and navigates away.
 export function ModalShell({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  return (
+  const mounted = useMounted();
+  if (!mounted) return null;
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
       onClick={(e) => { e.stopPropagation(); onClose(); }}
     >
       <div
@@ -33,7 +48,8 @@ export function ModalShell({ onClose, children }: { onClose: () => void; childre
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
