@@ -24,7 +24,6 @@
  * Reads NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from .env.local.
  */
 import { config } from "dotenv";
-import { createClient } from "@supabase/supabase-js";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,57 +39,45 @@ if (!url || !key) {
   process.exit(1);
 }
 
-const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-
-const die = (what, error) => {
-  if (!error) return;
-  console.error(`Failed ${what}: ${error.message}`);
-  process.exit(1);
+// Plain REST rather than @supabase/supabase-js: its client constructs a realtime
+// socket eagerly, which throws on Node 20 without the optional `ws` package. A
+// read-only diagnostic has no reason to carry that.
+const rest = async (what, path) => {
+  const res = await fetch(`${url}/rest/v1/${path}`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: "application/json" },
+  });
+  if (!res.ok) {
+    console.error(`Failed ${what}: ${res.status} ${await res.text()}`);
+    process.exit(1);
+  }
+  return res.json();
 };
+
+const inList = (values) => `in.(${values.map((v) => `"${v}"`).join(",")})`;
 
 const coins = (n) => `${n > 0 ? "+" : ""}${n}`;
 const utc = (t) => (t ? new Date(t).toISOString().replace("T", " ").replace(".000Z", "") : "—");
 const count = (rows, status) => rows.filter((r) => r.status === status).length;
 
-const { data: match, error: matchErr } = await db
-  .from("matches")
-  .select("*")
-  .eq("id", MATCH_ID)
-  .maybeSingle();
-die("reading the match", matchErr);
-
-const { data: wagers, error: wagerErr } = await db
-  .from("wagers")
-  .select("*")
-  .eq("match_id", MATCH_ID);
-die("reading wagers", wagerErr);
-
-const { data: legs, error: legErr } = await db
-  .from("parlay_legs")
-  .select("*")
-  .eq("match_id", MATCH_ID);
-die("reading parlay legs", legErr);
+const [match] = await rest("reading the match", `matches?id=eq.${MATCH_ID}&select=*`);
+const wagers = await rest("reading wagers", `wagers?match_id=eq.${MATCH_ID}&select=*`);
+const legs = await rest("reading parlay legs", `parlay_legs?match_id=eq.${MATCH_ID}&select=*`);
 
 const parlayIds = [...new Set((legs ?? []).map((l) => l.parlay_id))];
-let parlays = [];
-if (parlayIds.length) {
-  const { data, error } = await db.from("parlays").select("*").in("id", parlayIds);
-  die("reading parlays", error);
-  parlays = data ?? [];
-}
+const parlays = parlayIds.length
+  ? await rest("reading parlays", `parlays?id=${inList(parlayIds)}&select=*`)
+  : [];
 
 const discordIds = [
   ...new Set([...(wagers ?? []), ...parlays].map((r) => r.player_id).filter(Boolean)),
 ];
-let accounts = [];
-if (discordIds.length) {
-  const { data, error } = await db
-    .from("accounts")
-    .select("id, discord_id, username, display_name, crl_coins, updated_at")
-    .in("discord_id", discordIds);
-  die("reading accounts", error);
-  accounts = data ?? [];
-}
+const accounts = discordIds.length
+  ? await rest(
+      "reading accounts",
+      `accounts?discord_id=${inList(discordIds)}` +
+        `&select=id,discord_id,username,display_name,crl_coins,updated_at`,
+    )
+  : [];
 const accountByDiscordId = new Map(accounts.map((a) => [a.discord_id, a]));
 // wagers.player_id is a Discord snowflake, but wager_balance_adjustments.player_id
 // is an FK into players(id) (= accounts.id). Matching the log on snowflakes alone
@@ -101,12 +88,15 @@ const accountUuids = accounts.map((a) => a.id);
 
 // The admin correction tool's own audit log. A player already fixed by hand
 // shows up here, so a second pass can't double-credit them.
-const { data: adjustments, error: adjErr } = await db
-  .from("wager_balance_adjustments")
-  .select("*")
-  .order("created_at", { ascending: false })
-  .limit(200);
-if (adjErr) console.log(`(could not read wager_balance_adjustments: ${adjErr.message})\n`);
+let adjustments = [];
+{
+  const res = await fetch(
+    `${url}/rest/v1/wager_balance_adjustments?select=*&order=created_at.desc&limit=200`,
+    { headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: "application/json" } },
+  );
+  if (res.ok) adjustments = await res.json();
+  else console.log(`(could not read wager_balance_adjustments: ${res.status})\n`);
+}
 
 const name = (playerId) => {
   const a = accountByDiscordId.get(playerId) ?? accountByUuid.get(playerId);
