@@ -651,10 +651,12 @@ export async function createMatchChannel(
   if (deadlineTs < playTs) deadlineTs += 7 * 24 * 3600;
 
   // Home/Away match the match record (home_team_id = the seeded/scheduled home team).
-  // Null when the team has no role: the names are in the embed, so there is nothing
-  // for the content to fall back to.
-  const homePing = homeRole ? { text: `<@&${homeRole.id}>`, id: homeRole.id } : null;
-  const awayPing = awayRole ? { text: `<@&${awayRole.id}>`, id: awayRole.id } : null;
+  // Resolved through teamPing rather than from homeRole/awayRole directly so the
+  // @everyone guard applies here too; null when the team has no role, since the
+  // names are in the embed and there is nothing for the content to fall back to.
+  const pingRoles = [homeRole, awayRole].filter((r): r is { id: string; name: string } => !!r);
+  const homePing = teamPing(homeTeamName, pingRoles);
+  const awayPing = teamPing(awayTeamName, pingRoles);
   const rulesRef = rulesChannelId ? `<#${rulesChannelId}>` : "the rulebook";
 
   let bestOf = 3;
@@ -2824,13 +2826,17 @@ async function checkInCmd(userId: string, channelId: string) {
     deadlineTs: Math.floor(result.deadline / 1000),
   });
 
+  // Omitted when empty — no team here has a role — the way sendChannelMessage
+  // already drops falsy content, so all three paths send the same shape.
+  const maybeContent = content ? { content } : {};
+
   // Run in the match's channel, the reply *is* the announcement. Anywhere else,
   // confirm privately and post once in the channel — one visible message either way.
   if (channelId && channelId === result.discordChannelId)
-    return { type: 4, data: { content, embeds, allowed_mentions } };
+    return { type: 4, data: { ...maybeContent, embeds, allowed_mentions } };
   if (result.discordChannelId)
     await sendChannelMessage(result.discordChannelId, content, embeds, allowed_mentions).catch(() => {});
-  return { type: 4, data: { content, embeds, flags: 64, allowed_mentions } };
+  return { type: 4, data: { ...maybeContent, embeds, flags: 64, allowed_mentions } };
 }
 
 export async function isTournamentActive(): Promise<boolean> {

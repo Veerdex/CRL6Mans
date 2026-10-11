@@ -28,7 +28,11 @@ import {
   type SubPlayerRow,
 } from "../app/lib/match-embeds";
 
+// Includes @everyone because Discord's own role list does: GET /guilds/{id}/roles
+// returns it under that literal name, with the guild ID as its ID.
+const GUILD_ID = "999";
 const ROLES = [
+  { id: GUILD_ID, name: "@everyone" },
   { id: "100", name: "Top Tier" },
   { id: "200", name: "We Have The Meats" },
   { id: "300", name: "moderator" },
@@ -196,10 +200,24 @@ test("teamPing resolves a role by name and yields its ID", () => {
 });
 
 test("teamPing returns no ping for a team with no role", () => {
-  // Not a bolded fallback: the name is already in the embed, and a fallback in the
-  // content would duplicate it — and, for a team named "@everyone", ping the server.
-  assert.equal(teamPing("@everyone", ROLES), null);
+  // Not a bolded fallback: the name is already in the embed, so a fallback in the
+  // content would only duplicate it.
   assert.equal(teamPing("Unrostered FC", ROLES), null);
+});
+
+test("teamPing never resolves a team name onto @everyone or @here", () => {
+  // The real role list contains @everyone under that name, so a team called
+  // "@everyone" matches it and would ping the whole server through the bot.
+  assert.equal(teamPing("@everyone", ROLES), null);
+  assert.equal(teamPing("@here", ROLES), null);
+  // And the guild-wide role is never pingable even if a team somehow shares its ID.
+  for (const [name, post] of ALL) {
+    assert.ok(
+      !(post.allowed_mentions.roles ?? []).includes(GUILD_ID),
+      `${name}: whitelists the @everyone role`,
+    );
+    assert.ok(!post.content.includes(`<@&${GUILD_ID}>`), `${name}: mentions the @everyone role`);
+  }
 });
 
 test("a post with no resolvable ping has empty content and no whitelist", () => {

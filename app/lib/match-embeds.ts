@@ -36,12 +36,18 @@ export type Ping = { text: string; id: string };
  * A ping for the guild role matching a team name, or null when no such role
  * exists. Null means no ping rather than a bolded fallback name — the name is
  * already in the embed, so a fallback would only duplicate it in the content.
+ *
+ * `GET /guilds/{id}/roles` includes the `@everyone` role by that literal name,
+ * so a team called "@everyone" would otherwise match it by name and get the
+ * whole server pinged through the bot. Team names are player-supplied, so that
+ * role is excluded here, where every match-channel ping is resolved.
  */
 export function teamPing(
   teamName: string,
   roles: Array<{ id: string; name: string }>,
 ): Ping | null {
-  const role = roles.find((r) => r.name === teamName);
+  if (teamName === "@everyone" || teamName === "@here") return null;
+  const role = roles.find((r) => r.name === teamName && r.name !== "@everyone");
   return role ? { text: `<@&${role.id}>`, id: role.id } : null;
 }
 
@@ -98,7 +104,7 @@ export function tournamentIntroPost(
     });
   }
   fields.push({
-    name: `Private Match Lobby — ${teams.awayName} (Away) creates it`,
+    name: clamp(`Private Match Lobby — ${teams.awayName} (Away) creates it`, TITLE_LIMIT),
     value: `Room Name: \`${lobby.name}\`\nPassword: \`${lobby.password}\``,
   });
   return channelPost([teams.homePing, teams.awayPing], {
