@@ -4356,10 +4356,16 @@ export async function execReportMatchResult(
     const [winner, loser] = homeScore > awayScore ? [homeTeam, awayTeam] : [awayTeam, homeTeam];
     // Incremented in the DB rather than read-then-written: two of a team's
     // matches finishing at once would otherwise each write read+1 and lose one.
-    await Promise.all([
+    // Logged rather than thrown: the match is already claimed as completed, so
+    // aborting here would strand it. A missing function (pre-migration) would
+    // otherwise stop every standings update without a word.
+    const records = await Promise.all([
       supabaseAdmin.rpc("bump_team_record", { team: winner.id, won: true }),
       supabaseAdmin.rpc("bump_team_record", { team: loser.id, won: false }),
     ]);
+    for (const r of records) {
+      if (r.error) console.error(`[match ${matchId}] bump_team_record failed: ${r.error.message}`);
+    }
 
     // Update season ratings. Lazy-init from roster ratings on first match.
     // Forfeits are a complete no-op here — the games never happened, so they
