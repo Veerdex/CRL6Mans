@@ -180,6 +180,45 @@ export async function saveOwnMmr(values: {
   return { ok: true };
 }
 
+/**
+ * The four values and the tracker behind them, for the confirmation shown before
+ * a player joins a draft. Takes no argument on purpose — every export of a
+ * "use server" module is a public endpoint, so the row is resolved from the
+ * session and a caller cannot ask for someone else's. Reads `players`, the same
+ * source the Settings form reads, so the popup shows the numbers the player has
+ * been looking at.
+ */
+export async function getOwnMmrForJoin(): Promise<{
+  error?: string;
+  tracker_url?: string | null;
+  values?: MmrInput;
+}> {
+  const cookieStore = await cookies();
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId) return { error: "Your session expired — please sign in again." };
+
+  const { data: player } = await supabaseAdmin
+    .from("players")
+    .select("tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2")
+    .eq("discord_id", session.userId)
+    .single<{
+      tracker_url: string | null;
+      peak_3v3: string | null; current_3v3: string | null;
+      peak_2v2: string | null; current_2v2: string | null;
+    }>();
+  if (!player) return { error: "No player record for your account." };
+
+  return {
+    tracker_url: player.tracker_url,
+    values: {
+      peak_3v3:    String(player.peak_3v3 ?? ""),
+      current_3v3: String(player.current_3v3 ?? ""),
+      peak_2v2:    String(player.peak_2v2 ?? ""),
+      current_2v2: String(player.current_2v2 ?? ""),
+    },
+  };
+}
+
 export async function requestProfileChange(
   _prevState: unknown,
   formData: FormData
