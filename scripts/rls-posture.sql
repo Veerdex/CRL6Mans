@@ -117,12 +117,21 @@ alter table if exists wagers enable row level security;
 -- ─────────────────────────────────────────────
 -- PART 3 — the audit. Read-only; run it after Parts 1 and 2.
 --
--- Run against production 2026-10-11, after Parts 1, 2 and 4: 3a clean (RLS on
--- every table), 3b SELECT-only with the players policy gone, 3c and 3d both
--- empty. So there is no view or materialized view anon can read, and no
--- SECURITY DEFINER function anon can execute. Those two are the ones an outside
--- probe cannot see — check-anon-exposure.mjs reads tables, and a view running as
--- its owner would answer it without any policy's involvement.
+-- Run against production 2026-10-11: 3c and 3d both came back empty, so there
+-- is no view or materialized view anon can read and no SECURITY DEFINER
+-- function anon can execute. Those two are the ones an outside probe cannot
+-- see — check-anon-exposure.mjs reads tables, and a view running as its owner
+-- would answer it without any policy's involvement.
+--
+-- 3a and 3b were run earlier, before Part 4, so they still showed the players
+-- policy. 3a was clean (RLS on every table) and 3b was SELECT-only. The drop
+-- was confirmed separately and from outside, by `players` flipping from
+-- READABLE to "empty or filtered" in the probe — not by re-running 3b. Re-run
+-- 3b to see the end state directly: expect 27 rows, every one a
+-- crl6mansqueuebot_* table.
+--
+-- Nothing in Parts 1-4 covers Supabase Storage, which the same anon key also
+-- reaches. That is Part 5.
 -- ─────────────────────────────────────────────
 
 -- 3a. Every table, its RLS flag, and what anon is granted. Expect
@@ -231,4 +240,56 @@ drop policy if exists "Public read approved players" on players;
 -- If a public player list is ever actually wanted, the narrower shape is a view
 -- over just the columns meant to be published, created with
 -- `security_invoker = true` so it does not run as its owner and around RLS.
+-- ─────────────────────────────────────────────
+
+-- ─────────────────────────────────────────────
+-- PART 5 — Supabase Storage. Unaudited as of 2026-10-11.
+--
+-- The same anon key reaches Storage, and none of Parts 1-4 say anything about
+-- it. A *public* bucket is the case that matters most, because it serves any
+-- object to anyone who has the URL with no key at all — so no policy, and
+-- nothing in this file, constrains it.
+--
+-- Four buckets are in use:
+--
+--   team-logos                      getPublicUrl, rendered in <img>. Public is
+--                                   correct — these are meant to be seen.
+--   match-replays                   createSignedUrl only.
+--   platform-verification-replays   createSignedUrl only.
+--   college-ids                     enrollment proof: student ID images.
+--
+-- college-ids is the one to check. register/actions.ts uploads it and then
+-- calls getPublicUrl, storing that public URL in
+-- pending_players.college_image_url — so if the bucket is public, every proof
+-- is fetchable by URL, and the object name is `<discord id>-<timestamp>`.
+--
+-- The read path is already hardened: app/lib/college-ids.ts never links the
+-- stored URL, recovering the object name and signing a fresh 1-hour URL
+-- instead, and says in as many words that this works whether or not the bucket
+-- is still public. So flipping the bucket to private breaks no render surface.
+-- Proof is also deleted once a registration is decided. What is unverified is
+-- only whether the bucket was ever actually flipped.
+--
+-- Run these one at a time.
+-- ─────────────────────────────────────────────
+
+-- 5a. Which buckets are public. Expect `public = true` for team-logos only.
+select id, public, created_at
+from storage.buckets
+order by public desc, id;
+
+-- 5b. Storage policies anon falls under. An anon SELECT on storage.objects
+--     allows *listing* a bucket, which turns a guessable object name into an
+--     enumerable one. Expect no rows.
+select tablename, policyname, cmd, roles, qual
+from pg_policies
+where schemaname = 'storage'
+  and (roles @> '{anon}' or roles @> '{public}')
+order by tablename, policyname;
+
+-- If 5a shows college-ids public, this makes it private. Objects already
+-- uploaded are covered too — `public` is a property of the bucket, not of the
+-- object — and the signed-URL read path above is unaffected.
+--
+--   update storage.buckets set public = false where id = 'college-ids';
 -- ─────────────────────────────────────────────
