@@ -116,6 +116,13 @@ alter table if exists wagers enable row level security;
 
 -- ─────────────────────────────────────────────
 -- PART 3 — the audit. Read-only; run it after Parts 1 and 2.
+--
+-- Run against production 2026-10-11, after Parts 1, 2 and 4: 3a clean (RLS on
+-- every table), 3b SELECT-only with the players policy gone, 3c and 3d both
+-- empty. So there is no view or materialized view anon can read, and no
+-- SECURITY DEFINER function anon can execute. Those two are the ones an outside
+-- probe cannot see — check-anon-exposure.mjs reads tables, and a view running as
+-- its owner would answer it without any policy's involvement.
 -- ─────────────────────────────────────────────
 
 -- 3a. Every table, its RLS flag, and what anon is granted. Expect
