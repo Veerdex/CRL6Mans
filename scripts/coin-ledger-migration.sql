@@ -97,6 +97,7 @@ create or replace function credit_crl_coins(
   ref_type          text default null,
   ref_id            text default null
 ) returns integer as $$
+#variable_conflict use_variable
 declare
   new_balance integer;
 begin
@@ -132,6 +133,7 @@ create or replace function debit_crl_coins(
   ref_type          text default null,
   ref_id            text default null
 ) returns integer as $$
+#variable_conflict use_variable
 declare
   new_balance integer;
 begin
@@ -168,6 +170,7 @@ create or replace function adjust_crl_coins(
   delta         integer,
   change_reason text
 ) returns table (applied integer, balance_after integer) as $$
+#variable_conflict use_variable
 declare
   snowflake      text;
   before_balance integer;
@@ -202,6 +205,7 @@ create or replace function set_crl_coins(
   new_amount    integer,
   change_reason text
 ) returns table (applied integer, balance_after integer) as $$
+#variable_conflict use_variable
 declare
   snowflake      text;
   before_balance integer;
@@ -229,10 +233,17 @@ $$ language plpgsql;
 -- either side of this migration, and so any caller missed in the sweep still
 -- produces a ledger row instead of an untraceable balance change.
 -- ─────────────────────────────────────────────
+-- plpgsql with `perform` rather than `language sql` with a bare select:
+-- credit_crl_coins returns integer, and a SQL function declared `returns void`
+-- rejects a body whose final statement returns a value. Since the editor runs
+-- this file as one transaction, that one mismatch rolled the whole migration
+-- back -- tables included.
 create or replace function increment_crl_coins(player_discord_id text, coin_amount integer)
 returns void as $$
-  select credit_crl_coins(player_discord_id, coin_amount, 'legacy increment_crl_coins');
-$$ language sql;
+begin
+  perform credit_crl_coins(player_discord_id, coin_amount, 'legacy increment_crl_coins');
+end;
+$$ language plpgsql;
 
 -- ─────────────────────────────────────────────
 -- bump_team_record — atomic win/loss increment.
