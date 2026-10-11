@@ -1,6 +1,6 @@
 "use client";
 
-export function TrackerConfirmModal({
+export function MmrConfirmModal({
   open,
   onConfirm,
   onClose,
@@ -21,10 +21,11 @@ export function TrackerConfirmModal({
         className="w-full max-w-sm rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-xl flex flex-col gap-3"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold text-white">Confirm your tracker</h2>
+        <h2 className="text-base font-semibold text-white">Confirm your MMR</h2>
         <p className="text-sm text-zinc-400">
-          Your tracker stats haven&apos;t been updated in over a week. If they&apos;ve changed,
-          update them in Settings. Otherwise, confirm they&apos;re still the same to join.
+          Your MMR decides your rating and who you get drafted with. Check it against
+          your tracker — if it&apos;s changed, update it in Settings. Otherwise confirm
+          it&apos;s still the same to join.
         </p>
         <div className="flex flex-col gap-2 mt-1">
           <button
@@ -32,13 +33,13 @@ export function TrackerConfirmModal({
             disabled={isPending}
             className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
           >
-            {isPending ? "Joining…" : "My details are the same"}
+            {isPending ? "Joining…" : "My MMR is the same"}
           </button>
           <a
             href="/dashboard/settings"
             className="w-full text-center px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
           >
-            Update my tracker
+            Update my MMR
           </a>
           <button
             onClick={onClose}

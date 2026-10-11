@@ -5,7 +5,6 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { isGuildMember } from "@/app/lib/discord-api";
-import { isTrackerStale } from "@/app/lib/tracker";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { isCurrentlyKicked } from "@/app/lib/players";
@@ -17,13 +16,13 @@ async function currentPlayer() {
   if (!session?.userId) return null;
   const { data } = await supabaseAdmin
     .from("players")
-    .select("id, status, discord_id, kick_reason, kicked_until, peak_2v2, peak_3v3, tracker_confirmed_at")
+    .select("id, status, discord_id, kick_reason, kicked_until, peak_2v2, peak_3v3")
     .eq("discord_id", session.userId)
     .single();
   return data ? { ...data, userId: session.userId } : null;
 }
 
-export async function joinTournament(tournamentId: string, confirmTrackerSame = false): Promise<{ error?: string; ok?: boolean; message?: string; inviteRequired?: boolean; trackerStale?: boolean }> {
+export async function joinTournament(tournamentId: string, confirmedMmr = false): Promise<{ error?: string; ok?: boolean; message?: string; inviteRequired?: boolean; confirmMmr?: boolean }> {
   const player = await currentPlayer();
   if (!player) return { error: "You are not registered." };
   if (player.status !== "approved") return { error: "Your registration must be approved first." };
@@ -58,15 +57,13 @@ export async function joinTournament(tournamentId: string, confirmTrackerSame = 
   if (reqs.length > 0 && !reqs.some((r) => r.passes))
     return { error: `You need at least ${reqs.map((r) => r.label).join(" or ")} peak MMR to join.` };
 
-  if (!confirmTrackerSame && isTrackerStale((player as { tracker_confirmed_at?: string | null }).tracker_confirmed_at)) {
-    return { trackerStale: true };
-  }
-  if (confirmTrackerSame) {
-    await supabaseAdmin
-      .from("players")
-      .update({ tracker_confirmed_at: new Date().toISOString(), must_update_tracker: false })
-      .eq("id", player.id);
-  }
+  // Asked on every join, with no freshness window — see enterDraft.
+  if (!confirmedMmr) return { confirmMmr: true };
+
+  await supabaseAdmin
+    .from("players")
+    .update({ tracker_confirmed_at: new Date().toISOString(), must_update_tracker: false })
+    .eq("id", player.id);
 
   const { error } = await supabaseAdmin
     .from("tournament_entries")

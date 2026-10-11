@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { joinTournament, leaveTournament } from "./tournament-join-actions";
 import { LocalTime } from "./local-time";
 import type { TimelineItem } from "@/app/lib/tournament-timeline";
-import { TrackerConfirmModal } from "./tracker-confirm-modal";
+import { MmrConfirmModal } from "./mmr-confirm-modal";
 import { RegisterPromptModal } from "./register-prompt-modal";
 import { CountdownLabel } from "./countdown-label";
 import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
@@ -62,7 +62,7 @@ export function TournamentJoinCard({
   const [count, setCount] = useState(poolCount);
   const [error, setError] = useState<string | null>(null);
   const [inviteRequired, setInviteRequired] = useState(false);
-  const [trackerStale, setTrackerStale] = useState(false);
+  const [confirmMmr, setConfirmMmr] = useState(false);
   const [registerPrompt, setRegisterPrompt] = useState(false);
   const [isPending, startTransition] = useTransition();
 
@@ -70,20 +70,20 @@ export function TournamentJoinCard({
     if (!canJoin) { setRegisterPrompt(true); return; }
     setError(null);
     setInviteRequired(false);
-    setTrackerStale(false);
+    setConfirmMmr(false);
     startTransition(async () => {
       const res = joined ? await leaveTournament(id) : await joinTournament(id);
       if ("inviteRequired" in res && res.inviteRequired) { setInviteRequired(true); return; }
-      if ("trackerStale" in res && res.trackerStale) { setTrackerStale(true); return; }
+      if ("confirmMmr" in res && res.confirmMmr) { setConfirmMmr(true); return; }
       if (res.error) { setError(res.error); return; }
       setJoined(!joined);
       setCount((c) => Math.max(0, c + (joined ? -1 : 1)));
     });
   };
 
-  const confirmSameAndJoin = () => {
+  const confirmMmrAndJoin = () => {
     setError(null);
-    setTrackerStale(false);
+    setConfirmMmr(false);
     startTransition(async () => {
       const res = await joinTournament(id, true);
       if (res.error) { setError(res.error); return; }
@@ -199,10 +199,10 @@ export function TournamentJoinCard({
           </a>
         </div>
       )}
-      <TrackerConfirmModal
-        open={trackerStale}
-        onConfirm={confirmSameAndJoin}
-        onClose={() => setTrackerStale(false)}
+      <MmrConfirmModal
+        open={confirmMmr}
+        onConfirm={confirmMmrAndJoin}
+        onClose={() => setConfirmMmr(false)}
         isPending={isPending}
       />
       <RegisterPromptModal open={registerPrompt} onClose={() => setRegisterPrompt(false)} />

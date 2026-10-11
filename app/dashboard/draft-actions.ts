@@ -7,7 +7,6 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { execAutoPick } from "@/app/lib/discord-bot";
 import { isGuildMember } from "@/app/lib/discord-api";
-import { isTrackerStale } from "@/app/lib/tracker";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { isCurrentlyKicked } from "@/app/lib/players";
@@ -22,14 +21,14 @@ export async function triggerAutoPick(): Promise<{ done: boolean }> {
   return execAutoPick();
 }
 
-export async function enterDraft(confirmTrackerSame = false): Promise<{ error?: string; ok?: boolean; inviteRequired?: boolean; trackerStale?: boolean }> {
+export async function enterDraft(confirmedMmr = false): Promise<{ error?: string; ok?: boolean; inviteRequired?: boolean; confirmMmr?: boolean }> {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/");
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("id, status, draft_entered, kick_reason, kicked_until, tracker_confirmed_at, peak_2v2, peak_3v3")
+    .select("id, status, draft_entered, kick_reason, kicked_until, peak_2v2, peak_3v3")
     .eq("discord_id", session.userId)
     .single();
 
@@ -66,13 +65,19 @@ export async function enterDraft(confirmTrackerSame = false): Promise<{ error?: 
       return { error: `You need at least ${reqs.map((r) => r.label).join(" or ")} peak MMR to join the draft.` };
   }
 
-  if (!confirmTrackerSame && isTrackerStale(player.tracker_confirmed_at)) {
-    return { trackerStale: true };
-  }
+  // Every join asks, with no freshness window: a player's MMR can move between
+  // two events in the same week, and the prompt is the only thing that makes them
+  // look. The last gate, so a player isn't asked only to then be refused.
+  if (!confirmedMmr) return { confirmMmr: true };
 
   const now = new Date().toISOString();
-  const update: Record<string, unknown> = { draft_entered: true, draft_entered_at: now, updated_at: now };
-  if (confirmTrackerSame) { update.tracker_confirmed_at = now; update.must_update_tracker = false; }
+  const update: Record<string, unknown> = {
+    draft_entered: true,
+    draft_entered_at: now,
+    updated_at: now,
+    tracker_confirmed_at: now,
+    must_update_tracker: false,
+  };
 
   await supabaseAdmin.from("players").update(update).eq("id", player.id);
 

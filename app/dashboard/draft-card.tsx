@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { enterDraft, leaveDraft } from "./draft-actions";
-import { TrackerConfirmModal } from "./tracker-confirm-modal";
+import { MmrConfirmModal } from "./mmr-confirm-modal";
 
 interface DraftCardProps {
   inDraft: boolean;
@@ -20,7 +20,7 @@ export default function DraftCard({
   const [localCount, setLocalCount] = useState(draftCount);
   const [error, setError] = useState<string | null>(null);
   const [inviteRequired, setInviteRequired] = useState(false);
-  const [trackerStale, setTrackerStale] = useState(false);
+  const [confirmMmr, setConfirmMmr] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const locked = draftActive || seasonActive;
@@ -28,13 +28,13 @@ export default function DraftCard({
   function handleToggle() {
     setError(null);
     setInviteRequired(false);
-    setTrackerStale(false);
+    setConfirmMmr(false);
     startTransition(async () => {
       const result = entered ? await leaveDraft() : await enterDraft();
       if ("inviteRequired" in result && result.inviteRequired) {
         setInviteRequired(true);
-      } else if ("trackerStale" in result && result.trackerStale) {
-        setTrackerStale(true);
+      } else if ("confirmMmr" in result && result.confirmMmr) {
+        setConfirmMmr(true);
       } else if (result.error) {
         setError(result.error);
       } else {
@@ -44,9 +44,9 @@ export default function DraftCard({
     });
   }
 
-  function confirmSameAndEnter() {
+  function confirmMmrAndEnter() {
     setError(null);
-    setTrackerStale(false);
+    setConfirmMmr(false);
     startTransition(async () => {
       const result = await enterDraft(true);
       if (result.error) {
@@ -99,10 +99,10 @@ export default function DraftCard({
             </a>
           </div>
         )}
-        <TrackerConfirmModal
-          open={trackerStale}
-          onConfirm={confirmSameAndEnter}
-          onClose={() => setTrackerStale(false)}
+        <MmrConfirmModal
+          open={confirmMmr}
+          onConfirm={confirmMmrAndEnter}
+          onClose={() => setConfirmMmr(false)}
           isPending={isPending}
         />
       </div>
