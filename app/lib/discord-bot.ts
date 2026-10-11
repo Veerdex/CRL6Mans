@@ -32,10 +32,24 @@ import {
   checkInPost,
   matchResultPost,
   replayReviewPost,
+  seriesDisputedPost,
   type ChannelPost,
 } from "./match-embeds";
 import { announceClip, clipsChannelId, createClip } from "./clip-submit";
-import { profileEmbed, statsEmbed, coinsEmbed } from "./command-embeds";
+import { profileEmbed, statsEmbed, coinsEmbed, subAckEmbed, decisionAckEmbed } from "./command-embeds";
+import {
+  teamName,
+  submitSubRequestCore,
+  acceptSubRequestCore,
+  rejectSubRequestByOpponentCore,
+} from "./sub-requests";
+import {
+  openMatchIds,
+  seriesAwaitingTeam,
+  subRequestsAwaitingTeam,
+  type DecidableMatch,
+  type PendingSubRow,
+} from "./decision-targets";
 import { loadPlayerProfile } from "./player-profile";
 import { fetchAllTimeTotals, type CareerTotals } from "./career-stats";
 import { mvpScore, shootingPct } from "./stats-math";
@@ -2270,6 +2284,183 @@ async function coinsCmd(userId: string, targetId: string) {
   );
 }
 
+// ─── /sub, /approve, /reject ────────────────────────────────────────────────────
+//
+// The three write commands a player can run from a match channel. Every rule
+// they enforce lives in a core shared with the website — sub-requests.ts for the
+// substitutions, this file for the series decisions — so a request made here and
+// one made on My Team are validated identically. Each passes staffOverride:
+// false: the website's bypass is isModeratorVerified(), which is gated on Discord
+// 2FA, and typing a slash command proves nothing of the sort.
+
+// `players.discord_id` → `players.id`, which is what sub_requests stores. A
+// Discord account with no players row is someone who never got approved, and
+// saying so is clearer than letting them hit the core's "was not found".
+async function subjectPlayer(discordId: string) {
+  const { data } = await supabaseAdmin
+    .from("players").select("id, username, team_id").eq("discord_id", discordId).maybeSingle();
+  return data as { id: string; username: string | null; team_id: string | null } | null;
+}
+
+async function subCmd(userId: string, outId: string, inId: string, reason: string) {
+  const [me, playerOut, subIn] = await Promise.all([
+    subjectPlayer(userId), subjectPlayer(outId), subjectPlayer(inId),
+  ]);
+  if (!me?.team_id) return ephemeralReply("❌ You're not on a team.");
+  if (!playerOut) return ephemeralReply("❌ The player you're subbing out isn't a registered player.");
+  if (!subIn) return ephemeralReply("❌ The player you're subbing in isn't a registered player.");
+
+  const result = await submitSubRequestCore({
+    actorDiscordId: userId,
+    teamId: me.team_id,
+    playerOutId: playerOut.id,
+    subPlayerId: subIn.id,
+    reason,
+    staffOverride: false,
+  });
+  if (result.error) return ephemeralReply(`❌ ${result.error}`);
+
+  // The core has already posted the public request, with its pings, into the
+  // match channel. This is the private receipt for the person who ran it.
+  const [myName, oppName] = await Promise.all([
+    teamName(me.team_id),
+    (async () => {
+      const { data: m } = await supabaseAdmin
+        .from("matches")
+        .select("home_team_id, away_team_id")
+        .or(`home_team_id.eq.${me.team_id},away_team_id.eq.${me.team_id}`)
+        .is("home_score", null)
+        .not("home_team_id", "is", null).not("away_team_id", "is", null)
+        .order("round").order("match_number").limit(1).maybeSingle();
+      if (!m) return null;
+      return teamName(m.home_team_id === me.team_id ? m.away_team_id : m.home_team_id);
+    })(),
+  ]);
+
+  return ephemeralEmbedReply(subAckEmbed({
+    teamName: myName ?? "your team",
+    playerOut: playerOut.username ?? "a player",
+    subIn: subIn.username ?? "a player",
+    oppName,
+    reason: reason || null,
+  }));
+}
+
+const DECIDABLE_COLUMNS =
+  "id, home_team_id, away_team_id, home_score, pending_home_score, pending_away_score, score_submitted_by_team_id";
+
+// Channel first, exactly like /checkin: in a match channel the channel names the
+// match and there is nothing to resolve. Anywhere else, every unfinished match
+// the team is in is a candidate, and more than one waiting decision is refused
+// rather than guessed at.
+async function decidableMatches(
+  teamId: string, channelId: string,
+): Promise<{ matches: DecidableMatch[] } | { error: string }> {
+  if (channelId) {
+    const { data: here } = await supabaseAdmin
+      .from("matches").select(DECIDABLE_COLUMNS)
+      .eq("discord_channel_id", channelId).maybeSingle();
+    if (here) {
+      const m = here as DecidableMatch;
+      if (m.home_team_id !== teamId && m.away_team_id !== teamId)
+        return { error: "This isn't your match." };
+      return { matches: [m] };
+    }
+  }
+  const { data } = await supabaseAdmin
+    .from("matches").select(DECIDABLE_COLUMNS)
+    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
+    .is("home_score", null);
+  return { matches: (data ?? []) as DecidableMatch[] };
+}
+
+async function subsAwaitingMe(matches: DecidableMatch[], teamId: string) {
+  const ids = openMatchIds(matches);
+  if (ids.length === 0) return [];
+  const { data } = await supabaseAdmin
+    .from("sub_requests").select("id, team_id, match_id").eq("status", "pending").in("match_id", ids);
+  return subRequestsAwaitingTeam((data ?? []) as PendingSubRow[], teamId);
+}
+
+async function decisionCmd(userId: string, channelId: string, target: string, approve: boolean) {
+  const me = await subjectPlayer(userId);
+  if (!me?.team_id) return ephemeralReply("❌ You're not on a team.");
+  const teamId = me.team_id;
+  const verb = approve ? "approve" : "reject";
+  const other = approve ? "/approve" : "/reject";
+
+  const scope = await decidableMatches(teamId, channelId);
+  if ("error" in scope) return ephemeralReply(`❌ ${scope.error}`);
+
+  // Both are resolved up front so a "nothing to approve" answer can point at the
+  // other kind if that one is in fact waiting — the likeliest reason someone ran
+  // the command with the wrong choice.
+  const subs = await subsAwaitingMe(scope.matches, teamId);
+  const series = seriesAwaitingTeam(scope.matches, teamId);
+
+  const nothing = (what: string, hint: string, hintTarget: string) =>
+    ephemeralReply(
+      `ℹ️ Nothing to ${verb} — ${what}.` + (hint ? ` A ${hint} is, though: \`${other} target:${hintTarget}\`.` : ""),
+    );
+
+  if (target === "sub") {
+    if (subs.length === 0)
+      return nothing(
+        "no sub request is waiting on your team",
+        series.length ? "series result" : "", "series",
+      );
+    if (subs.length > 1)
+      return ephemeralReply(`❌ More than one sub request is waiting on you — run \`${other}\` in the match's own channel.`);
+
+    const req = subs[0];
+    const result = approve
+      ? await acceptSubRequestCore({ requestId: req.id, actorDiscordId: userId, staffOverride: false })
+      : await rejectSubRequestByOpponentCore({ requestId: req.id, actorDiscordId: userId, staffOverride: false });
+    if (result.error) return ephemeralReply(`❌ ${result.error}`);
+
+    const them = (await teamName(req.team_id)) ?? "the other team";
+    return ephemeralEmbedReply(decisionAckEmbed({
+      target: "sub", approved: approve,
+      detail: approve
+        ? `You accepted **${them}**'s substitute. It's confirmed in the match channel.`
+        : `You rejected **${them}**'s substitute. They can request a different one or report it to staff.`,
+    }));
+  }
+
+  if (series.length === 0)
+    return nothing(
+      "no series result is waiting on your approval",
+      subs.length ? "sub request" : "", "sub",
+    );
+  if (series.length > 1)
+    return ephemeralReply(`❌ More than one series result is waiting on you — run \`${other}\` in the match's own channel.`);
+
+  const match = series[0];
+  const result = approve
+    ? await confirmSeriesResultCore({ matchId: match.id, actorDiscordId: userId })
+    : await cancelSeriesSubmissionCore({ matchId: match.id, actorDiscordId: userId });
+  if (result.error) return ephemeralReply(`❌ ${result.error}`);
+
+  const [homeName, awayName] = await Promise.all([
+    teamName(match.home_team_id), teamName(match.away_team_id),
+  ]);
+  const line =
+    `**${homeName ?? "Home"} ${match.pending_home_score}–${match.pending_away_score} ${awayName ?? "Away"}**`;
+
+  // A confirm either finalises the match outright or hands it to staff for replay
+  // review, and only finalizeAcceptedSeries knows which — so the wording comes
+  // from its answer rather than assuming the happy path. Note that a finalised
+  // match deletes its channel, so if this was run there, this receipt lands on a
+  // channel that no longer exists; Discord drops it and nothing breaks.
+  const detail = !approve
+    ? `You rejected the submitted result, ${line}. The pending score is cleared and either team can submit again.`
+    : result.outcome === "pending_admin"
+      ? `You confirmed ${line}. Its replays contain unrecognised players, so staff will review the series before it counts.`
+      : `You confirmed ${line}. The match is final.`;
+
+  return ephemeralEmbedReply(decisionAckEmbed({ target: "series", approved: approve, detail }));
+}
+
 async function setDraftChannel(userId: string, channelId: string) {
   const denied = await directorGuard(userId);
   if (denied) return denied;
@@ -3134,17 +3325,20 @@ export async function finalizeMatchAndCloseChannel(
 // players the match goes to an admin instead — waiting until both teams have
 // accepted means the admin sees every replay in the series at once rather than
 // adjudicating the first bad one with the rest still missing.
+// The return value tells a caller which of the two it was, so an acknowledgement
+// can say "final" or "waiting on staff" truthfully instead of guessing. Callers
+// that only need the side effects ignore it.
 export async function finalizeAcceptedSeries(
   matchId: string,
   homeScore: number,
   awayScore: number,
-): Promise<void> {
+): Promise<"finalized" | "pending_admin"> {
   const needsReview =
     (await getReplayAnalysisMode()) === "strict" && (await matchHasUnmatchedPlayers(matchId));
 
   if (!needsReview) {
     await finalizeMatchAndCloseChannel(matchId, homeScore, awayScore);
-    return;
+    return "finalized";
   }
 
   await supabaseAdmin
@@ -3158,6 +3352,117 @@ export async function finalizeAcceptedSeries(
   }).catch(() => {});
 
   notifyMatchChannel(matchId, replayReviewPost(homeScore, awayScore)).catch(() => {});
+  return "pending_admin";
+}
+
+// ─── Series confirm / dispute, shared with the website ──────────────────────────
+//
+// These two live here rather than in a module of their own because
+// app/dashboard/my-team/series-actions.ts already imports finalizeAcceptedSeries
+// from this file — a separate module would have to import it back, and the cycle
+// would break at runtime. series-actions.ts keeps the session read, the redirect
+// and the revalidatePath calls and delegates the rest.
+//
+// They take actorDiscordId because a server action reads the session cookie and
+// the bot has none.
+
+async function teamIdOfDiscordId(discordId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("players").select("team_id").eq("discord_id", discordId).maybeSingle();
+  return (data?.team_id as string | null) ?? null;
+}
+
+export type SeriesDecision = {
+  error?: string;
+  outcome?: "finalized" | "pending_admin";
+  homeScore?: number;
+  awayScore?: number;
+};
+
+export async function confirmSeriesResultCore(args: {
+  matchId: string;
+  actorDiscordId: string;
+}): Promise<SeriesDecision> {
+  const teamId = await teamIdOfDiscordId(args.actorDiscordId);
+  if (!teamId) return { error: "Not on a team" };
+
+  const { data: match } = await supabaseAdmin
+    .from("matches")
+    .select("id, home_team_id, away_team_id, pending_home_score, pending_away_score, score_submitted_by_team_id, home_score, discord_channel_id")
+    .eq("id", args.matchId)
+    .single();
+
+  if (!match) return { error: "Match not found" };
+  if (match.home_team_id !== teamId && match.away_team_id !== teamId)
+    return { error: "Your team is not in this match" };
+  if (match.home_score !== null) return { error: "This match is already finalised" };
+  if (match.pending_home_score === null) return { error: "No pending result to confirm" };
+  if (match.score_submitted_by_team_id === teamId)
+    return { error: "You cannot confirm your own submission — wait for the opposing captain" };
+
+  const { error } = await supabaseAdmin
+    .from("matches")
+    .update({ score_confirmed: true })
+    .eq("id", args.matchId);
+  if (error) return { error: error.message };
+
+  const outcome = await finalizeAcceptedSeries(
+    args.matchId, match.pending_home_score!, match.pending_away_score!,
+  );
+  return { outcome, homeScore: match.pending_home_score!, awayScore: match.pending_away_score! };
+}
+
+// Either team in the match may clear a pending submission — that is the website's
+// rule and it stays the rule here. The bot narrows it on the way in, offering
+// /reject series only for a score the *other* team submitted.
+export async function cancelSeriesSubmissionCore(args: {
+  matchId: string;
+  actorDiscordId: string;
+}): Promise<SeriesDecision> {
+  const teamId = await teamIdOfDiscordId(args.actorDiscordId);
+  if (!teamId) return { error: "Not on a team" };
+
+  const { data: match } = await supabaseAdmin
+    .from("matches")
+    .select("id, home_team_id, away_team_id, home_score, pending_home_score, pending_away_score")
+    .eq("id", args.matchId)
+    .single();
+
+  if (!match) return { error: "Match not found" };
+  if (match.home_team_id !== teamId && match.away_team_id !== teamId)
+    return { error: "Your team is not in this match" };
+  if (match.home_score !== null) return { error: "This match is already finalised" };
+
+  const homeScore = match.pending_home_score as number | null;
+  const awayScore = match.pending_away_score as number | null;
+
+  const { error } = await supabaseAdmin
+    .from("matches")
+    .update({
+      pending_home_score:         null,
+      pending_away_score:         null,
+      score_submitted_by_team_id: null,
+      score_confirmed:            false,
+      score_submitted_at:         null,
+    })
+    .eq("id", args.matchId);
+  if (error) return { error: error.message };
+
+  try {
+    const otherTeamId = teamId === match.home_team_id ? match.away_team_id : match.home_team_id;
+    const [{ data: myTeam }, { data: otherTeam }] = await Promise.all([
+      supabaseAdmin.from("teams").select("name").eq("id", teamId).single(),
+      supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
+    ]);
+    if (myTeam?.name && otherTeam?.name) {
+      await notifyMatchChannel(args.matchId, seriesDisputedPost({
+        teamName: myTeam.name,
+        oppPing: teamPing(otherTeam.name, await getGuildRoles()),
+      }));
+    }
+  } catch { /* best-effort */ }
+
+  return { homeScore: homeScore ?? undefined, awayScore: awayScore ?? undefined };
 }
 
 // ─── Score auto-confirm ─────────────────────────────────────────────────────────
@@ -4708,6 +5013,27 @@ export async function handleCommand(interaction: Interaction) {
     case "profile":       return profileCmd(userId, String(opt(interaction, "user")));
     case "stats":         return statsCmd(userId, String(opt(interaction, "user")));
     case "coins":         return coinsCmd(userId, String(opt(interaction, "user")));
+    // `in` is a reserved word in Discord's option names only as far as taste
+    // goes, so it is spelled out — `sub_in` and `sub_out` read unambiguously in
+    // the command picker, where "out" alone could be read as "opt out".
+    case "sub":           return subCmd(
+      userId,
+      String(opt(interaction, "sub_out")),
+      String(opt(interaction, "sub_in")),
+      String(opt(interaction, "reason")),
+    );
+    case "approve":       return decisionCmd(
+      userId,
+      interaction.channel_id ?? interaction.channel?.id ?? "",
+      String(opt(interaction, "target")),
+      true,
+    );
+    case "reject":        return decisionCmd(
+      userId,
+      interaction.channel_id ?? interaction.channel?.id ?? "",
+      String(opt(interaction, "target")),
+      false,
+    );
     case "postclip":      return postClip(
       userId,
       String(opt(interaction, "url")),

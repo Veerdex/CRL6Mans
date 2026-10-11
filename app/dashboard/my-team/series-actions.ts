@@ -7,9 +7,18 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { notifyMatchChannel } from "@/app/lib/match-notifications";
 import { getGuildRoles } from "@/app/lib/discord-api";
-import { teamPing, seriesSubmittedPost, seriesDisputedPost } from "@/app/lib/match-embeds";
+import { teamPing, seriesSubmittedPost } from "@/app/lib/match-embeds";
 import { pushToAdmins } from "@/app/lib/push";
-import { getBestOfForMatch, validateSeriesScore, processExpiredScoreConfirmations, finalizeAcceptedSeries } from "@/app/lib/discord-bot";
+// confirmSeriesResultCore and cancelSeriesSubmissionCore live in discord-bot.ts
+// alongside finalizeAcceptedSeries: this file already depends on that module, so
+// putting them anywhere else would make the dependency circular.
+import {
+  getBestOfForMatch,
+  validateSeriesScore,
+  processExpiredScoreConfirmations,
+  confirmSeriesResultCore,
+  cancelSeriesSubmissionCore,
+} from "@/app/lib/discord-bot";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
@@ -17,6 +26,15 @@ import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
 import { evaluateAndPersistGameCertification, resolveSubmittedGames, resolvePlatformIdMatches } from "@/app/lib/replay-identity-certification";
 import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
+
+// For the actions that hand off to a core in discord-bot.ts: the core does its
+// own team lookup from the Discord ID, so all this needs is who is calling.
+async function getSessionOrLogin() {
+  const cookieStore = await cookies();
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId) redirect("/login");
+  return session;
+}
 
 // Any approved player on a team can submit/confirm results — not just the captain.
 // Subs are excluded because their team_id won't match the match's teams.
@@ -186,31 +204,10 @@ export async function submitSeriesResult(
 export async function confirmSeriesResult(
   matchId: string
 ): Promise<{ error?: string }> {
-  const player = await getTeamMember();
-  if (!player?.team_id) return { error: "Not on a team" };
+  const session = await getSessionOrLogin();
 
-  const { data: match } = await supabaseAdmin
-    .from("matches")
-    .select("id, home_team_id, away_team_id, pending_home_score, pending_away_score, score_submitted_by_team_id, home_score, discord_channel_id")
-    .eq("id", matchId)
-    .single();
-
-  if (!match) return { error: "Match not found" };
-  if (match.home_team_id !== player.team_id && match.away_team_id !== player.team_id)
-    return { error: "Your team is not in this match" };
-  if (match.home_score !== null) return { error: "This match is already finalised" };
-  if (match.pending_home_score === null) return { error: "No pending result to confirm" };
-  if (match.score_submitted_by_team_id === player.team_id)
-    return { error: "You cannot confirm your own submission — wait for the opposing captain" };
-
-  const { error } = await supabaseAdmin
-    .from("matches")
-    .update({ score_confirmed: true })
-    .eq("id", matchId);
-
-  if (error) return { error: error.message };
-
-  await finalizeAcceptedSeries(matchId, match.pending_home_score!, match.pending_away_score!);
+  const result = await confirmSeriesResultCore({ matchId, actorDiscordId: session.userId });
+  if (result.error) return { error: result.error };
 
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/admin");
@@ -525,46 +522,10 @@ export async function uploadGameReplay(
 export async function cancelSeriesSubmission(
   matchId: string
 ): Promise<{ error?: string }> {
-  const player = await getTeamMember();
-  if (!player?.team_id) return { error: "Not on a team" };
+  const session = await getSessionOrLogin();
 
-  const { data: match } = await supabaseAdmin
-    .from("matches")
-    .select("id, home_team_id, away_team_id, home_score")
-    .eq("id", matchId)
-    .single();
-
-  if (!match) return { error: "Match not found" };
-  if (match.home_team_id !== player.team_id && match.away_team_id !== player.team_id)
-    return { error: "Your team is not in this match" };
-  if (match.home_score !== null) return { error: "This match is already finalised" };
-
-  const { error } = await supabaseAdmin
-    .from("matches")
-    .update({
-      pending_home_score:         null,
-      pending_away_score:         null,
-      score_submitted_by_team_id: null,
-      score_confirmed:            false,
-      score_submitted_at:         null,
-    })
-    .eq("id", matchId);
-
-  if (error) return { error: error.message };
-
-  try {
-    const otherTeamId = player.team_id === match.home_team_id ? match.away_team_id : match.home_team_id;
-    const [{ data: myTeam }, { data: otherTeam }] = await Promise.all([
-      supabaseAdmin.from("teams").select("name").eq("id", player.team_id).single(),
-      supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
-    ]);
-    if (myTeam?.name && otherTeam?.name) {
-      await notifyMatchChannel(matchId, seriesDisputedPost({
-        teamName: myTeam.name,
-        oppPing: teamPing(otherTeam.name, await getGuildRoles()),
-      }));
-    }
-  } catch { /* best-effort */ }
+  const result = await cancelSeriesSubmissionCore({ matchId, actorDiscordId: session.userId });
+  if (result.error) return { error: result.error };
 
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/admin");

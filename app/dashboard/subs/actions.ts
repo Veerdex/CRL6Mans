@@ -6,54 +6,33 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { sendChannelMessage, getGuildRoles } from "@/app/lib/discord-api";
+import { getGuildRoles } from "@/app/lib/discord-api";
 import {
   teamPing,
   rolePing,
-  subRequestedPost,
-  subAcceptedPost,
-  subRejectedPost,
   subEscalatedPost,
   subAdminApprovedPost,
   subCancelledPost,
-  type ChannelPost,
 } from "@/app/lib/match-embeds";
 import { pushToAdmins, pushToTeam } from "@/app/lib/push";
-import { playerRatingFromRow } from "@/app/lib/rating";
+// The three flows the Discord bot shares live in app/lib/sub-requests.ts, since
+// "use server" here would turn any helper this file exported into a server
+// action. The actions below are the web half: session, redirect, revalidate.
+import {
+  postToChannel,
+  getMatchTeams,
+  teamName,
+  submitSubRequestCore,
+  acceptSubRequestCore,
+  rejectSubRequestByOpponentCore,
+} from "@/app/lib/sub-requests";
 
 async function getSession() {
   const cookieStore = await cookies();
   return decrypt(cookieStore.get("session")?.value);
 }
 
-const peakMmr = playerRatingFromRow;
-
-// A sub notification always goes to a match channel the caller already resolved,
-// so these post through sendChannelMessage rather than notifyMatchChannel.
-async function postToChannel(channelId: string, post: ChannelPost): Promise<void> {
-  await sendChannelMessage(channelId, post.content, post.embeds, post.allowed_mentions);
-}
-
-// Match row with both teams + channel, used for routing/notifications.
-async function getMatchTeams(matchId: string | null) {
-  if (!matchId) return null;
-  const { data } = await supabaseAdmin
-    .from("matches")
-    .select("discord_channel_id, home_team_id, away_team_id")
-    .eq("id", matchId)
-    .maybeSingle();
-  return data as { discord_channel_id: string | null; home_team_id: string | null; away_team_id: string | null } | null;
-}
-
-async function teamName(id: string | null): Promise<string | null> {
-  if (!id) return null;
-  const { data } = await supabaseAdmin.from("teams").select("name").eq("id", id).single();
-  return data?.name ?? null;
-}
-
 // ── Submit (requesting team) ─────────────────────────────────────────────────
-// One sub per request, one active request per team. No admin review — the
-// opposing team accepts or rejects.
 export async function submitSubRequest(
   teamId: string,
   playerOutId: string,
@@ -63,257 +42,44 @@ export async function submitSubRequest(
   const session = await getSession();
   if (!session?.userId) redirect("/login");
 
-  const admin = await isModeratorVerified(session.userId);
-
-  if (!admin) {
-    const { data: requestingPlayer } = await supabaseAdmin
-      .from("players").select("team_id").eq("discord_id", session.userId).single();
-    if (!requestingPlayer || requestingPlayer.team_id !== teamId) {
-      return { error: "You are not on this team." };
-    }
-  }
-
-  if (!subPlayerId) return { error: "Select a substitute." };
-
-  // One active sub request per team at a time. Consumed requests are deleted when
-  // the match is played, so any remaining row means a request is still in flight.
-  const { data: activeReqs } = await supabaseAdmin
-    .from("sub_requests")
-    .select("id")
-    .eq("team_id", teamId)
-    .in("status", ["pending", "rejected", "escalated", "approved"])
-    .limit(1);
-  if ((activeReqs ?? []).length > 0) {
-    return { error: "Your team already has an active sub request. Cancel it before requesting another." };
-  }
-
-  const { data: playerOut } = await supabaseAdmin
-    .from("players")
-    .select("id, username, team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
-    .eq("id", playerOutId)
-    .single();
-
-  if (!playerOut || playerOut.team_id !== teamId) {
-    return { error: "Player being replaced is not on your team." };
-  }
-
-  const [{ data: nextMatchRows }, { data: leagueSettings }] = await Promise.all([
-    supabaseAdmin
-      .from("matches")
-      .select("id, home_team_id, away_team_id")
-      .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
-      .is("home_score", null)
-      .not("home_team_id", "is", null)
-      .not("away_team_id", "is", null)
-      .order("round").order("match_number").limit(1),
-    supabaseAdmin.from("league_settings").select("active_tournament_id, subs_enabled").single(),
-  ]);
-
-  const nextMatch = (nextMatchRows ?? [])[0] ?? null;
-  const activeTournamentId = (leagueSettings?.active_tournament_id as string | null) ?? null;
-  if (leagueSettings?.subs_enabled === false) {
-    return { error: "Substitute requests are currently disabled by staff." };
-  }
-
-  if (activeTournamentId) {
-    const { data: tourney } = await supabaseAdmin
-      .from("tournaments").select("join_mode").eq("id", activeTournamentId).single();
-    if (tourney?.join_mode === "teams") {
-      return { error: "Substitute requests are not available for team sign-up tournaments." };
-    }
-  }
-
-  if (!nextMatch) return { error: "Your team has no upcoming matches." };
-
-  const opposingTeamId = nextMatch.home_team_id === teamId
-    ? nextMatch.away_team_id
-    : nextMatch.home_team_id;
-
-  // Validate the single sub candidate.
-  const { data: sub } = await supabaseAdmin
-    .from("players")
-    .select("id, username, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, team_id, status, sub_willing, draft_entered")
-    .eq("id", subPlayerId)
-    .single();
-
-  if (!sub) return { error: "Selected sub player was not found." };
-  if (sub.status !== "approved") return { error: `${sub.username} is not an approved player.` };
-  if (!sub.sub_willing) return { error: `${sub.username} has not enabled substitute availability.` };
-  if (sub.team_id === teamId) return { error: `${sub.username} is on your team.` };
-  if (opposingTeamId && sub.team_id === opposingTeamId) return { error: `${sub.username} is on the opposing team.` };
-
-  if (activeTournamentId) {
-    const { data: entry } = await supabaseAdmin
-      .from("tournament_entries")
-      .select("player_id")
-      .eq("tournament_id", activeTournamentId)
-      .eq("player_id", sub.id)
-      .maybeSingle();
-    if (!entry && sub.team_id === null) return { error: `${sub.username} did not sign up for this tournament.` };
-  } else if (!sub.draft_entered && sub.team_id === null) {
-    return { error: `${sub.username} did not enter the draft.` };
-  }
-
-  // Sub eligibility depends on the player being replaced. If they're below 1400 rating,
-  // subs can go up to +100 of that rating. Otherwise, subs must be <= player's rating.
-  // These absolute thresholds were tuned against the old rating formula's output
-  // scale (crl-game-share-elo-v1) and may need recalibration now that ratings are
-  // produced by crl-final-rating-v1 (app/lib/rating.ts) — revisit once real numbers
-  // are visible under the new formula.
-  const playerOutMmr = peakMmr(playerOut);
-  const subMmr = peakMmr(sub);
-  const mmrLimit = playerOutMmr < 1400 ? playerOutMmr + 100 : playerOutMmr;
-  if (subMmr > mmrLimit) {
-    return {
-      error: `${sub.username}'s Rank Value (${Math.round(subMmr).toLocaleString()}) is too high for this substitution. Maximum allowed: ${Math.round(mmrLimit).toLocaleString()}.`,
-    };
-  }
-
-  const { error } = await supabaseAdmin.from("sub_requests").insert({
-    team_id: teamId,
-    match_id: nextMatch.id,
-    player_out_id: playerOutId,
-    sub_player_id: subPlayerId,
-    sub_player_ids: null,
-    reason: reason || null,
-    status: "pending",
-    requested_by_discord_id: session.userId,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+  const result = await submitSubRequestCore({
+    actorDiscordId: session.userId,
+    teamId,
+    playerOutId,
+    subPlayerId,
+    reason,
+    staffOverride: await isModeratorVerified(session.userId),
   });
-
-  if (error) {
-    console.error("sub_requests insert error:", error);
-    return { error: "Failed to submit request. Please try again." };
-  }
-
-  // Notify the opposing team in the match channel with full rank detail.
-  try {
-    const match = await getMatchTeams(nextMatch.id);
-    if (match?.discord_channel_id) {
-      const [myName, oppName, roles] = await Promise.all([
-        teamName(teamId),
-        teamName(opposingTeamId),
-        getGuildRoles(),
-      ]);
-      await postToChannel(match.discord_channel_id, subRequestedPost({
-        teamName: myName ?? "A team",
-        oppPing: oppName ? teamPing(oppName, roles) : null,
-        playerOut,
-        sub,
-        reason,
-      }));
-    }
-  } catch { /* best-effort */ }
-
-  // Notify the opposing team's players so they know there's a request to act on.
-  if (opposingTeamId) {
-    const myName = await teamName(teamId);
-    pushToTeam(opposingTeamId, {
-      title: "Sub Request to Review",
-      body: `${myName ?? "A team"} requested a substitute for your upcoming match. Accept or reject it on your team page.`,
-      url: "/dashboard/my-team",
-      tag: "sub-request",
-    }).catch(() => {});
-  }
-
-  revalidatePath("/dashboard/my-team");
-  return { ok: true };
-}
-
-// Resolve the request and verify the caller is on the opposing team (or is staff).
-async function loadRequestForOpponent(requestId: string) {
-  const session = await getSession();
-  if (!session?.userId) redirect("/login");
-
-  const { data: request } = await supabaseAdmin
-    .from("sub_requests")
-    .select("id, team_id, match_id, player_out_id, sub_player_id, status")
-    .eq("id", requestId)
-    .single();
-  if (!request) return { error: "Request not found." as const };
-
-  const match = await getMatchTeams(request.match_id);
-  const opposingTeamId = match
-    ? (match.home_team_id === request.team_id ? match.away_team_id : match.home_team_id)
-    : null;
-
-  if (!(await isModeratorVerified(session.userId))) {
-    const { data: caller } = await supabaseAdmin
-      .from("players").select("team_id").eq("discord_id", session.userId).single();
-    if (!caller || caller.team_id !== opposingTeamId) {
-      return { error: "Only the opposing team can respond to this request." as const };
-    }
-  }
-  return { request, match, opposingTeamId };
+  if (result.ok) revalidatePath("/dashboard/my-team");
+  return result;
 }
 
 // ── Opposing team accepts ────────────────────────────────────────────────────
 export async function acceptSubRequest(requestId: string): Promise<{ ok?: boolean; error?: string }> {
-  const loaded = await loadRequestForOpponent(requestId);
-  if ("error" in loaded) return { error: loaded.error };
-  const { request, match } = loaded;
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
 
-  if (request.status !== "pending") return { error: "This request is no longer awaiting your response." };
-
-  const { error } = await supabaseAdmin
-    .from("sub_requests")
-    .update({ status: "approved", updated_at: new Date().toISOString() })
-    .eq("id", requestId);
-  if (error) return { error: "Failed to accept request." };
-
-  try {
-    if (match?.discord_channel_id) {
-      const myName = await teamName(request.team_id);
-      const { data: pOut } = await supabaseAdmin.from("players").select("username").eq("id", request.player_out_id).single();
-      await postToChannel(match.discord_channel_id, subAcceptedPost({
-        teamName: myName ?? "a team",
-        playerOut: pOut?.username ?? "a player",
-      }));
-    }
-  } catch { /* best-effort */ }
-
-  pushToTeam(request.team_id, {
-    title: "Sub Request Accepted",
-    body: "Your opponent accepted your substitute for the upcoming match.",
-    url: "/dashboard/my-team",
-    tag: "sub-request",
-  }).catch(() => {});
-
-  revalidatePath("/dashboard/my-team");
-  return { ok: true };
+  const result = await acceptSubRequestCore({
+    requestId,
+    actorDiscordId: session.userId,
+    staffOverride: await isModeratorVerified(session.userId),
+  });
+  if (result.ok) revalidatePath("/dashboard/my-team");
+  return result;
 }
 
 // ── Opposing team rejects ────────────────────────────────────────────────────
 export async function rejectSubRequestByOpponent(requestId: string): Promise<{ ok?: boolean; error?: string }> {
-  const loaded = await loadRequestForOpponent(requestId);
-  if ("error" in loaded) return { error: loaded.error };
-  const { request, match } = loaded;
+  const session = await getSession();
+  if (!session?.userId) redirect("/login");
 
-  if (request.status !== "pending") return { error: "This request is no longer awaiting your response." };
-
-  const { error } = await supabaseAdmin
-    .from("sub_requests")
-    .update({ status: "rejected", updated_at: new Date().toISOString() })
-    .eq("id", requestId);
-  if (error) return { error: "Failed to reject request." };
-
-  try {
-    if (match?.discord_channel_id) {
-      const myName = await teamName(request.team_id);
-      await postToChannel(match.discord_channel_id, subRejectedPost(myName ?? "a team"));
-    }
-  } catch { /* best-effort */ }
-
-  pushToTeam(request.team_id, {
-    title: "Sub Request Rejected",
-    body: "Your opponent rejected your sub request. You can report it to staff or request a different sub.",
-    url: "/dashboard/my-team",
-    tag: "sub-request",
-  }).catch(() => {});
-
-  revalidatePath("/dashboard/my-team");
-  return { ok: true };
+  const result = await rejectSubRequestByOpponentCore({
+    requestId,
+    actorDiscordId: session.userId,
+    staffOverride: await isModeratorVerified(session.userId),
+  });
+  if (result.ok) revalidatePath("/dashboard/my-team");
+  return result;
 }
 
 // ── Requesting team escalates a rejection to staff ───────────────────────────

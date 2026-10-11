@@ -245,6 +245,51 @@ const commands = [
     ],
   },
   {
+    name: "sub",
+    // Which match it applies to is not an option: it is always your team's next
+    // unplayed one, the same match the My Team page offers.
+    description: "Request a substitute for your team's next match — the opposing team has to accept it",
+    options: [
+      { name: "sub_out", description: "Your teammate who can't play", type: USER, required: true },
+      { name: "sub_in", description: "The substitute coming in", type: USER, required: true },
+      { name: "reason", description: "Shown to the opposing team", type: STRING, required: false },
+    ],
+  },
+  // `target` is required on both, so Discord makes the caller say which kind of
+  // decision they mean rather than the handler picking whichever is pending.
+  {
+    name: "approve",
+    description: "Accept a sub request or a series result the other team submitted",
+    options: [
+      {
+        name: "target",
+        description: "What you're approving",
+        type: STRING,
+        required: true,
+        choices: [
+          { name: "sub request", value: "sub" },
+          { name: "series submission", value: "series" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "reject",
+    description: "Reject a sub request or a series result the other team submitted",
+    options: [
+      {
+        name: "target",
+        description: "What you're rejecting",
+        type: STRING,
+        required: true,
+        choices: [
+          { name: "sub request", value: "sub" },
+          { name: "series submission", value: "series" },
+        ],
+      },
+    ],
+  },
+  {
     name: "pick",
     description: "Pick a player for your team during the snake draft",
     options: [

@@ -20,7 +20,8 @@
     "test:upload-limits": "tsc app/lib/upload-limits.ts scripts/test-upload-limits.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --lib es2019,dom --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-upload-limits.js",
     "test:event-winner": "tsc app/lib/bracket.ts scripts/test-event-winner.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-event-winner.js",
     "test:de-cross-seed": "tsc app/lib/bracket.ts scripts/test-de-cross-seed.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-de-cross-seed.js",
-    "test:command-embeds": "tsc app/lib/command-embeds.ts app/lib/stats-math.ts scripts/test-command-embeds.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-command-embeds.js"
+    "test:command-embeds": "tsc app/lib/command-embeds.ts app/lib/stats-math.ts scripts/test-command-embeds.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-command-embeds.js",
+    "test:decision-targets": "tsc app/lib/decision-targets.ts scripts/test-decision-targets.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-decision-targets.js"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",
