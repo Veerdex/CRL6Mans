@@ -4,12 +4,21 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { type Player } from "@/app/lib/players";
 import { playerRatingFromRow } from "@/app/lib/rating";
+import { hidesActiveTestTournament } from "@/app/lib/test-tournament";
 import PlayersList from "./players-list";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 export default async function PlayersPage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
+
+  // Players is not an event tab, so it stays visible while a test tournament
+  // runs — but everything on it is the live event's: the list is the draft pool
+  // (activateTournamentRuntime sets draft_entered for the test roster) and the
+  // columns are the live scoreboard. For a player who can't see that tournament
+  // the page has to read as it does between events, or the test's roster and its
+  // stats are on a tab nobody thought to hide.
+  const hidden = await hidesActiveTestTournament(session.userId);
 
   const [{ data: playersRaw }, { data: teams }, { data: statsRaw }] = await Promise.all([
     supabaseAdmin
@@ -27,14 +36,14 @@ export default async function PlayersPage() {
   ]);
 
   const ratingOf = (p: Player) => playerRatingFromRow(p);
-  const players = ((playersRaw ?? []) as Player[]).sort((a, b) => ratingOf(b) - ratingOf(a));
+  const players = hidden ? [] : ((playersRaw ?? []) as Player[]).sort((a, b) => ratingOf(b) - ratingOf(a));
 
   const teamNames: Record<string, string> = {};
   teams?.forEach((t) => { teamNames[t.id] = t.name; });
 
   type StatAgg = { games: number; totalGoals: number; totalAssists: number; totalSaves: number; totalShots: number; totalScore: number };
   const statsByPlayer: Record<string, StatAgg> = {};
-  for (const r of (statsRaw ?? []) as { player_id: string; goals: number; assists: number; saves: number; shots: number; score: number }[]) {
+  for (const r of (hidden ? [] : (statsRaw ?? [])) as { player_id: string; goals: number; assists: number; saves: number; shots: number; score: number }[]) {
     if (!r.player_id) continue;
     const prev = statsByPlayer[r.player_id] ?? { games: 0, totalGoals: 0, totalAssists: 0, totalSaves: 0, totalShots: 0, totalScore: 0 };
     statsByPlayer[r.player_id] = {
