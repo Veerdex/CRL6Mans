@@ -17,7 +17,7 @@ import {
 } from "@/app/lib/match-embeds";
 import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { pushToAdmins } from "@/app/lib/push";
-import { checkInTeam, createChannelIfCheckInOpen, processExpiredCheckIns, openReadyMatchChannels } from "@/app/lib/discord-bot";
+import { checkInTeam, createChannelIfCheckInOpen, processExpiredCheckIns, openReadyMatchChannels, isTournamentActive } from "@/app/lib/discord-bot";
 
 type AdminSchedule = { type: string; playAt: string; deadlineAt: string };
 
@@ -107,6 +107,13 @@ export async function proposeMatchTime(
   const ctx = await getCaptainContext(matchId);
   if (!ctx.ok) return { error: ctx.error };
   const { myTeamId, match } = ctx;
+
+  // Proposing a time is a season thing: a tournament match is played off its check-in
+  // window, so MatchSchedulePanel renders CheckInRow for one and offers no proposal at
+  // all. Guarded here as the entry point — accept, withdraw and reject all need a
+  // proposal to exist first, so none of them is reachable once this one isn't.
+  if (await isTournamentActive())
+    return { error: "Tournament matches aren't scheduled — check in when your round opens." };
 
   const dt = new Date(scheduledAt);
   if (isNaN(dt.getTime())) return { error: "Invalid date/time." };

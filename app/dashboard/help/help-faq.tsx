@@ -55,11 +55,11 @@ const SECTIONS: Section[] = [
     items: [
       {
         q: "How do I schedule my next match?",
-        a: <>From your <Link href="/dashboard/my-team" className="text-indigo-400 underline">My Team</Link> page — propose a time, and the other team accepts or proposes a different one. A time outside the league&rsquo;s standard scheduling window still works but needs the opponent to confirm first and an admin to sign off afterward.</>,
+        a: <>Season matches only: from your <Link href="/dashboard/my-team" className="text-indigo-400 underline">My Team</Link> page — propose a time, and the other team accepts or proposes a different one. A time outside the league&rsquo;s standard scheduling window still works but needs the opponent to confirm first and an admin to sign off afterward. Tournament matches aren&rsquo;t scheduled at all — you check in when your round opens.</>,
       },
       {
         q: "What's tournament check-in?",
-        a: "For tournament matches, a 10-minute check-in window opens before kickoff. Both teams need to check in independently within that window or risk a disqualification for the match. Once both sides are checked in, you'll see who's Home and who's Away for setting up the private lobby.",
+        a: "Tournament rounds aren't scheduled — they open as the matchups are decided, and a 10-minute check-in window opens with them. Both teams need to check in independently within that window or risk a disqualification for the match. Once both sides are checked in, you'll see who's Home and who's Away for setting up the private lobby.",
       },
       {
         q: "How do I report a match result?",

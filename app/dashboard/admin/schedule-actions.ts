@@ -43,6 +43,16 @@ async function verifyAdmin() {
   if (!session?.userId || !(await isModeratorVerified(session.userId))) redirect("/dashboard");
 }
 
+// Scheduling is a season thing. A tournament's rounds flow as their matchups seat —
+// check-in opens the moment a match is ready — so the Scheduling and Schedule Approvals
+// panels are hidden for the whole event. Enforced here too because a server action is a
+// boundary: it stays callable after the UI that drove it is gone, and a round window or
+// match pin written during a tournament is dead weight no tournament path reads.
+async function rejectIfTournament(): Promise<{ ok: false; error: string } | null> {
+  if (!(await isTournamentActive())) return null;
+  return { ok: false, error: "Scheduling is season-only — a tournament's rounds open as their matchups seat." };
+}
+
 // All window math is done in the scheduling admin's local zone (`tz`) — the app has
 // no single canonical zone. Times are stored as absolute UTC instants, so once saved
 // they display correctly in every viewer's own zone.
@@ -222,6 +232,8 @@ export async function setRoundSchedule(params: {
   timeZone?: string; // the admin's IANA zone; dates are read in it
 }): Promise<{ ok: boolean; error?: string }> {
   await verifyAdmin();
+  const notSeason = await rejectIfTournament();
+  if (notSeason) return notSeason;
 
   const { tournamentId, stage, round, scheduleType, dateStr } = params;
   const rangeDays = scheduleType === "range" || scheduleType === "custom" ? Math.max(1, Math.floor(params.rangeDays ?? 1))
@@ -500,6 +512,9 @@ export async function deleteRoundSchedule(params: {
   timeZone?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   await verifyAdmin();
+  const notSeason = await rejectIfTournament();
+  if (notSeason) return notSeason;
+
   const { tournamentId, stage, round } = params;
   const tz = params.timeZone || FALLBACK_TZ;
 
@@ -574,6 +589,8 @@ async function clearRoundMatchPins(canonStage: string, round: number): Promise<v
 
 export async function pinMatchTime(matchId: string, dtStr: string, timeZone?: string): Promise<{ ok: boolean; error?: string }> {
   await verifyAdmin();
+  const notSeason = await rejectIfTournament();
+  if (notSeason) return notSeason;
   const tz = timeZone || FALLBACK_TZ;
 
   const { data: match } = await supabaseAdmin
@@ -623,6 +640,8 @@ export async function pinMatchTime(matchId: string, dtStr: string, timeZone?: st
 
 export async function clearMatchTime(matchId: string): Promise<{ ok: boolean; error?: string }> {
   await verifyAdmin();
+  const notSeason = await rejectIfTournament();
+  if (notSeason) return notSeason;
 
   const { data: match } = await supabaseAdmin
     .from("matches").select("id, discord_channel_id, home_checked_in, away_checked_in").eq("id", matchId).maybeSingle();
@@ -650,6 +669,8 @@ export async function clearMatchTime(matchId: string): Promise<{ ok: boolean; er
 // giving the admin a chance to fix a bad round-1 schedule before it goes live.
 export async function startFirstRound(): Promise<{ ok: boolean; error?: string }> {
   await verifyAdmin();
+  const notSeason = await rejectIfTournament();
+  if (notSeason) return notSeason;
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")

@@ -416,8 +416,10 @@ Podium page will never reflect it at all.
 - Teams have a match schedule visible on the **Schedule** page (see "Other
   pages" below) and their own **My Team** page, which shows only the single
   next match in detail.
-- **Proposing/confirming a time.** The two teams in an upcoming match can
-  propose and accept a time themselves. Status badges walk each side through
+- **Proposing/confirming a time.** Seasons only — a tournament's rounds flow
+  as their matchups seat, so neither the teams nor an admin schedules one; see
+  "Tournament check-in" below. In a season, the two teams in an upcoming match
+  can propose and accept a time themselves. Status badges walk each side through
   where things stand: "Confirmed"/"Scheduled" once it's locked in, "Awaiting
   admin" if it still needs sign-off, "Awaiting" if it's the other team's turn
   to respond, or "Action needed" if it's this team's turn. A proposed time
@@ -432,8 +434,9 @@ Podium page will never reflect it at all.
   to each other while they're still getting ready, and the channel's opening
   message tells them to check in — either with the `/checkin` command right
   there in the channel or with the button on My Team, whichever is less
-  friction for them. For a round you gave a future start
-  time, that's that time; otherwise it's the moment the matchup is decided.
+  friction for them. The window opens the moment the matchup is decided —
+  there is nothing to schedule a tournament round for, so nothing holds it
+  back; the opening round's window is the event start itself.
   The one
   exception is a double-elimination **bracket reset**, which skips check-in
   and opens its channel straight away — both teams are already in the grand
@@ -1134,7 +1137,9 @@ closed by default until you click to open it.
   their own Rank Values (flagged if a candidate is over the outgoing
   player's skill limit), the team's stated reason, a note field for you, and
   Approve/Decline buttons.
-- **Schedule Approvals** — match times the two team captains agreed on
+- **Schedule Approvals** (seasons only — a tournament match has no proposal
+  flow, so the tab is hidden for the whole event) — match times the two team
+  captains agreed on
   outside the league's normal scheduling window. Each entry shows the
   requested time, a short note on why it falls outside the normal window,
   and Approve/Reject buttons.
@@ -1185,7 +1190,9 @@ Moderators too, it's noted.
   uncertain match worth double-checking, grey means it will just post as
   plain text with no real mention. "Post Announcement" publishes it; "Clear
   Live Announcement" removes whatever is currently showing on the home page.
-- **Scheduling** (only shown while a season is actively running) — every
+- **Scheduling** (seasons only — hidden for the whole of a tournament, whose
+  rounds flow as their matchups seat: check-in opens the moment a match is
+  ready and the opening round already carries the event's start time) — every
   stage of the season laid out as collapsible round-by-round groups. Each
   round can be set to one of four scheduling styles:
   - **Range** — a window of several days starting from a chosen date.
@@ -1198,11 +1205,8 @@ Moderators too, it's noted.
   before it ends, so dates don't have to be recalculated by hand as things
   shift. Rounds that use a shared window can be expanded to pin an exact
   time for any individual match inside it, and once a match is actually
-  under way its row locks. In a tournament "under way" means both teams
-  have checked in — the Discord channel opens earlier than that, with the
-  check-in window, so its existence alone no longer locks anything and a
-  time can still be corrected right up to kickoff. In a standalone season,
-  which has no check-in, the channel existing is what locks the row.
+  under way its row locks — a season has no check-in, so the match's Discord
+  channel existing is what counts as under way.
   A one-time "Start Round" button appears on the very first round
   of a standalone season — the round exists but stays paused until you press
   it, giving you a last look before it goes live.

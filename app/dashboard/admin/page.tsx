@@ -852,26 +852,27 @@ export default async function AdminPage() {
 
   // ── Scheduling section data ────────────────────────────────────────────────
   const activeTournamentId = (settings?.active_tournament_id as string | null) ?? null;
-  // Keyed on the bracket existing rather than the season being live, because the
-  // bracket is now built 30 minutes before the first matches and that window is the
-  // only chance to time round 1: once the season starts, round 1 is already live and
-  // isRoundLocked refuses to edit it. That matters for a season, whose round times
-  // are set here and are also what makes a round bettable; a tournament's opening
-  // round is stamped by execPregenerateBracket instead, and timing a later round here
-  // holds that round's check-in until the stamped time rather than opening it the
-  // moment the matchup seats. Tournament betting is independent of all of it — it
-  // opens on seating and closes on the result.
+  // Scheduling is a season thing. A tournament's rounds flow as their matchups seat —
+  // check-in opens the moment a match is ready and stampOpeningRoundTime already gives
+  // round 1 the event's own start time — so there is nothing here for an admin to time,
+  // and the panel is hidden for the whole event rather than offering round windows,
+  // match pins and a Start Round button that none of the tournament paths read.
+  // Betting is independent of all of it: a tournament match opens on seating and closes
+  // on the result.
+  //
+  // For a season it is keyed on the bracket existing rather than the season being live,
+  // because the bracket is built 30 minutes before the first matches and that window is
+  // the only chance to time round 1: once the season starts, round 1 is already live and
+  // isRoundLocked refuses to edit it.
   // "scheduled" is what makes it a live bracket, the same predicate the Teams tab
   // uses: a finished event keeps its matches as "completed" until the next build
   // deletes them, and pre-created downstream slots sit at "pending" — counting
   // either would leave this panel open on an event that is over.
   const bracketExists = (allMatchStages ?? []).some((m) => m.stage != null && m.status === "scheduled");
-  const schedulingVisible = !!settings?.season_active || bracketExists;
+  const schedulingVisible = !activeTournamentId && (!!settings?.season_active || bracketExists);
   const [{ data: roundScheduleRows }, { data: schedulerMatchRows }] = await Promise.all([
     schedulingVisible
-      ? (activeTournamentId
-          ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").eq("tournament_id", activeTournamentId)
-          : supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").is("tournament_id", null))
+      ? supabaseAdmin.from("round_schedules").select("stage, round, schedule_type, play_at, deadline_at, range_days").is("tournament_id", null)
       : Promise.resolve({ data: [] as { stage: string; round: number; schedule_type: string; play_at: string; deadline_at: string; range_days: number | null }[] }),
     schedulingVisible
       ? supabaseAdmin
@@ -990,6 +991,11 @@ export default async function AdminPage() {
         windowNote,
       };
     });
+
+  // Season-only for the same reason the Scheduling panel is: a tournament match is
+  // played off its check-in window, and CheckInRow has no propose flow, so no pair of
+  // captains can agree a time for an admin to sign off on.
+  const scheduleApprovalsVisible = !activeTournamentId;
 
   const seasonActive = settings?.season_active ?? false;
   const seasonFormat = (settings?.season_format as SeasonFormatConfig) ?? null;
@@ -1121,7 +1127,7 @@ export default async function AdminPage() {
         { id: "match-reporting", label: "Match Reporting", level: "moderator", value: matchRows.length, notification: matchesUnderReviewCount || undefined },
         { id: "replay-review", label: "Replay Review", level: "moderator", notification: replayReviewCards.length || undefined },
         { id: "sub-requests", label: "Sub Requests", level: "moderator", notification: subRequestCards.length || undefined },
-        { id: "schedule-approvals", label: "Schedule Approvals", level: "moderator", notification: scheduleOverrideCards.length || undefined },
+        ...(scheduleApprovalsVisible ? [{ id: "schedule-approvals", label: "Schedule Approvals", level: "moderator" as const, notification: scheduleOverrideCards.length || undefined }] : []),
       ],
     },
     {
@@ -1459,7 +1465,8 @@ export default async function AdminPage() {
         )}
       </AdminSubSection>
 
-      {/* ── Schedule Approvals ── */}
+      {/* ── Schedule Approvals (season only) ── */}
+      {scheduleApprovalsVisible && (
       <AdminSubSection
         sectionId="match-ops"
         tabId="schedule-approvals"
@@ -1481,6 +1488,7 @@ export default async function AdminPage() {
           </div>
         )}
       </AdminSubSection>
+      )}
       </AdminSection>
 
       <AdminSection id="season-league">
@@ -1504,7 +1512,7 @@ export default async function AdminPage() {
         </AdminSubSection>
       )}
 
-      {/* ── Scheduling (Director+, from bracket generation through the season) ── */}
+      {/* ── Scheduling (Director+, season only, from bracket generation onward) ── */}
       {userIsDirector && schedulingVisible && (
         <AdminSubSection
           sectionId="season-league"
@@ -1512,7 +1520,7 @@ export default async function AdminPage() {
           title="Scheduling"
           notification={schedulingUnscheduledCount || undefined}
           defaultOpen={schedulingUnscheduledCount > 0}
-          description="Set the play window and deadline for each round, per stage. Available from the moment the bracket is generated — a round given a specific time holds its check-in until then, and round 1 can only be timed before the event starts. The badge counts rounds that don't have a schedule set yet."
+          description="Season only — a tournament's rounds flow as their matchups seat, so there's nothing to time there. Set the play window and deadline for each round, per stage. Available from the moment the bracket is generated, and round 1 can only be timed before the season starts. The badge counts rounds that don't have a schedule set yet."
         >
           {schedulingSections.length === 0 ? (
             <p className="text-sm text-zinc-500">No rounds found — the bracket hasn&apos;t been generated yet.</p>
