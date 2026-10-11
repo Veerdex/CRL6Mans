@@ -1,0 +1,18 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2019",
+    "moduleResolution": "node",
+    "noEmit": false,
+    "isolatedModules": false,
+    "outDir": "../.test-build",
+    "rootDir": ".."
+  },
+  "include": [
+    "../next-env.d.ts",
+    "test-best-of.ts",
+    "../app/dashboard/season/format-constants.ts",
+    "../app/lib/bracket.ts"
+  ]
+}

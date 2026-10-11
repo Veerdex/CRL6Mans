@@ -935,11 +935,11 @@ export function getTier(round: number, totalRounds: number): RoundTier {
   return "standard";
 }
 
-// Which user-configurable best-of "slot" a physical DB stage string belongs to.
-// Multiple physical stage strings can share one slot — a double-elimination
-// bracket's winners/losers/grand-final rows are all one "Double Elimination"
-// settings block, and the hybrid bracket's UB/LB/SF/GF rows are all one
-// "Hybrid Bracket" block. Some presets also reuse the same literal stage string
+// One stage of a preset's chain, and the identity its emblem, short label and
+// description are keyed on. Multiple physical stage strings collapse into one
+// stage — a double-elimination bracket's winners/losers/grand-final rows are all
+// one "Double Elimination" stage, and the hybrid bracket's UB/LB/SF/GF rows are
+// all one "Hybrid Bracket". Some presets also reuse the same literal stage string
 // in a different role (the terminal bracket of a qualifier→Swiss→SE format is
 // stage="single_elimination", the same string the plain SE preset uses) — that's
 // fine since only one preset's stages ever exist in a tournament at a time.
@@ -952,12 +952,24 @@ export type StageSlotKey =
   | "double_elimination"
   | "hybrid";
 
-export function getStageSlotKey(stage: string): StageSlotKey | null {
+// What a best-of setting is keyed on, which is finer-grained than a stage: a DE
+// bracket is one stage but two independently-configurable brackets, since a
+// winners-side round and the losers-side round beside it carry different stakes.
+// These extra keys are deliberately NOT StageSlotKeys — they must never reach
+// stageEmblem/stageShortLabel/stageDescription or the preset's stage chain, and
+// keeping the unions separate is what makes tsc prove it.
+export type BestOfKey = StageSlotKey | "de_winners" | "de_losers";
+
+// The grand final answers to the winners block: it is the winners bracket's
+// deciding round in everything but name, and the alternative is a third settings
+// block for a single match.
+export function getBestOfKey(stage: string): BestOfKey | null {
   if (stage.startsWith(GROUP_STAGE_PREFIX)) return "group";
   if (stage === SWISS_STAGE) return "swiss";
   if (stage === SE_QUALIFIER) return "se_qualifier";
   if (stage === DE_QUALIFIER_WINNERS || stage === DE_QUALIFIER_LOSERS) return "de_qualifier";
-  if (stage === DE_WINNERS || stage === DE_LOSERS || stage === DE_GF) return "double_elimination";
+  if (stage === DE_WINNERS || stage === DE_GF) return "de_winners";
+  if (stage === DE_LOSERS) return "de_losers";
   if (stage === "single_elimination") return "single_elimination";
   if (stage.startsWith("hybrid")) return "hybrid";
   return null;

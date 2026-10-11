@@ -11,6 +11,7 @@ import {
   type StageType,
   type PresetDef,
   type StageSlotKey,
+  type BestOfKey,
   type StageBestOfConfig,
   type RoundBestOfConfig,
   type StageSlotDef,
@@ -24,6 +25,8 @@ import {
   DEFAULT_BEST_OF,
   applyBestOfCascade,
   STAGE_SLOTS_BY_PRESET,
+  bestOfBlocks,
+  normalizeRoundBestOf,
   defaultStageBestOf,
   defaultRoundBestOfForPreset,
 } from "./format-constants";
@@ -34,6 +37,7 @@ export type {
   BestOf,
   SeasonFormatConfig,
   StageSlotKey,
+  BestOfKey,
   StageBestOfConfig,
   RoundBestOfConfig,
   StageSlotDef,
@@ -49,6 +53,8 @@ export {
   DEFAULT_BEST_OF,
   applyBestOfCascade,
   STAGE_SLOTS_BY_PRESET,
+  bestOfBlocks,
+  normalizeRoundBestOf,
   defaultStageBestOf,
   defaultRoundBestOfForPreset,
 };
@@ -330,6 +336,11 @@ export function FormatEditor({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
+  // Every read of the stored config goes through this, so a format saved before
+  // a stage's best-of was split into blocks still shows the values it was saved
+  // with — in the grids, in the dirty check and in the read-only summary.
+  const initialRoundBestOf = normalizeRoundBestOf(initialFormat?.roundBestOf);
+
   const [previewTeamsRaw, setPreviewTeamsRaw] = useState(String(Math.max(4, Math.min(64, initialParticipants))));
   const previewTeams = Math.max(4, Math.min(64, parseInt(previewTeamsRaw, 10) || 4));
   const [selected, setSelected] = useState<PresetId | null>(initialFormat?.preset ?? null);
@@ -346,14 +357,14 @@ export function FormatEditor({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [roundBestOf, setRoundBestOf] = useState<RoundBestOfConfig>(() => ({
     ...(initialFormat?.preset ? defaultRoundBestOfForPreset(initialFormat.preset) : {}),
-    ...(initialFormat?.roundBestOf ?? {}),
+    ...initialRoundBestOf,
   }));
 
-  function setFlatSlot(key: StageSlotKey, value: BestOf) {
+  function setFlatSlot(key: BestOfKey, value: BestOf) {
     setRoundBestOf((prev) => ({ ...prev, [key]: { mode: "flat", value } }));
   }
 
-  function setTieredSlot(key: StageSlotKey, tier: RoundTier, value: BestOf) {
+  function setTieredSlot(key: BestOfKey, tier: RoundTier, value: BestOf) {
     setRoundBestOf((prev) => {
       const existing = prev[key];
       const currentTiers = existing?.mode === "tiered" ? existing.tiers : DEFAULT_BEST_OF;
@@ -379,9 +390,9 @@ export function FormatEditor({
     (hasGroupStage && seedingMethod !== (initialFormat?.groupSeedingMethod ?? "balanced")) ||
     (hasGroupStage && effectiveMaxAdvancing !== (initialFormat?.groupMaxAdvancing ?? null)) ||
     (hasGroupStage && effectiveGroupRounds !== (initialFormat?.groupRounds ?? null)) ||
-    currentSlots.some((slot) => {
-      const cur = roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
-      const init = initialFormat?.roundBestOf?.[slot.key] ?? defaultStageBestOf(slot.kind);
+    currentSlots.flatMap(bestOfBlocks).some((block) => {
+      const cur = roundBestOf[block.key] ?? defaultStageBestOf(block.kind);
+      const init = initialRoundBestOf[block.key] ?? defaultStageBestOf(block.kind);
       return JSON.stringify(cur) !== JSON.stringify(init);
     });
 
@@ -429,8 +440,8 @@ export function FormatEditor({
     if (!selected) return;
     startTransition(async () => {
       const trimmedRoundBestOf: RoundBestOfConfig = {};
-      for (const slot of STAGE_SLOTS_BY_PRESET[selected]) {
-        trimmedRoundBestOf[slot.key] = roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
+      for (const block of STAGE_SLOTS_BY_PRESET[selected].flatMap(bestOfBlocks)) {
+        trimmedRoundBestOf[block.key] = roundBestOf[block.key] ?? defaultStageBestOf(block.kind);
       }
       const config: SeasonFormatConfig = { preset: selected, roundBestOf: trimmedRoundBestOf };
       if (hasGroupStage) {
@@ -475,11 +486,11 @@ export function FormatEditor({
         </div>
         <StageFlow stages={readOnlyStages} />
         <div className="space-y-1.5">
-          {readOnlySlots.map((slot) => {
-            const slotConfig = initialFormat.roundBestOf?.[slot.key] ?? defaultStageBestOf(slot.kind);
+          {readOnlySlots.flatMap(bestOfBlocks).map((block) => {
+            const slotConfig = initialRoundBestOf[block.key] ?? defaultStageBestOf(block.kind);
             return (
-              <div key={slot.key} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
-                <span className="text-zinc-400 font-medium">{slot.label}:</span>
+              <div key={block.key} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+                <span className="text-zinc-400 font-medium">{block.label}:</span>
                 {slotConfig.mode === "flat" ? (
                   <span className="text-zinc-300">BO{slotConfig.value}</span>
                 ) : (
@@ -642,8 +653,8 @@ export function FormatEditor({
         </div>
       )}
 
-      {/* Best Of settings — one block per independently-configurable stage */}
-      {selected && currentSlots.map((slot) => {
+      {/* Best Of settings — one block per independently-configurable bracket */}
+      {selected && currentSlots.flatMap(bestOfBlocks).map((slot) => {
         const slotConfig = roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
         return (
           <div key={slot.key} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">

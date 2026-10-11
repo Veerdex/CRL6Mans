@@ -28,6 +28,8 @@ import {
   STAGE_SLOTS_BY_PRESET,
   TIER_LABELS,
   TIER_ORDER,
+  bestOfBlocks,
+  normalizeRoundBestOf,
   stageDescription,
   type SeasonFormatConfig,
   type StageSlotKey,
@@ -138,6 +140,7 @@ export async function TournamentDetailView({
     hasPlayoffs
   );
   const stageStartsRaw = (t.stage_starts as Record<string, string> | null) ?? {};
+  const roundBestOf = normalizeRoundBestOf(format?.roundBestOf);
   const sponsor = t.sponsor_id ? (publicSponsors.find((s) => s.id === t.sponsor_id) ?? null) : null;
   const design: PublicDesign | null = !sponsor && t.design_id ? (publicDesigns.find((d) => d.id === t.design_id) ?? null) : null;
   const backgroundUrl = sponsor?.background_image_url ?? design?.background_image_url ?? null;
@@ -458,7 +461,7 @@ export async function TournamentDetailView({
                   (legacyKey ? stageStartsRaw[legacyKey] : null) ??
                   (i === 0 ? t.season_start_at : null) ??
                   null;
-                const boConfig = format?.roundBestOf?.[slot.key];
+                const boBlocks = bestOfBlocks(slot);
                 const groupDetails =
                   stageType === "group"
                     ? [
@@ -485,20 +488,33 @@ export async function TournamentDetailView({
                     </div>
                     <p className="text-xs text-zinc-500">{stageDescription(slot.key, stageType)}</p>
                     {groupDetails && <p className="text-xs text-zinc-500">{groupDetails}</p>}
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 pt-2 border-t border-zinc-800">
-                      {boConfig?.mode === "flat" ? (
-                        <span className="text-xs text-zinc-400">
-                          All matches: <span className="text-amber-400 font-medium">Best of {boConfig.value}</span>
-                        </span>
-                      ) : boConfig?.mode === "tiered" ? (
-                        TIER_ORDER.map((tier) => (
-                          <span key={tier} className="text-xs text-zinc-400">
-                            {TIER_LABELS[tier]}: <span className="text-amber-400 font-medium">Bo{boConfig.tiers[tier]}</span>
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-zinc-600">Best-of not set</span>
-                      )}
+                    {/* A stage configured as several brackets (DE: winners incl.
+                        grand final, losers) gets a labelled row each; a
+                        single-block stage keeps its unlabelled row. */}
+                    <div className="pt-2 border-t border-zinc-800 space-y-1">
+                      {boBlocks.map((block) => {
+                        const boConfig = roundBestOf[block.key];
+                        return (
+                          <div key={block.key} className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                            {boBlocks.length > 1 && (
+                              <span className="text-xs text-zinc-500 font-medium">{block.label}:</span>
+                            )}
+                            {boConfig?.mode === "flat" ? (
+                              <span className="text-xs text-zinc-400">
+                                All matches: <span className="text-amber-400 font-medium">Best of {boConfig.value}</span>
+                              </span>
+                            ) : boConfig?.mode === "tiered" ? (
+                              TIER_ORDER.map((tier) => (
+                                <span key={tier} className="text-xs text-zinc-400">
+                                  {TIER_LABELS[tier]}: <span className="text-amber-400 font-medium">Bo{boConfig.tiers[tier]}</span>
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs text-zinc-600">Best-of not set</span>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );

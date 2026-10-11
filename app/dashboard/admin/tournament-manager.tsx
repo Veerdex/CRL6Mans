@@ -33,15 +33,23 @@ import {
   getDefaultGroupAdvancing,
   getDefaultGroupRounds,
   STAGE_SLOTS_BY_PRESET,
+  bestOfBlocks,
+  normalizeRoundBestOf,
   defaultStageBestOf,
   defaultRoundBestOfForPreset,
 } from "@/app/dashboard/season/format-editor";
-import { computeStageSchedule, type StageScheduleEntry } from "@/app/dashboard/season/format-constants";
+import { computeStageSchedule, type StageScheduleEntry, type BestOfBlock } from "@/app/dashboard/season/format-constants";
 
 // STAGE_SLOTS_BY_PRESET is keyed by the strict PresetId union; form.preset/sf.preset
 // are plain strings from DB rows, so every lookup goes through this guarded helper.
 function slotsForPreset(preset: string): StageSlotDef[] {
   return STAGE_SLOTS_BY_PRESET[preset as PresetId] ?? [];
+}
+
+// One entry per best-of settings block, which is finer than one per stage: a DE
+// bracket is one stage and two blocks (winners incl. grand final, losers).
+function bestOfBlocksForPreset(preset: string): BestOfBlock[] {
+  return slotsForPreset(preset).flatMap(bestOfBlocks);
 }
 import { LocalTime } from "@/app/dashboard/local-time";
 
@@ -316,8 +324,8 @@ export function TournamentManager({
 
   const buildInput = (): TournamentInput => {
     const trimmedRoundBestOf: RoundBestOfConfig = {};
-    for (const slot of slotsForPreset(form.preset)) {
-      trimmedRoundBestOf[slot.key] = form.roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
+    for (const block of bestOfBlocksForPreset(form.preset)) {
+      trimmedRoundBestOf[block.key] = form.roundBestOf[block.key] ?? defaultStageBestOf(block.kind);
     }
     const season_format: SeasonFormatConfig = {
       preset: form.preset as SeasonFormatConfig["preset"],
@@ -436,7 +444,7 @@ export function TournamentManager({
     const fmt = t.season_format as SeasonFormatConfig | null;
     const preset = fmt?.preset ?? "single_elimination";
     const tTeams = t.min_teams || 0;
-    const tBof = { ...defaultRoundBestOfForPreset(preset as PresetId), ...(fmt?.roundBestOf ?? {}) };
+    const tBof = { ...defaultRoundBestOfForPreset(preset as PresetId), ...normalizeRoundBestOf(fmt?.roundBestOf) };
     const tGroupAdv = fmt?.groupMaxAdvancing ?? null;
     const tGroupRounds = fmt?.groupRounds ?? null;
     const tStages = computeStageSchedule(preset, tTeams, tGroupAdv, tBof, tGroupRounds);
@@ -883,8 +891,8 @@ export function TournamentManager({
           </div>
         </div>
 
-        {/* Best Of settings — one block per independently-configurable stage */}
-        {slotsForPreset(form.preset).map((slot) => {
+        {/* Best Of settings — one block per independently-configurable bracket */}
+        {bestOfBlocksForPreset(form.preset).map((slot) => {
           const slotConfig = form.roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);
           return (
             <div key={slot.key} className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
@@ -1112,7 +1120,7 @@ export function TournamentManager({
                 sf.preset,
                 t.min_teams || 0,
                 sf.groupMaxAdvancing ?? null,
-                { ...defaultRoundBestOfForPreset(sf.preset as PresetId), ...(sf.roundBestOf ?? {}) },
+                { ...defaultRoundBestOfForPreset(sf.preset as PresetId), ...normalizeRoundBestOf(sf.roundBestOf) },
                 sf.groupRounds ?? null,
               )
             : [];
@@ -1145,8 +1153,8 @@ export function TournamentManager({
                 {sf?.preset && (
                   <p className="text-xs text-zinc-500 mt-1">
                     <span className="text-zinc-400">{PRESETS.find(p => p.id === sf.preset)?.name ?? sf.preset}</span>
-                    {slotsForPreset(sf.preset).map((slot) => {
-                      const sc = sf.roundBestOf?.[slot.key] ?? defaultStageBestOf(slot.kind);
+                    {bestOfBlocksForPreset(sf.preset).map((slot) => {
+                      const sc = normalizeRoundBestOf(sf.roundBestOf)[slot.key] ?? defaultStageBestOf(slot.kind);
                       const text = sc.mode === "flat"
                         ? `BO${sc.value}`
                         : TIER_ORDER.map(t => `${TIER_LABELS[t]} BO${sc.tiers[t]}`).join(", ");

@@ -10,9 +10,9 @@
 // format-editor.tsx ("use client") imports this file, so anything it pulls in
 // transitively ships to the browser.
 
-import { getTier, getStageSlotKey, type RoundTier, type StageSlotKey } from "@/app/lib/bracket";
+import { getTier, getBestOfKey, type RoundTier, type StageSlotKey, type BestOfKey } from "@/app/lib/bracket";
 
-export type { RoundTier, StageSlotKey };
+export type { RoundTier, StageSlotKey, BestOfKey };
 
 export type PresetId =
   | "single_elimination"
@@ -35,10 +35,11 @@ export type StageBestOfConfig =
   | { mode: "flat"; value: BestOf }
   | { mode: "tiered"; tiers: Record<RoundTier, BestOf> };
 
-// Keyed by StageSlotKey — each preset's own set of stage instances gets an
+// Keyed by BestOfKey — each preset's own set of stage instances gets an
 // independent entry, so e.g. an SE qualifier and the final SE bracket in the same
 // tournament never share settings even though both are "single_elimination"-shaped.
-export type RoundBestOfConfig = Partial<Record<StageSlotKey, StageBestOfConfig>>;
+// A DE bracket contributes two keys ("de_winners", "de_losers") for its one stage.
+export type RoundBestOfConfig = Partial<Record<BestOfKey, StageBestOfConfig>>;
 
 export type SeasonFormatConfig = {
   preset: PresetId;
@@ -200,19 +201,38 @@ export type StageSlotDef = {
   key: StageSlotKey;
   label: string;
   kind: "flat" | "tiered";
+  // A stage whose best-of is configured as more than one block. The slot stays
+  // one entry in the preset's chain — one emblem, one description, one stage
+  // card — and these are the settings groups rendered inside it.
+  subSlots?: { key: BestOfKey; label: string }[];
 };
 
-// Ordered list of independently-configurable best-of slots for each preset.
+// Ordered list of each preset's stages, and the one list every stage chain is
+// drawn from: PresetEmblemRow walks it for the emblem row, and
+// tournament-detail.tsx pairs it positionally with PresetDef.stageTypes. One
+// entry per stage, therefore — a stage needing two best-of blocks declares
+// subSlots rather than a second entry here.
+//
 // Group/Swiss are always "flat" (one BO for every match in the stage); SE/DE/
 // hybrid brackets (qualifier or terminal) are always "tiered" (standard/QF/SF/
-// finals) — the hybrid bracket's UB/LB/SF/GF rows share one "hybrid" slot the
-// same way a plain DE bracket's WB/LB/GF rows share "double_elimination".
+// finals).
 export const STAGE_SLOTS_BY_PRESET: Record<PresetId, StageSlotDef[]> = {
   single_elimination: [
     { key: "single_elimination", label: "Single Elimination", kind: "tiered" },
   ],
   double_elimination: [
-    { key: "double_elimination", label: "Double Elimination", kind: "tiered" },
+    {
+      key: "double_elimination",
+      label: "Double Elimination",
+      kind: "tiered",
+      // Two brackets run side by side at different stakes: a winners-bracket
+      // round decides who stays undefeated, while the losers round beside it is
+      // elimination. One tier grid for both could only ever suit one of them.
+      subSlots: [
+        { key: "de_winners", label: "Winners Bracket (incl. Grand Final)" },
+        { key: "de_losers", label: "Losers Bracket" },
+      ],
+    },
   ],
   group_single_elimination: [
     { key: "group", label: "Group Stage", kind: "flat" },
@@ -249,10 +269,46 @@ export function defaultStageBestOf(kind: "flat" | "tiered"): StageBestOfConfig {
   return kind === "flat" ? { mode: "flat", value: 3 } : { mode: "tiered", tiers: { ...DEFAULT_BEST_OF } };
 }
 
+export type BestOfBlock = { key: BestOfKey; label: string; kind: "flat" | "tiered" };
+
+// The settings groups a stage's best-of is edited and displayed as. Every
+// consumer that reads or writes config[...] for a slot goes through this rather
+// than indexing on slot.key, so a split stage can't be half-handled.
+export function bestOfBlocks(slot: StageSlotDef): BestOfBlock[] {
+  if (!slot.subSlots) return [{ key: slot.key, label: slot.label, kind: slot.kind }];
+  return slot.subSlots.map((s) => ({ ...s, kind: slot.kind }));
+}
+
+// Stages whose best-of used to be one block and is now several, mapped to the
+// key the single block was stored under. A tournament configured before the
+// split has only that key, and every consumer — both editors' initial state and
+// dirty checks, the read-only summaries, resolveBestOf, computeStageSchedule —
+// must see the values the admin actually set rather than fall through to
+// defaults: an in-flight DE bracket would otherwise silently revert to BO3, and
+// the editor would read as permanently unsaved.
+const SPLIT_FROM: Partial<Record<BestOfKey, BestOfKey>> = {
+  de_winners: "double_elimination",
+  de_losers: "double_elimination",
+};
+
+// Pure and idempotent: fills in a split stage's new keys from the block they
+// were split out of. Saving re-trims to the new keys, so this only ever has work
+// to do until the next save.
+export function normalizeRoundBestOf(config: RoundBestOfConfig | undefined): RoundBestOfConfig {
+  if (!config) return {};
+  let result = config;
+  for (const [key, legacyKey] of Object.entries(SPLIT_FROM) as [BestOfKey, BestOfKey][]) {
+    if (result[key] || !config[legacyKey]) continue;
+    if (result === config) result = { ...config };
+    result[key] = config[legacyKey];
+  }
+  return result;
+}
+
 export function defaultRoundBestOfForPreset(presetId: PresetId): RoundBestOfConfig {
   const result: RoundBestOfConfig = {};
   for (const slot of STAGE_SLOTS_BY_PRESET[presetId]) {
-    result[slot.key] = defaultStageBestOf(slot.kind);
+    for (const block of bestOfBlocks(slot)) result[block.key] = defaultStageBestOf(block.kind);
   }
   return result;
 }
@@ -301,17 +357,26 @@ function groupStageRounds(teams: number): number {
   return (minSize - 1) * 2;
 }
 
-// Double-elimination wall-clock rounds: WB = log2(size), LB = 2·(log2(size)−1),
-// plus the grand final. LB is the critical path for size ≥ 4, and it starts one
-// slot late: wbLoserTarget(1, …) sends WB R1's losers to LB R1, so LB R1 cannot
-// run beside WB R1. Hence `1 + lb`, not `lb` — for 8 teams the path is WB R1,
-// (WB R2 ‖ LB R1), (WB F ‖ LB R2), LB R3, LB F, GF. The grand final's bracket
-// reset is conditional and not counted. (bracket.ts)
-function deRounds(teams: number): number {
-  if (teams <= 2) return 1;
+// Double-elimination wall-clock duration: WB = log2(size), LB = 2·(log2(size)−1),
+// plus the grand final. LB starts one slot late — wbLoserTarget(1, …) sends WB
+// R1's losers to LB R1, so LB R1 cannot run beside WB R1. For 8 teams the path is
+// WB R1, (WB R2 ‖ LB R1), (WB F ‖ LB R2), LB R3, LB F, GF. The grand final's
+// bracket reset is conditional and not counted. (bracket.ts)
+//
+// A slot holding one round from each bracket costs the longer of the two, not the
+// losers round alone: the brackets have separate best-of settings, so lengthening
+// only the winners bracket has to move the estimate or the setting looks inert.
+function deDuration(teams: number, wbTiers: Record<RoundTier, BestOf>, lbTiers: Record<RoundTier, BestOf>): number {
+  if (teams <= 2) return gapMin(wbTiers.finals);
   const wb = log2ceil(teams);
   const lb = 2 * (wb - 1);
-  return Math.max(wb, 1 + lb) + 1;
+  let dur = gapMin(wbTiers[getTier(1, wb)]);
+  for (let k = 1; k <= lb; k++) {
+    const lbGap = gapMin(lbTiers[getTier(k, lb)]);
+    const wbRound = k + 1;
+    dur += wbRound <= wb ? Math.max(lbGap, gapMin(wbTiers[getTier(wbRound, wb)])) : lbGap;
+  }
+  return dur + gapMin(wbTiers.finals);
 }
 
 // Swiss runs until every team reaches 3 wins or 3 losses → at most 5 rounds, all standard.
@@ -321,7 +386,7 @@ function slotFlatBO(config: RoundBestOfConfig, key: "group" | "swiss"): BestOf {
   const c = config[key];
   return c?.mode === "flat" ? c.value : 3;
 }
-function slotTiers(config: RoundBestOfConfig, key: "single_elimination" | "double_elimination" | "se_qualifier" | "de_qualifier" | "hybrid"): Record<RoundTier, BestOf> {
+function slotTiers(config: RoundBestOfConfig, key: Exclude<BestOfKey, "group" | "swiss">): Record<RoundTier, BestOf> {
   const c = config[key];
   return c?.mode === "tiered" ? c.tiers : DEFAULT_BEST_OF;
 }
@@ -330,10 +395,11 @@ export function computeStageSchedule(
   preset: string,
   teams: number,
   groupMaxAdvancing: number | null,
-  config: RoundBestOfConfig,
+  storedConfig: RoundBestOfConfig,
   groupRounds: number | null = null,
 ): StageScheduleEntry[] {
   if (teams < 2) return [];
+  const config = normalizeRoundBestOf(storedConfig);
 
   const groupStd = gapMin(slotFlatBO(config, "group"));
   const swissStd = gapMin(slotFlatBO(config, "swiss"));
@@ -347,7 +413,7 @@ export function computeStageSchedule(
       return [{ key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(log2ceil(teams), slotTiers(config, "single_elimination")) }];
 
     case "double_elimination":
-      return [{ key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(deRounds(teams), slotTiers(config, "double_elimination")) }];
+      return [{ key: "bracket", label: "Bracket", estimatedMinutes: deDuration(teams, slotTiers(config, "de_winners"), slotTiers(config, "de_losers")) }];
 
     case "group_single_elimination": {
       const adv = groupMaxAdvancing ?? getDefaultGroupAdvancing(teams);
@@ -420,8 +486,8 @@ export function resolveBestOf(
   config: RoundBestOfConfig | undefined,
   fallback: BestOf = 3
 ): BestOf {
-  const slotKey = getStageSlotKey(stage);
-  const slotConfig = slotKey ? config?.[slotKey] : undefined;
+  const slotKey = getBestOfKey(stage);
+  const slotConfig = slotKey ? normalizeRoundBestOf(config)[slotKey] : undefined;
   if (!slotConfig) return fallback;
   if (slotConfig.mode === "flat") return slotConfig.value;
   const totalRounds = maxRoundByStage[stage] ?? round;

@@ -174,23 +174,34 @@ function getTier(round, totalRounds) {
   return "standard";
 }
 
-// Ported from getStageSlotKey/resolveBestOf in app/lib/bracket.ts and
-// app/dashboard/season/format-constants.ts — kept in sync by hand since this
-// script is plain JS and can't import those TS modules directly.
-function getStageSlotKey(stage) {
+// Ported from getBestOfKey/normalizeRoundBestOf/resolveBestOf in
+// app/lib/bracket.ts and app/dashboard/season/format-constants.ts — kept in sync
+// by hand since this script is plain JS and can't import those TS modules
+// directly. Read those for the why; this is a transcription.
+function getBestOfKey(stage) {
   if (stage.startsWith("group_")) return "group";
   if (stage === "swiss") return "swiss";
   if (stage === "se_qualifier") return "se_qualifier";
   if (stage === "deq_winners" || stage === "deq_losers") return "de_qualifier";
-  if (stage === "de_winners" || stage === "de_losers" || stage === "de_grand_final") return "double_elimination";
+  if (stage === "de_winners" || stage === "de_grand_final") return "de_winners";
+  if (stage === "de_losers") return "de_losers";
   if (stage === "single_elimination") return "single_elimination";
   if (stage.startsWith("hybrid")) return "hybrid";
   return null;
 }
+const SPLIT_FROM = { de_winners: "double_elimination", de_losers: "double_elimination" };
+function normalizeRoundBestOf(config) {
+  if (!config) return {};
+  const result = { ...config };
+  for (const [key, legacyKey] of Object.entries(SPLIT_FROM)) {
+    if (!result[key] && config[legacyKey]) result[key] = config[legacyKey];
+  }
+  return result;
+}
 function resolveBestOf(stage, round, maxRoundByStage, config, fallback = 3) {
   if (!stage) return fallback;
-  const slotKey = getStageSlotKey(stage);
-  const slotConfig = slotKey ? config?.[slotKey] : undefined;
+  const slotKey = getBestOfKey(stage);
+  const slotConfig = slotKey ? normalizeRoundBestOf(config)[slotKey] : undefined;
   if (!slotConfig) return fallback;
   if (slotConfig.mode === "flat") return slotConfig.value;
   const totalRounds = maxRoundByStage[stage] ?? round;
