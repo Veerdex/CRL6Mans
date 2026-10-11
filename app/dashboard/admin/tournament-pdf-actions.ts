@@ -2,7 +2,6 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -308,38 +307,4 @@ export async function fetchActiveSeasonPdfData(): Promise<TournamentPdfData | nu
     standings,
     matches,
   };
-}
-
-export async function purgeTournamentStandings(
-  id: string
-): Promise<{ ok?: boolean; error?: string }> {
-  await assertAdmin();
-
-  const { data: t } = await supabaseAdmin
-    .from("tournaments")
-    .select("summary, status")
-    .eq("id", id)
-    .single();
-
-  if (!t) return { error: "Tournament not found." };
-  if (t.status !== "completed") return { error: "Only completed tournaments can be archived." };
-
-  const existing = t.summary as { champion?: string | null; runnerUp?: string | null } | null;
-
-  const { error } = await supabaseAdmin
-    .from("tournaments")
-    .update({
-      summary: {
-        champion: existing?.champion ?? null,
-        runnerUp: existing?.runnerUp ?? null,
-        finalStandings: [],
-      },
-      full_archive: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", id);
-
-  if (error) return { error: error.message };
-  revalidatePath("/dashboard/admin");
-  return { ok: true };
 }

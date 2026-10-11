@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import {
-  purgeTournamentStandings,
   fetchCompletedTournamentPdfData,
   fetchActiveTournamentPdfData,
   fetchActiveSeasonPdfData,
@@ -47,71 +46,45 @@ async function downloadPdf(rawData: TournamentPdfData) {
   URL.revokeObjectURL(url);
 }
 
-// ── Completed tournament: Export PDF → purge standings ──────────────────────
+// ── Completed tournament: Export PDF ────────────────────────────────────────
+//
+// Read-only, and deliberately so: this used to purge the standings and null
+// out full_archive once the PDF was in hand, which destroyed the JSON archive
+// sitting behind the Download Archive button right next to it -- and it ran
+// first, so the archive could go before it was ever downloaded.
 
 export function ExportCompletedPdfButton({ tournamentId }: { tournamentId: string }) {
-  const [step, setStep] = useState<"idle" | "warn" | "generating" | "done">("idle");
+  const [state, setState] = useState<"idle" | "generating">("idle");
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
-  function handleConfirm() {
-    setStep("generating");
+  function handleClick() {
+    setState("generating");
     setError(null);
     startTransition(async () => {
       try {
         const data = await fetchCompletedTournamentPdfData(tournamentId);
-        if (!data) { setError("Could not load tournament data."); setStep("warn"); return; }
+        if (!data) { setError("Could not load tournament data."); setState("idle"); return; }
         await downloadPdf(data);
-        const res = await purgeTournamentStandings(tournamentId);
-        if (res.error) { setError(res.error); setStep("warn"); return; }
-        setStep("done");
+        setState("idle");
       } catch (err) {
         setError(`Failed to generate PDF${err instanceof Error ? `: ${err.message}` : "."}`);
-        setStep("warn");
+        setState("idle");
       }
     });
   }
 
-  if (step === "done") {
-    return <span className="text-xs text-emerald-400 font-medium">Archived</span>;
-  }
-
-  if (step === "warn" || step === "generating") {
-    return (
-      <div className="mt-3 pt-3 border-t border-zinc-800 space-y-2">
-        <p className="text-xs text-zinc-300 leading-relaxed">
-          This will download the full tournament report and permanently remove detailed
-          standings. Only the champion, runner-up, and dates will be retained.
-        </p>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={handleConfirm}
-            disabled={step === "generating"}
-            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
-          >
-            {step === "generating" ? "Generating…" : "Download & Archive"}
-          </button>
-          {step !== "generating" && (
-            <button
-              onClick={() => { setStep("idle"); setError(null); }}
-              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-          )}
-          {error && <span className="text-xs text-red-400">{error}</span>}
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <button
-      onClick={() => setStep("warn")}
-      className="px-3 py-1.5 bg-zinc-800 hover:bg-indigo-900/40 border border-zinc-700 hover:border-indigo-700/50 text-indigo-300 text-xs font-medium rounded-lg transition-colors"
-    >
-      Export PDF
-    </button>
+    <div className="flex items-center gap-2">
+      <button
+        onClick={handleClick}
+        disabled={state === "generating"}
+        className="px-3 py-1.5 bg-zinc-800 hover:bg-indigo-900/40 border border-zinc-700 hover:border-indigo-700/50 disabled:opacity-50 text-indigo-300 text-xs font-medium rounded-lg transition-colors"
+      >
+        {state === "generating" ? "Generating…" : "Export PDF"}
+      </button>
+      {error && <span className="text-xs text-red-400">{error}</span>}
+    </div>
   );
 }
 
