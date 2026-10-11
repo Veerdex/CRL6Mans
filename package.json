@@ -17,7 +17,8 @@
     "test:hybrid-layout": "tsc app/dashboard/season/hybrid-layout.ts scripts/test-hybrid-layout.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-hybrid-layout.js",
     "test:swiss-layout": "tsc app/dashboard/season/swiss-layout.ts scripts/test-swiss-layout.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-swiss-layout.js",
     "test:upload-limits": "tsc app/lib/upload-limits.ts scripts/test-upload-limits.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --lib es2019,dom --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-upload-limits.js",
-    "test:event-winner": "tsc app/lib/bracket.ts scripts/test-event-winner.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-event-winner.js"
+    "test:event-winner": "tsc app/lib/bracket.ts scripts/test-event-winner.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-event-winner.js",
+    "test:de-cross-seed": "tsc app/lib/bracket.ts scripts/test-de-cross-seed.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-de-cross-seed.js"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",

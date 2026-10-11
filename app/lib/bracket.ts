@@ -481,9 +481,35 @@ export const DE_GF      = "de_grand_final";
 export function getDEWBRounds(size: number): number { return Math.log2(size); }
 export function getDELBRounds(size: number): number { return 2 * (Math.log2(size) - 1); }
 
+// Cross-seeding: which LB match does a WB round-r loser drop into?
+//
+// A drop round's match count equals the feeding WB round's own match count —
+// one LB match per loser. Dropping a loser *straight* down (same match number)
+// lands it on the same side of the LB that the team which just beat it came
+// from, so the LB survivor waiting there is drawn from the same quarter of the
+// WB: an immediate rematch of the game that sent it down. Crossing the order
+// sends it to the opposite side instead, where the survivor cannot have played
+// it yet. Both hybrid formats already spell this out inline in
+// advanceBracketWinner ("loser cross-routes to the OPPOSITE LB slot"); this is
+// the same rule for full DE.
+//
+// Only alternate drop rounds cross, which is the convention the published
+// bracket guides describe. Crossing *every* drop round is worse, not better:
+// from the second drop round on, a crossed drop can land against the team it
+// beat one WB round ago, while the straight drop can only meet a round-1
+// opponent that is two LB rounds staler. test:de-cross-seed brute-forces every
+// WB outcome for sizes 4/8/16 and pins exactly that trade down.
+//
+// `size` is the full (power-of-two) bracket size, not the round count — the DE
+// *qualifier* truncates its WB, so there 2^numWBRounds is not the bracket size.
+export function dropMatchNum(wbRound: number, matchNum: number, size: number): number {
+  const count = size / Math.pow(2, wbRound);
+  return wbRound % 2 === 0 ? count - matchNum + 1 : matchNum;
+}
+
 // Where does a WB loser land in the LB?
 export function wbLoserTarget(
-  wbRound: number, matchNum: number
+  wbRound: number, matchNum: number, size: number
 ): { lbRound: number; lbMatchNum: number; slot: "home_team_id" | "away_team_id" } {
   if (wbRound === 1) {
     return {
@@ -492,7 +518,11 @@ export function wbLoserTarget(
       slot: matchNum % 2 === 1 ? "home_team_id" : "away_team_id",
     };
   }
-  return { lbRound: 2 * (wbRound - 1), lbMatchNum: matchNum, slot: "away_team_id" };
+  return {
+    lbRound: 2 * (wbRound - 1),
+    lbMatchNum: dropMatchNum(wbRound, matchNum, size),
+    slot: "away_team_id",
+  };
 }
 
 // Where does an LB winner advance?
@@ -535,7 +565,10 @@ export function getDELBFeederLabel(lbRound: number, matchNum: number, slot: "hom
     // Drop round: home = prev LB winner, away = WB loser
     if (slot === "home") return `Winner of L-${getLBMatchLabel(lbRound - 1, matchNum, numR1LB)}`;
     const wbRound = lbRound / 2 + 1;
-    return `Loser of W-${getMatchLabel(wbRound, matchNum, numR1WB)}`;
+    // Which WB match drops *here* is the inverse of wbLoserTarget's crossing —
+    // and dropMatchNum is its own inverse, reversal being an involution.
+    const wbM = dropMatchNum(wbRound, matchNum, size);
+    return `Loser of W-${getMatchLabel(wbRound, wbM, numR1WB)}`;
   }
   // Consolidation: both come from prev LB round
   const prevM = slot === "home" ? 2 * matchNum - 1 : 2 * matchNum;

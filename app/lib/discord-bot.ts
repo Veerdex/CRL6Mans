@@ -3382,6 +3382,13 @@ async function resolveDeByeMatches(): Promise<boolean> {
   return resolved;
 }
 
+// The full power-of-two bracket size, counted off WB round 1 rather than derived
+// from the round count: the DE qualifier truncates its WB, so 2^numWBRounds is
+// its survivor target, not its size. wbLoserTarget's crossing needs the size.
+function deBracketSize(wbRows: { round: number }[]): number {
+  return 2 * wbRows.filter(m => m.round === 1).length;
+}
+
 async function getDEBracketSizes() {
   const [{ data: wbRows }, { data: lbRows }] = await Promise.all([
     supabaseAdmin.from("matches").select("round").eq("stage", DE_WINNERS),
@@ -3390,7 +3397,7 @@ async function getDEBracketSizes() {
   if (!wbRows?.length) return null;
   const numWB = Math.max(...wbRows.map(m => m.round));
   const numLB = lbRows?.length ? Math.max(...lbRows.map(m => m.round)) : 0;
-  return { numWB, numLB };
+  return { numWB, numLB, size: deBracketSize(wbRows) };
 }
 
 async function getDEQBracketSizes() {
@@ -3401,7 +3408,7 @@ async function getDEQBracketSizes() {
   if (!wbRows?.length) return null;
   const numWBQ = Math.max(...wbRows.map(m => m.round));
   const numLBQ = lbRows?.length ? Math.max(...lbRows.map(m => m.round)) : 0;
-  return { numWBQ, numLBQ };
+  return { numWBQ, numLBQ, size: deBracketSize(wbRows) };
 }
 
 // Creates a channel for a match if both teams are now set after a slot assignment.
@@ -3464,7 +3471,7 @@ async function advanceBracketWinner(
     }
 
     if (loserId) {
-      const { lbRound, lbMatchNum, slot } = wbLoserTarget(round, match_number);
+      const { lbRound, lbMatchNum, slot } = wbLoserTarget(round, match_number, sizes.size);
       await setMatchSlot(DE_LOSERS, lbRound, lbMatchNum, slot, loserId);
       await maybeCreateChannelForMatch(DE_LOSERS, lbRound, lbMatchNum);
     }
@@ -3515,7 +3522,7 @@ async function advanceBracketWinner(
     }
 
     if (loserId) {
-      const { lbRound, lbMatchNum, slot } = wbLoserTarget(round, match_number);
+      const { lbRound, lbMatchNum, slot } = wbLoserTarget(round, match_number, sizes.size);
       await setMatchSlot(DE_QUALIFIER_LOSERS, lbRound, lbMatchNum, slot, loserId);
       await maybeCreateChannelForMatch(DE_QUALIFIER_LOSERS, lbRound, lbMatchNum);
     }

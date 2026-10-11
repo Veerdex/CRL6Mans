@@ -254,7 +254,7 @@ async function simulateDEQualifierSingleMatch(
     }
     // Last WB round: winner is a qualifier survivor, no further routing
 
-    const { lbRound, lbMatchNum, slot } = wbLoserTarget(match.round, match.match_number);
+    const { lbRound, lbMatchNum, slot } = wbLoserTarget(match.round, match.match_number, sizes.size);
     await setMatchSlot(DE_QUALIFIER_LOSERS, lbRound, lbMatchNum, slot, loserId);
     await checkAndAutoCompleteDEQLBMatch(lbRound, lbMatchNum, sizes);
   }
@@ -495,7 +495,7 @@ async function simulateDESingleMatch(match: {
     }
     // Drop loser to LB, then auto-complete the LB match as a bye if its other slot
     // will never be filled (because that slot's source was a WB bye or ghost LB match).
-    const { lbRound, lbMatchNum, slot } = wbLoserTarget(match.round, match.match_number);
+    const { lbRound, lbMatchNum, slot } = wbLoserTarget(match.round, match.match_number, sizes.size);
     await setMatchSlot(DE_LOSERS, lbRound, lbMatchNum, slot, loserId);
     await checkAndAutoCompleteLBMatch(lbRound, lbMatchNum, sizes);
   }
