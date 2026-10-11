@@ -85,10 +85,13 @@ const ephemeralReply = (content: string) => ({ type: 4, data: { content, flags: 
 // only — returning this from a direct reply would send an empty message, which
 // Discord rejects.
 const silentReply = () => ({ type: 4, data: { content: "", flags: 64 } });
-// Embed-bodied replies. No allowed_mentions on either: a mention inside an embed
-// notifies nobody, and `content` — the only place a ping could live — is left
-// empty, so there is nothing for Discord to resolve.
-const embedReply = (embed: DiscordEmbed) => ({ type: 4, data: { embeds: [embed] } });
+// Embed-bodied replies are all private: every command that answers with one is a
+// lookup whose result is only interesting to whoever asked. There is deliberately
+// no public counterpart — a deferred command's reply is ephemeral whatever the
+// handler asks for, so a public one would have to answer inside Discord's three
+// seconds, and any command that stops being public would silently become a
+// 3-second liability. No allowed_mentions: a mention inside an embed notifies
+// nobody, and `content` — the only place a ping could live — is left empty.
 const ephemeralEmbedReply = (embed: DiscordEmbed) => ({ type: 4, data: { embeds: [embed], flags: 64 } });
 
 // Pace Discord channel/category create & delete operations so bulk work (season
@@ -2271,7 +2274,7 @@ async function coinsCmd(userId: string, targetId: string) {
   const rows = (standings ?? []) as { discord_id: string | null; crl_coins: number | null }[];
   const ranked = rows.some((r) => r.discord_id === subject);
   const coins = account.crl_coins ?? 0;
-  return embedReply(
+  return ephemeralEmbedReply(
     coinsEmbed({
       username: account.username,
       displayName: account.display_name,

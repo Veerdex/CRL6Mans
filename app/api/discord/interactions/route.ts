@@ -10,7 +10,7 @@ import type { DiscordEmbed } from "@/app/lib/discord-api";
 // channel, not the reply the invoker sees. /coins is deliberately absent — its
 // reply is public, so it has to answer inside Discord's three seconds.
 const DEFERRED_COMMANDS = new Set([
-  "openround", "postclip", "profile", "stats", "sub", "approve", "reject",
+  "openround", "postclip", "profile", "stats", "coins", "sub", "approve", "reject",
 ]);
 // Subcommands of /admin that are slow enough to need deferral (matched against
 // interaction.data.options[0].name, since Discord nests subcommand names one level deep).

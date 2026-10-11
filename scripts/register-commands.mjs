@@ -239,7 +239,7 @@ const commands = [
   },
   {
     name: "coins",
-    description: "Show a player's Westside Wages balance and leaderboard place",
+    description: "Show a player's Westside Wages balance and leaderboard place (only you see it)",
     options: [
       { name: "user", description: "Player to look up — defaults to you", type: USER, required: false },
     ],
