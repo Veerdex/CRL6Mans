@@ -8,7 +8,6 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { notifyMatchChannel } from "@/app/lib/match-notifications";
 import { getGuildRoles } from "@/app/lib/discord-api";
 import { teamPing, seriesSubmittedPost } from "@/app/lib/match-embeds";
-import { pushToAdmins } from "@/app/lib/push";
 // confirmSeriesResultCore and cancelSeriesSubmissionCore live in discord-bot.ts
 // alongside finalizeAcceptedSeries: this file already depends on that module, so
 // putting them anywhere else would make the dependency circular.
@@ -185,12 +184,13 @@ export async function submitSeriesResult(
     }
   } catch { /* best-effort */ }
 
-  pushToAdmins({
-    title: "Match Result Submitted",
-    body: `A team submitted a series result (${homeWins}–${awayWins}) — pending confirmation.`,
-    url: "/dashboard/admin",
-    tag: "match-reporting",
-  }, "match_reporting").catch(() => {});
+  // No staff push here. A submission is the routine case: the opponent confirms
+  // it, or processExpiredScoreConfirmations auto-finalises it in 5-15 minutes, and
+  // either way staff have nothing to do. Pinging them on every submission buried
+  // the cases that do need them. Staff are notified when a match actually stalls:
+  // finalizeAcceptedSeries pushes "Replay Review Required" when strict mode finds
+  // unrecognised players. The submission is still visible in the admin panel's
+  // pending list the whole time.
 
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/admin");
