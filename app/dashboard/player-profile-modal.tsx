@@ -12,13 +12,14 @@ import {
   type AccoladeResult,
   type AccoladeSlot,
 } from "./accolade-actions";
+import { saveOwnMmr } from "./settings/actions";
 import type { PlayerProfile } from "@/app/lib/player-profile";
 import type { EventHistoryEntry } from "@/app/lib/event-results";
 
 export type ProfileKey = { username: string } | { discordId: string };
 
-/** `canEditAccolades` is decided per viewer by the profile route, not stored on the player. */
-type LoadedProfile = PlayerProfile & { canEditAccolades: boolean };
+/** Both flags are decided per viewer by the profile route, not stored on the player. */
+type LoadedProfile = PlayerProfile & { canEditAccolades: boolean; isSelf: boolean };
 
 export function PlayerProfileModal({
   target,
@@ -128,7 +129,7 @@ export function PlayerProfileModal({
 
               <div className="flex flex-col gap-4 min-w-0">
                 <SixMans profile={profile} />
-                <Ranks profile={profile} />
+                <Ranks profile={profile} canEdit={profile.isSelf} onSaved={refresh} />
               </div>
             </div>
           )}
@@ -194,20 +195,149 @@ function SixMans({ profile }: { profile: PlayerProfile }) {
   );
 }
 
-function Ranks({ profile }: { profile: PlayerProfile }) {
+function Ranks({
+  profile,
+  canEdit,
+  onSaved,
+}: {
+  profile: PlayerProfile;
+  canEdit: boolean;
+  onSaved: () => void;
+}) {
   const { ranks } = profile;
+  const [editing, setEditing] = useState(false);
+
   return (
     <section className="rounded-xl bg-zinc-800/40 border border-zinc-800 p-4">
-      <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-3">Rocket League MMR</h3>
-      <div className="grid grid-cols-2 gap-2">
-        <Stat label="Season Peak 2v2" value={fmt(ranks.seasonPeak2v2)} />
-        <Stat label="All Time Peak 2v2" value={fmt(ranks.allTimePeak2v2)} />
-        <Stat label="Season Peak 3v3" value={fmt(ranks.seasonPeak3v3)} />
-        <Stat label="All Time Peak 3v3" value={fmt(ranks.allTimePeak3v3)} />
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <h3 className="text-xs uppercase tracking-wide text-zinc-500">Rocket League MMR</h3>
+        {canEdit && (
+          <button
+            onClick={() => setEditing((v) => !v)}
+            aria-expanded={editing}
+            className={`rounded-lg border px-2 py-0.5 text-xs font-medium transition-colors ${
+              editing
+                ? "border-indigo-500 bg-indigo-600 text-white"
+                : "border-zinc-700 bg-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-700"
+            }`}
+          >
+            Edit
+          </button>
+        )}
       </div>
+
+      {editing ? (
+        <RankEditor
+          ranks={ranks}
+          onCancel={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            onSaved();
+          }}
+        />
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          <Stat label="Season Peak 2v2" value={fmt(ranks.seasonPeak2v2)} />
+          <Stat label="All Time Peak 2v2" value={fmt(ranks.allTimePeak2v2)} />
+          <Stat label="Season Peak 3v3" value={fmt(ranks.seasonPeak3v3)} />
+          <Stat label="All Time Peak 3v3" value={fmt(ranks.allTimePeak3v3)} />
+        </div>
+      )}
     </section>
   );
 }
+
+/**
+ * Same self-service edit as the Settings form, minus the tracker URL — that is
+ * the one field an admin still verifies, so it stays on the page that can show
+ * the review state. Field order matches Settings: Season Peak, then All Time.
+ */
+function RankEditor({
+  ranks,
+  onCancel,
+  onSaved,
+}: {
+  ranks: PlayerProfile["ranks"];
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState({
+    current_2v2: mmrDraft(ranks.seasonPeak2v2),
+    peak_2v2: mmrDraft(ranks.allTimePeak2v2),
+    current_3v3: mmrDraft(ranks.seasonPeak3v3),
+    peak_3v3: mmrDraft(ranks.allTimePeak3v3),
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const save = () =>
+    startTransition(async () => {
+      const res = await saveOwnMmr(draft);
+      if (res.error) return setError(res.error);
+      setError(null);
+      onSaved();
+    });
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        {(
+          [
+            ["current_2v2", "Season Peak 2v2"],
+            ["peak_2v2", "All Time Peak 2v2"],
+            ["current_3v3", "Season Peak 3v3"],
+            ["peak_3v3", "All Time Peak 3v3"],
+          ] as [keyof typeof draft, string][]
+        ).map(([name, label]) => (
+          <div key={name} className="space-y-1">
+            <label
+              htmlFor={`rank-${name}`}
+              className="block text-[11px] uppercase tracking-wide text-zinc-500"
+            >
+              {label}
+            </label>
+            <input
+              id={`rank-${name}`}
+              type="number"
+              min={0}
+              max={3000}
+              value={draft[name]}
+              onChange={(e) => setDraft((d) => ({ ...d, [name]: e.target.value }))}
+              placeholder="e.g. 1420"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-white tabular-nums placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </div>
+        ))}
+      </div>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={save}
+          disabled={pending}
+          className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white transition-colors disabled:opacity-50"
+        >
+          {pending ? "Saving…" : "Save"}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={pending}
+          className="rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white transition-colors disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+
+      <p className="text-[11px] text-zinc-500">
+        Applies instantly and updates your Rank Value. Tracker link changes still go
+        through Settings.
+      </p>
+    </div>
+  );
+}
+
+const mmrDraft = (v: number | null) => (v == null ? "" : String(v));
 
 function EventHistory({
   events,

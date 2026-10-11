@@ -16,6 +16,170 @@ function validateMmr(label: string, val: string): string | null {
   return null;
 }
 
+/** Season Peak is `current_*`, All Time Peak is `peak_*` — the labels the forms show. */
+type MmrInput = {
+  peak_2v2: string;
+  current_2v2: string;
+  peak_3v3: string;
+  current_3v3: string;
+};
+
+const MMR_PLAYER_COLUMNS =
+  "id, team_id, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1";
+
+/** MMR columns come back from supabase-js as strings — the shape RatingFields wants. */
+type MmrPlayerRow = {
+  id: string;
+  team_id: string | null;
+  peak_3v3: string; current_3v3: string;
+  peak_2v2: string; current_2v2: string;
+  peak_1v1: string | null; current_1v1: string | null;
+};
+
+function validateMmrInput(v: MmrInput): string | null {
+  for (const [label, val] of [
+    ["All Time Peak 3v3", v.peak_3v3],
+    ["Season Peak 3v3", v.current_3v3],
+    ["All Time Peak 2v2", v.peak_2v2],
+    ["Season Peak 2v2", v.current_2v2],
+  ] as [string, string][]) {
+    if (!val?.trim()) return `${label} is required.`;
+    const err = validateMmr(label, val.trim());
+    if (err) return err;
+  }
+  if (Number(v.current_3v3) > Number(v.peak_3v3))
+    return "Season Peak 3v3 cannot exceed All Time Peak 3v3.";
+  if (Number(v.current_2v2) > Number(v.peak_2v2))
+    return "Season Peak 2v2 cannot exceed All Time Peak 2v2.";
+  return null;
+}
+
+/**
+ * The one writer of a player's own MMR. Deliberately not exported: every export
+ * of a "use server" module is a public endpoint, and this takes the row to write
+ * as an argument, so an exported version would let anyone rewrite anyone's MMR.
+ * Callers resolve the row from the session first.
+ *
+ * Writes both tiers — `loadPlayerProfile` reads `pending_players` ahead of
+ * `players`, so a Tier 3 only write succeeds and changes nothing a player sees.
+ */
+async function applyMmrChange(
+  player: MmrPlayerRow,
+  next: MmrInput,
+  now: string,
+): Promise<{ changed: boolean; error?: string }> {
+  const changed =
+    Number(next.peak_3v3) !== Number(player.peak_3v3) ||
+    Number(next.current_3v3) !== Number(player.current_3v3) ||
+    Number(next.peak_2v2) !== Number(player.peak_2v2) ||
+    Number(next.current_2v2) !== Number(player.current_2v2);
+
+  if (!changed) return { changed: false };
+
+  await supabaseAdmin
+    .from("pending_players")
+    .update({
+      peak_3v3:    next.peak_3v3,
+      current_3v3: next.current_3v3,
+      peak_2v2:    next.peak_2v2,
+      current_2v2: next.current_2v2,
+      updated_at:  now,
+    })
+    .eq("account_id", player.id);
+
+  const { error } = await supabaseAdmin
+    .from("players")
+    .update({
+      peak_3v3:    next.peak_3v3,
+      current_3v3: next.current_3v3,
+      peak_2v2:    next.peak_2v2,
+      current_2v2: next.current_2v2,
+      updated_at:  now,
+    })
+    .eq("id", player.id);
+
+  if (error) return { changed: false, error: "Failed to save MMR. Please try again." };
+
+  if (player.team_id) {
+    await applyPlayerRVChangeToTeamRating(
+      player.id,
+      player.team_id,
+      {
+        peak_2v2:    player.peak_2v2,
+        current_2v2: player.current_2v2,
+        peak_3v3:    player.peak_3v3,
+        current_3v3: player.current_3v3,
+        peak_1v1:    player.peak_1v1,
+        current_1v1: player.current_1v1,
+      },
+      {
+        peak_2v2:    next.peak_2v2,
+        current_2v2: next.current_2v2,
+        peak_3v3:    next.peak_3v3,
+        current_3v3: next.current_3v3,
+        peak_1v1:    player.peak_1v1,
+        current_1v1: player.current_1v1,
+      },
+    ).catch(() => {});
+  }
+
+  return { changed: true };
+}
+
+/**
+ * Same self-service MMR edit as the Settings form, reached from the MMR card on
+ * a player's own profile popup. Refuses by returning an error rather than
+ * redirecting, since the caller is a popup over whatever page the viewer is on.
+ */
+export async function saveOwnMmr(values: {
+  peak_2v2: string;
+  current_2v2: string;
+  peak_3v3: string;
+  current_3v3: string;
+}): Promise<{ error?: string; ok?: boolean }> {
+  const cookieStore = await cookies();
+  const session = await decrypt(cookieStore.get("session")?.value);
+  if (!session?.userId) return { error: "Your session expired — please sign in again." };
+
+  const next: MmrInput = {
+    peak_2v2:    String(values?.peak_2v2 ?? "").trim(),
+    current_2v2: String(values?.current_2v2 ?? "").trim(),
+    peak_3v3:    String(values?.peak_3v3 ?? "").trim(),
+    current_3v3: String(values?.current_3v3 ?? "").trim(),
+  };
+
+  const invalid = validateMmrInput(next);
+  if (invalid) return { error: invalid };
+
+  const { data: account } = await supabaseAdmin
+    .from("accounts")
+    .select("status, kick_reason, kicked_until")
+    .eq("discord_id", session.userId)
+    .single();
+
+  if (
+    account?.status !== "approved" ||
+    isCurrentlyKicked(account.kick_reason ?? null, account.kicked_until ?? null)
+  ) {
+    return { error: "Only approved players can edit their MMR." };
+  }
+
+  const { data: player } = await supabaseAdmin
+    .from("players")
+    .select(MMR_PLAYER_COLUMNS)
+    .eq("discord_id", session.userId)
+    .single<MmrPlayerRow>();
+  if (!player) return { error: "No player record for your account." };
+
+  const res = await applyMmrChange(player, next, new Date().toISOString());
+  if (res.error) return { error: res.error };
+  if (!res.changed) return { error: "No changes to save — update a value first." };
+
+  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/players");
+  return { ok: true };
+}
+
 export async function requestProfileChange(
   _prevState: unknown,
   formData: FormData
@@ -38,17 +202,15 @@ export async function requestProfileChange(
     return { error: "Please enter a valid tracker URL." };
   }
 
-  for (const [label, val] of [
-    ["Peak 3v3",    peak3v3],
-    ["Current 3v3", current3v3],
-    ["Peak 2v2",    peak2v2],
-    ["Current 2v2", current2v2],
-  ] as [string, string][]) {
-    const err = validateMmr(label, val);
-    if (err) return { error: err };
-  }
-  if (Number(current3v3) > Number(peak3v3)) return { error: "Current 3v3 MMR cannot exceed Peak 3v3." };
-  if (Number(current2v2) > Number(peak2v2)) return { error: "Current 2v2 MMR cannot exceed Peak 2v2." };
+  const nextMmr: MmrInput = {
+    peak_3v3:    peak3v3,
+    current_3v3: current3v3,
+    peak_2v2:    peak2v2,
+    current_2v2: current2v2,
+  };
+
+  const invalidMmr = validateMmrInput(nextMmr);
+  if (invalidMmr) return { error: invalidMmr };
 
   const { data: account } = await supabaseAdmin
     .from("accounts")
@@ -60,9 +222,9 @@ export async function requestProfileChange(
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("id, username, tracker_url, team_id, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1")
+    .select(`username, tracker_url, ${MMR_PLAYER_COLUMNS}`)
     .eq("discord_id", session.userId)
-    .single();
+    .single<MmrPlayerRow & { username: string | null; tracker_url: string | null }>();
   if (!player) redirect("/dashboard");
 
   const now = new Date().toISOString();
@@ -73,62 +235,11 @@ export async function requestProfileChange(
     .update({ sub_willing: subWilling, updated_at: now })
     .eq("discord_id", session.userId);
 
-  const mmrChanged =
-    Number(peak3v3)    !== Number(player.peak_3v3) ||
-    Number(current3v3) !== Number(player.current_3v3) ||
-    Number(peak2v2)    !== Number(player.peak_2v2) ||
-    Number(current2v2) !== Number(player.current_2v2);
-
   // MMR is self-reported and applies immediately — only the tracker URL, which
   // is what an admin actually verifies it against, still goes through review.
-  if (mmrChanged) {
-    await supabaseAdmin
-      .from("pending_players")
-      .update({
-        peak_3v3:    peak3v3,
-        current_3v3: current3v3,
-        peak_2v2:    peak2v2,
-        current_2v2: current2v2,
-        updated_at:  now,
-      })
-      .eq("account_id", player.id);
-
-    const { error: mmrErr } = await supabaseAdmin
-      .from("players")
-      .update({
-        peak_3v3:    peak3v3,
-        current_3v3: current3v3,
-        peak_2v2:    peak2v2,
-        current_2v2: current2v2,
-        updated_at:  now,
-      })
-      .eq("id", player.id);
-
-    if (mmrErr) return { error: "Failed to save MMR. Please try again." };
-
-    if (player.team_id) {
-      await applyPlayerRVChangeToTeamRating(
-        player.id,
-        player.team_id,
-        {
-          peak_2v2:    player.peak_2v2,
-          current_2v2: player.current_2v2,
-          peak_3v3:    player.peak_3v3,
-          current_3v3: player.current_3v3,
-          peak_1v1:    player.peak_1v1,
-          current_1v1: player.current_1v1,
-        },
-        {
-          peak_2v2:    peak2v2,
-          current_2v2: current2v2,
-          peak_3v3:    peak3v3,
-          current_3v3: current3v3,
-          peak_1v1:    player.peak_1v1,
-          current_1v1: player.current_1v1,
-        },
-      ).catch(() => {});
-    }
-  }
+  const mmrResult = await applyMmrChange(player, nextMmr, now);
+  if (mmrResult.error) return { error: mmrResult.error };
+  const mmrChanged = mmrResult.changed;
 
   const trackerChanged = trackerUrl !== (player.tracker_url ?? "").trim();
 

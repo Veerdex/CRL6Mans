@@ -24,7 +24,10 @@ export async function GET(request: NextRequest) {
   ]);
   if (!profile) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // Only decides whether the edit affordance renders — every accolade write is
-  // gated again server-side in app/dashboard/accolade-actions.ts.
-  return NextResponse.json({ ...profile, canEditAccolades });
+  // Both flags only decide whether an edit affordance renders — accolade writes
+  // are gated again in app/dashboard/accolade-actions.ts, and the MMR write in
+  // saveOwnMmr resolves the player from the session rather than from the client.
+  const isSelf = profile.identity.discordId === session.userId;
+
+  return NextResponse.json({ ...profile, canEditAccolades, isSelf });
 }
