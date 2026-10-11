@@ -6,7 +6,8 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { openReadyMatchChannels } from "@/app/lib/discord-bot";
+import { openReadyMatchChannels, isTournamentActive } from "@/app/lib/discord-bot";
+import { matchHasBegun } from "@/app/lib/match-state";
 import { type ScheduleType, stageName, expectedStageRounds, canonicalStage } from "./schedule-utils";
 import { zonedDate, wallToUtc, shiftWall } from "@/app/lib/pt-time";
 
@@ -102,10 +103,14 @@ function parseDateTimeInZone(dtStr: string, tz: string): number {
   return wallToUtc(tz, y, m - 1, d, h, min);
 }
 
+// A round is locked once any of its matches is actually under way. It can no longer
+// be a head-count of channels: in a tournament the channel opens with the check-in
+// window, so counting channels would lock a round the moment it seats and leave an
+// admin unable to fix a time nobody has played against yet.
 async function isRoundLocked(canonStage: string, round: number): Promise<boolean> {
   let q = supabaseAdmin
     .from("matches")
-    .select("*", { count: "exact", head: true })
+    .select("discord_channel_id, home_checked_in, away_checked_in")
     .eq("round", round)
     .not("discord_channel_id", "is", null);
   if (canonStage === "group") {
@@ -113,8 +118,8 @@ async function isRoundLocked(canonStage: string, round: number): Promise<boolean
   } else {
     q = q.eq("stage", canonStage);
   }
-  const { count } = await q;
-  return (count ?? 0) > 0;
+  const [{ data }, isTournament] = await Promise.all([q, isTournamentActive()]);
+  return (data ?? []).some((m) => matchHasBegun(m, isTournament));
 }
 
 // Fetch the match rows of a canonical (stage, round) — group spans group_% sub-stages.
@@ -573,11 +578,12 @@ export async function pinMatchTime(matchId: string, dtStr: string, timeZone?: st
 
   const { data: match } = await supabaseAdmin
     .from("matches")
-    .select("id, stage, round, discord_channel_id")
+    .select("id, stage, round, discord_channel_id, home_checked_in, away_checked_in")
     .eq("id", matchId)
     .maybeSingle();
   if (!match) return { ok: false, error: "Match not found." };
-  if (match.discord_channel_id) return { ok: false, error: "This match has already started." };
+  if (matchHasBegun(match, await isTournamentActive()))
+    return { ok: false, error: "This match has already started." };
 
   const canonStage = canonicalStage(match.stage as string);
   const { data: settings } = await supabaseAdmin
@@ -619,9 +625,10 @@ export async function clearMatchTime(matchId: string): Promise<{ ok: boolean; er
   await verifyAdmin();
 
   const { data: match } = await supabaseAdmin
-    .from("matches").select("id, discord_channel_id").eq("id", matchId).maybeSingle();
+    .from("matches").select("id, discord_channel_id, home_checked_in, away_checked_in").eq("id", matchId).maybeSingle();
   if (!match) return { ok: false, error: "Match not found." };
-  if (match.discord_channel_id) return { ok: false, error: "This match has already started." };
+  if (matchHasBegun(match, await isTournamentActive()))
+    return { ok: false, error: "This match has already started." };
 
   const { error } = await supabaseAdmin.from("matches").update({
     scheduled_at: null,

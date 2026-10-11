@@ -5,6 +5,7 @@ import { decrypt } from "@/app/lib/session";
 import { getAllPendingPlayers, isModeratorVerified, isDirector, isCEO, isCurrentlyKicked, type StaffRole } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { normalizeTeamSize } from "@/app/lib/team-size";
+import { matchHasBegun } from "@/app/lib/match-state";
 import { collegeIdSignedUrl } from "@/app/lib/college-ids";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { SEASON_ACCOLADES } from "@/app/lib/accolades";
@@ -213,7 +214,7 @@ export default async function AdminPage() {
     supabaseAdmin.from("tournaments").select("*").order("created_at", { ascending: false }),
     supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
     supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar, status, ban_reason, kick_reason, kicked_until, created_at, is_guest").order("username"),
-    supabaseAdmin.from("matches").select("stage, round, discord_channel_id, status"),
+    supabaseAdmin.from("matches").select("stage, round, discord_channel_id, home_checked_in, away_checked_in, status"),
     supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2"),
     getPublicSponsors(),
     getPublicDesigns(),
@@ -842,10 +843,10 @@ export default async function AdminPage() {
     schedulingVisible
       ? supabaseAdmin
           .from("matches")
-          .select("id, stage, round, match_number, home_team_id, away_team_id, scheduled_at, admin_scheduled, schedule_proposed_by_team_id, discord_channel_id")
+          .select("id, stage, round, match_number, home_team_id, away_team_id, scheduled_at, admin_scheduled, schedule_proposed_by_team_id, discord_channel_id, home_checked_in, away_checked_in")
           .neq("status", "completed")
           .order("stage").order("round").order("match_number")
-      : Promise.resolve({ data: [] as { id: string; stage: string; round: number; match_number: number; home_team_id: string | null; away_team_id: string | null; scheduled_at: string | null; admin_scheduled: boolean; schedule_proposed_by_team_id: string | null; discord_channel_id: string | null }[] }),
+      : Promise.resolve({ data: [] as { id: string; stage: string; round: number; match_number: number; home_team_id: string | null; away_team_id: string | null; scheduled_at: string | null; admin_scheduled: boolean; schedule_proposed_by_team_id: string | null; discord_channel_id: string | null; home_checked_in: boolean | null; away_checked_in: boolean | null }[] }),
   ]);
 
   const draftPoolEntries: DraftPoolEntry[] = ((draftPoolRows ?? []) as DraftPoolEntry[]).map((r) =>
@@ -853,7 +854,7 @@ export default async function AdminPage() {
   );
   const enteredCount = draftPoolEntries.length;
 
-  type MatchStageRow = { stage: string; round: number; discord_channel_id: string | null };
+  type MatchStageRow = { stage: string; round: number; discord_channel_id: string | null; home_checked_in: boolean | null; away_checked_in: boolean | null };
   const matchStageRows = (allMatchStages ?? []) as MatchStageRow[];
 
   // Build canonical (stage, round) sections from all matches
@@ -863,7 +864,9 @@ export default async function AdminPage() {
     const cs = canonicalStage(m.stage);
     if (!canonRoundSets.has(cs)) canonRoundSets.set(cs, new Set());
     canonRoundSets.get(cs)!.add(m.round);
-    if (m.discord_channel_id) lockedRoundKeys.add(`${cs}:${m.round}`);
+    // Not the mere existence of a channel: a tournament channel opens with the
+    // check-in window, so that would lock every round the moment its matchups seat.
+    if (matchHasBegun(m, !!activeTournamentId)) lockedRoundKeys.add(`${cs}:${m.round}`);
   }
 
   // Predict all format stages + their round counts so the scheduler shows every
@@ -928,7 +931,7 @@ export default async function AdminPage() {
       scheduledAt: m.scheduled_at,
       adminScheduled: !!m.admin_scheduled,
       hasProposal: !!m.schedule_proposed_by_team_id,
-      hasChannel: !!m.discord_channel_id,
+      hasBegun: matchHasBegun(m, !!activeTournamentId),
     });
   }
   for (const key of Object.keys(matchesByRound)) {

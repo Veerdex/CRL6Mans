@@ -14,7 +14,7 @@ export type RoundMatchInfo = {
   scheduledAt: string | null;
   adminScheduled: boolean;
   hasProposal: boolean;
-  hasChannel: boolean;
+  hasBegun: boolean;
 };
 
 // The admin's own IANA zone — times they enter are read in it. Resolved at call time
@@ -208,7 +208,7 @@ function MatchPinRow({
       <span className="text-xs font-medium text-zinc-400 w-28 shrink-0">{label}</span>
       <span className="text-xs text-zinc-500 w-44 shrink-0 truncate">{match.homeName} vs {match.awayName}</span>
 
-      {match.hasChannel ? (
+      {match.hasBegun ? (
         <span className="text-[11px] text-zinc-500">In progress — locked</span>
       ) : (
         <>

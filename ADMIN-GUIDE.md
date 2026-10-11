@@ -426,7 +426,13 @@ Podium page will never reflect it at all.
   an admin to approve afterward — a team can send it anyway or pick a
   different time instead.
 - **Tournament check-in.** For tournament matches, once both teams are
-  otherwise ready, a 10-minute check-in window opens before kickoff. The one
+  otherwise ready, a 10-minute check-in window opens before kickoff. The
+  match's Discord channel opens at the same moment the window does — not
+  after both teams have checked in — so the two teams have somewhere to talk
+  to each other while they're still getting ready, and the channel's opening
+  message tells them to go and check in. For a round you gave a future start
+  time, that's that time; otherwise it's the moment the matchup is decided.
+  The one
   exception is a double-elimination **bracket reset**, which skips check-in
   and opens its channel straight away — both teams are already in the grand
   final's channel when it seats, so a window there would expire unnoticed and
@@ -1177,9 +1183,13 @@ Moderators too, it's noted.
   A "Follow previous round" toggle chains a round's start to when the round
   before it ends, so dates don't have to be recalculated by hand as things
   shift. Rounds that use a shared window can be expanded to pin an exact
-  time for any individual match inside it, and once a match's Discord
-  channel actually exists, that match's row locks since it's already in
-  progress. A one-time "Start Round" button appears on the very first round
+  time for any individual match inside it, and once a match is actually
+  under way its row locks. In a tournament "under way" means both teams
+  have checked in — the Discord channel opens earlier than that, with the
+  check-in window, so its existence alone no longer locks anything and a
+  time can still be corrected right up to kickoff. In a standalone season,
+  which has no check-in, the channel existing is what locks the row.
+  A one-time "Start Round" button appears on the very first round
   of a standalone season — the round exists but stays paused until you press
   it, giving you a last look before it goes live.
 - **Tournaments** — both a creation form and a history list.

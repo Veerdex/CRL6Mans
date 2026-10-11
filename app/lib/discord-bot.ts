@@ -18,6 +18,7 @@ import {
 import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow, calculatePlayerRating } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
+import { matchHasBegun } from "./match-state";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "./team-size";
 import { APP_NAME } from "./constants";
 import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft-order";
@@ -691,10 +692,17 @@ export async function createMatchChannel(
   if (isTournament && matchInfo?.matchId) {
     const lobbyName = lobbyCode(`${matchInfo.matchId}:name`);
     const lobbyPw   = lobbyCode(`${matchInfo.matchId}:pw`);
+    // This channel now opens with the check-in window instead of after it, so the
+    // first thing in it has to be the thing that forfeits you if you skip it. The
+    // bracket reset has no check-in at all and must not be told it does.
+    const checkInLine = isBracketReset({ stage: matchInfo.stage, match_number: matchInfo.matchNumber ?? 1 })
+      ? ``
+      : `⚠️ **Check in on the website first** — under My Team. Both teams have 10 minutes from when check-in opens, or the match is forfeited.\n\n`;
     message =
       `## Welcome! ##\n\n` +
       `Match: ${homePing} 🏠 **Home**  vs  ${awayPing} ✈️ **Away**\n` +
       `Format: **Best of ${bestOf}**\n\n` +
+      checkInLine +
       `**Private Match Lobby** — ${awayPing} (Away) creates the lobby:\n` +
       `> Room Name: \`${lobbyName}\`\n` +
       `> Password: \`${lobbyPw}\`\n\n` +
@@ -2550,7 +2558,11 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
       if (m.checkin_deadline) continue;
       if (blockedByEarlierRound(m)) continue;
       if (isBracketReset(m)) continue;
-      await openCheckInForMatch(m.id, m.stage, m.round);
+      // Written back onto the in-memory row: the ready filter below reads this same
+      // array, which was fetched before this loop, so without it a match whose window
+      // opens right now would wait a whole pinger tick for its channel.
+      const deadline = await openCheckInForMatch(m.id, m.stage, m.round);
+      if (deadline) m.checkin_deadline = deadline;
     }
   }
 
@@ -2558,9 +2570,12 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
     if (m.status !== "scheduled" || m.discord_channel_id || !m.home_team_id || !m.away_team_id) return false;
     if (blockedByEarlierRound(m)) return false;
 
-    // Tournaments: channel opens only once BOTH teams check in — except the
-    // bracket reset, which opens straight away.
-    if (isTournamentMode) return isBracketReset(m) || (!!m.home_checked_in && !!m.away_checked_in);
+    // Tournaments: the channel opens with the check-in window, not once both teams
+    // have checked in — a team with nowhere to talk to its opponent can't arrange the
+    // series it is being asked to check in for. A round an admin gave a future time
+    // opens at that time, because that is when its window opens too. The bracket
+    // reset has no window and opens the instant it seats.
+    if (isTournamentMode) return checkInWindowOpen(m);
 
     const cs = (m.stage as string).startsWith("group_") ? "group" : (m.stage as string);
     if (round1ManualStartPending && (m.round as number) === 1 && cs === firstStage) return false;
@@ -2627,8 +2642,11 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
       adminScheduled: pinned,
     });
     if (!r.created && r.error) console.error("[openReadyMatchChannels]", r.error);
-    if (r.created && isTournament) {
-      // Notify both teams that their match is now ready to play.
+    if (r.created && isTournament && !m.checkin_deadline) {
+      // Only for a match with no check-in window — i.e. the bracket reset. Everything
+      // else was told about this match by openCheckInForMatch ("Check in now!" or
+      // "Match scheduled") in the loop above, and the channel now opens at the same
+      // moment, so a second push would land on top of the first one.
       const notifBase = { url: "/dashboard/my-team", tag: "match-ready", category: "tournament" as const };
       pushToTeam(m.home_team_id!, { ...notifBase, title: "Match Ready!", body: `Your match vs ${a} is ready. Head to My Team to get started.` }).catch(() => {});
       pushToTeam(m.away_team_id!, { ...notifBase, title: "Match Ready!", body: `Your match vs ${h} is ready. Head to My Team to get started.` }).catch(() => {});
@@ -2653,7 +2671,21 @@ const CHECKIN_WINDOW_MS = 10 * 60 * 1000;
 const isBracketReset = (m: { stage: string | null; match_number: number }): boolean =>
   m.stage === DE_GF && m.match_number === 2;
 
-async function isTournamentActive(): Promise<boolean> {
+// Whether a tournament match's check-in window has opened. This — not "both teams
+// checked in" — is what gates the channel: teams need somewhere to coordinate
+// before they check in, not after. Monotone once true, including past the deadline,
+// so a match the window already closed on keeps its channel.
+const checkInWindowOpen = (m: {
+  stage: string | null;
+  match_number: number;
+  checkin_deadline: string | null;
+}): boolean => {
+  if (isBracketReset(m)) return true;
+  if (!m.checkin_deadline) return false;
+  return Date.now() >= new Date(m.checkin_deadline).getTime() - CHECKIN_WINDOW_MS;
+};
+
+export async function isTournamentActive(): Promise<boolean> {
   const { data } = await supabaseAdmin.from("league_settings").select("active_tournament_id").maybeSingle();
   return !!(data?.active_tournament_id as string | null | undefined);
 }
@@ -2679,9 +2711,11 @@ async function roundPlayAt(stage: string, round: number): Promise<string | null>
 
 // Opens a 10-minute check-in window for a tournament match if one isn't open yet.
 // A round an admin gave a future time opens then; anything else opens now.
-async function openCheckInForMatch(matchId: string, stage: string, round: number): Promise<void> {
+// Returns the deadline it wrote, or null if it wrote none — the caller needs it to
+// decide whether the channel can open in this same pass.
+async function openCheckInForMatch(matchId: string, stage: string, round: number): Promise<string | null> {
   const { data: m } = await supabaseAdmin.from("matches").select("checkin_deadline, home_team_id, away_team_id").eq("id", matchId).maybeSingle();
-  if (!m || m.checkin_deadline) return;
+  if (!m || m.checkin_deadline) return null;
   let deadlineMs = Date.now() + CHECKIN_WINDOW_MS;
 
   // Every round, not just round 1 of a stage. Reading only round 1 made a scheduled
@@ -2701,11 +2735,12 @@ async function openCheckInForMatch(matchId: string, stage: string, round: number
   // the scheduled stage start — processExpiredCheckIns sends the second, at-the-window
   // nudge when that arrives.
   const immediate = deadlineMs - CHECKIN_WINDOW_MS <= Date.now();
+  const deadlineIso = new Date(deadlineMs).toISOString();
   await supabaseAdmin.from("matches")
-    .update({ checkin_deadline: new Date(deadlineMs).toISOString(), checkin_notified: immediate })
+    .update({ checkin_deadline: deadlineIso, checkin_notified: immediate })
     .eq("id", matchId);
 
-  if (!m.home_team_id || !m.away_team_id) return;
+  if (!m.home_team_id || !m.away_team_id) return deadlineIso;
 
   // A window opening in the future is announced NOW rather than only when it opens.
   // The at-the-window push depends on processExpiredCheckIns running inside a 10-minute
@@ -2718,15 +2753,17 @@ async function openCheckInForMatch(matchId: string, stage: string, round: number
     : { title: "Match scheduled", body: "Check-in opens when your match is due to start. Both teams have 10 minutes to check in or forfeit.", url: "/dashboard/my-team", tag: "checkin-soon", category: "tournament" as const };
   pushToTeam(m.home_team_id, payload).catch(() => {});
   pushToTeam(m.away_team_id, payload).catch(() => {});
+  return deadlineIso;
 }
 
-// Creates the match's Discord channel once both teams have checked in.
-export async function createChannelIfCheckedIn(matchId: string): Promise<void> {
+// Creates the match's Discord channel once its check-in window is open. Re-reads the
+// row so it sees a deadline a caller just wrote.
+export async function createChannelIfCheckInOpen(matchId: string): Promise<void> {
   const { data: m } = await supabaseAdmin.from("matches")
-    .select("id, home_team_id, away_team_id, home_checked_in, away_checked_in, discord_channel_id, stage, round, match_number, scheduled_at")
+    .select("id, home_team_id, away_team_id, discord_channel_id, stage, round, match_number, scheduled_at, checkin_deadline")
     .eq("id", matchId).maybeSingle();
   if (!m || m.discord_channel_id || !m.home_team_id || !m.away_team_id) return;
-  if (!m.home_checked_in || !m.away_checked_in) return;
+  if (!checkInWindowOpen(m)) return;
   const [{ data: hTeam }, { data: aTeam }] = await Promise.all([
     supabaseAdmin.from("teams").select("name").eq("id", m.home_team_id).single(),
     supabaseAdmin.from("teams").select("name").eq("id", m.away_team_id).single(),
@@ -2737,7 +2774,7 @@ export async function createChannelIfCheckedIn(matchId: string): Promise<void> {
     homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, matchId: m.id,
     scheduledAt: (m as { scheduled_at?: string | null }).scheduled_at ?? null,
   });
-  if (!r.created && r.error) console.error("[createChannelIfCheckedIn]", r.error);
+  if (!r.created && r.error) console.error("[createChannelIfCheckInOpen]", r.error);
 }
 
 // Notifies teams when a check-in window opens (covers round 1 opening at stage start),
@@ -2747,14 +2784,17 @@ export async function processExpiredCheckIns(): Promise<void> {
   if (!(await isTournamentActive())) return;
   const now = Date.now();
   const { data: matches } = await supabaseAdmin.from("matches")
-    .select("id, home_checked_in, away_checked_in, checkin_deadline, checkin_notified, discord_channel_id, status, home_team_id, away_team_id, stage, match_number")
+    .select("id, home_checked_in, away_checked_in, checkin_deadline, checkin_notified, status, home_team_id, away_team_id, stage, match_number")
     .eq("status", "scheduled")
     .not("checkin_deadline", "is", null)
     .not("home_team_id", "is", null)
     .not("away_team_id", "is", null);
   for (const m of matches ?? []) {
-    if (m.discord_channel_id) continue;
     if (isBracketReset(m)) continue;
+    // Deliberately not gated on discord_channel_id. The channel now opens with the
+    // check-in window rather than after it, so every match this sweep is meant to
+    // police has one — skipping those would disable no-show forfeits outright. The
+    // check below is the real guard and always was.
     if (m.home_checked_in && m.away_checked_in) continue;
 
     const deadline = new Date(m.checkin_deadline as string).getTime();
@@ -3459,13 +3499,14 @@ async function maybeCreateChannelForMatch(
     .maybeSingle();
   if (!m?.home_team_id || !m?.away_team_id) return;
 
-  // Tournaments gate the channel behind a check-in window instead of opening it now.
-  // The bracket reset is the path that actually seats this way — advanceBracketWinner
-  // calls straight here the moment a lower-bracket team forces it — and it is exempt,
-  // so it falls through and opens its channel now.
+  // Tournaments open a check-in window first, and the channel opens with it — which
+  // for a round with no future scheduled time is right now. The bracket reset is the
+  // path that actually seats this way — advanceBracketWinner calls straight here the
+  // moment a lower-bracket team forces it — and it is exempt from check-in, so it
+  // falls through and opens its channel below.
   if ((await isTournamentActive()) && !isBracketReset({ stage, match_number: matchNum })) {
     await openCheckInForMatch(m.id, stage, round);
-    await createChannelIfCheckedIn(m.id);
+    await createChannelIfCheckInOpen(m.id);
     return;
   }
 
@@ -3893,10 +3934,12 @@ export async function execDisqualifyTeam(teamId: string): Promise<{ ok: boolean;
     .update({ is_disqualified: true, disqualified_at: new Date().toISOString() })
     .eq("id", teamId);
 
+  const isTournament = await isTournamentActive();
+
   for (let guard = 0; guard < 200; guard++) {
     const { data: matches } = await supabaseAdmin
       .from("matches")
-      .select("id, stage, round, match_number, home_team_id, away_team_id, discord_channel_id")
+      .select("id, stage, round, match_number, home_team_id, away_team_id, discord_channel_id, home_checked_in, away_checked_in")
       .eq("status", "scheduled")
       .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
 
@@ -3907,7 +3950,12 @@ export async function execDisqualifyTeam(teamId: string): Promise<{ ok: boolean;
     const isHome = next.home_team_id === teamId;
     const opponentId = isHome ? next.away_team_id! : next.home_team_id!;
     const isGroupOrSwiss = stage.startsWith(GROUP_STAGE_PREFIX) || stage === "swiss";
-    const hasBegun = !!next.discord_channel_id;
+    // Not `!!next.discord_channel_id`: a tournament channel now opens with the
+    // check-in window, so every seated match has one and that would read every
+    // match as under way — turning every reinstatement silently back into a forfeit.
+    // The bracket reset is under way by definition: it continues a grand final that
+    // has already been played, so there is no earlier opponent to put back.
+    const hasBegun = isBracketReset(next) || matchHasBegun(next, isTournament);
 
     let reinstateId: string | null = null;
     if (!isGroupOrSwiss && !hasBegun) {
@@ -3917,6 +3965,19 @@ export async function execDisqualifyTeam(teamId: string): Promise<{ ok: boolean;
 
     if (reinstateId) {
       const slot = isHome ? "home_team_id" : "away_team_id";
+      // The channel standing here was opened for the DQ'd pairing: it carries that
+      // team's name and its role overwrite, so it has to go before the slot is
+      // refilled, or the DQ'd team keeps access and the reinstated team has none.
+      // Clearing the check-in fields alongside it is what lets a fresh window — and
+      // with it a fresh channel — open for the new pair.
+      if (next.discord_channel_id) await deleteChannel(next.discord_channel_id);
+      await supabaseAdmin.from("matches").update({
+        discord_channel_id: null,
+        checkin_deadline: null,
+        checkin_notified: false,
+        home_checked_in: false,
+        away_checked_in: false,
+      }).eq("id", next.id);
       await setMatchSlot(stage, next.round, next.match_number, slot, reinstateId);
       await maybeCreateChannelForMatch(stage, next.round, next.match_number);
       continue;

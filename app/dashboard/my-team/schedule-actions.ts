@@ -9,7 +9,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { roleMention, notifyMatchChannel } from "@/app/lib/match-notifications";
 import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { pushToAdmins } from "@/app/lib/push";
-import { createChannelIfCheckedIn, processExpiredCheckIns, openReadyMatchChannels } from "@/app/lib/discord-bot";
+import { createChannelIfCheckInOpen, processExpiredCheckIns, openReadyMatchChannels } from "@/app/lib/discord-bot";
 
 type AdminSchedule = { type: string; playAt: string; deadlineAt: string };
 
@@ -327,8 +327,8 @@ export async function checkInForMatch(
     .eq("id", matchId);
 
   // The match goes live the moment the second team is in. Stamped by its own
-  // conditional update rather than inside the bothNow branch below: bothNow reads
-  // the row from *before* this write, so two captains checking in at the same
+  // conditional update rather than a read of the other team's flag: such a read
+  // sees the row from *before* this write, so two captains checking in at the same
   // moment would each see the other as false and nobody would stamp. Here
   // whichever update lands second matches the filter and wins; a repeat is a
   // no-op against the is-null guard. Kept separate from the boolean write so a
@@ -341,9 +341,10 @@ export async function checkInForMatch(
     .eq("away_checked_in", true)
     .is("started_at", null);
 
-  // If this completes the pair, create the match channel immediately.
-  const bothNow = isHome ? !!m.away_checked_in : !!m.home_checked_in;
-  if (bothNow) await createChannelIfCheckedIn(matchId).catch(() => {});
+  // The channel normally already exists by now — it opens with the check-in window.
+  // This stays as the backstop for a window whose pinger tick hasn't landed yet, and
+  // no longer waits on the pair being complete: the window being open is enough.
+  await createChannelIfCheckInOpen(matchId).catch(() => {});
 
   revalidatePath("/dashboard/my-team");
   return { ok: true };
