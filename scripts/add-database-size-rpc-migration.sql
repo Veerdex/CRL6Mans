@@ -22,7 +22,12 @@ $$;
 -- public function at /rest/v1/rpc/, so the grant below was not what made this
 -- callable — it was already callable by the anon key, and being SECURITY
 -- DEFINER it ran as the owner, around RLS. Verified against production: it
--- answered an anon call with HTTP 200. Only storage-section.tsx calls it, via
--- supabaseAdmin, so the revoke costs the dashboard nothing.
+-- answered an anon call with HTTP 200.
+--
+-- What leaked was one number, the database size, so this was never urgent. It
+-- is revoked because the default is the problem: every SECURITY DEFINER
+-- function added here starts out callable by anon, and the next one might read
+-- rows. Only storage-section.tsx calls this, via supabaseAdmin, so the revoke
+-- costs the dashboard nothing.
 revoke execute on function public.get_database_size_bytes() from public, anon, authenticated;
 grant  execute on function public.get_database_size_bytes() to service_role;

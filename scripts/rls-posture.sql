@@ -21,14 +21,28 @@
 --      read `enable`.
 --   3. get_database_size_bytes was SECURITY DEFINER with EXECUTE still granted
 --      to PUBLIC, so it ran as its owner, around RLS, for anyone holding the
---      anon key. Verified: it answered an anon call with HTTP 200.
+--      anon key. Verified: it answered an anon call with HTTP 200. Low severity
+--      on its own — it returns one number, the database size, and can reach no
+--      row — but it is the whole class that matters: the next SECURITY DEFINER
+--      function someone adds is open by default too, and the next one may read
+--      rows. Part 3d is the standing check for that.
 --
 -- Safe to run against production, and safe to re-run. Everything in Part 2 is
--- already true there, so those statements are no-ops; Part 1 is the only line
--- that changes anything live. Run this last, after any other migration — it is
--- the backstop that makes a re-run of an older file harmless.
+-- already true there, so those statements are no-ops; Part 1 is the only thing
+-- in this file that changes anything live. Run this last, after any other
+-- migration — it is the backstop that makes a re-run of an older file harmless.
 --
--- Verify with: node scripts/check-anon-exposure.mjs
+-- Part 2 uses `alter table if exists` because four of these tables (wagers,
+-- parlays, parlay_legs, round_schedules) were created by hand and exist in no
+-- script here. Without `if exists` this file would fail on a fresh database —
+-- and since the editor runs it as one transaction, that failure would roll back
+-- Part 1 as well, which is the only part that does anything on production.
+--
+-- Run Parts 3a–3d one statement at a time. The SQL editor shows only the last
+-- result set when several statements run together, so running the file whole
+-- would hide 3c and 3a behind 3d's empty result.
+--
+-- Then verify from outside with: node scripts/check-anon-exposure.mjs
 -- ─────────────────────────────────────────────
 
 -- ─────────────────────────────────────────────
@@ -51,54 +65,54 @@ grant  execute on function public.get_database_size_bytes() to service_role;
 -- separate application that does read them with the anon key, through 27
 -- hand-made `using (true)` SELECT policies. Not ours to change.
 -- ─────────────────────────────────────────────
-alter table accounts                          enable row level security;
-alter table analytics_events                  enable row level security;
-alter table clip_likes                        enable row level security;
-alter table clips                             enable row level security;
-alter table crl_coin_transactions             enable row level security;
-alter table designs                           enable row level security;
-alter table event_accolade_prizes             enable row level security;
-alter table game_scores                       enable row level security;
-alter table league_settings                   enable row level security;
-alter table match_discord_categories          enable row level security;
-alter table match_identity_snapshots          enable row level security;
-alter table matches                           enable row level security;
-alter table notifications                     enable row level security;
-alter table parlay_legs                       enable row level security;
-alter table parlays                           enable row level security;
-alter table patreon_tier_benefits             enable row level security;
-alter table patreon_tier_prices               enable row level security;
-alter table patreon_tier_roles                enable row level security;
-alter table pending_players                   enable row level security;
-alter table player_career_stats               enable row level security;
-alter table player_edit_requests              enable row level security;
-alter table player_event_results              enable row level security;
-alter table player_game_stats                 enable row level security;
-alter table player_platform_account_events    enable row level security;
-alter table player_platform_accounts          enable row level security;
-alter table players                           enable row level security;
-alter table push_subscriptions                enable row level security;
-alter table replay_identity_certifications    enable row level security;
-alter table replay_identity_discrepancies     enable row level security;
-alter table round_schedules                   enable row level security;
-alter table season_accolades                  enable row level security;
-alter table seasons                           enable row level security;
-alter table seeded_player_stats               enable row level security;
-alter table sponsor_members                   enable row level security;
-alter table sponsors                          enable row level security;
-alter table staff_contributions               enable row level security;
-alter table staff_roles                       enable row level security;
-alter table sub_requests                      enable row level security;
-alter table tab_visits                        enable row level security;
-alter table team_signup_members               enable row level security;
-alter table team_signups                      enable row level security;
-alter table teams                             enable row level security;
-alter table themes                            enable row level security;
-alter table tournament_entries                enable row level security;
-alter table tournaments                       enable row level security;
-alter table wager_balance_adjustments         enable row level security;
-alter table wager_settlement_failures         enable row level security;
-alter table wagers                            enable row level security;
+alter table if exists accounts enable row level security;
+alter table if exists analytics_events enable row level security;
+alter table if exists clip_likes enable row level security;
+alter table if exists clips enable row level security;
+alter table if exists crl_coin_transactions enable row level security;
+alter table if exists designs enable row level security;
+alter table if exists event_accolade_prizes enable row level security;
+alter table if exists game_scores enable row level security;
+alter table if exists league_settings enable row level security;
+alter table if exists match_discord_categories enable row level security;
+alter table if exists match_identity_snapshots enable row level security;
+alter table if exists matches enable row level security;
+alter table if exists notifications enable row level security;
+alter table if exists parlay_legs enable row level security;
+alter table if exists parlays enable row level security;
+alter table if exists patreon_tier_benefits enable row level security;
+alter table if exists patreon_tier_prices enable row level security;
+alter table if exists patreon_tier_roles enable row level security;
+alter table if exists pending_players enable row level security;
+alter table if exists player_career_stats enable row level security;
+alter table if exists player_edit_requests enable row level security;
+alter table if exists player_event_results enable row level security;
+alter table if exists player_game_stats enable row level security;
+alter table if exists player_platform_account_events enable row level security;
+alter table if exists player_platform_accounts enable row level security;
+alter table if exists players enable row level security;
+alter table if exists push_subscriptions enable row level security;
+alter table if exists replay_identity_certifications enable row level security;
+alter table if exists replay_identity_discrepancies enable row level security;
+alter table if exists round_schedules enable row level security;
+alter table if exists season_accolades enable row level security;
+alter table if exists seasons enable row level security;
+alter table if exists seeded_player_stats enable row level security;
+alter table if exists sponsor_members enable row level security;
+alter table if exists sponsors enable row level security;
+alter table if exists staff_contributions enable row level security;
+alter table if exists staff_roles enable row level security;
+alter table if exists sub_requests enable row level security;
+alter table if exists tab_visits enable row level security;
+alter table if exists team_signup_members enable row level security;
+alter table if exists team_signups enable row level security;
+alter table if exists teams enable row level security;
+alter table if exists themes enable row level security;
+alter table if exists tournament_entries enable row level security;
+alter table if exists tournaments enable row level security;
+alter table if exists wager_balance_adjustments enable row level security;
+alter table if exists wager_settlement_failures enable row level security;
+alter table if exists wagers enable row level security;
 
 -- ─────────────────────────────────────────────
 -- PART 3 — the audit. Read-only; run it after Parts 1 and 2.
@@ -154,24 +168,33 @@ where pronamespace = 'public'::regnamespace
 -- rejected and banned rows are filtered out, so ban_reason and kick_reason are
 -- not reachable through it.
 --
--- Today that key reaches nobody. app/lib/supabase.ts exports an anon client and
--- nothing imports it — no "use client" file, no .channel() subscription — so
--- Next.js never inlines NEXT_PUBLIC_SUPABASE_ANON_KEY into a browser bundle.
--- The exposure is latent, not live. It goes live the moment any client component
--- imports that client, which is a realistic step if the draft page ever moves to
--- Supabase realtime.
+-- The exposure is latent rather than live, and this was checked in both
+-- applications that share this Supabase project — the anon key belongs to the
+-- project, not to one app, so checking only this one would have proved nothing:
 --
--- Left in place because the question it turns on is not answerable from this
--- repo: does anything OUTSIDE it read `players` with the anon key? The queue bot
--- is the obvious candidate — it is a separate application against the same
--- database, and it is the likeliest reason this policy was added by hand. It has
--- its own crl6mansqueuebot_players table, which argues it does not need this
--- one, but that is inference.
+--   CRL6Mans           app/lib/supabase.ts exports an anon client and nothing
+--                      imports it. No "use client" file, no .channel()
+--                      subscription.
+--   CRL6MansQueueBot   web/lib/supabase/{server,admin}.ts both begin with
+--                      `import "server-only"`. The two client components that
+--                      reach into lib/supabase take `import type` only, which
+--                      erases at compile time.
 --
--- If nothing external reads it, drop it — the website does not use it:
+-- Neither project's client bundle contains the key, so Next.js is not inlining
+-- NEXT_PUBLIC_SUPABASE_ANON_KEY anywhere a browser can see it. It goes live the
+-- moment any client component imports an anon client — a realistic step if the
+-- draft page ever moves to Supabase realtime.
+--
+-- The queue bot also never reads this table; it has its own
+-- crl6mansqueuebot_players. So nothing known reads `players` with the anon key,
+-- and dropping the policy should be safe:
 --
 --   drop policy "Public read approved players" on players;
 --
--- Reversible, and the way to find out is to drop it and watch the queue bot. Do
--- that outside a queue window, not during a live draft.
+-- Not dropped here because this file is meant to be a no-op on production apart
+-- from Part 1, and because "nothing known" is not "nothing" — the 27
+-- `using (true)` policies on the crl6mansqueuebot_* tables were made by hand by
+-- someone, for some client, and that intent is not recorded anywhere in either
+-- repo. Reversible either way. Do it outside a queue window, not during a live
+-- draft, and watch the queue bot afterwards.
 -- ─────────────────────────────────────────────
