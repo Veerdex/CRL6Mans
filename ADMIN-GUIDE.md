@@ -426,7 +426,11 @@ Podium page will never reflect it at all.
   an admin to approve afterward — a team can send it anyway or pick a
   different time instead.
 - **Tournament check-in.** For tournament matches, once both teams are
-  otherwise ready, a 10-minute check-in window opens before kickoff. Each
+  otherwise ready, a 10-minute check-in window opens before kickoff. The one
+  exception is a double-elimination **bracket reset**, which skips check-in
+  and opens its channel straight away — both teams are already in the grand
+  final's channel when it seats, so a window there would expire unnoticed and
+  disqualify them both. Each
   team checks in independently ("Check in to confirm you're ready to play"),
   with a live countdown and a clear warning that failing to check in within
   the window results in a disqualification for that match; if both sides

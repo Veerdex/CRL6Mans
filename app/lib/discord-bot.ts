@@ -544,7 +544,7 @@ export async function createMatchChannel(
   awayTeamName: string,
   weekNum: number,
   ctx?: MatchChannelContext,
-  matchInfo?: { round: number; stage: string; homeTeamId?: string; awayTeamId?: string; matchId?: string; scheduledAt?: string | null; adminScheduled?: boolean },
+  matchInfo?: { round: number; stage: string; matchNumber?: number; homeTeamId?: string; awayTeamId?: string; matchId?: string; scheduledAt?: string | null; adminScheduled?: boolean },
 ): Promise<ChannelResult> {
   let resolvedCtx: MatchChannelContext;
 
@@ -599,8 +599,16 @@ export async function createMatchChannel(
     categoryId = await getOrCreateStageCategory(label, matchInfo.stage, categoryRound, bucket, categoryCache, categoryAnchorId, existingChannels);
   }
 
+  // The bracket reset is the same two teams in the same stage and round as the grand
+  // final, so it would land on an identical name — and it seats while the grand
+  // final's channel is still open (execReportMatchResult deletes that one further
+  // down). Without the suffix the dedupe check below reads the reset as already
+  // handled and silently opens nothing.
+  const resetSuffix = matchInfo && isBracketReset({ stage: matchInfo.stage, match_number: matchInfo.matchNumber ?? 1 })
+    ? "-reset"
+    : "";
   const channelName = `${homeTeamName}-vs-${awayTeamName}`
-    .toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 100);
+    .toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 100 - resetSuffix.length) + resetSuffix;
 
   if (existingChannels.some(c => c.name === channelName && (categoryId ? c.parent_id === categoryId : true))) {
     return { created: false, skipped: true };
@@ -2541,6 +2549,7 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
       if (m.status !== "scheduled" || m.discord_channel_id || !m.home_team_id || !m.away_team_id) continue;
       if (m.checkin_deadline) continue;
       if (blockedByEarlierRound(m)) continue;
+      if (isBracketReset(m)) continue;
       await openCheckInForMatch(m.id, m.stage, m.round);
     }
   }
@@ -2549,8 +2558,9 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
     if (m.status !== "scheduled" || m.discord_channel_id || !m.home_team_id || !m.away_team_id) return false;
     if (blockedByEarlierRound(m)) return false;
 
-    // Tournaments: channel opens only once BOTH teams check in.
-    if (isTournamentMode) return !!m.home_checked_in && !!m.away_checked_in;
+    // Tournaments: channel opens only once BOTH teams check in — except the
+    // bracket reset, which opens straight away.
+    if (isTournamentMode) return isBracketReset(m) || (!!m.home_checked_in && !!m.away_checked_in);
 
     const cs = (m.stage as string).startsWith("group_") ? "group" : (m.stage as string);
     if (round1ManualStartPending && (m.round as number) === 1 && cs === firstStage) return false;
@@ -2610,7 +2620,7 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
     const pinned = !!(m as { admin_scheduled?: boolean }).admin_scheduled;
     const matchScheduledAt = (m as { scheduled_at?: string | null }).scheduled_at ?? null;
     const r = await createMatchChannel(h, a, m.round, ctx, {
-      round: m.round, stage: m.stage,
+      round: m.round, stage: m.stage, matchNumber: m.match_number,
       homeTeamId: m.home_team_id!, awayTeamId: m.away_team_id!, matchId: m.id,
       // A pinned match uses its own fixed time; otherwise the round window start.
       scheduledAt: pinned && matchScheduledAt ? matchScheduledAt : (schedEntry?.play_at ?? matchScheduledAt),
@@ -2630,6 +2640,18 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
 // ─── Tournament check-in ────────────────────────────────────────────────────────
 
 const CHECKIN_WINDOW_MS = 10 * 60 * 1000;
+
+// The DE bracket reset is the same series continuing — both teams are standing in
+// the grand final's channel at the moment it seats. A fresh check-in window there
+// opens and expires against two teams who have no reason to go looking for one,
+// which is how a reset got double-forfeited. It skips check-in entirely: no window
+// is opened for it, its channel opens the instant it seats, and the sweep below
+// leaves alone any reset already carrying a deadline from before this rule.
+//
+// DE_GF match 2 is the only match_number 2 any format builds (app/lib/bracket.ts),
+// so the pair identifies the reset on its own.
+const isBracketReset = (m: { stage: string | null; match_number: number }): boolean =>
+  m.stage === DE_GF && m.match_number === 2;
 
 async function isTournamentActive(): Promise<boolean> {
   const { data } = await supabaseAdmin.from("league_settings").select("active_tournament_id").maybeSingle();
@@ -2701,7 +2723,7 @@ async function openCheckInForMatch(matchId: string, stage: string, round: number
 // Creates the match's Discord channel once both teams have checked in.
 export async function createChannelIfCheckedIn(matchId: string): Promise<void> {
   const { data: m } = await supabaseAdmin.from("matches")
-    .select("id, home_team_id, away_team_id, home_checked_in, away_checked_in, discord_channel_id, stage, round, scheduled_at")
+    .select("id, home_team_id, away_team_id, home_checked_in, away_checked_in, discord_channel_id, stage, round, match_number, scheduled_at")
     .eq("id", matchId).maybeSingle();
   if (!m || m.discord_channel_id || !m.home_team_id || !m.away_team_id) return;
   if (!m.home_checked_in || !m.away_checked_in) return;
@@ -2711,7 +2733,7 @@ export async function createChannelIfCheckedIn(matchId: string): Promise<void> {
   ]);
   if (!hTeam || !aTeam) return;
   const r = await createMatchChannel(hTeam.name, aTeam.name, m.round, undefined, {
-    round: m.round, stage: m.stage,
+    round: m.round, stage: m.stage, matchNumber: m.match_number,
     homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, matchId: m.id,
     scheduledAt: (m as { scheduled_at?: string | null }).scheduled_at ?? null,
   });
@@ -2725,13 +2747,14 @@ export async function processExpiredCheckIns(): Promise<void> {
   if (!(await isTournamentActive())) return;
   const now = Date.now();
   const { data: matches } = await supabaseAdmin.from("matches")
-    .select("id, home_checked_in, away_checked_in, checkin_deadline, checkin_notified, discord_channel_id, status, home_team_id, away_team_id")
+    .select("id, home_checked_in, away_checked_in, checkin_deadline, checkin_notified, discord_channel_id, status, home_team_id, away_team_id, stage, match_number")
     .eq("status", "scheduled")
     .not("checkin_deadline", "is", null)
     .not("home_team_id", "is", null)
     .not("away_team_id", "is", null);
   for (const m of matches ?? []) {
     if (m.discord_channel_id) continue;
+    if (isBracketReset(m)) continue;
     if (m.home_checked_in && m.away_checked_in) continue;
 
     const deadline = new Date(m.checkin_deadline as string).getTime();
@@ -3437,7 +3460,10 @@ async function maybeCreateChannelForMatch(
   if (!m?.home_team_id || !m?.away_team_id) return;
 
   // Tournaments gate the channel behind a check-in window instead of opening it now.
-  if (await isTournamentActive()) {
+  // The bracket reset is the path that actually seats this way — advanceBracketWinner
+  // calls straight here the moment a lower-bracket team forces it — and it is exempt,
+  // so it falls through and opens its channel now.
+  if ((await isTournamentActive()) && !isBracketReset({ stage, match_number: matchNum })) {
     await openCheckInForMatch(m.id, stage, round);
     await createChannelIfCheckedIn(m.id);
     return;
@@ -3449,7 +3475,7 @@ async function maybeCreateChannelForMatch(
   ]);
   if (!hTeam || !aTeam) return;
   const r = await createMatchChannel(hTeam.name, aTeam.name, round, undefined, {
-    round, stage,
+    round, stage, matchNumber: matchNum,
     homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, matchId: m.id,
     scheduledAt: (m as { scheduled_at?: string | null }).scheduled_at ?? null,
   });
