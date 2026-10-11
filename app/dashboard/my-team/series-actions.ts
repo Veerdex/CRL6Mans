@@ -5,7 +5,9 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { roleMention, notifyMatchChannel } from "@/app/lib/match-notifications";
+import { notifyMatchChannel } from "@/app/lib/match-notifications";
+import { getGuildRoles } from "@/app/lib/discord-api";
+import { teamPing, seriesSubmittedPost, seriesDisputedPost } from "@/app/lib/match-embeds";
 import { pushToAdmins } from "@/app/lib/push";
 import { getBestOfForMatch, validateSeriesScore, processExpiredScoreConfirmations, finalizeAcceptedSeries } from "@/app/lib/discord-bot";
 import { parseReplay } from "@/app/lib/replay-parser";
@@ -156,11 +158,12 @@ export async function submitSeriesResult(
       supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
     ]);
     if (myTeam?.name && otherTeam?.name) {
-      const mention = await roleMention(otherTeam.name);
-      await notifyMatchChannel(
-        matchId,
-        `${mention} 📊 **${myTeam.name}** submitted the series result: **${homeWins}–${awayWins}**.\nHead to the website to confirm or dispute.`,
-      );
+      await notifyMatchChannel(matchId, seriesSubmittedPost({
+        teamName: myTeam.name,
+        oppPing: teamPing(otherTeam.name, await getGuildRoles()),
+        homeWins,
+        awayWins,
+      }));
     }
   } catch { /* best-effort */ }
 
@@ -556,11 +559,10 @@ export async function cancelSeriesSubmission(
       supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
     ]);
     if (myTeam?.name && otherTeam?.name) {
-      const mention = await roleMention(otherTeam.name);
-      await notifyMatchChannel(
-        matchId,
-        `${mention} ↩️ **${myTeam.name}** disputed the submitted result. Please resubmit when ready.`,
-      );
+      await notifyMatchChannel(matchId, seriesDisputedPost({
+        teamName: myTeam.name,
+        oppPing: teamPing(otherTeam.name, await getGuildRoles()),
+      }));
     }
   } catch { /* best-effort */ }
 

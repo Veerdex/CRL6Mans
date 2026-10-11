@@ -6,8 +6,18 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { sendChannelMessage, getGuildRoles, type DiscordEmbed } from "@/app/lib/discord-api";
-import { roleMention } from "@/app/lib/match-notifications";
+import { sendChannelMessage, getGuildRoles } from "@/app/lib/discord-api";
+import {
+  teamPing,
+  rolePing,
+  subRequestedPost,
+  subAcceptedPost,
+  subRejectedPost,
+  subEscalatedPost,
+  subAdminApprovedPost,
+  subCancelledPost,
+  type ChannelPost,
+} from "@/app/lib/match-embeds";
 import { pushToAdmins, pushToTeam } from "@/app/lib/push";
 import { playerRatingFromRow } from "@/app/lib/rating";
 
@@ -16,26 +26,12 @@ async function getSession() {
   return decrypt(cookieStore.get("session")?.value);
 }
 
-type RankRow = {
-  username: string;
-  peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
-  peak_1v1: string | null; current_1v1: string | null;
-};
-
 const peakMmr = playerRatingFromRow;
 
-function rankField(label: string, p: RankRow): { name: string; value: string; inline: true } {
-  const rv = Math.round(peakMmr(p));
-  return {
-    name: `${label}: ${p.username}`,
-    value:
-      `• All Time Peak 2v2: ${Number(p.peak_2v2).toLocaleString()}\n` +
-      `• Season Peak 2v2: ${Number(p.current_2v2).toLocaleString()}\n` +
-      `• All Time Peak 3v3: ${Number(p.peak_3v3).toLocaleString()}\n` +
-      `• Season Peak 3v3: ${Number(p.current_3v3).toLocaleString()}\n` +
-      `• Rank Value: ${rv.toLocaleString()}`,
-    inline: true,
-  };
+// A sub notification always goes to a match channel the caller already resolved,
+// so these post through sendChannelMessage rather than notifyMatchChannel.
+async function postToChannel(channelId: string, post: ChannelPost): Promise<void> {
+  await sendChannelMessage(channelId, post.content, post.embeds, post.allowed_mentions);
 }
 
 // Match row with both teams + channel, used for routing/notifications.
@@ -200,18 +196,13 @@ export async function submitSubRequest(
         teamName(opposingTeamId),
         getGuildRoles(),
       ]);
-      const oppMention = oppName ? await roleMention(oppName, roles) : "";
-      const embed: DiscordEmbed = {
-        color: 0xe88a24,
-        fields: [rankField("Out", playerOut), rankField("Sub", sub)],
-        ...(reason ? { description: `**Reason:** ${reason}` } : {}),
-        footer: { text: "Head to the website to accept or reject this substitution." },
-      };
-      await sendChannelMessage(
-        match.discord_channel_id,
-        `${oppMention} ⚠️ **${myName ?? "A team"}** requested a substitution.`,
-        [embed],
-      );
+      await postToChannel(match.discord_channel_id, subRequestedPost({
+        teamName: myName ?? "A team",
+        oppPing: oppName ? teamPing(oppName, roles) : null,
+        playerOut,
+        sub,
+        reason,
+      }));
     }
   } catch { /* best-effort */ }
 
@@ -275,10 +266,10 @@ export async function acceptSubRequest(requestId: string): Promise<{ ok?: boolea
     if (match?.discord_channel_id) {
       const myName = await teamName(request.team_id);
       const { data: pOut } = await supabaseAdmin.from("players").select("username").eq("id", request.player_out_id).single();
-      await sendChannelMessage(
-        match.discord_channel_id,
-        `✅ The substitution for **${myName ?? "a team"}** (in place of **${pOut?.username ?? "a player"}**) was **accepted** by the opposing team.`,
-      );
+      await postToChannel(match.discord_channel_id, subAcceptedPost({
+        teamName: myName ?? "a team",
+        playerOut: pOut?.username ?? "a player",
+      }));
     }
   } catch { /* best-effort */ }
 
@@ -310,10 +301,7 @@ export async function rejectSubRequestByOpponent(requestId: string): Promise<{ o
   try {
     if (match?.discord_channel_id) {
       const myName = await teamName(request.team_id);
-      await sendChannelMessage(
-        match.discord_channel_id,
-        `❌ The opposing team **rejected** the substitution requested by **${myName ?? "a team"}**.`,
-      );
+      await postToChannel(match.discord_channel_id, subRejectedPost(myName ?? "a team"));
     }
   } catch { /* best-effort */ }
 
@@ -368,13 +356,13 @@ export async function escalateSubRequest(requestId: string): Promise<{ ok?: bool
       const { data: ls } = await supabaseAdmin
         .from("league_settings").select("moderator_role_id").single();
       const modRoleId = ls?.moderator_role_id as string | null;
-      const modMention = modRoleId
-        ? `<@&${modRoleId}>`
-        : await roleMention("moderator", await getGuildRoles());
-      await sendChannelMessage(
-        match.discord_channel_id,
-        `${modMention} ⚖️ **${myName ?? "A team"}** has reported their rejected substitution for staff review.`,
-      );
+      // The by-name fallback is kept, unlike the team pings: "moderator" is a league-
+      // owned role name, not a player-supplied one, so there's no @everyone hole here.
+      const modPing = rolePing(modRoleId) ?? teamPing("moderator", await getGuildRoles());
+      await postToChannel(match.discord_channel_id, subEscalatedPost({
+        teamName: myName ?? "A team",
+        modPing,
+      }));
     }
   } catch { /* best-effort */ }
 
@@ -409,10 +397,10 @@ export async function adminApproveSubRequest(
     if (match?.discord_channel_id) {
       const myName = await teamName(req.team_id);
       const { data: pOut } = await supabaseAdmin.from("players").select("username").eq("id", req.player_out_id).single();
-      await sendChannelMessage(
-        match.discord_channel_id,
-        `✅ Staff **approved** the substitution for **${myName ?? "a team"}** in place of **${pOut?.username ?? "a player"}**.`,
-      );
+      await postToChannel(match.discord_channel_id, subAdminApprovedPost({
+        teamName: myName ?? "a team",
+        playerOut: pOut?.username ?? "a player",
+      }));
     }
   } catch { /* best-effort */ }
 
@@ -468,11 +456,11 @@ export async function cancelSubRequest(requestId: string): Promise<{ ok?: boolea
         ]);
         const opposingId = match.home_team_id === request.team_id ? match.away_team_id : match.home_team_id;
         const oppName = await teamName(opposingId);
-        const mention = oppName ? await roleMention(oppName, roles) : "";
-        await sendChannelMessage(
-          match.discord_channel_id,
-          `${mention} ↩️ The substitution for **${myName ?? "a team"}** has been cancelled — **${pOut?.username ?? "the original player"}** will play as originally scheduled.`,
-        );
+        await postToChannel(match.discord_channel_id, subCancelledPost({
+          teamName: myName ?? "a team",
+          playerOut: pOut?.username ?? "the original player",
+          oppPing: oppName ? teamPing(oppName, roles) : null,
+        }));
       }
     } catch { /* best-effort */ }
   }

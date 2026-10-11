@@ -8,6 +8,7 @@ import { isDirectorVerified, isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { finalizeMatchAndCloseChannel } from "@/app/lib/discord-bot";
 import { notifyMatchChannel } from "@/app/lib/match-notifications";
+import { replayRejectedPost } from "@/app/lib/match-embeds";
 import { pushToTeam } from "@/app/lib/push";
 import { recordStaffAction } from "@/app/lib/staff-contributions";
 import type { ReplayAnalysisMode } from "@/app/lib/replay-analysis-mode";
@@ -164,10 +165,7 @@ export async function rejectReplayReview(
     }).catch(() => {});
   }
 
-  notifyMatchChannel(
-    matchId,
-    `❌ An admin rejected this series' replay submission.\n**Reason:** ${trimmed}\nPlease upload the correct replays and resubmit.`,
-  ).catch(() => {});
+  notifyMatchChannel(matchId, replayRejectedPost(trimmed)).catch(() => {});
 
   await recordStaffAction("replay_review_rejected", matchId);
 

@@ -4,7 +4,7 @@ import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfaEnabled, type StaffRole } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
-import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView, type AllowedMentions } from "./discord-api";
+import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -25,18 +25,19 @@ import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft
 import { draftLabel, draftStartEmbed, onTheClockEmbed, pickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "./solo-team";
 import { notifyMatchChannel } from "./match-notifications";
+import {
+  teamPing,
+  tournamentIntroPost,
+  seasonIntroPost,
+  checkInPost,
+  matchResultPost,
+  replayReviewPost,
+  type ChannelPost,
+} from "./match-embeds";
 import { announceClip, clipsChannelId, createClip } from "./clip-submit";
 import { kickAccount, banAccount, findAccountByDiscordId, DEFAULT_KICK_TIMEOUT_MS, type RevokedPatron } from "./moderation";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
-
-async function roleMentionByName(
-  teamName: string,
-  roles: Array<{ id: string; name: string }>,
-): Promise<string> {
-  const role = roles.find((r) => r.name === teamName);
-  return role ? `<@&${role.id}>` : `**${teamName}**`;
-}
 
 type Option = { name: string; value: string | number | boolean; focused?: boolean };
 // Discord nests a subcommand's own options one level deeper, under the subcommand entry
@@ -650,8 +651,10 @@ export async function createMatchChannel(
   if (deadlineTs < playTs) deadlineTs += 7 * 24 * 3600;
 
   // Home/Away match the match record (home_team_id = the seeded/scheduled home team).
-  const homePing = homeRole ? `<@&${homeRole.id}>` : `**${homeTeamName}**`;
-  const awayPing = awayRole ? `<@&${awayRole.id}>` : `**${awayTeamName}**`;
+  // Null when the team has no role: the names are in the embed, so there is nothing
+  // for the content to fall back to.
+  const homePing = homeRole ? { text: `<@&${homeRole.id}>`, id: homeRole.id } : null;
+  const awayPing = awayRole ? { text: `<@&${awayRole.id}>`, id: awayRole.id } : null;
   const rulesRef = rulesChannelId ? `<#${rulesChannelId}>` : "the rulebook";
 
   let bestOf = 3;
@@ -688,25 +691,25 @@ export async function createMatchChannel(
     }
   }
 
-  let message: string;
+  const introTeams = {
+    homeName: homeTeamName,
+    awayName: awayTeamName,
+    homePing,
+    awayPing,
+    bestOf,
+  };
+
+  let post: ChannelPost;
   if (isTournament && matchInfo?.matchId) {
-    const lobbyName = lobbyCode(`${matchInfo.matchId}:name`);
-    const lobbyPw   = lobbyCode(`${matchInfo.matchId}:pw`);
-    // This channel now opens with the check-in window instead of after it, so the
-    // first thing in it has to be the thing that forfeits you if you skip it. The
-    // bracket reset has no check-in at all and must not be told it does.
-    const checkInLine = isBracketReset({ stage: matchInfo.stage, match_number: matchInfo.matchNumber ?? 1 })
-      ? ``
-      : `⚠️ **Check in first** — run \`/checkin\` right here, or use the button on the website under My Team. Both teams have 10 minutes from when check-in opens, or the match is forfeited.\n\n`;
-    message =
-      `## Welcome! ##\n\n` +
-      `Match: ${homePing} 🏠 **Home**  vs  ${awayPing} ✈️ **Away**\n` +
-      `Format: **Best of ${bestOf}**\n\n` +
-      checkInLine +
-      `**Private Match Lobby** — ${awayPing} (Away) creates the lobby:\n` +
-      `> Room Name: \`${lobbyName}\`\n` +
-      `> Password: \`${lobbyPw}\`\n\n` +
-      `- **To report a match**: Head to the website and submit your result under My Team.`;
+    post = tournamentIntroPost(
+      introTeams,
+      {
+        name: lobbyCode(`${matchInfo.matchId}:name`),
+        password: lobbyCode(`${matchInfo.matchId}:pw`),
+      },
+      // The bracket reset has no check-in at all and must not be told it does.
+      !isBracketReset({ stage: matchInfo.stage, match_number: matchInfo.matchNumber ?? 1 }),
+    );
   } else {
     let scheduleLines: string;
     let coordinateLine: string;
@@ -730,18 +733,15 @@ export async function createMatchChannel(
       coordinateLine = `- Coordinate a time that works for both teams before the match deadline.`;
     }
 
-    message =
-      `## Welcome to Round ${weekNum}! ##\n\n` +
-      `Match: ${homePing} 🏠 **Home**  vs  ${awayPing} ✈️ **Away**\n` +
-      `${scheduleLines}\n` +
-      `Format: **Best of ${bestOf}**\n\n` +
-      `${coordinateLine}\n` +
-      `- If a sub is needed, please follow what is listed in the rulebook located in ${rulesRef}. ` +
-      `If these procedures are not followed, a match played with the illegal sub will be forfeited.\n` +
-      `- **To report a match**: Head to the website and submit your result under My Team.`;
+    post = seasonIntroPost(
+      introTeams,
+      weekNum,
+      { lines: scheduleLines, coordinate: coordinateLine },
+      rulesRef,
+    );
   }
 
-  await sendChannelMessage(result.id, message);
+  await sendChannelMessage(result.id, post.content, post.embeds, post.allowed_mentions);
   return { created: true };
 }
 
@@ -2750,14 +2750,6 @@ export async function checkInTeam(matchId: string, teamId: string): Promise<Chec
   return { ...base, bothIn: !!(after.home_checked_in && after.away_checked_in) };
 }
 
-// A mention plus its role ID, so the caller can name the role in allowed_mentions
-// instead of letting Discord parse the content. Team names are player-supplied and
-// one matching the @everyone role would otherwise ping the server through the bot.
-function teamTag(name: string, roles: Array<{ id: string; name: string }>) {
-  const id = roles.find((r) => r.name === name)?.id;
-  return { text: id ? `<@&${id}>` : `**${name}**`, id };
-}
-
 // /checkin — the same check-in as the My Team button, from the match's own channel.
 // Teams now sit in that channel while check-in is still outstanding (it opens with
 // the window), so making them leave for the website was the one step nobody did.
@@ -2823,23 +2815,22 @@ async function checkInCmd(userId: string, channelId: string) {
 
   // Only the success announcement is public; every refusal above stays private so a
   // shared match channel doesn't fill with one team's mistakes.
-  const myTag = teamTag(myName, roles);
-  const oppTag = teamTag(oppName, roles);
-  const content = result.bothIn
-    ? `✅ ${myTag.text} checked in — both teams are in. ${oppTag.text}, you're clear to play. Good luck!`
-    : `✅ **${myName}** checked in. ${oppTag.text} — you have until <t:${Math.floor(result.deadline / 1000)}:R> to \`/checkin\` or the match is forfeited.`;
-  const allowed_mentions: AllowedMentions = {
-    parse: [],
-    roles: [myTag.id, oppTag.id].filter((id): id is string => !!id),
-  };
+  const { content, embeds, allowed_mentions } = checkInPost({
+    teamName: myName,
+    oppName,
+    teamPing: teamPing(myName, roles),
+    oppPing: teamPing(oppName, roles),
+    bothIn: result.bothIn,
+    deadlineTs: Math.floor(result.deadline / 1000),
+  });
 
   // Run in the match's channel, the reply *is* the announcement. Anywhere else,
   // confirm privately and post once in the channel — one visible message either way.
   if (channelId && channelId === result.discordChannelId)
-    return { type: 4, data: { content, allowed_mentions } };
+    return { type: 4, data: { content, embeds, allowed_mentions } };
   if (result.discordChannelId)
-    await sendChannelMessage(result.discordChannelId, content, undefined, allowed_mentions).catch(() => {});
-  return { type: 4, data: { content, flags: 64, allowed_mentions } };
+    await sendChannelMessage(result.discordChannelId, content, embeds, allowed_mentions).catch(() => {});
+  return { type: 4, data: { content, embeds, flags: 64, allowed_mentions } };
 }
 
 export async function isTournamentActive(): Promise<boolean> {
@@ -3043,10 +3034,7 @@ export async function finalizeAcceptedSeries(
     tag: "replay-review",
   }).catch(() => {});
 
-  notifyMatchChannel(
-    matchId,
-    `🔍 Both teams accepted the **${homeScore}–${awayScore}** result, but some players in the replays weren't recognised. An admin will review the replays and finalise the match.`,
-  ).catch(() => {});
+  notifyMatchChannel(matchId, replayReviewPost(homeScore, awayScore)).catch(() => {});
 }
 
 // ─── Score auto-confirm ─────────────────────────────────────────────────────────
@@ -3971,12 +3959,20 @@ export async function execReportMatchResult(
   if (match.discord_channel_id) {
     try {
       const roles = await getGuildRoles();
-      const homeMention = await roleMentionByName(homeTeam.name, roles);
-      const awayMention = await roleMentionByName(awayTeam.name, roles);
-      const resultLine = winnerName ? `🏆 **${winnerName} wins!**` : "🤝 **Draw**";
+      const post = matchResultPost({
+        homeName: homeTeam.name,
+        awayName: awayTeam.name,
+        homePing: teamPing(homeTeam.name, roles),
+        awayPing: teamPing(awayTeam.name, roles),
+        homeScore,
+        awayScore,
+        winnerName,
+      });
       await sendChannelMessage(
         match.discord_channel_id,
-        `${homeMention} ${awayMention}\n📊 **Match result: ${homeTeam.name} ${homeScore}–${awayScore} ${awayTeam.name}**\n${resultLine}`,
+        post.content,
+        post.embeds,
+        post.allowed_mentions,
       );
     } catch { /* best-effort */ }
     // Delete the channel now that the result has been posted — don't wait for the

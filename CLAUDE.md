@@ -69,7 +69,8 @@ app/
     bracket.ts            # Pure bracket math (seed order, round names, stage IDs)
     bracket-server.ts     # Server-side bracket build + Supabase save
     tournament-runtime.ts # activateTournamentRuntime — bridges tournament → global state
-    match-notifications.ts
+    match-notifications.ts # notifyMatchChannel — posts a ChannelPost to a match's channel
+    match-embeds.ts       # Pure leaf: every embed the bot posts into a match channel
     replay-parser.ts      # Binary .replay file parser (extracts per-player scoreboard stats)
     ranks.ts              # RL rank tiers
   globals.css             # Tailwind v4 config + all three themes
@@ -198,6 +199,16 @@ Used in tournament-scheduler cron and admin web actions for signup open/close, d
 - Deferred commands (long-running): acknowledged immediately, result sent via `followUp()` using `after()` so the handler can exceed the 3-second Discord limit.
 - `DEFERRED_COMMANDS = ["openround", "score", "syncroles"]` — only commands with actual implementations that take >3s. Auction draft commands (`nominate`, `bid`, `endround`, `budget`) are commented out in `register-commands.mjs` and excluded from `DEFERRED_COMMANDS`; their handler code is preserved for future use.
 - All slash command logic lives in `app/lib/discord-bot.ts`.
+
+### Match channel messages
+
+Every message the bot posts into a **match channel** is an embed built in `app/lib/match-embeds.ts` — a pure leaf like `draft-embeds.ts`, tested by `npm run test:match-embeds`. Nothing else should format one: the intro, check-in, score reporting, scheduling, replay review and every sub notification all go through a builder there.
+
+Each builder returns a `ChannelPost` — `{ content, embeds, allowed_mentions }` — from one list of pings, and that bundling is the whole point. **A mention inside an embed notifies nobody**, so `content` holds the pings and nothing else while the embed carries names as plain bold text; and a ping absent from `allowed_mentions.roles` is stripped by Discord, so the two have to be generated together or a ping dies silently with no type error and no failing test. `notifyMatchChannel(matchId, post)` takes the whole bundle for the same reason.
+
+`teamPing(name, roles)` returns **null** when no role matches, not a bolded fallback name: the name is already in the embed, so `content` ends up containing zero player-supplied text. That closes the hole where a team named `@everyone` would resolve through the name lookup and ping the server through the bot — which is why `roleMention`/`roleMentionByName` are gone rather than kept for callers that "only" post plain text.
+
+Free text (an admin's rejection reason, a sub reason, a round's schedule lines) is clamped into `description` or a field `value`, because an over-long part 400s the whole message instead of truncating. `<t:…>` and `**bold**` render only in `description` and field values — never put either in a footer or a title.
 
 ---
 

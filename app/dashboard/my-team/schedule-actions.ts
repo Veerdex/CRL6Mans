@@ -6,7 +6,15 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { roleMention, notifyMatchChannel } from "@/app/lib/match-notifications";
+import { notifyMatchChannel } from "@/app/lib/match-notifications";
+import { getGuildRoles } from "@/app/lib/discord-api";
+import {
+  teamPing,
+  timeProposedPost,
+  timeAcceptedPost,
+  timeWithdrawnPost,
+  timeRejectedPost,
+} from "@/app/lib/match-embeds";
 import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { pushToAdmins } from "@/app/lib/push";
 import { checkInTeam, createChannelIfCheckInOpen, processExpiredCheckIns, openReadyMatchChannels } from "@/app/lib/discord-bot";
@@ -136,18 +144,18 @@ export async function proposeMatchTime(
       supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
     ]);
     if (myTeam?.name && otherTeam?.name) {
-      const mention = await roleMention(otherTeam.name);
-      const ts = Math.floor(dt.getTime() / 1000);
-      const verb = match.scheduled_at ? "proposed a new" : "proposed a";
       const note = adminRequired
         ? isCustomRound
-          ? "\nThis round requires admin approval for every match time, so it will need admin sign-off after you confirm."
-          : "\n⚠️ This time is **outside the scheduled window**, so it will need admin approval after you confirm."
-        : "\nHead to the website to confirm or suggest a different time.";
-      await notifyMatchChannel(
-        matchId,
-        `${mention} 📅 **${myTeam.name}** has ${verb} match time: <t:${ts}:F> (<t:${ts}:R>)${note}`,
-      );
+          ? "This round requires admin approval for every match time, so it will need admin sign-off after you confirm."
+          : "⚠️ This time is **outside the scheduled window**, so it will need admin approval after you confirm."
+        : "Head to the website to confirm or suggest a different time.";
+      await notifyMatchChannel(matchId, timeProposedPost({
+        teamName: myTeam.name,
+        oppPing: teamPing(otherTeam.name, await getGuildRoles()),
+        ts: Math.floor(dt.getTime() / 1000),
+        isNewTime: !!match.scheduled_at,
+        note,
+      }));
     }
   } catch { /* best-effort */ }
 
@@ -185,12 +193,12 @@ export async function acceptMatchTime(
       supabaseAdmin.from("teams").select("name").eq("id", proposerTeamId).single(),
     ]);
     if (myTeam?.name && proposerTeam?.name) {
-      const mention = await roleMention(proposerTeam.name);
-      const ts = Math.floor(new Date(match.scheduled_at).getTime() / 1000);
-      const msg = needsAdmin
-        ? `${mention} 🕓 **${myTeam.name}** confirmed the out-of-window time: <t:${ts}:F>. Awaiting admin approval before it's locked in.`
-        : `${mention} ✅ **${myTeam.name}** confirmed the match time: <t:${ts}:F>. See you then! 🎮`;
-      await notifyMatchChannel(matchId, msg);
+      await notifyMatchChannel(matchId, timeAcceptedPost({
+        teamName: myTeam.name,
+        proposerPing: teamPing(proposerTeam.name, await getGuildRoles()),
+        ts: Math.floor(new Date(match.scheduled_at).getTime() / 1000),
+        needsAdmin,
+      }));
     }
   } catch { /* best-effort */ }
 
@@ -237,11 +245,10 @@ export async function withdrawMatchTime(
       supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
     ]);
     if (myTeam?.name && otherTeam?.name) {
-      const mention = await roleMention(otherTeam.name);
-      await notifyMatchChannel(
-        matchId,
-        `${mention} ↩️ **${myTeam.name}** removed the proposed match time.`,
-      );
+      await notifyMatchChannel(matchId, timeWithdrawnPost({
+        teamName: myTeam.name,
+        oppPing: teamPing(otherTeam.name, await getGuildRoles()),
+      }));
     }
   } catch { /* best-effort */ }
 
@@ -283,11 +290,11 @@ export async function rejectMatchTime(
       supabaseAdmin.from("teams").select("name").eq("id", proposerTeamId).single(),
     ]);
     if (myTeam?.name && proposerTeam?.name) {
-      const mention = await roleMention(proposerTeam.name);
-      await notifyMatchChannel(
-        matchId,
-        `${mention} ❌ **${myTeam.name}** rejected the proposed match time (<t:${proposedTs}:F>). Please propose a new time.`,
-      );
+      await notifyMatchChannel(matchId, timeRejectedPost({
+        teamName: myTeam.name,
+        proposerPing: teamPing(proposerTeam.name, await getGuildRoles()),
+        ts: proposedTs,
+      }));
     }
   } catch { /* best-effort */ }
 

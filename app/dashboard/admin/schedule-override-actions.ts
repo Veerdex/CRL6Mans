@@ -7,6 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { notifyMatchChannel } from "@/app/lib/match-notifications";
+import { adminTimeApprovedPost, adminTimeDeclinedPost } from "@/app/lib/match-embeds";
 import { recordStaffAction } from "@/app/lib/staff-contributions";
 
 async function verifyAdmin() {
@@ -38,7 +39,7 @@ export async function approveScheduleOverride(
   try {
     if (match.scheduled_at) {
       const ts = Math.floor(new Date(match.scheduled_at as string).getTime() / 1000);
-      await notifyMatchChannel(matchId, `✅ Admin approved the match time: <t:${ts}:F>. It's locked in — see you then! 🎮`);
+      await notifyMatchChannel(matchId, adminTimeApprovedPost(ts));
     }
   } catch { /* best-effort */ }
 
@@ -76,7 +77,7 @@ export async function rejectScheduleOverride(
     .eq("id", matchId);
 
   try {
-    await notifyMatchChannel(matchId, "❌ Admin declined the out-of-window time. Please propose a new time within the scheduled window.");
+    await notifyMatchChannel(matchId, adminTimeDeclinedPost());
   } catch { /* best-effort */ }
 
   await recordStaffAction("schedule_override_rejected", matchId);
