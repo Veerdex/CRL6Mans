@@ -243,12 +243,18 @@ drop policy if exists "Public read approved players" on players;
 -- ─────────────────────────────────────────────
 
 -- ─────────────────────────────────────────────
--- PART 5 — Supabase Storage. Unaudited as of 2026-10-11.
+-- PART 5 — Supabase Storage. Audited clean 2026-10-11.
 --
 -- The same anon key reaches Storage, and none of Parts 1-4 say anything about
 -- it. A *public* bucket is the case that matters most, because it serves any
 -- object to anyone who has the URL with no key at all — so no policy, and
 -- nothing in this file, constrains it.
+--
+-- Result: team-logos is the only public bucket, which is the one that should
+-- be, and 5b returned no rows, so anon holds no policy on storage.objects and
+-- cannot list a bucket either. Nothing to fix; 5a and 5b are the standing
+-- check, because a bucket created through the dashboard defaults to private
+-- but is one checkbox away from public and leaves no trace in this repo.
 --
 -- Four buckets are in use:
 --
@@ -267,8 +273,9 @@ drop policy if exists "Public read approved players" on players;
 -- stored URL, recovering the object name and signing a fresh 1-hour URL
 -- instead, and says in as many words that this works whether or not the bucket
 -- is still public. So flipping the bucket to private breaks no render surface.
--- Proof is also deleted once a registration is decided. What is unverified is
--- only whether the bucket was ever actually flipped.
+-- Proof is also deleted once a registration is decided. And 5a confirms the
+-- bucket is private, so the public URL sitting in that column resolves for
+-- nobody — belt and braces, which is the right posture for a student ID.
 --
 -- Run these one at a time.
 -- ─────────────────────────────────────────────
