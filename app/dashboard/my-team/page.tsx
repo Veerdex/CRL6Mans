@@ -493,6 +493,9 @@ export default async function MyTeamPage() {
   const iCheckedIn = nextMatch?.home_team_id === teamId
     ? !!nextMatchSchedule?.home_checked_in
     : !!nextMatchSchedule?.away_checked_in;
+  const oppCheckedIn = nextMatch?.home_team_id === teamId
+    ? !!nextMatchSchedule?.away_checked_in
+    : !!nextMatchSchedule?.home_checked_in;
 
   const oppApprovedSubs = (oppApprovedSubsRaw ?? []) as { player_out_id: string; sub_player_id: string | null }[];
   const oppSubIds = oppApprovedSubs.map((r) => r.sub_player_id).filter((x): x is string => !!x);
@@ -590,6 +593,18 @@ export default async function MyTeamPage() {
   });
 
   const isEliminated = seasonActive && !wonTournament && nextMatch === null;
+
+  // The series panel is the middle of three columns on xl, which is what the
+  // tracks either side are sized against — without it the page is back to the
+  // two-column grid it has always been.
+  const showSeriesPanel = seasonActive && !isEliminated;
+  const gridCls = showSeriesPanel
+    ? "grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+    : "grid grid-cols-1 lg:grid-cols-3 gap-6";
+  const leftColCls = showSeriesPanel
+    ? "lg:col-span-2 xl:col-span-1 xl:order-1 space-y-6"
+    : "lg:col-span-2 space-y-6";
+  const rightColCls = showSeriesPanel ? "xl:order-3 space-y-6" : "space-y-6";
 
   const form = [...realCompleted]
     .sort(sortDescending)
@@ -795,35 +810,42 @@ export default async function MyTeamPage() {
         </div>
       </div>
 
-      {/* ── Score Confirmation ── */}
-      {seasonActive && !isEliminated && (
-        <SeriesReplayPanel
-          matchId={nextMatch?.id ?? null}
-          homeTeam={seriesHomeTeam}
-          awayTeam={seriesAwayTeam}
-          bestOf={bestOf}
-          myTeamId={teamId}
-          pendingHomeScore={nextMatch?.pending_home_score ?? null}
-          pendingAwayScore={nextMatch?.pending_away_score ?? null}
-          scoreSubmittedByTeamId={nextMatch?.score_submitted_by_team_id ?? null}
-          scoreConfirmed={nextMatch?.score_confirmed ?? false}
-          scoreSubmittedAt={nextMatch?.score_submitted_at ?? null}
-          opponentNotReady={opponentNotReady}
-          checkInPending={checkInPending}
-          iCheckedIn={iCheckedIn}
-          opponentName={opponentName}
-          isTournament={!!activeTournamentId}
-          statsEnabled={statsEnabled}
-          replayAnalysisMode={replayAnalysisMode}
-          unmatchedByGame={unmatchedByGame}
-        />
-      )}
-
       {/* ── Main grid ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className={gridCls}>
+
+        {/* Score Confirmation / Check-in. First in the DOM so it stays at the top
+            of the stack on a phone; ordered into the middle track on xl. Three
+            columns can't start at lg — the 224px sidebar leaves the middle track
+            too narrow for two team columns with a score between them. */}
+        {showSeriesPanel && (
+          <div className="lg:col-span-3 xl:col-span-2 xl:order-2 space-y-6">
+            <SeriesReplayPanel
+              matchId={nextMatch?.id ?? null}
+              homeTeam={seriesHomeTeam}
+              awayTeam={seriesAwayTeam}
+              bestOf={bestOf}
+              myTeamId={teamId}
+              pendingHomeScore={nextMatch?.pending_home_score ?? null}
+              pendingAwayScore={nextMatch?.pending_away_score ?? null}
+              scoreSubmittedByTeamId={nextMatch?.score_submitted_by_team_id ?? null}
+              scoreConfirmed={nextMatch?.score_confirmed ?? false}
+              scoreSubmittedAt={nextMatch?.score_submitted_at ?? null}
+              opponentNotReady={opponentNotReady}
+              checkInPending={checkInPending}
+              iCheckedIn={iCheckedIn}
+              oppCheckedIn={oppCheckedIn}
+              checkinDeadline={nextMatchSchedule?.checkin_deadline ?? null}
+              opponentName={opponentName}
+              isTournament={!!activeTournamentId}
+              statsEnabled={statsEnabled}
+              replayAnalysisMode={replayAnalysisMode}
+              unmatchedByGame={unmatchedByGame}
+            />
+          </div>
+        )}
 
         {/* Roster + Recent Results */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className={leftColCls}>
           <Card title="Roster">
             <div className="divide-y divide-zinc-800">
               {sortedRoster.length === 0 ? (
@@ -870,8 +892,8 @@ export default async function MyTeamPage() {
           )}
         </div>
 
-        {/* Schedule + Results */}
-        <div className="space-y-6">
+        {/* Team settings + Next Match + subs */}
+        <div className={rightColCls}>
 
           {/* Team editor */}
           <MyTeamEditor

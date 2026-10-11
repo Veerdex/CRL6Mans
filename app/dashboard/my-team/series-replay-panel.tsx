@@ -10,7 +10,9 @@ import {
   processScoreConfirmationsNow,
 } from "./series-actions";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
+import { checkInForMatch } from "./schedule-actions";
 import { checkReplayFile, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
+import { useCheckInClock, fmtCountdown, fmtCheckInTime } from "./check-in-window";
 
 const TOURNAMENT_SCORE_CONFIRM_WINDOW_MS = 5 * 60 * 1000;
 const SEASON_SCORE_CONFIRM_WINDOW_MS = 15 * 60 * 1000;
@@ -35,11 +37,6 @@ function useConfirmCountdown(scoreSubmittedAt: string | null, isTournament: bool
     }
   }, [nowMs, deadline, router]);
   return deadline !== null ? Math.max(0, deadline - nowMs) : null;
-}
-
-function fmtCountdown(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 export type SeriesTeamInfo = {
@@ -74,6 +71,10 @@ interface Props {
   // Tournament match with an open check-in window that both teams haven't cleared.
   checkInPending?: boolean;
   iCheckedIn?: boolean;
+  oppCheckedIn?: boolean;
+  // When the window shuts. Stamped well before it opens, so its presence says the
+  // match has a check-in, not that one is running.
+  checkinDeadline?: string | null;
   opponentName?: string | null;
   isTournament?: boolean;
   statsEnabled?: boolean;
@@ -228,6 +229,140 @@ function TeamColumn({ team, side }: { team: SeriesTeamInfo | null; side: "home" 
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Check-in view ──────────────────────────────────────────────────────────────
+
+function CheckInSide({ label, done }: { label: string; done: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+        done
+          ? "border-emerald-700/40 bg-emerald-400/10 text-emerald-300"
+          : "border-zinc-700 bg-zinc-800/60 text-zinc-400"
+      }`}
+    >
+      <span>{done ? "✓" : "○"}</span>
+      <span className="truncate max-w-[9rem]">{label}</span>
+    </span>
+  );
+}
+
+/**
+ * What the panel shows instead of score reporting while a check-in is outstanding.
+ * The matchup is the same one every other state of the panel shows; only the
+ * bottom half differs, and here it is the check-in itself rather than replay
+ * slots or score fields.
+ *
+ * A stamped deadline arrives long before the window opens, so "check-in pending"
+ * covers three quite different situations and they each get their own box: not
+ * open yet, running, and shut. Only the middle one has a button — checkInTeam on
+ * the server refuses the other two.
+ */
+function CheckInView({
+  homeTeam, awayTeam, bestOf, matchId, iCheckedIn, oppCheckedIn, checkinDeadline, opponentName,
+}: {
+  homeTeam: SeriesTeamInfo | null;
+  awayTeam: SeriesTeamInfo | null;
+  bestOf: number;
+  matchId: string;
+  iCheckedIn: boolean;
+  oppCheckedIn: boolean;
+  checkinDeadline: string | null;
+  opponentName: string | null;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const { deadline, opensAt, windowOpen, windowClosed, msLeft, msUntilOpen } =
+    useCheckInClock(checkinDeadline, false);
+
+  function handleCheckIn() {
+    setError(null);
+    startTransition(async () => {
+      const res = await checkInForMatch(matchId);
+      if (res.error) { setError(res.error); return; }
+      router.refresh();
+    });
+  }
+
+  const opponent = opponentName ?? "your opponent";
+
+  return (
+    <div className="p-5 space-y-6">
+      <div className="flex items-start gap-4">
+        <TeamColumn team={homeTeam} side="home" />
+        <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
+          <p className="text-3xl font-bold font-mono text-zinc-600 tabular-nums">– – –</p>
+          <p className="text-xs text-zinc-600 uppercase tracking-wider text-center">BO{bestOf}</p>
+        </div>
+        <TeamColumn team={awayTeam} side="away" />
+      </div>
+
+      <div className="rounded-xl border border-zinc-700 bg-zinc-800/40 px-5 py-6 space-y-4 text-center">
+        {deadline === null ? (
+          <p className="text-sm text-zinc-400">Check-in opens once both teams are decided.</p>
+        ) : windowClosed ? (
+          <>
+            <p className="text-3xl">⌛</p>
+            <p className="text-sm font-semibold text-amber-300">Check-in closed</p>
+            <p className="text-xs text-zinc-500">Resolving the result — this page will update on its own.</p>
+          </>
+        ) : !windowOpen ? (
+          <>
+            <p className="text-3xl">⏰</p>
+            <p className="text-sm font-semibold text-zinc-200">
+              Check-in opens {fmtCheckInTime(opensAt!)}
+            </p>
+            {msUntilOpen !== null && msUntilOpen < 60 * 60 * 1000 && (
+              <p className="text-2xl font-mono font-bold text-zinc-300 tabular-nums">
+                in {fmtCountdown(msUntilOpen)}
+              </p>
+            )}
+            <p className="text-xs text-zinc-500 max-w-sm mx-auto">
+              Both teams have 10 minutes from then to check in, or the match is forfeited. Replays
+              and the score can only be reported once both of you are in.
+            </p>
+          </>
+        ) : iCheckedIn ? (
+          <>
+            <p className="text-sm font-semibold text-emerald-300">✓ You&apos;re checked in</p>
+            <p className="text-4xl font-mono font-bold text-amber-300 tabular-nums">
+              {fmtCountdown(msLeft!)}
+            </p>
+            <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+              Waiting on {opponent}. If they don&apos;t check in before the clock runs out, the
+              match goes your way.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-xs uppercase tracking-wider text-zinc-500">Time left to check in</p>
+            <p className="text-5xl font-mono font-bold text-amber-300 tabular-nums">
+              {fmtCountdown(msLeft!)}
+            </p>
+            <button
+              onClick={handleCheckIn}
+              disabled={isPending}
+              className="w-full max-w-sm mx-auto block px-6 py-3 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-base font-semibold rounded-xl transition-colors"
+            >
+              {isPending ? "Checking in…" : "Check In"}
+            </button>
+            <p className="text-xs text-zinc-500 max-w-sm mx-auto">
+              If you don&apos;t check in before the clock runs out, your team is disqualified from
+              this match.
+            </p>
+            {error && <p className="text-xs text-red-400">{error}</p>}
+          </>
+        )}
+
+        <div className="flex items-center justify-center gap-2 pt-1">
+          <CheckInSide label="You" done={iCheckedIn} />
+          <CheckInSide label={opponentName ?? "Opponent"} done={oppCheckedIn} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -517,7 +652,8 @@ export function SeriesReplayPanel({
   matchId, homeTeam, awayTeam, bestOf,
   myTeamId, pendingHomeScore, pendingAwayScore, scoreSubmittedByTeamId, scoreConfirmed,
   scoreSubmittedAt = null,
-  opponentNotReady = false, checkInPending = false, iCheckedIn = false, opponentName = null,
+  opponentNotReady = false, checkInPending = false, iCheckedIn = false, oppCheckedIn = false,
+  checkinDeadline = null, opponentName = null,
   isTournament = false, statsEnabled = true,
   replayAnalysisMode = "loose", unmatchedByGame = {},
 }: Props) {
@@ -665,12 +801,13 @@ export function SeriesReplayPanel({
 
   // ── Header ──
 
-  const header = (
+  const panelHeader = (title: string) => (
     <div className="px-5 py-3 border-b border-zinc-800 flex items-center justify-between">
-      <h2 className="text-sm font-semibold text-zinc-300">Score Confirmation</h2>
+      <h2 className="text-sm font-semibold text-zinc-300">{title}</h2>
       <span className="text-xs text-zinc-500">Bo{bestOf}</span>
     </div>
   );
+  const header = panelHeader("Score Confirmation");
 
   // ── No match / no opponent ──
 
@@ -788,16 +925,17 @@ export function SeriesReplayPanel({
   if (checkInPending) {
     return (
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        {header}
-        <div className="px-5 py-8 text-center space-y-2">
-          <p className="text-3xl">📋</p>
-          <p className="text-sm font-semibold text-amber-300">Check in to report this match</p>
-          <p className="text-sm text-zinc-400 max-w-md mx-auto">
-            {iCheckedIn
-              ? `You're checked in — once ${opponentName ?? "your opponent"} checks in too, you'll be able to upload replays and report the score here.`
-              : "Both teams have to check in before replays or a score can be submitted. Use the check-in panel on this page."}
-          </p>
-        </div>
+        {panelHeader("Check-in")}
+        <CheckInView
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          bestOf={bestOf}
+          matchId={matchId}
+          iCheckedIn={iCheckedIn}
+          oppCheckedIn={oppCheckedIn}
+          checkinDeadline={checkinDeadline}
+          opponentName={opponentName}
+        />
       </div>
     );
   }

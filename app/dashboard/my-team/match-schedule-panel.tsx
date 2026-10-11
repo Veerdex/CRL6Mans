@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { proposeMatchTime, acceptMatchTime, withdrawMatchTime, rejectMatchTime, checkInForMatch, processCheckInsNow } from "./schedule-actions";
+import { proposeMatchTime, acceptMatchTime, withdrawMatchTime, rejectMatchTime, processCheckInsNow } from "./schedule-actions";
+import { useCheckInClock, fmtCheckInTime } from "./check-in-window";
 
 export type SchedulableMatch = {
   id: string;
@@ -25,8 +26,6 @@ export type SchedulableMatch = {
   oppCheckedIn: boolean;
   isHome: boolean;
 };
-
-const CHECKIN_WINDOW_MS = 10 * 60 * 1000;
 
 // Mirrors the server-side window check so we can warn before submitting. Any
 // non-"specific" type (range, weekly, custom) is just the stored [playAt, deadlineAt]
@@ -476,53 +475,28 @@ function LobbyBox({ match }: { match: SchedulableMatch }) {
 
 // ── Tournament check-in row ──────────────────────────────────────────────────────
 
+// Status and lobby only. The check-in itself — the button and the countdown —
+// lives in the Score Confirmation panel, so there is exactly one place to do it
+// and one clock to read. What stays here is the half this row is the only owner
+// of: the lobby credentials, and the trigger below.
 function CheckInRow({ match, teamId }: { match: SchedulableMatch; teamId: string }) {
   void teamId;
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
-
-  const deadline = match.checkinDeadline ? new Date(match.checkinDeadline).getTime() : null;
-  const opensAt = deadline !== null ? deadline - CHECKIN_WINDOW_MS : null;
   const bothCheckedIn = match.iCheckedIn && match.oppCheckedIn;
+  const { deadline, opensAt, windowOpen, windowClosed } =
+    useCheckInClock(match.checkinDeadline, bothCheckedIn);
+  const resolveFired = useRef(false);
 
-  // Tick every second while a window is active so the countdown updates and we can
-  // fire the server-side DQ processing the moment the deadline passes.
+  // When the deadline passes without both teams in, ask the server to resolve it
+  // (DQ / channel). The clock ticks every second, so the ref is what actually
+  // makes this once per crossing — and this row is the only sender: the panel's
+  // copy of the clock is display-only, since two components racing to post a
+  // disqualification is not worth a second countdown.
   useEffect(() => {
-    if (deadline === null || bothCheckedIn) return;
-    const t = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [deadline, bothCheckedIn]);
-
-  // When the deadline passes and we're not fully checked in, ask the server to
-  // resolve it (DQ / channel). Runs once per crossing.
-  useEffect(() => {
-    if (deadline === null || bothCheckedIn) return;
-    if (nowMs > deadline) {
-      processCheckInsNow().then(() => router.refresh()).catch(() => {});
-    }
-  }, [nowMs, deadline, bothCheckedIn, router]);
-
-  function handleCheckIn() {
-    setError(null);
-    startTransition(async () => {
-      const res = await checkInForMatch(match.id);
-      if (res.error) { setError(res.error); return; }
-      router.refresh();
-    });
-  }
-
-  function fmtCountdown(ms: number): string {
-    const s = Math.max(0, Math.floor(ms / 1000));
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  }
-  function fmtTime(iso: string): string {
-    return new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
-  }
-
-  const windowOpen = opensAt !== null && nowMs >= opensAt && deadline !== null && nowMs <= deadline;
-  const windowClosed = deadline !== null && nowMs > deadline;
+    if (!windowClosed || bothCheckedIn || resolveFired.current) return;
+    resolveFired.current = true;
+    processCheckInsNow().then(() => router.refresh()).catch(() => { resolveFired.current = false; });
+  }, [windowClosed, bothCheckedIn, router]);
 
   return (
     <div className="px-5 py-4 border-b border-zinc-800 last:border-0 space-y-3">
@@ -548,37 +522,21 @@ function CheckInRow({ match, teamId }: { match: SchedulableMatch; teamId: string
         ) : null}
       </div>
 
-      {/* Check-in status / controls */}
+      {/* Check-in status — the control itself is in the Score Confirmation panel */}
       {!bothCheckedIn && (
-        <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 p-3 space-y-2">
+        <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 p-3">
           {deadline === null ? (
             <p className="text-xs text-zinc-400">Check-in opens once both teams are decided.</p>
-          ) : !windowOpen && !windowClosed ? (
-            <p className="text-xs text-zinc-400">⏰ Check-in opens at <span className="text-zinc-200 font-medium">{fmtTime(new Date(opensAt!).toISOString())}</span>. Both teams must check in within 10 minutes.</p>
           ) : windowClosed ? (
             <p className="text-xs text-amber-300">⌛ Check-in window closed. Resolving result…</p>
+          ) : !windowOpen ? (
+            <p className="text-xs text-zinc-400">⏰ Check-in opens at <span className="text-zinc-200 font-medium">{fmtCheckInTime(opensAt!)}</span>.</p>
           ) : (
-            <>
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-zinc-300">
-                  {match.iCheckedIn ? "✓ You're checked in — waiting for opponent." : "Check in to confirm you're ready to play."}
-                </p>
-                <span className="text-xs font-mono text-amber-300">{fmtCountdown(deadline - nowMs)} left</span>
-              </div>
-              <p className="text-[11px] text-zinc-500">
-                {match.iCheckedIn ? "" : "If you don't check in within 10 minutes, your team is DQ'd."}
-              </p>
-              {!match.iCheckedIn && (
-                <button
-                  onClick={handleCheckIn}
-                  disabled={isPending}
-                  className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
-                >
-                  {isPending ? "Checking in…" : "Check In"}
-                </button>
-              )}
-              {error && <p className="text-xs text-red-400">{error}</p>}
-            </>
+            <p className="text-xs text-zinc-300">
+              {match.iCheckedIn
+                ? "✓ You're checked in — waiting for opponent."
+                : "Check-in is open — use the Check-in panel on this page."}
+            </p>
           )}
         </div>
       )}
