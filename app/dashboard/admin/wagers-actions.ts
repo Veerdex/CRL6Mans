@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { adjustCoinsByAccount, setCoinsByAccount, type CoinAdjustment } from "@/app/lib/coins";
 
 async function requireDirector(): Promise<string> {
   const cookieStore = await cookies();
@@ -14,13 +15,13 @@ async function requireDirector(): Promise<string> {
   return session.userId;
 }
 
-// Clamped at 0 — Westside Wages has no concept of debt anywhere else in the
-// codebase (bet placement checks crl_coins >= cost), so letting an admin
-// adjustment push a balance negative would put the player in a state normal
-// gameplay can never produce or recover from.
-function applyClamped(current: number, amount: number): number {
-  return Math.max(0, current + amount);
-}
+// The clamp at 0 now lives in adjust_crl_coins (see
+// scripts/coin-ledger-migration.sql) along with the write itself. Westside Wages
+// has no concept of debt anywhere else in the codebase (bet placement checks
+// crl_coins >= cost), so letting an admin adjustment push a balance negative
+// would put the player in a state normal gameplay can never produce or recover
+// from. Doing it in the DB is what stops the adjustment from overwriting a bet
+// that settled between the read and the write.
 
 export async function adjustPlayerBalance(
   playerId: string,
@@ -36,28 +37,15 @@ export async function adjustPlayerBalance(
   // (players.id = accounts.id by construction — see approvePlayerWithEdits),
   // so wager_balance_adjustments.player_id (an FK into players(id)) keeps
   // resolving correctly with no change to that table.
-  const { data: account } = await supabaseAdmin
-    .from("accounts")
-    .select("id, crl_coins")
-    .eq("id", playerId)
-    .single();
-  if (!account) return { error: "Player not found." };
-
-  const current = account.crl_coins ?? 0;
-  const balanceAfter = applyClamped(current, amount);
-
-  const { error } = await supabaseAdmin
-    .from("accounts")
-    .update({ crl_coins: balanceAfter })
-    .eq("id", playerId);
-  if (error) return { error: "Failed to update balance." };
+  const adjusted = await adjustCoinsByAccount(playerId, amount, `admin adjustment: ${reason.trim()}`);
+  if (!adjusted) return { error: "Player not found." };
 
   await supabaseAdmin.from("wager_balance_adjustments").insert({
     scope: "single",
     player_id: playerId,
     requested_amount: amount,
-    amount: balanceAfter - current,
-    balance_after: balanceAfter,
+    amount: adjusted.applied,
+    balance_after: adjusted.balanceAfter,
     reason: reason.trim(),
     actor: adminId,
   });
@@ -79,36 +67,34 @@ export async function bulkAdjustAllBalances(
 
   const { data: accounts } = await supabaseAdmin
     .from("accounts")
-    .select("id, crl_coins")
+    .select("id")
     .eq("status", "approved");
   if (!accounts?.length) return { error: "No approved players found." };
 
   const batchId = crypto.randomUUID();
-  const updates = accounts.map(a => {
-    const current = a.crl_coins ?? 0;
-    const balanceAfter = applyClamped(current, amount);
-    return { id: a.id, balanceAfter, applied: balanceAfter - current };
-  });
-
-  await Promise.all(
-    updates.map(u => supabaseAdmin.from("accounts").update({ crl_coins: u.balanceAfter }).eq("id", u.id)),
+  const results = await Promise.all(
+    accounts.map(async a => ({
+      id: a.id as string,
+      adjusted: await adjustCoinsByAccount(a.id, amount, `bulk adjustment: ${reason.trim()}`),
+    })),
   );
+  const applied = results.filter((r): r is { id: string; adjusted: CoinAdjustment } => r.adjusted !== null);
 
   await supabaseAdmin.from("wager_balance_adjustments").insert(
-    updates.map(u => ({
+    applied.map(r => ({
       batch_id: batchId,
       scope: "bulk" as const,
-      player_id: u.id,
+      player_id: r.id,
       requested_amount: amount,
-      amount: u.applied,
-      balance_after: u.balanceAfter,
+      amount: r.adjusted.applied,
+      balance_after: r.adjusted.balanceAfter,
       reason: reason.trim(),
       actor: adminId,
     })),
   );
 
   revalidatePath("/dashboard/admin");
-  return { ok: true, affected: updates.length };
+  return { ok: true, affected: applied.length };
 }
 
 const STARTING_BALANCE = 1000;
@@ -127,30 +113,32 @@ export async function resetAllBalancesToStart(
 
   const { data: accounts } = await supabaseAdmin
     .from("accounts")
-    .select("id, crl_coins")
+    .select("id")
     .eq("status", "approved");
   if (!accounts?.length) return { error: "No approved players found." };
 
   const batchId = crypto.randomUUID();
-  const updates = accounts.map(a => ({ id: a.id, applied: STARTING_BALANCE - (a.crl_coins ?? 0) }));
-
-  await Promise.all(
-    updates.map(u => supabaseAdmin.from("accounts").update({ crl_coins: STARTING_BALANCE }).eq("id", u.id)),
+  const results = await Promise.all(
+    accounts.map(async a => ({
+      id: a.id as string,
+      adjusted: await setCoinsByAccount(a.id, STARTING_BALANCE, `balance reset: ${reason.trim()}`),
+    })),
   );
+  const applied = results.filter((r): r is { id: string; adjusted: CoinAdjustment } => r.adjusted !== null);
 
   await supabaseAdmin.from("wager_balance_adjustments").insert(
-    updates.map(u => ({
+    applied.map(r => ({
       batch_id: batchId,
       scope: "bulk" as const,
-      player_id: u.id,
+      player_id: r.id,
       requested_amount: STARTING_BALANCE,
-      amount: u.applied,
-      balance_after: STARTING_BALANCE,
+      amount: r.adjusted.applied,
+      balance_after: r.adjusted.balanceAfter,
       reason: reason.trim(),
       actor: adminId,
     })),
   );
 
   revalidatePath("/dashboard/admin");
-  return { ok: true, affected: updates.length };
+  return { ok: true, affected: applied.length };
 }

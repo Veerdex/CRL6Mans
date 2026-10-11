@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { getNameDecorations } from "@/app/lib/patreon-entitlements";
 import { type NavTabOverrides } from "@/app/lib/nav-tabs";
 import { needsPlatformAccountClaim } from "@/app/lib/platform-account-gate";
-import { REGISTRATION_BONUS, WEEKLY_GRANT } from "@/app/lib/coins";
+import { REGISTRATION_BONUS, WEEKLY_GRANT, creditCoins } from "@/app/lib/coins";
 
 // ── The switch ────────────────────────────────────────────────────────────────
 // How the dashboard chrome fetches its data. Change it here, in code — there is
@@ -113,7 +113,7 @@ async function claimGrants(
 
   const { data: accountCoins } = await supabaseAdmin
     .from("accounts")
-    .select("id, crl_coins, coin_grant_pending_start, coin_grant_pending_weekly, coin_grant_pending_register")
+    .select("id, coin_grant_pending_start, coin_grant_pending_weekly, coin_grant_pending_register")
     .eq("discord_id", userId)
     .single();
 
@@ -138,23 +138,47 @@ async function claimGrants(
       : 0;
     const weeklyAmount = pendingWeekly && !expired(ls?.weekly_grant_expires_at) ? WEEKLY_GRANT : 0;
     const registerAmount = pendingRegister ? REGISTRATION_BONUS : 0;
-    const total = startAmount + weeklyAmount + registerAmount;
 
-    // Only the crediting case writes crl_coins. Sweeping an expired flag must not
-    // write back the balance this render read, or a bet settling in between gets
-    // clobbered with a stale value.
     const clearFlags = {
       coin_grant_pending_start: false,
       coin_grant_pending_weekly: false,
       coin_grant_pending_register: false,
     };
-    await supabaseAdmin
-      .from("accounts")
-      .update(total > 0 ? { crl_coins: (accountCoins.crl_coins ?? 0) + total, ...clearFlags } : clearFlags)
-      .eq("id", accountCoins.id);
-    grants.coinGrantStart = startAmount;
-    grants.coinGrantWeekly = weeklyAmount;
-    grants.coinGrantRegister = registerAmount;
+
+    // Clearing the flags is the claim, and it is conditional on them still being
+    // set: two dashboard renders in flight at once used to both read `pending`,
+    // both credit, and both write back `read + total`. The balance moves only
+    // through the ledger afterwards, never by writing back the value this render
+    // read -- a bet settling in between would be clobbered with a stale number.
+    let claim = supabaseAdmin.from("accounts").update(clearFlags).eq("id", accountCoins.id);
+    if (pendingStart) claim = claim.eq("coin_grant_pending_start", true);
+    if (pendingWeekly) claim = claim.eq("coin_grant_pending_weekly", true);
+    if (pendingRegister) claim = claim.eq("coin_grant_pending_register", true);
+    const { data: claimed, error: claimError } = await claim.select("id");
+
+    if (claimError) console.error(`[grants] could not claim grants for ${userId}: ${claimError.message}`);
+
+    if (claimed?.length) {
+      const credits: [number, string][] = [
+        [startAmount, "event start grant"],
+        [weeklyAmount, "weekly grant"],
+        [registerAmount, "registration bonus"],
+      ];
+      for (const [amount, reason] of credits) {
+        if (amount <= 0) continue;
+        try {
+          await creditCoins(userId, amount, reason);
+        } catch (e) {
+          // The flag is already cleared, so this grant is gone rather than
+          // double-paid. Losing coins is the safe side of that trade, but it
+          // needs saying out loud.
+          console.error(`[grants] ${reason} of ${amount} not credited to ${userId}: ${(e as Error).message}`);
+        }
+      }
+      grants.coinGrantStart = startAmount;
+      grants.coinGrantWeekly = weeklyAmount;
+      grants.coinGrantRegister = registerAmount;
+    }
   }
 
   if (playerInfo.status === "approved") {

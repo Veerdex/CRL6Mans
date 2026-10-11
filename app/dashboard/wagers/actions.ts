@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { creditCoins, debitCoins } from "@/app/lib/coins";
 import { getBestOfForMatch } from "@/app/lib/discord-bot";
 import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
 import {
@@ -347,22 +348,28 @@ export async function placeBets(bets: BetInput[]): Promise<{ error?: string }> {
     if (!b.isPool && !b.serverMultiplier) return { error: "Could not compute odds for one or more bets" };
   }
 
-  await Promise.all([
-    supabaseAdmin.from("wagers").insert(
-      resolvedBets.map((b) => ({
-        player_id: session.userId,
-        match_id: b.matchId,
-        bet_type: b.betType,
-        amount: b.amount,
-        odds_multiplier: b.serverMultiplier,
-        status: "pending",
-      })),
-    ),
-    supabaseAdmin
-      .from("accounts")
-      .update({ crl_coins: (account.crl_coins ?? 0) - totalCost })
-      .eq("id", account.id),
-  ]);
+  // The debit is the real affordability check: it only succeeds if the balance
+  // still covers the stake at the moment it runs. The read above is UX only —
+  // deducting `read - totalCost` erased any payout that landed in between, and
+  // two bets submitted at once could both pass the read and spend the same coins.
+  const paid = await debitCoins(session.userId, totalCost, `bet placed (${bets.length})`);
+  if (!paid) return { error: "Insufficient Westside Wages" };
+
+  const { error: insertError } = await supabaseAdmin.from("wagers").insert(
+    resolvedBets.map((b) => ({
+      player_id: session.userId,
+      match_id: b.matchId,
+      bet_type: b.betType,
+      amount: b.amount,
+      odds_multiplier: b.serverMultiplier,
+      status: "pending",
+    })),
+  );
+
+  if (insertError) {
+    await creditCoins(session.userId, totalCost, "bet placement failed, stake returned");
+    return { error: "Failed to place bets" };
+  }
 
   return {};
 }
@@ -472,29 +479,39 @@ export async function placeParlayBet(
   }
   serverCombinedMultiplier = Math.round(serverCombinedMultiplier * 100) / 100;
 
+  // Charged before anything is written, for the same reason as placeBets: the
+  // conditional debit is the only affordability check that can't be raced.
+  const paid = await debitCoins(session.userId, amount, "parlay placed");
+  if (!paid) return { error: "Insufficient Westside Wages" };
+
   const { data: parlay, error: parlayErr } = await supabaseAdmin
     .from("parlays")
     .insert({ player_id: session.userId, amount, combined_multiplier: serverCombinedMultiplier, status: "pending" })
     .select("id")
     .single();
 
-  if (parlayErr || !parlay) return { error: "Failed to place parlay" };
+  if (parlayErr || !parlay) {
+    await creditCoins(session.userId, amount, "parlay placement failed, stake returned");
+    return { error: "Failed to place parlay" };
+  }
 
-  await Promise.all([
-    supabaseAdmin.from("parlay_legs").insert(
-      resolvedLegs.map((l) => ({
-        parlay_id: parlay.id,
-        match_id: l.matchId,
-        bet_type: l.betType,
-        odds_multiplier: l.legMultiplier,
-        status: "pending",
-      })),
-    ),
-    supabaseAdmin
-      .from("accounts")
-      .update({ crl_coins: (account.crl_coins ?? 0) - amount })
-      .eq("id", account.id),
-  ]);
+  const { error: legsError } = await supabaseAdmin.from("parlay_legs").insert(
+    resolvedLegs.map((l) => ({
+      parlay_id: parlay.id,
+      match_id: l.matchId,
+      bet_type: l.betType,
+      odds_multiplier: l.legMultiplier,
+      status: "pending",
+    })),
+  );
+
+  // A parlay with no legs would sit pending forever — nothing resolves it, so the
+  // stake would never come back on its own.
+  if (legsError) {
+    await supabaseAdmin.from("parlays").delete().eq("id", parlay.id);
+    await creditCoins(session.userId, amount, "parlay placement failed, stake returned");
+    return { error: "Failed to place parlay" };
+  }
 
   return {};
 }
