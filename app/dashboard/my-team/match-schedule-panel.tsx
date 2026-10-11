@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect, useRef } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { proposeMatchTime, acceptMatchTime, withdrawMatchTime, rejectMatchTime, processCheckInsNow } from "./schedule-actions";
 import { useCheckInClock, fmtCheckInTime } from "./check-in-window";
@@ -485,17 +485,23 @@ function CheckInRow({ match, teamId }: { match: SchedulableMatch; teamId: string
   const bothCheckedIn = match.iCheckedIn && match.oppCheckedIn;
   const { deadline, opensAt, windowOpen, windowClosed } =
     useCheckInClock(match.checkinDeadline, bothCheckedIn);
-  const resolveFired = useRef(false);
 
   // When the deadline passes without both teams in, ask the server to resolve it
-  // (DQ / channel). The clock ticks every second, so the ref is what actually
-  // makes this once per crossing — and this row is the only sender: the panel's
-  // copy of the clock is display-only, since two components racing to post a
-  // disqualification is not worth a second countdown.
+  // (DQ / channel). This row is the only sender — the panel's copy of the clock is
+  // display-only, since two components racing to post a disqualification is not
+  // worth a second countdown.
+  //
+  // It keeps asking rather than firing once, because the server compares the
+  // deadline against its own clock: a browser a few seconds fast sends the first
+  // call before the deadline has passed over there, and a single call would leave
+  // the page reading "resolving…" forever. Retrying until the resolution lands —
+  // which unmounts this row — is what makes that copy true.
   useEffect(() => {
-    if (!windowClosed || bothCheckedIn || resolveFired.current) return;
-    resolveFired.current = true;
-    processCheckInsNow().then(() => router.refresh()).catch(() => { resolveFired.current = false; });
+    if (!windowClosed || bothCheckedIn) return;
+    const fire = () => processCheckInsNow().then(() => router.refresh()).catch(() => {});
+    fire();
+    const t = setInterval(fire, 10_000);
+    return () => clearInterval(t);
   }, [windowClosed, bothCheckedIn, router]);
 
   return (
