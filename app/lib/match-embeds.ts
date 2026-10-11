@@ -218,7 +218,10 @@ export function seriesRejectedPost(args: { teamName: string; oppPing: Ping | nul
   return channelPost([args.oppPing], {
     title: "Result rejected",
     color: WARN_AMBER,
-    description: `**${args.teamName}** rejected the submitted result. Please resubmit when ready.`,
+    description:
+      `**${args.teamName}** rejected the submitted result. Submit it again from My Team ` +
+      `if the score was wrong — or if it was right, dispute it there and staff will ` +
+      `record the result.`,
   });
 }
 

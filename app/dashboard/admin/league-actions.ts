@@ -949,7 +949,7 @@ export async function saveMatchSettings(deadlineDay: number, playDay: number, pl
   return { ok: true, message: "Match schedule settings saved." };
 }
 
-const ADMIN_NOTIFICATION_CATEGORIES = ["match_reporting", "sub_requests", "registrations", "profile_changes", "schedule_approvals"];
+const ADMIN_NOTIFICATION_CATEGORIES = ["sub_requests", "registrations", "profile_changes", "schedule_approvals"];
 
 export async function setAdminNotificationPref(category: string, enabled: boolean) {
   await verifyAdmin();

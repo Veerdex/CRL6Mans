@@ -3566,12 +3566,16 @@ export async function disputeSeriesResultCore(args: {
     }
   } catch { /* best-effort */ }
 
+  // No category, so it cannot be muted. The old match_reporting toggle existed
+  // to escape a push on every submission; a staff member who had turned it off
+  // for that reason would otherwise silently miss the one message that means
+  // two teams are stuck waiting on them.
   pushToAdmins({
     title: "Result Disputed",
     body: `Two teams can't agree on a ${homeScore}–${awayScore} series. Record the result in the Admin panel.`,
     url: "/dashboard/admin",
     tag: "match-reporting",
-  }, "match_reporting").catch(() => {});
+  }).catch(() => {});
 
   return { outcome: "pending_admin", homeScore, awayScore };
 }

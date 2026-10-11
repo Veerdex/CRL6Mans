@@ -156,7 +156,6 @@ export async function pushToUser(discordId: string, payload: PushPayload) {
 }
 
 export type AdminNotificationCategory =
-  | "match_reporting"
   | "sub_requests"
   | "registrations"
   | "profile_changes"

@@ -35,7 +35,10 @@ async function resolveKeyState(): Promise<KeyState> {
 }
 
 const ITEMS: { key: string; label: string; desc: string }[] = [
-  { key: "match_reporting", label: "Match Reporting",          desc: "When a team submits a series result." },
+  // No match-reporting toggle. Routine submissions no longer push at all, and
+  // the one score notification left — a disputed result — is deliberately not
+  // mutable: it means two teams are blocked until staff rule, the same reason
+  // "Replay Review Required" has no category either.
   { key: "sub_requests",    label: "Sub Requests",             desc: "When a team requests a substitute." },
   { key: "registrations",   label: "Pending Registrations",    desc: "When a new player submits a registration." },
   { key: "profile_changes", label: "Profile Change Requests",  desc: "When a player requests an MMR / tracker change." },
