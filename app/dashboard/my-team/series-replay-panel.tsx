@@ -6,6 +6,7 @@ import {
   submitSeriesResult,
   confirmSeriesResult,
   cancelSeriesSubmission,
+  disputeSeriesResult,
   uploadGameReplay,
   processScoreConfirmationsNow,
 } from "./series-actions";
@@ -67,6 +68,15 @@ interface Props {
   scoreSubmittedByTeamId: string | null;
   scoreConfirmed: boolean;
   scoreSubmittedAt?: string | null;
+  // Set when the opponent threw out this team's submission. The rejected claim is
+  // kept in its own columns rather than pending_*, which a rejection clears —
+  // anything left pending gets auto-finalised once its window lapses.
+  scoreRejectedByTeamId?: string | null;
+  scoreRejectedHome?: number | null;
+  scoreRejectedAway?: number | null;
+  // Non-null once a rejected team escalated. Staff own the match from here, so
+  // every reporting control comes off the page.
+  scoreDisputedAt?: string | null;
   opponentNotReady?: boolean;
   // Tournament match with an open check-in window that both teams haven't cleared.
   checkInPending?: boolean;
@@ -602,7 +612,7 @@ function OpponentSubmittedView({
             {submitterTeamName} submitted this result
           </p>
           <p className="text-xs text-indigo-500 mt-0.5">
-            Confirm if the score is correct, or dispute to start over.
+            Confirm if the score is correct, or reject it to start over.
           </p>
           <p className="text-xs text-amber-400 mt-1">
             {remaining !== null && remaining > 0
@@ -623,7 +633,7 @@ function OpponentSubmittedView({
             disabled={confirming || disputing}
             className="px-4 py-1.5 bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            {disputing ? "Disputing…" : "Dispute"}
+            {disputing ? "Rejecting…" : "Reject"}
           </button>
           {error && !showModal && <span className="text-xs text-red-400">{error}</span>}
         </div>
@@ -646,12 +656,135 @@ function OpponentSubmittedView({
   );
 }
 
+// ── My submission was rejected: resubmit, or stand by it and bring staff in ────
+
+function RejectedView({
+  homeTeam,
+  awayTeam,
+  rejectedHome,
+  rejectedAway,
+  rejecterName,
+  matchId,
+  onResubmit,
+}: {
+  homeTeam: SeriesTeamInfo | null;
+  awayTeam: SeriesTeamInfo | null;
+  rejectedHome: number | null;
+  rejectedAway: number | null;
+  rejecterName: string;
+  matchId: string;
+  onResubmit: () => void;
+}) {
+  const router = useRouter();
+  const [escalating, startEscalate] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function handleDispute() {
+    setError(null);
+    startEscalate(async () => {
+      const res = await disputeSeriesResult(matchId);
+      if (res.error) { setError(res.error); return; }
+      router.refresh();
+    });
+  }
+
+  const hadScore = rejectedHome !== null && rejectedAway !== null;
+
+  return (
+    <div className="p-5 space-y-4">
+      {hadScore && (
+        <div className="flex items-start gap-4">
+          <TeamColumn team={homeTeam} side="home" />
+          <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
+            <p className="text-3xl font-bold font-mono text-zinc-500 line-through tabular-nums">
+              {rejectedHome} – {rejectedAway}
+            </p>
+          </div>
+          <TeamColumn team={awayTeam} side="away" />
+        </div>
+      )}
+      <div className="text-center space-y-1">
+        <p className="text-3xl">✋</p>
+        <p className="text-sm font-semibold text-amber-300">
+          {rejecterName} rejected your result
+        </p>
+      </div>
+      <div className="bg-indigo-950/40 border border-indigo-700/40 rounded-lg px-4 py-3 space-y-3">
+        <p className="text-xs text-indigo-400">
+          If you got the score wrong, submit it again. If your score was right and they
+          rejected it anyway, dispute it — staff will step in and record the result
+          themselves, and neither team will be able to report until they do.
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={onResubmit}
+            disabled={escalating}
+            className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Submit Again
+          </button>
+          <button
+            onClick={handleDispute}
+            disabled={escalating}
+            className="px-4 py-1.5 bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {escalating ? "Disputing…" : "Dispute"}
+          </button>
+          {error && <span className="text-xs text-red-400">{error}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Disputed: staff own it, so there is nothing either team can do here ────────
+
+function DisputedView({
+  homeTeam,
+  awayTeam,
+  rejectedHome,
+  rejectedAway,
+}: {
+  homeTeam: SeriesTeamInfo | null;
+  awayTeam: SeriesTeamInfo | null;
+  rejectedHome: number | null;
+  rejectedAway: number | null;
+}) {
+  const hadScore = rejectedHome !== null && rejectedAway !== null;
+  return (
+    <div className="p-5 space-y-4">
+      {hadScore && (
+        <div className="flex items-start gap-4">
+          <TeamColumn team={homeTeam} side="home" />
+          <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
+            <p className="text-3xl font-bold font-mono text-white tabular-nums">
+              {rejectedHome} – {rejectedAway}
+            </p>
+            <p className="text-[11px] uppercase tracking-wide text-red-400">in question</p>
+          </div>
+          <TeamColumn team={awayTeam} side="away" />
+        </div>
+      )}
+      <div className="text-center space-y-2">
+        <p className="text-3xl">⚖️</p>
+        <p className="text-sm font-semibold text-red-300">Result disputed — staff reviewing</p>
+        <p className="text-sm text-zinc-400 max-w-md mx-auto">
+          Staff have been notified and will record the result. Reporting is closed for
+          both teams until they do.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Main panel ─────────────────────────────────────────────────────────────────
 
 export function SeriesReplayPanel({
   matchId, homeTeam, awayTeam, bestOf,
   myTeamId, pendingHomeScore, pendingAwayScore, scoreSubmittedByTeamId, scoreConfirmed,
   scoreSubmittedAt = null,
+  scoreRejectedByTeamId = null, scoreRejectedHome = null, scoreRejectedAway = null,
+  scoreDisputedAt = null,
   opponentNotReady = false, checkInPending = false, iCheckedIn = false, oppCheckedIn = false,
   checkinDeadline = null, opponentName = null,
   isTournament = false, statsEnabled = true,
@@ -662,6 +795,10 @@ export function SeriesReplayPanel({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  // Dismisses the rejection notice so the reporting flow below it comes back.
+  // Client-only: the rejection stays recorded, so Dispute is still available
+  // until this team actually submits again.
+  const [resubmitting, setResubmitting] = useState(false);
   const [homeScoreInput, setHomeScoreInput] = useState("");
   const [awayScoreInput, setAwayScoreInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -837,6 +974,22 @@ export function SeriesReplayPanel({
   // the server so both captains see it, not just the one who uploaded.
   const seriesUnmatched = Object.values(unmatchedByGame).flat();
 
+  // ── Disputed: staff own the match, so this outranks every reporting state ──
+
+  if (scoreDisputedAt) {
+    return (
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        {header}
+        <DisputedView
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          rejectedHome={scoreRejectedHome}
+          rejectedAway={scoreRejectedAway}
+        />
+      </div>
+    );
+  }
+
   // ── Confirmed (both captains agreed) ──
 
   if (scoreConfirmed && pendingHomeScore !== null && pendingAwayScore !== null) {
@@ -894,6 +1047,34 @@ export function SeriesReplayPanel({
           isTournament={isTournament}
           unmatchedNames={seriesUnmatched}
           mode={replayAnalysisMode}
+        />
+      </div>
+    );
+  }
+
+  // ── They rejected our submission; we resubmit or stand by it ──
+  //
+  // A rejection clears pending_*, so this sits below both pending branches and
+  // never competes with them: a fresh submission from either side supersedes it.
+
+  if (
+    !resubmitting &&
+    pendingHomeScore === null &&
+    scoreRejectedByTeamId !== null &&
+    scoreRejectedByTeamId !== myTeamId
+  ) {
+    const rejecter = scoreRejectedByTeamId === homeTeam.id ? homeTeam : awayTeam;
+    return (
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        {header}
+        <RejectedView
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          rejectedHome={scoreRejectedHome}
+          rejectedAway={scoreRejectedAway}
+          rejecterName={rejecter.name}
+          matchId={matchId}
+          onResubmit={() => setResubmitting(true)}
         />
       </div>
     );

@@ -211,11 +211,32 @@ export function seriesSubmittedPost(args: {
   });
 }
 
-export function seriesDisputedPost(args: { teamName: string; oppPing: Ping | null }): ChannelPost {
+// Named "rejected", not "disputed". This is the first round and it is routine —
+// usually a typo — so it stays between the teams and no staff are pulled in.
+// seriesEscalatedPost below is the one that means they could not settle it.
+export function seriesRejectedPost(args: { teamName: string; oppPing: Ping | null }): ChannelPost {
   return channelPost([args.oppPing], {
-    title: "Result disputed",
+    title: "Result rejected",
     color: WARN_AMBER,
-    description: `**${args.teamName}** disputed the submitted result. Please resubmit when ready.`,
+    description: `**${args.teamName}** rejected the submitted result. Please resubmit when ready.`,
+  });
+}
+
+// The rejected team stood by its score, so staff now own the match. No ping:
+// the teams can read this but there is nothing left for them to do, and the
+// people who have to act are notified by push instead.
+export function seriesEscalatedPost(args: {
+  teamName: string;
+  homeWins: number;
+  awayWins: number;
+}): ChannelPost {
+  return channelPost([], {
+    title: "Result disputed — staff reviewing",
+    color: BAD_RED,
+    description:
+      `**${args.teamName}** disputed the rejection of its **${args.homeWins}–${args.awayWins}** ` +
+      `submission. Staff have been notified and will record the result. ` +
+      `Neither team can submit or confirm a score until they do.`,
   });
 }
 

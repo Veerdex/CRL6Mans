@@ -33,7 +33,8 @@ import {
   checkInPost,
   matchResultPost,
   replayReviewPost,
-  seriesDisputedPost,
+  seriesRejectedPost,
+  seriesEscalatedPost,
   type ChannelPost,
 } from "./match-embeds";
 import { announceClip, clipsChannelId, createClip } from "./clip-submit";
@@ -3403,12 +3404,18 @@ export async function confirmSeriesResultCore(args: {
   if (match.pending_home_score === null) return { error: "No pending result to confirm" };
   if (match.score_submitted_by_team_id === teamId)
     return { error: "You cannot confirm your own submission — wait for the opposing captain" };
+  if (await isScoreDisputed(args.matchId))
+    return { error: "This match is disputed — staff will record the result" };
 
   const { error } = await supabaseAdmin
     .from("matches")
     .update({ score_confirmed: true })
     .eq("id", args.matchId);
   if (error) return { error: error.message };
+
+  // The teams have agreed, so any earlier rejection is spent. Left behind, it
+  // would offer a Dispute button on a match that is already settled.
+  await clearScoreDispute(args.matchId);
 
   const outcome = await finalizeAcceptedSeries(
     args.matchId, match.pending_home_score!, match.pending_away_score!,
@@ -3428,7 +3435,7 @@ export async function cancelSeriesSubmissionCore(args: {
 
   const { data: match } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, home_score, pending_home_score, pending_away_score")
+    .select("id, home_team_id, away_team_id, home_score, pending_home_score, pending_away_score, score_submitted_by_team_id")
     .eq("id", args.matchId)
     .single();
 
@@ -3452,6 +3459,37 @@ export async function cancelSeriesSubmissionCore(args: {
     .eq("id", args.matchId);
   if (error) return { error: error.message };
 
+  // Record the rejection so the submitting team has something to dispute.
+  //
+  // Only when the actor is the *other* team. Either team may clear a pending
+  // submission, and a team retracting its own typo has rejected nothing — giving
+  // it a Dispute button there would let it escalate against itself.
+  //
+  // The scores go in score_rejected_* rather than staying in pending_*, which the
+  // update above has just cleared: processExpiredScoreConfirmations adopts any
+  // lingering pending score as final once its window lapses.
+  //
+  // Separate, best-effort update for the same reason identity_status is one in
+  // series-actions.ts — an unknown column makes PostgREST reject the whole
+  // statement, so folding these into the update above would break rejection
+  // entirely on a database where score-dispute-migration.sql has not run.
+  const rejectedSomeoneElse =
+    match.score_submitted_by_team_id !== null && match.score_submitted_by_team_id !== teamId;
+
+  if (rejectedSomeoneElse) {
+    try {
+      await supabaseAdmin
+        .from("matches")
+        .update({
+          score_rejected_by_team_id: teamId,
+          score_rejected_at:         new Date().toISOString(),
+          score_rejected_home:       homeScore,
+          score_rejected_away:       awayScore,
+        })
+        .eq("id", args.matchId);
+    } catch { /* pre-migration database — rejection still works, dispute is unavailable */ }
+  }
+
   try {
     const otherTeamId = teamId === match.home_team_id ? match.away_team_id : match.home_team_id;
     const [{ data: myTeam }, { data: otherTeam }] = await Promise.all([
@@ -3459,7 +3497,7 @@ export async function cancelSeriesSubmissionCore(args: {
       supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
     ]);
     if (myTeam?.name && otherTeam?.name) {
-      await notifyMatchChannel(args.matchId, seriesDisputedPost({
+      await notifyMatchChannel(args.matchId, seriesRejectedPost({
         teamName: myTeam.name,
         oppPing: teamPing(otherTeam.name, await getGuildRoles()),
       }));
@@ -3467,6 +3505,144 @@ export async function cancelSeriesSubmissionCore(args: {
   } catch { /* best-effort */ }
 
   return { homeScore: homeScore ?? undefined, awayScore: awayScore ?? undefined };
+}
+
+// The rejected team stands by its score. This is the only path in the reporting
+// flow that notifies staff, and the point of the two rounds: one rejection is
+// usually a typo, so it stays between the teams, while a team insisting after a
+// rejection means they cannot settle it themselves.
+//
+// Deliberately not reachable from the bot — there is no /dispute command, so
+// nothing new has to be registered. It takes actorDiscordId anyway to match its
+// two siblings above.
+export async function disputeSeriesResultCore(args: {
+  matchId: string;
+  actorDiscordId: string;
+}): Promise<SeriesDecision> {
+  const teamId = await teamIdOfDiscordId(args.actorDiscordId);
+  if (!teamId) return { error: "Not on a team" };
+
+  const rejection = await getScoreDisputeState(args.matchId);
+  if (!rejection.rejectedByTeamId) return { error: "There is no rejected result to dispute" };
+  if (rejection.disputedAt) return { error: "This result is already disputed — staff are reviewing it" };
+
+  const { data: match } = await supabaseAdmin
+    .from("matches")
+    .select("id, home_team_id, away_team_id, home_score, pending_home_score")
+    .eq("id", args.matchId)
+    .single();
+
+  if (!match) return { error: "Match not found" };
+  if (match.home_team_id !== teamId && match.away_team_id !== teamId)
+    return { error: "Your team is not in this match" };
+  if (match.home_score !== null) return { error: "This match is already finalised" };
+  // The rejecting team cannot dispute its own rejection; only the team whose
+  // submission was thrown out can escalate.
+  if (rejection.rejectedByTeamId === teamId)
+    return { error: "You rejected this result — only the submitting team can dispute it" };
+  // A resubmission supersedes the rejection: the teams are talking again, and the
+  // new claim has its own confirm/reject round to go through.
+  if (match.pending_home_score !== null)
+    return { error: "A new result has been submitted — that one has to be settled first" };
+
+  const { error } = await supabaseAdmin
+    .from("matches")
+    .update({ score_disputed_at: new Date().toISOString() })
+    .eq("id", args.matchId);
+  if (error) return { error: error.message };
+
+  const homeScore = rejection.rejectedHome ?? 0;
+  const awayScore = rejection.rejectedAway ?? 0;
+
+  try {
+    const { data: myTeam } = await supabaseAdmin
+      .from("teams").select("name").eq("id", teamId).single();
+    if (myTeam?.name) {
+      await notifyMatchChannel(args.matchId, seriesEscalatedPost({
+        teamName: myTeam.name,
+        homeWins: homeScore,
+        awayWins: awayScore,
+      }));
+    }
+  } catch { /* best-effort */ }
+
+  pushToAdmins({
+    title: "Result Disputed",
+    body: `Two teams can't agree on a ${homeScore}–${awayScore} series. Record the result in the Admin panel.`,
+    url: "/dashboard/admin",
+    tag: "match-reporting",
+  }, "match_reporting").catch(() => {});
+
+  return { outcome: "pending_admin", homeScore, awayScore };
+}
+
+export type ScoreDisputeState = {
+  rejectedByTeamId: string | null;
+  rejectedHome:     number | null;
+  rejectedAway:     number | null;
+  disputedAt:       string | null;
+};
+
+const NO_DISPUTE: ScoreDisputeState = {
+  rejectedByTeamId: null, rejectedHome: null, rejectedAway: null, disputedAt: null,
+};
+
+// The one reader for the dispute columns, so every surface that needs them —
+// the My Team panel, the admin list — goes through the same statement.
+//
+// Its own select, separate from whatever else the caller is fetching, for the
+// usual reason: an unknown column makes PostgREST reject the whole statement, so
+// a pre-migration database would take the caller's other columns down with it.
+// All-null on failure, which is the "nothing rejected, nothing disputed" state a
+// pre-migration database is genuinely in.
+export async function getScoreDisputeState(matchId: string): Promise<ScoreDisputeState> {
+  const { data } = await supabaseAdmin
+    .from("matches")
+    .select("score_rejected_by_team_id, score_rejected_home, score_rejected_away, score_disputed_at")
+    .eq("id", matchId)
+    .maybeSingle();
+  const row = data as {
+    score_rejected_by_team_id: string | null;
+    score_rejected_home:       number | null;
+    score_rejected_away:       number | null;
+    score_disputed_at:         string | null;
+  } | null;
+  if (!row) return NO_DISPUTE;
+  return {
+    rejectedByTeamId: row.score_rejected_by_team_id,
+    rejectedHome:     row.score_rejected_home,
+    rejectedAway:     row.score_rejected_away,
+    disputedAt:       row.score_disputed_at,
+  };
+}
+
+// True once a match is with staff. Reporting is frozen from that point: letting
+// a team submit or confirm afterwards would let them settle, by themselves, the
+// disagreement they just escalated.
+export async function isScoreDisputed(matchId: string): Promise<boolean> {
+  return !!(await getScoreDisputeState(matchId)).disputedAt;
+}
+
+// Clears the rejection and dispute record. Called wherever a match leaves the
+// disagreement behind — a fresh submission, a confirmation, an admin recording
+// the result — so the flags never outlive the round they belong to and a later
+// rejection starts from a clean slate.
+//
+// Best-effort and separate, like every other write to these columns: a
+// pre-migration database has nothing to clear.
+export async function clearScoreDispute(matchId: string): Promise<void> {
+  try {
+    await supabaseAdmin
+      .from("matches")
+      .update({
+        score_rejected_by_team_id: null,
+        score_rejected_at:         null,
+        score_rejected_home:       null,
+        score_rejected_away:       null,
+        score_disputed_at:         null,
+      })
+      .eq("id", matchId);
+  } catch { /* pre-migration database */ }
 }
 
 // ─── Score auto-confirm ─────────────────────────────────────────────────────────

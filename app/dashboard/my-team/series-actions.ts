@@ -17,6 +17,9 @@ import {
   processExpiredScoreConfirmations,
   confirmSeriesResultCore,
   cancelSeriesSubmissionCore,
+  disputeSeriesResultCore,
+  clearScoreDispute,
+  isScoreDisputed,
 } from "@/app/lib/discord-bot";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
@@ -89,6 +92,8 @@ export async function submitSeriesResult(
     return { error: "Your team is not in this match" };
   if (match.home_score !== null) return { error: "This match already has a recorded result" };
   if (match.score_confirmed) return { error: "The result has already been confirmed — contact an admin to change it" };
+  if (await isScoreDisputed(matchId))
+    return { error: "This match is disputed — staff will record the result" };
   const checkIn = checkInGate(match);
   if (checkIn) return { error: checkIn };
 
@@ -135,6 +140,10 @@ export async function submitSeriesResult(
     .eq("id", matchId);
 
   if (error) return { error: error.message };
+
+  // A resubmission supersedes any earlier rejection: the new claim gets its own
+  // confirm/reject round, so the old one must not leave a Dispute button behind.
+  await clearScoreDispute(matchId);
 
   // Best-effort — identity_status is a visibility column, not load-bearing for
   // submission, and must not fail the whole request if the migration adding it
@@ -212,6 +221,22 @@ export async function confirmSeriesResult(
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard/season");
+  return {};
+}
+
+// The submitting team stands by a score the opponent rejected, which hands the
+// match to staff. This is the only reporting action that notifies them — see
+// disputeSeriesResultCore for why it takes two rounds to get here.
+export async function disputeSeriesResult(
+  matchId: string
+): Promise<{ error?: string }> {
+  const session = await getSessionOrLogin();
+
+  const result = await disputeSeriesResultCore({ matchId, actorDiscordId: session.userId });
+  if (result.error) return { error: result.error };
+
+  revalidatePath("/dashboard/my-team");
+  revalidatePath("/dashboard/admin");
   return {};
 }
 

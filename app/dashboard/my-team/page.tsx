@@ -13,7 +13,7 @@ import {
   nextPow2,
   GROUP_STAGE_PREFIX, parseGroupNum,
 } from "@/app/lib/bracket";
-import { getBestOfForMatch } from "@/app/lib/discord-bot";
+import { getBestOfForMatch, getScoreDisputeState } from "@/app/lib/discord-bot";
 import { getUnmatchedByGame } from "@/app/lib/replay-analysis-mode";
 import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { MyTeamEditor } from "@/app/dashboard/teams/my-team-editor";
@@ -484,6 +484,12 @@ export default async function MyTeamPage() {
   // about unrecognised players before deciding whether to accept the score.
   const unmatchedByGame = nextMatch ? await getUnmatchedByGame(nextMatch.id) : {};
 
+  // Its own query rather than four more columns on the matches select above —
+  // see getScoreDisputeState for why.
+  const scoreDispute = nextMatch
+    ? await getScoreDisputeState(nextMatch.id)
+    : { rejectedByTeamId: null, rejectedHome: null, rejectedAway: null, disputedAt: null };
+
   // Mirrors checkInGate in series-actions.ts — a stamped deadline means a tournament
   // match, and until both sides clear it neither can upload a replay or report a score.
   const nextMatchSchedule = nextMatch ? scheduleMap[nextMatch.id] : undefined;
@@ -830,6 +836,10 @@ export default async function MyTeamPage() {
               scoreSubmittedByTeamId={nextMatch?.score_submitted_by_team_id ?? null}
               scoreConfirmed={nextMatch?.score_confirmed ?? false}
               scoreSubmittedAt={nextMatch?.score_submitted_at ?? null}
+              scoreRejectedByTeamId={scoreDispute.rejectedByTeamId}
+              scoreRejectedHome={scoreDispute.rejectedHome}
+              scoreRejectedAway={scoreDispute.rejectedAway}
+              scoreDisputedAt={scoreDispute.disputedAt}
               opponentNotReady={opponentNotReady}
               checkInPending={checkInPending}
               iCheckedIn={iCheckedIn}
