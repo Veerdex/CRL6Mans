@@ -3691,16 +3691,18 @@ export async function disputeSeriesResultCore(args: {
     }
   } catch { /* best-effort */ }
 
-  // No category, so it cannot be muted. The old match_reporting toggle existed
-  // to escape a push on every submission; a staff member who had turned it off
-  // for that reason would otherwise silently miss the one message that means
-  // two teams are stuck waiting on them.
+  // Mutable, under its own category rather than the retired match_reporting one
+  // — see AdminNotificationCategory for why the key had to change. What made the
+  // old toggle dangerous was its label, not its existence: it promised to mute a
+  // push on every submission, which no longer exists, so the only thing it
+  // silenced was this. Named for what it is, muting it is a real choice staff can
+  // make, and "Match Result Disputes" is the box that makes it.
   pushToAdmins({
     title: "Result Disputed",
     body: `Two teams can't agree on a ${homeScore}–${awayScore} series. Record the result in the Admin panel.`,
     url: "/dashboard/admin",
     tag: "match-reporting",
-  }).catch(() => {});
+  }, "match_disputes").catch(() => {});
 
   return { outcome: "pending_admin", homeScore, awayScore };
 }

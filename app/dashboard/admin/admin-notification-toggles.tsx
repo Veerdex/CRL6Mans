@@ -34,12 +34,18 @@ async function resolveKeyState(): Promise<KeyState> {
   }
 }
 
+// Each label names the push it actually silences, not the feature area it sits
+// in. The retired "match_reporting" toggle said "when a team submits a series
+// result" long after routine submissions had stopped pushing at all, so the only
+// thing it still muted was the escalation — someone turning off what the label
+// advertised lost the one message that means two teams are blocked. Both
+// escalation toggles below are worded as escalations for that reason.
+//
+// These live on league_settings, so they are league-wide: one staff member
+// unchecking a box silences it for all staff, not just themselves.
 const ITEMS: { key: string; label: string; desc: string }[] = [
-  // No match-reporting toggle. Routine submissions no longer push at all, and
-  // the one score notification left — a disputed result — is deliberately not
-  // mutable: it means two teams are blocked until staff rule, the same reason
-  // "Replay Review Required" has no category either.
-  { key: "sub_requests",    label: "Sub Requests",             desc: "When a team requests a substitute." },
+  { key: "sub_requests",    label: "Sub Request Disputes",     desc: "When a team asks staff to overrule a rejected substitute." },
+  { key: "match_disputes",  label: "Match Result Disputes",    desc: "When two teams can't agree on a series score and staff must record it." },
   { key: "registrations",   label: "Pending Registrations",    desc: "When a new player submits a registration." },
   { key: "profile_changes", label: "Profile Change Requests",  desc: "When a player requests an MMR / tracker change." },
   { key: "schedule_approvals", label: "Schedule Approvals",    desc: "When two teams agree on a time outside the scheduled window." },
@@ -100,7 +106,8 @@ export function AdminNotificationToggles({ initial }: { initial: Record<string, 
   return (
     <div className="space-y-2">
       <p className="text-xs text-zinc-500">
-        Push notifications sent to staff. Turn off any you don&apos;t want to receive.
+        Push notifications sent to staff. These apply to the whole staff team —
+        turning one off stops it reaching every moderator, not just you.
       </p>
       {ITEMS.map((item) => {
         const on = prefs[item.key] !== false;

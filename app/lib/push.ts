@@ -155,8 +155,15 @@ export async function pushToUser(discordId: string, payload: PushPayload) {
   if (data?.length) await sendToSubscriptions(data, payload);
 }
 
+// Deliberately not the old "match_reporting" key, which this replaces.
+// setAdminNotificationPref only ever writes keys into admin_notification_prefs
+// and never deletes them, so any staff member who muted the retired
+// every-submission push left `match_reporting: false` sitting in that jsonb —
+// reusing the name would hand them disputes pre-muted by a choice they made
+// about a different notification. The stale key is inert: nothing passes it.
 export type AdminNotificationCategory =
   | "sub_requests"
+  | "match_disputes"
   | "registrations"
   | "profile_changes"
   | "schedule_approvals";
