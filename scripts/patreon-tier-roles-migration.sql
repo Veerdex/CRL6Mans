@@ -16,4 +16,4 @@ create table if not exists patreon_tier_roles (
   updated_at timestamptz not null default now()
 );
 
-alter table patreon_tier_roles disable row level security;
+alter table patreon_tier_roles enable row level security;

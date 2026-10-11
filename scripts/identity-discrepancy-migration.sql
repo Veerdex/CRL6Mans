@@ -71,5 +71,5 @@ create index if not exists replay_identity_discrepancies_match_id_idx  on replay
 create index if not exists replay_identity_discrepancies_replay_id_idx on replay_identity_discrepancies(replay_id);
 create index if not exists replay_identity_discrepancies_status_idx    on replay_identity_discrepancies(status);
 
-alter table replay_identity_certifications disable row level security;
-alter table replay_identity_discrepancies  disable row level security;
+alter table replay_identity_certifications enable row level security;
+alter table replay_identity_discrepancies  enable row level security;

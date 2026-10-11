@@ -25,7 +25,7 @@ create table if not exists themes (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-alter table themes disable row level security;
+alter table themes enable row level security;
 
 alter table sponsors add column if not exists theme_id uuid references themes(id) on delete set null;
 

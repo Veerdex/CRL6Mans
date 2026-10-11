@@ -39,4 +39,4 @@ create table if not exists match_identity_snapshots (
 create unique index if not exists match_identity_snapshots_match_id_idx
   on match_identity_snapshots(match_id);
 
-alter table match_identity_snapshots disable row level security;
+alter table match_identity_snapshots enable row level security;

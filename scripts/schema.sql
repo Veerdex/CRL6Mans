@@ -583,24 +583,31 @@ on conflict (id) do update set public = excluded.public;
 
 -- ─────────────────────────────────────────────
 -- ROW LEVEL SECURITY
--- Disabled on all tables — the app uses the service-role key exclusively.
+-- Enabled on every table, with no policies. The app reaches Postgres only
+-- through the service-role key, which bypasses RLS, so this costs it nothing —
+-- and it is the only thing standing between the anon key, which Supabase
+-- publishes every one of these tables to at /rest/v1/<table>, and the data.
+--
+-- These statements used to read `disable`, on the reasoning that the app uses
+-- the service role exclusively. True, but backwards: that is an argument for
+-- RLS being free, not for turning it off.
 -- ─────────────────────────────────────────────
-alter table players                  disable row level security;
-alter table teams                    disable row level security;
-alter table matches                  disable row level security;
-alter table league_settings          disable row level security;
-alter table sub_requests             disable row level security;
-alter table game_scores              disable row level security;
-alter table tournaments              disable row level security;
-alter table tournament_entries       disable row level security;
-alter table team_signups             disable row level security;
-alter table team_signup_members      disable row level security;
-alter table player_edit_requests     disable row level security;
-alter table match_discord_categories disable row level security;
-alter table player_game_stats        disable row level security;
-alter table push_subscriptions       disable row level security;
-alter table seasons                  disable row level security;
-alter table analytics_events         disable row level security;
-alter table player_platform_accounts       disable row level security;
-alter table player_platform_account_events disable row level security;
-alter table match_identity_snapshots       disable row level security;
+alter table players                  enable row level security;
+alter table teams                    enable row level security;
+alter table matches                  enable row level security;
+alter table league_settings          enable row level security;
+alter table sub_requests             enable row level security;
+alter table game_scores              enable row level security;
+alter table tournaments              enable row level security;
+alter table tournament_entries       enable row level security;
+alter table team_signups             enable row level security;
+alter table team_signup_members      enable row level security;
+alter table player_edit_requests     enable row level security;
+alter table match_discord_categories enable row level security;
+alter table player_game_stats        enable row level security;
+alter table push_subscriptions       enable row level security;
+alter table seasons                  enable row level security;
+alter table analytics_events         enable row level security;
+alter table player_platform_accounts       enable row level security;
+alter table player_platform_account_events enable row level security;
+alter table match_identity_snapshots       enable row level security;

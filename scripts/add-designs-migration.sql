@@ -25,7 +25,7 @@ create table if not exists designs (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-alter table designs disable row level security;
+alter table designs enable row level security;
 
 alter table tournaments add column if not exists design_id uuid references designs(id) on delete set null;
 alter table league_settings add column if not exists season_design_id uuid references designs(id) on delete set null;

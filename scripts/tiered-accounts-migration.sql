@@ -217,10 +217,20 @@ alter table wager_balance_adjustments add constraint wager_balance_adjustments_p
 -- from every wager/parlay payout and refund path in app/lib/discord-bot.ts.
 -- Already keyed by discord_id, so no app-code changes are needed — only
 -- the function body moves from `players` to `accounts`.
+--
+-- The body below must stay identical to the one in coin-ledger-migration.sql.
+-- It used to be a bare `update accounts set crl_coins = crl_coins + n`, which
+-- meant re-running this file silently replaced the ledger-writing version with
+-- one that moves coins and records nothing — reintroducing the exact bug the
+-- ledger exists to prevent. Requires coin-ledger-migration.sql, which creates
+-- credit_crl_coins; run these in order on a fresh database.
 -- ─────────────────────────────────────────────
 create or replace function increment_crl_coins(player_discord_id text, coin_amount integer)
 returns void as $$
-  update accounts
-  set crl_coins = crl_coins + coin_amount, updated_at = now()
-  where discord_id = player_discord_id;
-$$ language sql;
+begin
+  perform credit_crl_coins(player_discord_id, coin_amount, 'legacy increment_crl_coins');
+end;
+$$ language plpgsql;
+
+revoke execute on function increment_crl_coins(text, integer) from public, anon, authenticated;
+grant  execute on function increment_crl_coins(text, integer) to service_role;

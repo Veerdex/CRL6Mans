@@ -109,8 +109,9 @@ create index if not exists team_signups_tournament_idx     on team_signups(tourn
 create index if not exists team_signup_members_team_idx     on team_signup_members(team_signup_id);
 create index if not exists team_signup_members_player_idx   on team_signup_members(player_id);
 
--- Rely on the service-role key for all writes (consistent with the rest of the schema)
-alter table tournaments         disable row level security;
-alter table tournament_entries  disable row level security;
-alter table team_signups        disable row level security;
-alter table team_signup_members disable row level security;
+-- No policies: the service-role key bypasses RLS, so default-deny costs the app
+-- nothing and keeps the anon key out. See the note in schema.sql.
+alter table tournaments         enable row level security;
+alter table tournament_entries  enable row level security;
+alter table team_signups        enable row level security;
+alter table team_signup_members enable row level security;

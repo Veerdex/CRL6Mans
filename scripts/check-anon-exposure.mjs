@@ -14,13 +14,10 @@
  * Read the verdicts narrowly. PostgREST answers an RLS-filtered request exactly
  * as it answers one that genuinely matched nothing, so "no rows" never convicts
  * and never acquits -- only 401/403 (no grant at all) and rows actually coming
- * back are conclusive. The catalog is the authoritative check:
- *
- *   select relname, relrowsecurity,
- *          has_table_privilege('anon', oid, 'select') as anon_select,
- *          has_table_privilege('anon', oid, 'update') as anon_update
- *   from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r'
- *   order by relname;
+ * back are conclusive. This probe is the outside view; the authoritative check
+ * is Part 3 of scripts/rls-posture.sql, which reads the catalog directly and
+ * also covers what this cannot see from out here -- views, which bypass RLS by
+ * running as their owner, and SECURITY DEFINER functions.
  */
 
 import { readFileSync } from "node:fs";
@@ -97,15 +94,30 @@ for (const [table, column] of [["crl_coin_transactions", "amount"], ["accounts",
   );
 }
 
-console.log("\nThe coin mutators, called with the public anon key\n");
+console.log("\nFunctions called with the public anon key\n");
 
-for (const fn of ["credit_crl_coins", "debit_crl_coins", "increment_crl_coins"]) {
+// Postgres grants EXECUTE to PUBLIC by default and Supabase publishes every
+// public function at /rest/v1/rpc/, so a new function is reachable by the anon
+// key until something revokes it. A SECURITY DEFINER one is worse than an open
+// table: it runs as its owner, so it bypasses RLS entirely.
+//
+// A function the role cannot execute comes back 404 rather than 403 -- PostgREST
+// will not admit that it exists.
+const FUNCTIONS = [
+  // The coin mutators. A snowflake matching no account and a zero amount, so a
+  // permitted call moves nothing and the refusal we want is a permissions one.
+  ["credit_crl_coins", { player_discord_id: "0", coin_amount: 0 }],
+  ["debit_crl_coins", { player_discord_id: "0", coin_amount: 0 }],
+  ["increment_crl_coins", { player_discord_id: "0", coin_amount: 0 }],
+  // SECURITY DEFINER, and was callable by anon until rls-posture.sql revoked it.
+  ["get_database_size_bytes", {}],
+];
+
+for (const [fn, body] of FUNCTIONS) {
   const res = await fetch(`${url}/rest/v1/rpc/${fn}`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
-    // A snowflake that matches no account, and zero coins: if this is permitted,
-    // it moves nothing, and the refusal we want to see is a permissions one.
-    body: JSON.stringify({ player_discord_id: "0", coin_amount: 0 }),
+    body: JSON.stringify(body),
   });
   const denied = res.status === 401 || res.status === 403 || res.status === 404;
   console.log(`  ${fn.padEnd(26)} ${denied ? `denied (HTTP ${res.status})` : `CALLABLE (HTTP ${res.status})`}`);

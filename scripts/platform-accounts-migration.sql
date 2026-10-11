@@ -91,5 +91,5 @@ insert into storage.buckets (id, name, public)
 values ('platform-verification-replays', 'platform-verification-replays', false)
 on conflict (id) do update set public = excluded.public;
 
-alter table player_platform_accounts       disable row level security;
-alter table player_platform_account_events disable row level security;
+alter table player_platform_accounts       enable row level security;
+alter table player_platform_account_events enable row level security;

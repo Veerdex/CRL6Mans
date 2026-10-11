@@ -27,4 +27,4 @@ create table if not exists player_career_stats (
   updated_at timestamptz not null default now()
 );
 
-alter table player_career_stats disable row level security;
+alter table player_career_stats enable row level security;

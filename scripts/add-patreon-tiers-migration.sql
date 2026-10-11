@@ -35,6 +35,6 @@ create table if not exists patreon_tier_benefits (
   primary key (tier_id, benefit_id)
 );
 
-alter table patreon_benefits      disable row level security;
-alter table patreon_tiers         disable row level security;
-alter table patreon_tier_benefits disable row level security;
+alter table patreon_benefits      enable row level security;
+alter table patreon_tiers         enable row level security;
+alter table patreon_tier_benefits enable row level security;

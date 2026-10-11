@@ -42,5 +42,5 @@ alter table league_settings add column if not exists clips_channel_id text;
 alter table league_settings add column if not exists last_clip_reset_at timestamptz;
 alter table league_settings add column if not exists clip_of_week_id uuid references clips(id) on delete set null;
 
-alter table clips      disable row level security;
-alter table clip_likes disable row level security;
+alter table clips      enable row level security;
+alter table clip_likes enable row level security;

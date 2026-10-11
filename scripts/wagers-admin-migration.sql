@@ -24,4 +24,4 @@ create index if not exists wager_balance_adjustments_batch_id_idx   on wager_bal
 create index if not exists wager_balance_adjustments_player_id_idx  on wager_balance_adjustments(player_id);
 create index if not exists wager_balance_adjustments_created_at_idx on wager_balance_adjustments(created_at);
 
-alter table wager_balance_adjustments disable row level security;
+alter table wager_balance_adjustments enable row level security;

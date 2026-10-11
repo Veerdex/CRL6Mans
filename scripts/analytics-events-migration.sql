@@ -7,4 +7,4 @@ create table if not exists analytics_events (
 
 create index if not exists analytics_events_type_created_idx on analytics_events(type, created_at);
 
-alter table analytics_events disable row level security;
+alter table analytics_events enable row level security;
