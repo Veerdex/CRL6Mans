@@ -401,9 +401,9 @@ too if the Losers-side team forces one.
 
 Importantly, that notification firing does **not** mean the Podium page
 updates automatically. The Podium's permanent record only gets created when
-an admin separately runs the archiving step afterward (Season Report /
-"Export & Reset Season," or a tournament's "Export & Complete" / "Complete,"
-both described in the Admin Dashboard section) — that step is what actually
+an admin separately runs the archiving step afterward (End Season /
+"Complete Season," or a tournament's "Complete," both described in the
+Admin Dashboard section) — that step is what actually
 snapshots the champion, rosters, and top performers into a permanent
 record and only then clears out the live data for the next event. So there
 can be a real gap in time between "everyone got the completion
@@ -1235,13 +1235,15 @@ Moderators too, it's noted.
     completed / cancelled), a "test" badge if applicable, and whether
     sign-ups are open. Scheduled tournaments get Open/Close Sign-ups,
     Activate (disabled while another tournament is already active), Edit,
-    and Cancel buttons. The active tournament gets "Export & Complete"
-    (downloads a full report, then marks it complete and resets the team
-    pool — irreversible) and a plain "Complete" button. Completed
-    tournaments with saved standings get "Export PDF" (downloads the report,
-    then permanently trims the stored record down to just the champion,
-    runner-up, and dates) and, if a full archive was saved, "Download
-    Archive."
+    and Cancel buttons. The active tournament gets a "Complete" button,
+    which marks it complete and resets the team pool — irreversible.
+    Completed tournaments then get a single **Export** button, which
+    downloads both files in one press: the PDF report and the JSON archive.
+    Because both are now on your device, Export also clears the archive out
+    of the database to save space, and the button becomes "Export PDF" from
+    then on — the report can be regenerated any time, but the JSON cannot,
+    so keep that file. The card shows "Archive exported · cleared from DB"
+    with the date once that has happened.
   - A collapsible "All Events" list holds every past tournament and season
     together, each with a Show/Hide toggle (controls whether it appears on
     the public Home page and Podium) and a Delete option that requires
@@ -1289,9 +1291,11 @@ Moderators too, it's noted.
     blocked from submitting replays for their next match.
   - A **Test Season** toggle (locked while a season is active) — same
     discard-on-completion behavior as the tournament-level test toggle.
-  - While a season is active, **Export & Reset Season** downloads a full
-    report, then deletes matches, unassigns every player, and strips team
-    roles — irreversible, with its own confirmation.
+  - While a season is active, **End Season** archives the final standings to
+    Past Events, then deletes matches, unassigns every player, and strips
+    team roles — irreversible, with its own confirmation. The report and the
+    JSON archive are downloaded afterwards, with **Export** on the archived
+    season in the All Events list.
   - A league-wide **Push Notifications** mute toggle (distinct from the
     personal notification list on Overview).
   - A **Testing** section (off by default, with its own warning before you
@@ -1299,7 +1303,8 @@ Moderators too, it's noted.
     generating fake test teams, removing all test users, stripping Discord
     team roles from everyone, and a **Reset Season** button that deletes all
     teams and resets the season immediately — the raw destructive version,
-    as opposed to Export & Reset Season, which saves a report first.
+    as opposed to End Season, which archives the result to Past Events
+    first.
   - A **Live State** readout showing the system's own internal
     understanding of where the draft currently stands, useful for
     diagnosing a stuck draft.

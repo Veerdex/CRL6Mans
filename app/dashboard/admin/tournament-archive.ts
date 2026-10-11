@@ -259,17 +259,6 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
   };
 }
 
-export async function exportTournamentArchive(
-  kind: "tournament" | "season",
-  id: string
-): Promise<TournamentArchive | null> {
-  await assertAdmin();
-
-  const table = kind === "season" ? "seasons" : "tournaments";
-  const { data } = await supabaseAdmin.from(table).select("full_archive").eq("id", id).single();
-  return (data?.full_archive as TournamentArchive | null) ?? null;
-}
-
 /**
  * The handful of fields the admin Data section reads out of an archive. Copied
  * into `summary` before the archive goes, so a purged event still shows its
@@ -282,27 +271,34 @@ export type ArchiveResidual = {
 };
 
 /**
- * Drop the archive once both exports have been taken.
+ * Drop the archive now that the Export button has handed its JSON to an admin.
  *
- * This is irreversible and the downloaded files become the only copy, so the
- * decision is made here from the stored row — never from a client that says it
- * downloaded something. `.not("full_archive", "is", null)` makes it idempotent
- * when two clicks race.
+ * Irreversible, and the downloaded file becomes the only copy — so this is
+ * called only after the client confirms that file was written, and only ever
+ * for the archive, never the PDF: the PDF is rebuilt from `summary` on demand.
+ * `.not("full_archive", "is", null)` makes it idempotent when two clicks race.
  *
- * `summary` is deliberately left otherwise intact: it is a few hundred bytes,
- * the public past-events display reads it, and ExportCompletedPdfButton is
- * gated on its standings, so keeping it is what lets a purged tournament still
- * re-export its PDF.
+ * `summary` is deliberately left otherwise intact. It is a few hundred bytes,
+ * the public past-events display reads it, and it carries everything the PDF
+ * needs — which is what lets a purged event still re-export its report.
+ *
+ * No new column records this: the residual's `archivePurgedAt` already does,
+ * in a column that already exists, so the purge needs no migration to work.
  */
-async function purgeIfFullyDownloaded(table: "tournaments" | "seasons", id: string) {
+export async function purgeExportedArchive(
+  kind: "tournament" | "season",
+  id: string,
+): Promise<void> {
+  await assertAdmin();
+
+  const table = kind === "season" ? "seasons" : "tournaments";
   const { data } = await supabaseAdmin
     .from(table)
-    .select("summary, full_archive, pdf_downloaded_at, archive_downloaded_at")
+    .select("summary, full_archive")
     .eq("id", id)
     .single();
 
   if (!data?.full_archive) return;
-  if (!data.pdf_downloaded_at || !data.archive_downloaded_at) return;
 
   const archive = data.full_archive as TournamentArchive;
   const residual: ArchiveResidual = {
@@ -319,32 +315,6 @@ async function purgeIfFullyDownloaded(table: "tournaments" | "seasons", id: stri
     })
     .eq("id", id)
     .not("full_archive", "is", null);
-}
 
-/**
- * Record that one of an event's two exports reached an admin's disk, and purge
- * the archive once both have.
- *
- * Never reports failure: the file has already been written client-side by the
- * time this runs, so a missing column (pre-migration) or a failed update must
- * not surface as a failed download.
- */
-export async function markEventDownloaded(
-  kind: "tournament" | "season",
-  id: string,
-  file: "pdf" | "archive",
-): Promise<void> {
-  await assertAdmin();
-
-  const table = kind === "season" ? "seasons" : "tournaments";
-  const column = file === "pdf" ? "pdf_downloaded_at" : "archive_downloaded_at";
-
-  const { error } = await supabaseAdmin
-    .from(table)
-    .update({ [column]: new Date().toISOString() })
-    .eq("id", id);
-  if (error) return;
-
-  await purgeIfFullyDownloaded(table, id);
   revalidatePath("/dashboard/admin");
 }

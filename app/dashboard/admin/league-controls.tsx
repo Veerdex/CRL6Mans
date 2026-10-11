@@ -4,7 +4,7 @@ import { useState, useTransition, useEffect } from "react";
 import { adminStartDraft, adminAutoBalance, adminEndDraft, adminStartSeason, addTestUser, addBulkTestUsers, removeTestUsers, generateTestTeams, resetSeason, openDraftSignups, closeDraftSignups, saveMatchSettings, saveMinMmr, saveSeasonPrizes, forceResetDraftState, setTestingMode, setNotificationsEnabled, stripTeamDiscordRoles, forceTrackerUpdate, setIsTestSeason, setSubsEnabled } from "./league-actions";
 import { auditMatchChannels, applyChannelChanges, type ChannelAuditItem, type ChannelAuditResult } from "./channel-debug-actions";
 import { SEASON_ACCOLADES } from "@/app/lib/accolades";
-import { ExportAndResetSeasonButton } from "./export-pdf-button";
+import { CompleteSeasonButton } from "./complete-season-button";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const HOURS = Array.from({ length: 24 }, (_, h) => {
@@ -546,14 +546,15 @@ export function LeagueControls({ draftOpen, matchDeadlineDay, matchPlayDay, matc
         </div>
       </div>
 
-      {/* End of season — export report, then reset */}
+      {/* End of season — archive to Past Events, then reset */}
       {seasonActive && (
         <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-4 space-y-2">
-          <p className="text-sm font-medium text-white">Season Report</p>
+          <p className="text-sm font-medium text-white">End Season</p>
           <p className="text-xs text-zinc-500">
-            Download a PDF of final standings and match results, then end and reset the season.
+            Archive the final standings to Past Events and reset the season. The PDF report and
+            JSON archive are downloaded afterwards, with Export on the archived season.
           </p>
-          <ExportAndResetSeasonButton />
+          <CompleteSeasonButton />
         </div>
       )}
 

@@ -18,8 +18,7 @@ import {
   type TournamentInput,
 } from "./tournament-actions";
 import { addBulkTournamentTestUsers } from "./league-actions";
-import { ExportCompletedPdfButton, ExportAndCompletePdfButton } from "./export-pdf-button";
-import { ArchivePurgedNote, DownloadArchiveButton } from "./download-archive-button";
+import { ArchivePurgedNote, ExportEventButton } from "./export-event-button";
 import {
   type SeasonFormatConfig,
   type PresetId,
@@ -1197,19 +1196,13 @@ export function TournamentManager({
                   </>
                 )}
                 {t.status === "active" && (
-                  <>
-                    <ExportAndCompletePdfButton />
-                    <button onClick={() => setConfirm({ id: t.id, action: "complete" })} disabled={isPending}
-                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded-lg transition-colors">
-                      Complete
-                    </button>
-                  </>
+                  <button onClick={() => setConfirm({ id: t.id, action: "complete" })} disabled={isPending}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded-lg transition-colors">
+                    Complete
+                  </button>
                 )}
-                {t.status === "completed" && (summary?.finalStandings?.length ?? 0) > 0 && (
-                  <ExportCompletedPdfButton tournamentId={t.id} />
-                )}
-                {t.status === "completed" && !!t.full_archive && (
-                  <DownloadArchiveButton kind="tournament" id={t.id} name={t.name} />
+                {t.status === "completed" && (!!t.full_archive || (summary?.finalStandings?.length ?? 0) > 0) && (
+                  <ExportEventButton kind="tournament" id={t.id} hasArchive={!!t.full_archive} />
                 )}
                 {t.status === "completed" && !t.full_archive && summary?.archivePurgedAt && (
                   <ArchivePurgedNote purgedAt={summary.archivePurgedAt} />
@@ -1272,8 +1265,8 @@ export function TournamentManager({
                   </p>
                 )}
               </div>
-              {!!s.full_archive && (
-                <DownloadArchiveButton kind="season" id={s.id} name={s.name} />
+              {(!!s.full_archive || (s.summary?.finalStandings?.length ?? 0) > 0) && (
+                <ExportEventButton kind="season" id={s.id} hasArchive={!!s.full_archive} />
               )}
               {!s.full_archive && s.summary?.archivePurgedAt && (
                 <ArchivePurgedNote purgedAt={s.summary.archivePurgedAt} />

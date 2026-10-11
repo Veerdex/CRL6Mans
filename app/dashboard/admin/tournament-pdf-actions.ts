@@ -5,8 +5,7 @@ import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { APP_NAME } from "@/app/lib/constants";
-import { fetchEventWinner } from "@/app/lib/bracket-server";
+import type { TournamentArchive } from "./tournament-archive";
 
 export type PdfStanding = {
   place: number;
@@ -58,253 +57,127 @@ async function assertAdmin() {
   if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
 }
 
-export async function fetchCompletedTournamentPdfData(
-  tournamentId: string
-): Promise<TournamentPdfData | null> {
+export type EventExport = {
+  name: string;
+  pdf: TournamentPdfData;
+  /** Null for a purged event, and for one completed before archives existed. */
+  archive: TournamentArchive | null;
+};
+
+/**
+ * Everything the Export button hands over, from one row read.
+ *
+ * Both files are built here rather than by two separate actions, because the
+ * PDF is assembled partly out of the archive — the report would otherwise lose
+ * its match results the moment exporting moved to after completion, where the
+ * live matches it used to read are already gone.
+ *
+ * `tournaments` and `seasons` carry the same column names for everything this
+ * needs, so the two kinds share one path.
+ */
+export async function fetchEventExport(
+  kind: "tournament" | "season",
+  id: string,
+): Promise<EventExport | null> {
   await assertAdmin();
 
-  const [{ data: t }, { data: allTeams }] = await Promise.all([
-    supabaseAdmin
-      .from("tournaments")
-      .select("name, season_format, started_at, ended_at, summary")
-      .eq("id", tournamentId)
-      .single(),
-    supabaseAdmin.from("teams").select("name, logo_url"),
-  ]);
+  const table = kind === "season" ? "seasons" : "tournaments";
+  const { data: row } = await supabaseAdmin
+    .from(table)
+    .select("name, season_format, started_at, ended_at, summary, full_archive")
+    .eq("id", id)
+    .single();
 
-  if (!t) return null;
+  if (!row) return null;
 
-  const summary = t.summary as {
+  const summary = row.summary as {
     champion?: string | null;
     runnerUp?: string | null;
     finalStandings?: { name: string; wins: number; losses: number }[];
+    championLogoUrl?: string | null;
+    runnerUpLogoUrl?: string | null;
     championPlayers?: PdfPlayer[];
     runnerUpPlayers?: PdfPlayer[];
+    formatPreset?: string | null;
   } | null;
+  const archive = (row.full_archive as TournamentArchive | null) ?? null;
 
-  const logoByName = Object.fromEntries(
-    (allTeams ?? []).map((team) => [team.name, (team.logo_url as string | null) ?? null])
+  // Logos come from the archive, which snapshotted them at completion. Every
+  // event ends with a reset that deletes the teams, so matching live rows by
+  // name can hand an old event a later team's logo.
+  const logoByName = new Map<string, string | null>(
+    (archive?.teams ?? []).map((t) => [t.name, t.logoUrl]),
   );
+  // Events completed before archives existed have no snapshot to read, so a
+  // live name match is all there is for those.
+  if (!archive) {
+    const { data: liveTeams } = await supabaseAdmin.from("teams").select("name, logo_url");
+    for (const t of liveTeams ?? []) {
+      logoByName.set(t.name, (t.logo_url as string | null) ?? null);
+    }
+  }
 
-  const rawStandings = summary?.finalStandings ?? [];
-  const standings: PdfStanding[] = rawStandings.map((row, i) => ({
+  const standings: PdfStanding[] = (summary?.finalStandings ?? []).map((r, i) => ({
     place: i + 1,
-    name: row.name,
-    wins: row.wins,
-    losses: row.losses,
-    logoUrl: logoByName[row.name] ?? null,
+    name: r.name,
+    wins: r.wins,
+    losses: r.losses,
+    logoUrl: logoByName.get(r.name) ?? null,
   }));
 
-  const sf = t.season_format as { preset?: string } | null;
+  const teamNameById = new Map((archive?.teams ?? []).map((t) => [t.id, t.name]));
+  const matches: PdfMatch[] = (archive?.matches ?? [])
+    .filter(
+      (m) =>
+        m.status === "completed" &&
+        m.homeTeamId !== null &&
+        m.awayTeamId !== null &&
+        m.homeScore !== null &&
+        m.awayScore !== null,
+    )
+    .map((m) => ({
+      stage: String(m.stage ?? ""),
+      round: `Round ${m.round}`,
+      home: teamNameById.get(m.homeTeamId as string) ?? "Unknown",
+      away: teamNameById.get(m.awayTeamId as string) ?? "Unknown",
+      homeScore: m.homeScore as number,
+      awayScore: m.awayScore as number,
+    }));
+
+  const preset =
+    (row.season_format as { preset?: string } | null)?.preset ??
+    archive?.meta?.formatPreset ??
+    summary?.formatPreset ??
+    null;
+
   const champion = summary?.champion ?? null;
   const runnerUp = summary?.runnerUp ?? null;
 
   return {
-    name: t.name,
-    format: PRESET_NAMES[sf?.preset ?? ""] ?? sf?.preset ?? "Tournament",
-    teamCount: standings.length,
-    startedAt: t.started_at,
-    endedAt: t.ended_at,
-    champion,
-    championLogoUrl: champion ? (logoByName[champion] ?? null) : null,
-    championPlayers: summary?.championPlayers ?? [],
-    runnerUp,
-    runnerUpLogoUrl: runnerUp ? (logoByName[runnerUp] ?? null) : null,
-    runnerUpPlayers: summary?.runnerUpPlayers ?? [],
-    standings,
-    matches: [],
-  };
-}
-
-export async function fetchActiveTournamentPdfData(): Promise<TournamentPdfData | null> {
-  await assertAdmin();
-
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings")
-    .select("active_tournament_id")
-    .single();
-
-  const activeId = settings?.active_tournament_id as string | null | undefined;
-  if (!activeId) return null;
-
-  const [{ data: t }, { data: allTeams }, { data: completedMatches }] = await Promise.all([
-    supabaseAdmin
-      .from("tournaments")
-      .select("name, season_format, started_at")
-      .eq("id", activeId)
-      .single(),
-    supabaseAdmin.from("teams").select("id, name, wins, losses, logo_url"),
-    supabaseAdmin
-      .from("matches")
-      .select("home_team_id, away_team_id, home_score, away_score, stage, round, match_number")
-      .eq("status", "completed")
-      .not("home_team_id", "is", null)
-      .not("away_team_id", "is", null)
-      .not("home_score", "is", null)
-      .not("away_score", "is", null)
-      .order("stage")
-      .order("round")
-      .order("match_number"),
-  ]);
-
-  if (!t) return null;
-
-  const teamById = Object.fromEntries(
-    (allTeams ?? []).map((team) => [
-      team.id,
-      { name: team.name, logoUrl: (team.logo_url as string | null) ?? null },
-    ])
-  );
-
-  const standings: PdfStanding[] = (allTeams ?? [])
-    .filter((team) => (team.wins ?? 0) + (team.losses ?? 0) > 0)
-    .sort(
-      (a, b) =>
-        (b.wins ?? 0) - (a.wins ?? 0) ||
-        (a.losses ?? 0) - (b.losses ?? 0) ||
-        a.name.localeCompare(b.name)
-    )
-    .map((team, i) => ({
-      place: i + 1,
-      name: team.name,
-      wins: team.wins ?? 0,
-      losses: team.losses ?? 0,
-      logoUrl: (team.logo_url as string | null) ?? null,
-    }));
-
-  const matches: PdfMatch[] = (completedMatches ?? []).map((m) => ({
-    stage: String(m.stage ?? ""),
-    round: `Round ${m.round}`,
-    home: teamById[m.home_team_id as string]?.name ?? "Unknown",
-    away: teamById[m.away_team_id as string]?.name ?? "Unknown",
-    homeScore: (m.home_score as number) ?? 0,
-    awayScore: (m.away_score as number) ?? 0,
-  }));
-
-  const sf = t.season_format as { preset?: string } | null;
-  // The deciding match outranks the standings — see computeSummary in
-  // tournament-actions.ts for why a win/loss record can't name the champion.
-  // Null until a final has actually been played, which is the normal state for
-  // a mid-event report, so the standings still answer then.
-  const decided = await fetchEventWinner();
-  const championId = decided?.championId ?? (allTeams ?? []).find((t) => t.name === standings[0]?.name)?.id;
-  const runnerUpId = decided?.runnerUpId ?? (allTeams ?? []).find((t) => t.name === standings[1]?.name)?.id;
-  const champion = (championId ? teamById[championId]?.name : null) ?? null;
-  const runnerUp = (runnerUpId ? teamById[runnerUpId]?.name : null) ?? null;
-
-  const topIds = [championId, runnerUpId].filter((id): id is string => !!id);
-  const { data: rosterPlayers } = topIds.length
-    ? await supabaseAdmin.from("players").select("username, display_name, team_id").in("team_id", topIds)
-    : { data: [] as { username: string; display_name: string | null; team_id: string }[] };
-  const byTeam = (id: string | undefined): PdfPlayer[] =>
-    (rosterPlayers ?? []).filter((p) => p.team_id === id).map((p) => ({ username: p.username, displayName: p.display_name ?? null }));
-
-  return {
-    name: t.name,
-    format: PRESET_NAMES[sf?.preset ?? ""] ?? sf?.preset ?? "Tournament",
-    teamCount: standings.length,
-    startedAt: t.started_at,
-    endedAt: null,
-    champion,
-    championLogoUrl: (championId ? teamById[championId]?.logoUrl : null) ?? null,
-    championPlayers: byTeam(championId),
-    runnerUp,
-    runnerUpLogoUrl: (runnerUpId ? teamById[runnerUpId]?.logoUrl : null) ?? null,
-    runnerUpPlayers: byTeam(runnerUpId),
-    standings,
-    matches,
-  };
-}
-
-/**
- * PDF data for a manually-run season (started via League Controls, not a tournament).
- * Mirrors fetchActiveTournamentPdfData but sources everything from live state, since
- * there is no tournament row behind a manual season.
- */
-export async function fetchActiveSeasonPdfData(): Promise<TournamentPdfData | null> {
-  await assertAdmin();
-
-  const [{ data: settings }, { data: allTeams }, { data: completedMatches }] = await Promise.all([
-    supabaseAdmin.from("league_settings").select("season_format, season_active").single(),
-    supabaseAdmin.from("teams").select("id, name, wins, losses, logo_url"),
-    supabaseAdmin
-      .from("matches")
-      .select("home_team_id, away_team_id, home_score, away_score, stage, round, match_number")
-      .eq("status", "completed")
-      .not("home_team_id", "is", null)
-      .not("away_team_id", "is", null)
-      .not("home_score", "is", null)
-      .not("away_score", "is", null)
-      .order("stage")
-      .order("round")
-      .order("match_number"),
-  ]);
-
-  if (!settings?.season_active) return null;
-
-  const teamById = Object.fromEntries(
-    (allTeams ?? []).map((team) => [
-      team.id,
-      { name: team.name, logoUrl: (team.logo_url as string | null) ?? null },
-    ])
-  );
-
-  const standings: PdfStanding[] = (allTeams ?? [])
-    .filter((team) => (team.wins ?? 0) + (team.losses ?? 0) > 0)
-    .sort(
-      (a, b) =>
-        (b.wins ?? 0) - (a.wins ?? 0) ||
-        (a.losses ?? 0) - (b.losses ?? 0) ||
-        a.name.localeCompare(b.name)
-    )
-    .map((team, i) => ({
-      place: i + 1,
-      name: team.name,
-      wins: team.wins ?? 0,
-      losses: team.losses ?? 0,
-      logoUrl: (team.logo_url as string | null) ?? null,
-    }));
-
-  const matches: PdfMatch[] = (completedMatches ?? []).map((m) => ({
-    stage: String(m.stage ?? ""),
-    round: `Round ${m.round}`,
-    home: teamById[m.home_team_id as string]?.name ?? "Unknown",
-    away: teamById[m.away_team_id as string]?.name ?? "Unknown",
-    homeScore: (m.home_score as number) ?? 0,
-    awayScore: (m.away_score as number) ?? 0,
-  }));
-
-  const sf = settings.season_format as { preset?: string } | null;
-  // The deciding match outranks the standings — see computeSummary in
-  // tournament-actions.ts for why a win/loss record can't name the champion.
-  // Null until a final has actually been played, which is the normal state for
-  // a mid-event report, so the standings still answer then.
-  const decided = await fetchEventWinner();
-  const championId = decided?.championId ?? (allTeams ?? []).find((t) => t.name === standings[0]?.name)?.id;
-  const runnerUpId = decided?.runnerUpId ?? (allTeams ?? []).find((t) => t.name === standings[1]?.name)?.id;
-  const champion = (championId ? teamById[championId]?.name : null) ?? null;
-  const runnerUp = (runnerUpId ? teamById[runnerUpId]?.name : null) ?? null;
-
-  const topIds = [championId, runnerUpId].filter((id): id is string => !!id);
-  const { data: rosterPlayers } = topIds.length
-    ? await supabaseAdmin.from("players").select("username, display_name, team_id").in("team_id", topIds)
-    : { data: [] as { username: string; display_name: string | null; team_id: string }[] };
-  const byTeam = (id: string | undefined): PdfPlayer[] =>
-    (rosterPlayers ?? []).filter((p) => p.team_id === id).map((p) => ({ username: p.username, displayName: p.display_name ?? null }));
-
-  return {
-    name: `${APP_NAME} Season ${new Date().getFullYear()}`,
-    format: PRESET_NAMES[sf?.preset ?? ""] ?? sf?.preset ?? "Season",
-    teamCount: standings.length,
-    startedAt: null,
-    endedAt: new Date().toISOString(),
-    champion,
-    championLogoUrl: (championId ? teamById[championId]?.logoUrl : null) ?? null,
-    championPlayers: byTeam(championId),
-    runnerUp,
-    runnerUpLogoUrl: (runnerUpId ? teamById[runnerUpId]?.logoUrl : null) ?? null,
-    runnerUpPlayers: byTeam(runnerUpId),
-    standings,
-    matches,
+    name: row.name,
+    archive,
+    pdf: {
+      name: row.name,
+      format: preset
+        ? (PRESET_NAMES[preset] ?? preset)
+        : kind === "season"
+          ? "Season"
+          : "Tournament",
+      teamCount: standings.length,
+      startedAt: row.started_at ?? null,
+      endedAt: row.ended_at ?? null,
+      champion,
+      championLogoUrl: champion
+        ? (logoByName.get(champion) ?? summary?.championLogoUrl ?? null)
+        : null,
+      championPlayers: summary?.championPlayers ?? [],
+      runnerUp,
+      runnerUpLogoUrl: runnerUp
+        ? (logoByName.get(runnerUp) ?? summary?.runnerUpLogoUrl ?? null)
+        : null,
+      runnerUpPlayers: summary?.runnerUpPlayers ?? [],
+      standings,
+      matches,
+    },
   };
 }

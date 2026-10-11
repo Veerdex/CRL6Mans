@@ -655,14 +655,7 @@ async function computeSummary(statsEnabled: boolean): Promise<TournamentSummary>
   };
 }
 
-/**
- * `pdfDownloaded` is set by the Export & Complete button, which hands the admin
- * the PDF on its way through here. It is the only way a completed event can
- * start life with one of its two downloads already taken — and for a season,
- * the only way it can ever reach both, since a completed season card has no
- * PDF button of its own.
- */
-export async function completeTournament(opts?: { pdfDownloaded?: boolean }) {
+export async function completeTournament() {
   await verifyAdmin();
 
   const { data: settings } = await supabaseAdmin
@@ -724,16 +717,6 @@ export async function completeTournament(opts?: { pdfDownloaded?: boolean }) {
       await recordEventResults(activeId, fullArchive);
     } catch (e) {
       console.error("[completeTournament] failed to record player event results", e);
-    }
-
-    // Deliberately its own update, not folded into the one above: the column
-    // only exists after the archive-download-purge migration, and a missing
-    // column would fail the whole statement and leave the tournament active.
-    if (opts?.pdfDownloaded) {
-      await supabaseAdmin
-        .from("tournaments")
-        .update({ pdf_downloaded_at: endedAt })
-        .eq("id", activeId);
     }
   }
 
