@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { supabaseAdmin } from "./supabase";
 import type { NotificationCategory, AdminNotificationCategory, PushPayload } from "./push";
+import { adminCategoryEnabled } from "./admin-notification-prefs";
 
 export const NOTIFICATION_TTL_DAYS = 30;
 
@@ -106,7 +107,7 @@ function visibleTo(viewer: Viewer, row: Row): boolean {
       break;
     case "admins":
       if (!viewer.isStaff) return false;
-      if (row.admin_category && viewer.adminPrefs?.[row.admin_category] === false) return false;
+      if (row.admin_category && !adminCategoryEnabled(viewer.adminPrefs, row.admin_category)) return false;
       return true;
     case "draft":
       if (!viewer.draftEntered) return false;

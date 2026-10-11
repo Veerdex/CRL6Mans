@@ -297,14 +297,17 @@ export async function createTournament(input: TournamentInput) {
   revalidatePath("/dashboard");
 
   // A test tournament is staff scaffolding — announcing it would put a fixture
-  // nobody can enter in front of the whole league.
-  if (ANNOUNCE_TOURNAMENT_CHANGES && !value!.is_test) {
+  // nobody can enter in front of the whole league. The flag reroutes it to the
+  // staff who opted into test-tournament notifications rather than dropping it,
+  // which is why this no longer skips the call outright.
+  if (ANNOUNCE_TOURNAMENT_CHANGES) {
     pushToAllApproved({
       title: `New Tournament: ${value!.name}`,
       body: `${tournamentHeadline(value!)}. Open the dashboard for sign-up times and details.`,
       url: "/dashboard",
       tag: "tournament-created",
       category: "tournament",
+      testTournament: !!value!.is_test,
     }).catch(() => {});
   }
 
@@ -364,10 +367,8 @@ export async function updateTournament(id: string, input: TournamentInput) {
   revalidatePath("/dashboard");
 
   // Silent when the edit only touched the overview, MMR floors, format internals
-  // or anything else off the whitelist. `is_test` is read from the stored row,
-  // not the input, so flipping a live tournament to a test one still announces
-  // the change that flip accompanied.
-  if (ANNOUNCE_TOURNAMENT_CHANGES && changedLabels.length && !existing.is_test) {
+  // or anything else off the whitelist.
+  if (ANNOUNCE_TOURNAMENT_CHANGES && changedLabels.length) {
     const sentences: string[] = [];
     if (renamed) sentences.push(`${existing.name} is now called ${value!.name}.`);
     if (otherLabels.length)
@@ -380,6 +381,12 @@ export async function updateTournament(id: string, input: TournamentInput) {
       url: "/dashboard",
       tag: "tournament-updated",
       category: "tournament",
+      // Either side being a test is enough. An edit that flips test mode off is
+      // still an edit to something the league has never been told about, and the
+      // body lists only what changed — "the format and prize pool changed" is a
+      // strange first thing to hear about a tournament. Announcing it properly is
+      // what the create push is for.
+      testTournament: !!existing.is_test || !!value!.is_test,
     }).catch(() => {});
   }
 

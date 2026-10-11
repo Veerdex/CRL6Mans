@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useTransition } from "react";
 import { setAdminNotificationPref, sendTestAdminNotification } from "./league-actions";
+import { adminCategoryEnabled } from "@/app/lib/admin-notification-prefs";
 import { subscribeToPush } from "../notification-button";
 
 type TestResult = Awaited<ReturnType<typeof sendTestAdminNotification>>;
@@ -49,6 +50,7 @@ const ITEMS: { key: string; label: string; desc: string }[] = [
   { key: "registrations",   label: "Pending Registrations",    desc: "When a new player submits a registration." },
   { key: "profile_changes", label: "Profile Change Requests",  desc: "When a player requests an MMR / tracker change." },
   { key: "schedule_approvals", label: "Schedule Approvals",    desc: "When two teams agree on a time outside the scheduled window." },
+  { key: "test_tournaments",   label: "Test Tournaments",      desc: "Off by default. A test tournament's notifications never reach players — turn this on to receive them yourself while running one." },
 ];
 
 export function AdminNotificationToggles({ initial }: { initial: Record<string, boolean> }) {
@@ -65,8 +67,12 @@ export function AdminNotificationToggles({ initial }: { initial: Record<string, 
     return () => { cancelled = true; };
   }, []);
 
+  // Both the switch's drawn state and the value a click writes come from
+  // adminCategoryEnabled, the same helper the server gates on. Reading an unset
+  // pref as "on" here, as this used to, draws a default-off category ON and makes
+  // the first click write `false` to something the server already treats as off.
   const toggle = (key: string) => {
-    const next = !(prefs[key] !== false); // current state is on unless explicitly false
+    const next = !adminCategoryEnabled(prefs, key);
     setPrefs((p) => ({ ...p, [key]: next }));
     startTransition(() => { setAdminNotificationPref(key, next); });
   };
@@ -110,7 +116,7 @@ export function AdminNotificationToggles({ initial }: { initial: Record<string, 
         turning one off stops it reaching every moderator, not just you.
       </p>
       {ITEMS.map((item) => {
-        const on = prefs[item.key] !== false;
+        const on = adminCategoryEnabled(prefs, item.key);
         return (
           <div key={item.key} className="flex items-center justify-between bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3">
             <div>

@@ -9,6 +9,7 @@ import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, de
 import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app/lib/discord-api";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft, pushToRosteredPlayers } from "@/app/lib/push";
 import { isActiveTournamentTest } from "@/app/lib/test-tournament";
+import { ADMIN_NOTIFICATION_CATEGORIES } from "@/app/lib/admin-notification-prefs";
 import { APP_NAME } from "@/app/lib/constants";
 import { computeTopStats } from "@/app/lib/game-stats";
 import { rollUpCareerStats } from "@/app/lib/career-stats";
@@ -953,11 +954,9 @@ export async function saveMatchSettings(deadlineDay: number, playDay: number, pl
   return { ok: true, message: "Match schedule settings saved." };
 }
 
-const ADMIN_NOTIFICATION_CATEGORIES = ["sub_requests", "match_disputes", "registrations", "profile_changes", "schedule_approvals"];
-
 export async function setAdminNotificationPref(category: string, enabled: boolean) {
   await verifyAdmin();
-  if (!ADMIN_NOTIFICATION_CATEGORIES.includes(category))
+  if (!(ADMIN_NOTIFICATION_CATEGORIES as readonly string[]).includes(category))
     return { ok: false, message: "Invalid category." };
 
   const { data: settings } = await supabaseAdmin

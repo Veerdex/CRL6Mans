@@ -4,6 +4,7 @@ import { supabaseAdmin } from "./supabase";
 import { recordNotification } from "./notifications";
 import { developerDiscordIds } from "./players";
 import { isActiveTournamentTest, isTestTournament } from "./test-tournament";
+import { adminCategoryEnabled, type AdminNotificationCategory } from "./admin-notification-prefs";
 
 webpush.setVapidDetails(
   `mailto:${process.env.VAPID_EMAIL ?? "admin@crl6mans.com"}`,
@@ -152,11 +153,34 @@ async function sendToSubscriptions(
 // comes first and is never gated on notificationsEnabled(), which reads a
 // per-request cookie — gating it would mean the same event is filed when a cron
 // fires it and silently dropped when an admin does.
-export async function pushToDevelopers(payload: PushPayload): Promise<PushResult> {
-  const ids = developerDiscordIds();
-  if (!ids.length) return { ...EMPTY_RESULT, skipped: "no-staff" };
-  await recordNotification({ kind: "users", discordIds: ids }, payload);
+// Where every push about a test tournament ends up, whatever audience the caller
+// named — opt-in, so by default a test run is silent for staff as well as
+// players. Terminal on purpose: routing it back through pushToAdmins would
+// re-enter that function's own test branch and recurse forever.
+//
+// DEVELOPER_DISCORD_IDS are unioned in because getStaffRole resolves them as CEO
+// without a staff_roles row, so the plain staff query can miss exactly the
+// person running the test.
+//
+// The feed row is written before the toggle is consulted, matching every other
+// category: the push is ephemeral and the row is the record, so switching the
+// toggle on later reveals the history instead of starting from nothing.
+export async function pushToTestTournamentAdmins(payload: PushPayload): Promise<PushResult> {
+  await recordNotification({ kind: "admins", adminCategory: "test_tournaments" }, payload);
   if (!(await notificationsEnabled())) return { ...EMPTY_RESULT, skipped: "notifications-off" };
+  const { data: settings } = await supabaseAdmin
+    .from("league_settings")
+    .select("admin_notification_prefs")
+    .maybeSingle();
+  const prefs = settings?.admin_notification_prefs as Record<string, boolean> | null | undefined;
+  if (!adminCategoryEnabled(prefs, "test_tournaments")) return { ...EMPTY_RESULT, skipped: "category-off" };
+
+  const { data: staff } = await supabaseAdmin.from("staff_roles").select("discord_id");
+  const ids = [...new Set([
+    ...(staff ?? []).map((s) => s.discord_id as string).filter(Boolean),
+    ...developerDiscordIds(),
+  ])];
+  if (!ids.length) return { ...EMPTY_RESULT, skipped: "no-staff" };
   const { data } = await supabaseAdmin
     .from("push_subscriptions")
     .select("endpoint, p256dh, auth")
@@ -166,7 +190,7 @@ export async function pushToDevelopers(payload: PushPayload): Promise<PushResult
 }
 
 export async function pushToUser(discordId: string, payload: PushPayload) {
-  if (payload.testTournament) return void (await pushToDevelopers(payload));
+  if (payload.testTournament) return void (await pushToTestTournamentAdmins(payload));
   await recordNotification({ kind: "users", discordIds: [discordId] }, payload);
   if (!(await notificationsEnabled())) return;
   const { data } = await supabaseAdmin
@@ -176,18 +200,7 @@ export async function pushToUser(discordId: string, payload: PushPayload) {
   if (data?.length) await sendToSubscriptions(data, payload);
 }
 
-// Deliberately not the old "match_reporting" key, which this replaces.
-// setAdminNotificationPref only ever writes keys into admin_notification_prefs
-// and never deletes them, so any staff member who muted the retired
-// every-submission push left `match_reporting: false` sitting in that jsonb —
-// reusing the name would hand them disputes pre-muted by a choice they made
-// about a different notification. The stale key is inert: nothing passes it.
-export type AdminNotificationCategory =
-  | "sub_requests"
-  | "match_disputes"
-  | "registrations"
-  | "profile_changes"
-  | "schedule_approvals";
+export type { AdminNotificationCategory } from "./admin-notification-prefs";
 
 const EVENT_ADMIN_CATEGORIES = new Set<AdminNotificationCategory>(["match_disputes", "sub_requests", "schedule_approvals"]);
 
@@ -198,7 +211,7 @@ export async function pushToAdmins(
   adminCategory?: AdminNotificationCategory
 ): Promise<PushResult> {
   const inferTest = !!adminCategory && EVENT_ADMIN_CATEGORIES.has(adminCategory);
-  if (payload.testTournament ?? (inferTest && (await isActiveTournamentTest()))) return pushToDevelopers(payload);
+  if (payload.testTournament ?? (inferTest && (await isActiveTournamentTest()))) return pushToTestTournamentAdmins(payload);
   await recordNotification({ kind: "admins", adminCategory }, payload);
   if (!(await notificationsEnabled())) return { ...EMPTY_RESULT, skipped: "notifications-off" };
   // Respect per-category admin notification toggles (default on when unset).
@@ -208,7 +221,7 @@ export async function pushToAdmins(
       .select("admin_notification_prefs")
       .maybeSingle();
     const prefs = settings?.admin_notification_prefs as Record<string, boolean> | null | undefined;
-    if (prefs && prefs[adminCategory] === false) return { ...EMPTY_RESULT, skipped: "category-off" };
+    if (!adminCategoryEnabled(prefs, adminCategory)) return { ...EMPTY_RESULT, skipped: "category-off" };
   }
   const { data: staff } = await supabaseAdmin
     .from("staff_roles")
@@ -238,7 +251,7 @@ function filterByCategory(
 }
 
 export async function pushToAllApproved(payload: PushPayload) {
-  if (payload.testTournament) return void (await pushToDevelopers(payload));
+  if (payload.testTournament) return void (await pushToTestTournamentAdmins(payload));
   await recordNotification({ kind: "all" }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players, error } = await supabaseAdmin
@@ -260,7 +273,7 @@ export async function pushToAllApproved(payload: PushPayload) {
 
 export async function pushToDiscordIds(discordIds: string[], payload: PushPayload) {
   if (!discordIds.length) return;
-  if (payload.testTournament) return void (await pushToDevelopers(payload));
+  if (payload.testTournament) return void (await pushToTestTournamentAdmins(payload));
   await recordNotification({ kind: "users", discordIds }, payload);
   if (!(await notificationsEnabled())) return;
   const { data } = await supabaseAdmin
@@ -271,7 +284,7 @@ export async function pushToDiscordIds(discordIds: string[], payload: PushPayloa
 }
 
 export async function pushToTeam(teamId: string, payload: PushPayload) {
-  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToDevelopers(payload));
+  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToTestTournamentAdmins(payload));
   await recordNotification({ kind: "team", teamId }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players } = await supabaseAdmin
@@ -289,7 +302,7 @@ export async function pushToTeam(teamId: string, payload: PushPayload) {
 }
 
 export async function pushToEnteredDraft(payload: PushPayload) {
-  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToDevelopers(payload));
+  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToTestTournamentAdmins(payload));
   await recordNotification({ kind: "draft" }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players, error } = await supabaseAdmin
@@ -370,7 +383,7 @@ export async function pushToTournamentEntrants(
   // Asked of the tournament in hand rather than through isActiveTournamentTest:
   // these two fire before activation (sign-ups closing, the 24h reminder), when
   // the tournament isn't yet league_settings.active_tournament_id.
-  if (payload.testTournament ?? (await isTestTournament(tournamentId))) return void (await pushToDevelopers(payload));
+  if (payload.testTournament ?? (await isTestTournament(tournamentId))) return void (await pushToTestTournamentAdmins(payload));
   await pushToPlayerIds(await tournamentEntrantPlayerIds(tournamentId, joinMode), payload);
 }
 
@@ -390,7 +403,7 @@ export async function pushToTournamentRoster(
   joinMode: string | null | undefined,
   payload: PushPayload
 ) {
-  if (payload.testTournament ?? (await isTestTournament(tournamentId))) return void (await pushToDevelopers(payload));
+  if (payload.testTournament ?? (await isTestTournament(tournamentId))) return void (await pushToTestTournamentAdmins(payload));
   const entrantIds = await tournamentEntrantPlayerIds(tournamentId, joinMode);
   if (!entrantIds.length) return;
   const { data: rostered } = await supabaseAdmin
@@ -411,7 +424,7 @@ export async function pushToTournamentRoster(
  * worse than sending them nothing.
  */
 export async function pushToRosteredPlayers(payload: PushPayload) {
-  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToDevelopers(payload));
+  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToTestTournamentAdmins(payload));
   const { data: players } = await supabaseAdmin
     .from("players")
     .select("id")
