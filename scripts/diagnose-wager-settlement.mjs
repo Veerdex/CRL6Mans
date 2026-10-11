@@ -14,9 +14,11 @@
  * bracket the failure. `payout_amount` is written in step 1 and proves nothing
  * about step 2 — it is not evidence anyone was paid.
  *
- * Writes nothing. Dumps a JSON snapshot beside itself, because resetSeason()
- * and adminWipe() DELETE every wager and parlay row outright — completing or
- * resetting the event destroys the only record of who is owed what.
+ * Writes nothing to the database. Dumps a JSON snapshot to the temp dir —
+ * never the repo, since it holds real Discord IDs and balances — because
+ * resetSeason() and adminWipe() DELETE every wager and parlay row outright:
+ * completing or resetting the event destroys the only record of who is owed
+ * what.
  *
  * Usage: node scripts/diagnose-wager-settlement.mjs [matchId]
  * Reads NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from .env.local.
@@ -24,6 +26,8 @@
 import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 config({ path: ".env.local" });
 
@@ -58,8 +62,7 @@ die("reading the match", matchErr);
 const { data: wagers, error: wagerErr } = await db
   .from("wagers")
   .select("*")
-  .eq("match_id", MATCH_ID)
-  .order("created_at");
+  .eq("match_id", MATCH_ID);
 die("reading wagers", wagerErr);
 
 const { data: legs, error: legErr } = await db
@@ -89,6 +92,12 @@ if (discordIds.length) {
   accounts = data ?? [];
 }
 const accountByDiscordId = new Map(accounts.map((a) => [a.discord_id, a]));
+// wagers.player_id is a Discord snowflake, but wager_balance_adjustments.player_id
+// is an FK into players(id) (= accounts.id). Matching the log on snowflakes alone
+// finds nothing and reads as "nobody has been fixed yet" — the one false all-clear
+// that could get a player credited twice.
+const accountByUuid = new Map(accounts.map((a) => [a.id, a]));
+const accountUuids = accounts.map((a) => a.id);
 
 // The admin correction tool's own audit log. A player already fixed by hand
 // shows up here, so a second pass can't double-credit them.
@@ -99,9 +108,9 @@ const { data: adjustments, error: adjErr } = await db
   .limit(200);
 if (adjErr) console.log(`(could not read wager_balance_adjustments: ${adjErr.message})\n`);
 
-const name = (discordId) => {
-  const a = accountByDiscordId.get(discordId);
-  return a ? (a.display_name || a.username || discordId) : discordId;
+const name = (playerId) => {
+  const a = accountByDiscordId.get(playerId) ?? accountByUuid.get(playerId);
+  return a ? (a.display_name || a.username || playerId) : playerId;
 };
 
 console.log(`\nMatch ${MATCH_ID}`);
@@ -136,16 +145,24 @@ for (const w of wagers ?? []) {
 }
 if (!(wagers ?? []).length) console.log("  (none)");
 
+// A parlay's own status can be decided by its legs on OTHER matches, so this
+// match's leg is what says whether voidMatchWagers reached this parlay.
+const legHere = (parlayId) => (legs ?? []).filter((l) => l.parlay_id === parlayId);
+const legStatusHere = (parlayId) => {
+  const own = legHere(parlayId).map((l) => l.status);
+  return own.includes("void") ? "void" : own.includes("pending") ? "pending" : (own[0] ?? "—");
+};
+
 console.log(`\n── Parlays touching this match (${parlays.length}) ───────────────`);
 for (const p of parlays) {
   const a = accountByDiscordId.get(p.player_id);
-  const own = (legs ?? []).filter((l) => l.parlay_id === p.id);
+  const own = legHere(p.id);
   console.log(
     [
-      p.status.padEnd(8),
+      `leg ${legStatusHere(p.id).padEnd(8)}`,
+      `parlay ${p.status.padEnd(8)}`,
       `stake ${String(p.amount).padStart(6)}`,
       `legs ${own.length}`,
-      `leg statuses ${[...new Set(own.map((l) => l.status))].join("/")}`,
       `balance ${String(a?.crl_coins ?? "?").padStart(7)}`,
       `acct updated ${utc(a?.updated_at)}`,
       name(p.player_id),
@@ -158,8 +175,8 @@ console.log(`\n── What the statuses say happened ─────────
 const pendingWagers = count(wagers ?? [], "pending");
 const voidWagers = count(wagers ?? [], "void");
 const settledWagers = (wagers ?? []).filter((w) => w.status === "won" || w.status === "lost").length;
-const pendingParlays = count(parlays, "pending");
-const voidParlays = count(parlays, "void");
+const pendingParlays = parlays.filter((p) => legStatusHere(p.id) === "pending").length;
+const voidParlays = parlays.filter((p) => legStatusHere(p.id) === "void").length;
 
 if (!(wagers ?? []).length && !parlays.length) {
   console.log("  Nothing is staked on this match. Nothing to reconcile.");
@@ -189,6 +206,20 @@ if (!(wagers ?? []).length && !parlays.length) {
 }
 
 if (voidWagers || voidParlays) {
+  const owed = new Map();
+  for (const w of (wagers ?? []).filter((w) => w.status === "void")) {
+    owed.set(w.player_id, (owed.get(w.player_id) ?? 0) + w.amount);
+  }
+  for (const p of parlays.filter((p) => legStatusHere(p.id) === "void")) {
+    owed.set(p.player_id, (owed.get(p.player_id) ?? 0) + p.amount);
+  }
+  // The adjustment tool is per player, not per wager, so this is the number to
+  // type in — for whichever players the checks below show were never credited.
+  console.log(`\n  Owed per player if uncredited (void stakes only):`);
+  for (const [playerId, total] of owed) {
+    console.log(`   ${String(total).padStart(7)}  ${name(playerId)}`);
+  }
+
   console.log(`\n  Corroboration, in rough order of strength:`);
   console.log(`   1. The escalation's console.error names the step ("what:"). Check Vercel`);
   console.log(`      runtime logs for ~04:04 UTC now — retention is short and it may be gone.`);
@@ -199,7 +230,9 @@ if (voidWagers || voidParlays) {
   console.log(`      nothing — a login, theme change or new bet bumps it too.`);
 }
 
-const relevant = (adjustments ?? []).filter((r) => discordIds.includes(r.player_id));
+const relevant = (adjustments ?? []).filter(
+  (r) => accountUuids.includes(r.player_id) || discordIds.includes(r.player_id),
+);
 console.log(`\n── Prior hand corrections for these players (${relevant.length}) ──`);
 for (const r of relevant) {
   console.log(
@@ -208,7 +241,7 @@ for (const r of relevant) {
 }
 if (!relevant.length) console.log("  (none — nobody here has been adjusted by hand yet)");
 
-const snapshotPath = `wager-incident-${MATCH_ID.slice(0, 8)}.json`;
+const snapshotPath = join(tmpdir(), `wager-incident-${MATCH_ID.slice(0, 8)}.json`);
 writeFileSync(
   snapshotPath,
   JSON.stringify(
