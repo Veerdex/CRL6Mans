@@ -86,6 +86,18 @@ create table if not exists wager_settlement_failures (
 
 create index if not exists wager_settlement_failures_match_idx on wager_settlement_failures(match_id);
 
+-- RLS on with no policies, which denies anon and authenticated outright while
+-- service_role bypasses it -- and every app read and write here goes through
+-- supabaseAdmin (service role), so nothing in the app notices.
+--
+-- A deliberate break with the other migrations in this directory, which all
+-- `disable row level security`. Those tables hold league data that is on the
+-- site anyway; these two hold every player's snowflake next to their running
+-- balance, and a snapshot of their bets. Default-deny is the right side to err
+-- on for an audit log, and the app needs no policy to use it.
+alter table crl_coin_transactions     enable row level security;
+alter table wager_settlement_failures enable row level security;
+
 -- ─────────────────────────────────────────────
 -- credit_crl_coins — add coins and record why.
 -- Returns 1 when an account was updated, 0 when no account matched.
