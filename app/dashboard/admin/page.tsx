@@ -823,8 +823,10 @@ export default async function AdminPage() {
   // only chance to time round 1: once the season starts, round 1 is already live and
   // isRoundLocked refuses to edit it. That matters for a season, whose round times
   // are set here and are also what makes a round bettable; a tournament's opening
-  // round is stamped by execPregenerateBracket instead, and its later rounds run on
-  // check-in rather than a schedule.
+  // round is stamped by execPregenerateBracket instead, and its later rounds open on
+  // check-in unless a round is timed here, which holds that round's check-in until
+  // the stamped time and is the only way a tournament round after the first becomes
+  // bettable.
   // "scheduled" is what makes it a live bracket, the same predicate the Teams tab
   // uses: a finished event keeps its matches as "completed" until the next build
   // deletes them, and pre-created downstream slots sit at "pending" — counting

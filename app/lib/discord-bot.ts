@@ -1783,17 +1783,18 @@ export async function execPregenerateBracket(round1PlayAt?: string): Promise<{ o
 }
 
 // Gives the opening round the event's own start time, which is the only time a
-// tournament match ever gets: round schedules are a season mechanism, and the
-// three writers of scheduled_at (the admin round pin, the admin match pin, a
-// captain's proposal) are all season paths. Without this nothing in a tournament
-// is ever bettable — the wagers tab needs a confirmed future time — and with it
-// round 1 is bettable for exactly the pre-generation window, closing at the start
-// when check-in opens.
+// tournament match gets unless an admin schedules its rounds by hand: the round
+// pin, the match pin and a captain's proposal are all driven from panels nobody
+// opens for a tournament. Without this nothing in a tournament is bettable before
+// it starts — the wagers tab needs a confirmed future time — and with it round 1
+// is bettable for exactly the pre-generation window, closing at the start when
+// check-in opens.
 //
-// Deliberately writes no round_schedules row: stageStartPlayAt reads that table,
-// not matches, so round 1's check-in window still opens at the start exactly as it
-// does today. A row would also re-point openReadyMatchChannels at a season-shaped
-// schedule for an event that doesn't use one.
+// Deliberately writes no round_schedules row: roundPlayAt reads that table, not
+// matches, so round 1's check-in window still opens at the start exactly as it
+// does today. A row would instead hold the opening round's check-in until the
+// stamped time, which for the first stage is the start anyway, and would show up
+// in the Scheduling panel as a round an admin never set.
 export async function stampOpeningRoundTime(playAt: string): Promise<void> {
   const { data: built } = await supabaseAdmin
     .from("matches").select("id, stage, round, status").not("stage", "is", null)
@@ -2641,34 +2642,41 @@ async function isSeasonActive(): Promise<boolean> {
   return !!(data?.season_active as boolean | null | undefined);
 }
 
-// Scheduled start time of a stage (round 1's play time), if an admin set one.
-async function stageStartPlayAt(stage: string): Promise<string | null> {
+// Scheduled play time of one round, if an admin set one.
+async function roundPlayAt(stage: string, round: number): Promise<string | null> {
   const { data: ls } = await supabaseAdmin.from("league_settings").select("active_tournament_id").maybeSingle();
   const tid = (ls?.active_tournament_id as string | null) ?? null;
   const cs = stage.startsWith("group_") ? "group" : stage;
   const q = tid
-    ? supabaseAdmin.from("round_schedules").select("play_at").eq("tournament_id", tid).eq("stage", cs).eq("round", 1).maybeSingle()
-    : supabaseAdmin.from("round_schedules").select("play_at").is("tournament_id", null).eq("stage", cs).eq("round", 1).maybeSingle();
+    ? supabaseAdmin.from("round_schedules").select("play_at").eq("tournament_id", tid).eq("stage", cs).eq("round", round).maybeSingle()
+    : supabaseAdmin.from("round_schedules").select("play_at").is("tournament_id", null).eq("stage", cs).eq("round", round).maybeSingle();
   const { data } = await q;
   return (data?.play_at as string | undefined) ?? null;
 }
 
 // Opens a 10-minute check-in window for a tournament match if one isn't open yet.
-// First round of a stage opens at the stage's scheduled start; later rounds open now.
+// A round an admin gave a future time opens then; anything else opens now.
 async function openCheckInForMatch(matchId: string, stage: string, round: number): Promise<void> {
   const { data: m } = await supabaseAdmin.from("matches").select("checkin_deadline, home_team_id, away_team_id").eq("id", matchId).maybeSingle();
   if (!m || m.checkin_deadline) return;
   let deadlineMs = Date.now() + CHECKIN_WINDOW_MS;
-  if (round === 1) {
-    // If an admin set a round-1 schedule for this stage, the window opens at that time.
-    // Tournaments normally have none — round schedules are a season mechanism, and a
-    // tournament's round 1 is gated by check-in itself (showStartButton in
-    // round-scheduler.tsx is explicitly season-only). So with no schedule the window
-    // opens now, which for round 1 of the first stage is the moment execStartSeason
-    // builds the bracket: the tournament starting IS the call to play.
-    const start = await stageStartPlayAt(stage);
-    if (start) deadlineMs = new Date(start).getTime() + CHECKIN_WINDOW_MS;
-  }
+
+  // Every round, not just round 1 of a stage. Reading only round 1 made a scheduled
+  // later round a trap: My Team and the Schedule page show the round_schedules time,
+  // while check-in opened the instant the matchup seated, so a player who trusted the
+  // displayed time could be forfeited on a window that had already closed. It is also
+  // what makes a tournament round bettable at all — the wagers gate wants a confirmed
+  // future scheduled_at, and syncRoundMatchPins stamps one on every match of a
+  // scheduled round, including the pending ones not yet seated.
+  //
+  // With no schedule the window still opens now, which for round 1 of the first stage
+  // is the moment execStartSeason builds the bracket: the tournament starting IS the
+  // call to play. A past time falls through to now for the same reason it is not
+  // honoured — play_at + window would already be expired, and processExpiredCheckIns
+  // would forfeit both teams on a window nobody could have used.
+  const scheduled = await roundPlayAt(stage, round);
+  const scheduledMs = scheduled ? new Date(scheduled).getTime() : 0;
+  if (scheduledMs > Date.now()) deadlineMs = scheduledMs + CHECKIN_WINDOW_MS;
   // Later rounds open immediately, so notify now and mark notified. Round 1 opens at
   // the scheduled stage start — processExpiredCheckIns sends the second, at-the-window
   // nudge when that arrives.
