@@ -909,7 +909,7 @@ export async function buildAndSaveHybrid8FromSwiss(): Promise<{ error?: string; 
 export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: boolean; cutTeams?: number }> {
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("season_format")
+    .select("season_format, active_tournament_id")
     .single();
 
   if (!settings?.season_format) return { error: "No season format configured." };
@@ -935,8 +935,15 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
     teamRv[t.id] = initialTeamRating(roster.map(playerRatingFromRow));
   });
 
+  // A season's playoff bracket seeds off the standings it just played, so wins
+  // lead. A tournament has no standings to seed from — its bracket *is* the whole
+  // event — so there rating is the only ordering that means anything, and wins
+  // leading is actively wrong: nothing clears teams.wins between a hand-generated
+  // bracket and a regenerate, and execReportMatchResult increments it, so a
+  // rebuild part-way through an event would reseed by this event's own results.
+  const isTournament = !!settings.active_tournament_id;
   let seeded = [...(teamsRaw ?? [])].sort((a, b) => {
-    const diff = (b.wins ?? 0) - (a.wins ?? 0);
+    const diff = isTournament ? 0 : (b.wins ?? 0) - (a.wins ?? 0);
     return diff !== 0 ? diff : (teamRv[b.id] ?? 0) - (teamRv[a.id] ?? 0);
   });
 
