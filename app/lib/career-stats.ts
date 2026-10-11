@@ -1,6 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { fetchAllRows } from "@/app/lib/paginate";
+import { isTestEventActive } from "@/app/lib/test-tournament";
 
 export type CareerTotals = {
   games: number;
@@ -137,8 +138,15 @@ async function resolvePlayerIds(discordIds: string[]): Promise<Map<string, strin
  * All-time totals per player: the rolled-up table, the seeded past seasons, and
  * whatever the live event has produced so far, so All Time always includes the
  * event in progress.
+ *
+ * Unless that event is a test, whose games are discarded on reset rather than
+ * rolled up — All Time is the permanent record, and showing numbers there that
+ * are about to evaporate would be wrong. That exclusion covers staff too: a test
+ * event's stats are real only under Current Event, which is where staff read
+ * them.
  */
 export async function fetchAllTimeTotals(): Promise<Map<string, CareerTotals>> {
+  const includeLive = !(await isTestEventActive());
   const [career, live, seeded] = await Promise.all([
     fetchAllRows<CareerRow>((from, to) =>
       supabaseAdmin
@@ -148,7 +156,7 @@ export async function fetchAllTimeTotals(): Promise<Map<string, CareerTotals>> {
         .order("player_id")
         .range(from, to)
     ),
-    fetchLiveRows(),
+    includeLive ? fetchLiveRows() : Promise.resolve([] as LiveRow[]),
     fetchSeededRows(),
   ]);
 

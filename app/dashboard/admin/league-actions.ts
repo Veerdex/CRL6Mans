@@ -8,7 +8,7 @@ import { isDirectorVerified } from "@/app/lib/players";
 import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, deleteMatchChannels, execSyncRoles, voidAllPendingWagers, setDraftChannelVisibility } from "@/app/lib/discord-bot";
 import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app/lib/discord-api";
 import { pushToAllApproved, pushToAdmins, pushToEnteredDraft, pushToRosteredPlayers } from "@/app/lib/push";
-import { isActiveTournamentTest } from "@/app/lib/test-tournament";
+import { isActiveTournamentTest, isTestEventActive } from "@/app/lib/test-tournament";
 import { ADMIN_NOTIFICATION_CATEGORIES } from "@/app/lib/admin-notification-prefs";
 import { APP_NAME } from "@/app/lib/constants";
 import { computeTopStats } from "@/app/lib/game-stats";
@@ -597,7 +597,16 @@ export async function resetSeason() {
   // the delete that would destroy them (player_game_stats.match_id cascades).
   // rollUpCareerStats consumes the rows it folds in, so the window where a game
   // is counted in both the career table and the still-live rows is this narrow.
-  await rollUpCareerStats();
+  //
+  // A test event skips the fold, and that same cascade is what discards it:
+  // player_career_stats is permanent and has no event column, so once a test's
+  // games are summed in and the source rows deleted there is nothing left to
+  // subtract. The check lives here rather than in completeTournament because
+  // every way an event ends comes through this function — Complete Tournament,
+  // Cancel Tournament, completeSeason's is_test_season branch, and the manual
+  // Reset Season button — and each of the others would otherwise make a test's
+  // stats permanent while reporting "No records saved."
+  if (!(await isTestEventActive())) await rollUpCareerStats();
 
   await supabaseAdmin.from("sub_requests").delete().not("id", "is", null);
   await supabaseAdmin.from("matches").delete().not("id", "is", null);

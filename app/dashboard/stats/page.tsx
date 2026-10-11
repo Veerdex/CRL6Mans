@@ -4,6 +4,7 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { fetchAllTimeTotals } from "@/app/lib/career-stats";
+import { hidesActiveTestTournament } from "@/app/lib/test-tournament";
 import { aggregatePlayerGameStats, type StatAggregationInput } from "@/app/lib/player-stat-aggregation";
 import type { PlayerStatRow } from "./stats-table";
 import { StatsView } from "./stats-view";
@@ -15,13 +16,18 @@ type PlayerRow = { id: string; discord_id: string | null; username: string; disp
 // player_game_stats is empty — rollUpCareerStats folds it into the career table
 // on reset — so offering the toggle would offer an empty table. stats_enabled is
 // the separate case of an event that runs without replay tracking at all.
-async function showEventToggle(): Promise<boolean> {
+// A test tournament is hidden from players here as everywhere else. Current
+// Event is the one surface its games appear on at all — fetchAllTimeTotals
+// excludes a test event's live rows — so while one runs the toggle is staff-only
+// and a player sees the page exactly as they would between events.
+async function showEventToggle(discordId: string): Promise<boolean> {
   const { data } = await supabaseAdmin
     .from("league_settings")
     .select("season_active, active_tournament_id, stats_enabled")
     .single();
   const eventRunning = !!data?.season_active || !!data?.active_tournament_id;
-  return eventRunning && (data?.stats_enabled ?? true);
+  if (!eventRunning || !(data?.stats_enabled ?? true)) return false;
+  return !(await hidesActiveTestTournament(discordId));
 }
 
 export default async function StatsPage() {
@@ -54,7 +60,7 @@ export default async function StatsPage() {
       supabaseAdmin.from("teams").select("id, name").order("id").range(from, to)
     ),
     fetchAllTimeTotals(),
-    showEventToggle(),
+    showEventToggle(session.userId),
   ]);
 
   const teamNames = Object.fromEntries(teamsRaw.map((t) => [t.id, t.name]));
