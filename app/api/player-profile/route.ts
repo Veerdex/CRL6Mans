@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
-import { isDirectorVerified } from "@/app/lib/players";
+import { isCurrentlyKicked, isDirectorVerified } from "@/app/lib/players";
 import { loadPlayerProfile } from "@/app/lib/player-profile";
+import { supabaseAdmin } from "@/app/lib/supabase";
 
 // Profiles are fetched only when one is opened, never alongside the pages that
 // link to them, so this is a route handler rather than data threaded through
@@ -27,7 +28,26 @@ export async function GET(request: NextRequest) {
   // Both flags only decide whether an edit affordance renders — accolade writes
   // are gated again in app/dashboard/accolade-actions.ts, and the MMR write in
   // saveOwnMmr resolves the player from the session rather than from the client.
-  const isSelf = profile.identity.discordId === session.userId;
+  //
+  // The MMR flag mirrors saveOwnMmr's own gate rather than just "is this me":
+  // loadPlayerProfile treats Tier 3 as optional, so a pending or kicked account
+  // has a viewable profile and would otherwise get a button that always refuses.
+  const canEditMmr =
+    profile.identity.discordId === session.userId && (await selfCanEditMmr(session.userId));
 
-  return NextResponse.json({ ...profile, canEditAccolades, isSelf });
+  return NextResponse.json({ ...profile, canEditAccolades, canEditMmr });
+}
+
+/** Only called for a viewer looking at their own profile, so other viewers pay nothing. */
+async function selfCanEditMmr(discordId: string): Promise<boolean> {
+  const { data: account } = await supabaseAdmin
+    .from("accounts")
+    .select("status, kick_reason, kicked_until")
+    .eq("discord_id", discordId)
+    .single();
+
+  return (
+    account?.status === "approved" &&
+    !isCurrentlyKicked(account.kick_reason ?? null, account.kicked_until ?? null)
+  );
 }

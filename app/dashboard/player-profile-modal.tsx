@@ -19,7 +19,7 @@ import type { EventHistoryEntry } from "@/app/lib/event-results";
 export type ProfileKey = { username: string } | { discordId: string };
 
 /** Both flags are decided per viewer by the profile route, not stored on the player. */
-type LoadedProfile = PlayerProfile & { canEditAccolades: boolean; isSelf: boolean };
+type LoadedProfile = PlayerProfile & { canEditAccolades: boolean; canEditMmr: boolean };
 
 export function PlayerProfileModal({
   target,
@@ -129,7 +129,7 @@ export function PlayerProfileModal({
 
               <div className="flex flex-col gap-4 min-w-0">
                 <SixMans profile={profile} />
-                <Ranks profile={profile} canEdit={profile.isSelf} onSaved={refresh} />
+                <Ranks profile={profile} canEdit={profile.canEditMmr} onSaved={refresh} />
               </div>
             </div>
           )}

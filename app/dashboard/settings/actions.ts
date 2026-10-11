@@ -27,7 +27,7 @@ type MmrInput = {
 const MMR_PLAYER_COLUMNS =
   "id, team_id, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1";
 
-/** MMR columns come back from supabase-js as strings — the shape RatingFields wants. */
+/** Typed to match RatingFields, which is what applyPlayerRVChangeToTeamRating takes. */
 type MmrPlayerRow = {
   id: string;
   team_id: string | null;
