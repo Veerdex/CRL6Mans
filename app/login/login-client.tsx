@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { APP_NAME } from "@/app/lib/constants";
 
-const VIDEO_ID = "7gDosXgDNUM";
+const VIDEO_ID = "NBFVztq7OlU";
 const IDLE_MS = 3000;
 const MAX_VOLUME = 25; // 0–100 scale; 25 = 0.25×
 const FADE_MS = 1500;
