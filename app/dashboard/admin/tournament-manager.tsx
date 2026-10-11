@@ -19,7 +19,7 @@ import {
 } from "./tournament-actions";
 import { addBulkTournamentTestUsers } from "./league-actions";
 import { ExportCompletedPdfButton, ExportAndCompletePdfButton } from "./export-pdf-button";
-import { DownloadArchiveButton } from "./download-archive-button";
+import { ArchivePurgedNote, DownloadArchiveButton } from "./download-archive-button";
 import {
   type SeasonFormatConfig,
   type PresetId,
@@ -1211,6 +1211,9 @@ export function TournamentManager({
                 {t.status === "completed" && !!t.full_archive && (
                   <DownloadArchiveButton kind="tournament" id={t.id} name={t.name} />
                 )}
+                {t.status === "completed" && !t.full_archive && summary?.archivePurgedAt && (
+                  <ArchivePurgedNote purgedAt={summary.archivePurgedAt} />
+                )}
                 {t.status === "scheduled" && (
                   <button onClick={() => setConfirm({ id: t.id, action: "cancel" })} disabled={isPending}
                     className="px-3 py-1.5 bg-zinc-800 hover:bg-red-900/50 text-red-400 text-xs font-medium rounded-lg transition-colors">
@@ -1271,6 +1274,9 @@ export function TournamentManager({
               </div>
               {!!s.full_archive && (
                 <DownloadArchiveButton kind="season" id={s.id} name={s.name} />
+              )}
+              {!s.full_archive && s.summary?.archivePurgedAt && (
+                <ArchivePurgedNote purgedAt={s.summary.archivePurgedAt} />
               )}
             </div>
           );

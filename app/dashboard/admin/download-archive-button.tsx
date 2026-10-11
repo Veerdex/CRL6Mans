@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { exportTournamentArchive, type TournamentArchive } from "./tournament-archive";
+import { exportTournamentArchive, markEventDownloaded, type TournamentArchive } from "./tournament-archive";
 import { toSafeDataUrl } from "./image-data-url";
 
 // Logos must be self-contained in the downloaded file — it's meant to be kept
@@ -36,6 +36,20 @@ function downloadJson(archive: TournamentArchive, name: string) {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Stands in for the Download Archive button once the archive has been dropped.
+ * Without it the button simply vanishes, which reads as a bug rather than as
+ * the space-saving it is.
+ */
+export function ArchivePurgedNote({ purgedAt }: { purgedAt: string }) {
+  const when = new Date(purgedAt);
+  return (
+    <span className="text-xs text-zinc-500" title={`Archive removed from the database on ${when.toLocaleString()}`}>
+      Archive downloaded · cleared from DB
+    </span>
+  );
+}
+
 export function DownloadArchiveButton({
   kind,
   id,
@@ -56,6 +70,9 @@ export function DownloadArchiveButton({
         if (!archive) { setState("error"); return; }
         const sanitized = await sanitizeArchiveImages(archive);
         downloadJson(sanitized, name);
+        // Only after the file exists — marking it earlier could purge an
+        // archive that sanitizing then failed to hand over.
+        await markEventDownloaded(kind, id, "archive");
         setState("idle");
       } catch {
         setState("error");

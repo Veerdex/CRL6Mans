@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { TAB_LABELS } from "@/app/lib/tab-labels";
 import { PRESETS } from "@/app/dashboard/season/format-constants";
-import type { Tournament, Season } from "./tournament-actions";
+import type { Tournament, Season, TournamentSummary } from "./tournament-actions";
 import { AdminSubSection } from "./admin-sub-section";
 
 function StatCard({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
@@ -63,16 +63,25 @@ type EventOverviewRow = {
 // before matches/teams get wiped — roster size is the number of players the
 // draft actually placed, and stays accurate forever. Events that haven't
 // completed yet have no archive, so those fall back to live signup counts.
-function archivePlayerCount(fullArchive: unknown): number | null {
+//
+// Once both exports have been downloaded the archive is dropped, and these two
+// numbers survive it in `summary` as the ArchiveResidual — which is why the
+// summary is checked before any live fallback.
+function archivePlayerCount(fullArchive: unknown, summary: TournamentSummary | null): number | null {
   const archive = fullArchive as { teams?: { roster?: unknown[] }[] } | null;
-  if (!archive?.teams) return null;
-  return archive.teams.reduce((sum, t) => sum + (t.roster?.length ?? 0), 0);
+  if (archive?.teams) return archive.teams.reduce((sum, t) => sum + (t.roster?.length ?? 0), 0);
+  return summary?.participantCount ?? null;
 }
 
-function eventFormatName(seasonFormat: unknown, fullArchive: unknown): string {
+function eventFormatName(
+  seasonFormat: unknown,
+  fullArchive: unknown,
+  summary: TournamentSummary | null,
+): string {
   const preset =
     (seasonFormat as { preset?: string } | null)?.preset ??
-    (fullArchive as { meta?: { formatPreset?: string | null } } | null)?.meta?.formatPreset;
+    (fullArchive as { meta?: { formatPreset?: string | null } } | null)?.meta?.formatPreset ??
+    summary?.formatPreset;
   if (!preset) return "—";
   return PRESET_NAMES[preset] ?? preset;
 }
@@ -94,8 +103,12 @@ export async function EventOverviewSection({
 }) {
   // Only tournaments without an archive yet (not completed) need a live signup
   // count — tournament_entries/team_signup_members rows are never deleted, so
-  // this stays accurate for scheduled and active tournaments alike.
-  const liveCountIds = tournaments.filter((t) => !t.full_archive).map((t) => t.id);
+  // this stays accurate for scheduled and active tournaments alike. A purged
+  // event has no archive either but is emphatically not live: its count comes
+  // from the residual in `summary`.
+  const liveCountIds = tournaments
+    .filter((t) => !t.full_archive && !t.summary?.archivePurgedAt)
+    .map((t) => t.id);
 
   const [{ data: entryRows }, { data: teamSignupRows }] = liveCountIds.length
     ? await Promise.all([
@@ -125,8 +138,8 @@ export async function EventOverviewSection({
     id: t.id,
     name: t.name,
     status: t.status,
-    format: eventFormatName(t.season_format, t.full_archive),
-    playerCount: archivePlayerCount(t.full_archive) ?? liveCountByTournament.get(t.id) ?? 0,
+    format: eventFormatName(t.season_format, t.full_archive, t.summary),
+    playerCount: archivePlayerCount(t.full_archive, t.summary) ?? liveCountByTournament.get(t.id) ?? 0,
     startedAt: t.started_at,
     endedAt: t.ended_at,
     sponsorName: t.sponsor_id ? (sponsorNameById.get(t.sponsor_id) ?? "Yes") : null,
@@ -137,8 +150,8 @@ export async function EventOverviewSection({
     id: s.id,
     name: s.name,
     status: "completed",
-    format: eventFormatName(s.season_format, s.full_archive),
-    playerCount: archivePlayerCount(s.full_archive) ?? 0,
+    format: eventFormatName(s.season_format, s.full_archive, s.summary),
+    playerCount: archivePlayerCount(s.full_archive, s.summary) ?? 0,
     startedAt: s.started_at,
     endedAt: s.ended_at,
     sponsorName: null,

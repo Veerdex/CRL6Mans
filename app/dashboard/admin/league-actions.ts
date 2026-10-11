@@ -653,8 +653,14 @@ export async function resetSeason() {
  * End a manual season: snapshot final standings into the `seasons` archive
  * (mirrors completeTournament's summary), then reset the league. The archive
  * row is the permanent record once the live data is wiped.
+ *
+ * `pdfDownloaded` comes from the Export & Reset button, which hands the admin
+ * the PDF on its way through here. It is the only way a season's PDF download
+ * is ever recorded — a completed season card has no PDF button — so without it
+ * a season could never reach "both downloaded" and its archive would never be
+ * purged.
  */
-export async function completeSeason(): Promise<{ ok?: boolean; error?: string; message?: string }> {
+export async function completeSeason(opts?: { pdfDownloaded?: boolean }): Promise<{ ok?: boolean; error?: string; message?: string }> {
   await verifyAdmin();
 
   const { data: settings } = await supabaseAdmin
@@ -786,6 +792,16 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
       .from("event_accolade_prizes")
       .upsert({ event_id: archivedSeason.id as string, ...accoladePrizeColumns }, { onConflict: "event_id" });
     if (prizeError) console.error("[completeSeason] failed to record accolade prizes", prizeError);
+
+    // Deliberately its own update, not folded into the insert above: the column
+    // only exists after the archive-download-purge migration, and a missing
+    // column would fail the insert and lose the archive entirely.
+    if (opts?.pdfDownloaded) {
+      await supabaseAdmin
+        .from("seasons")
+        .update({ pdf_downloaded_at: endedAt })
+        .eq("id", archivedSeason.id as string);
+    }
   }
 
   // Only wipe once the archive is safely written.

@@ -9,15 +9,21 @@ import type { TournamentArchive } from "@/app/dashboard/admin/tournament-archive
 /**
  * Per-player event results.
  *
- * `player_event_results` is a derived index, not a second source of truth. The
- * canonical record of a finished event is the `full_archive` jsonb on
- * `tournaments`/`seasons`; every row here is reproducible from it, and
+ * `player_event_results` starts as a derived index: every row is reproducible
+ * from the `full_archive` jsonb on `tournaments`/`seasons`, and
  * rebuildEventResults() regenerates the table from those archives. That is the
  * backfill path for any later fix to placement or to the shape of a row.
  *
  * It exists because a profile should be one indexed lookup on discord_id rather
  * than a scan of every archive in the league's history — the user's requirement
  * that a profile fetch only the player being viewed.
+ *
+ * **These rows are not always rebuildable.** Once an event's PDF and JSON
+ * archive have both been downloaded, purgeIfFullyDownloaded nulls its
+ * `full_archive` to reclaim the space, and from then on these rows are the only
+ * record of that event left in the database. So never truncate this table:
+ * rebuildEventResults() is an upsert for exactly that reason, and a purged
+ * event's rows survive it untouched because nothing regenerates them.
  *
  * Points are never stored, only the inputs they are computed from. See
  * app/lib/career-points.ts.

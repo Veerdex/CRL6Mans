@@ -9,6 +9,7 @@ import {
 } from "./tournament-pdf-actions";
 import { completeTournament } from "./tournament-actions";
 import { completeSeason } from "./league-actions";
+import { markEventDownloaded } from "./tournament-archive";
 import { toSafeDataUrl } from "./image-data-url";
 
 async function sanitizeImages(data: TournamentPdfData): Promise<TournamentPdfData> {
@@ -66,6 +67,7 @@ export function ExportCompletedPdfButton({ tournamentId }: { tournamentId: strin
         const data = await fetchCompletedTournamentPdfData(tournamentId);
         if (!data) { setError("Could not load tournament data."); setState("idle"); return; }
         await downloadPdf(data);
+        await markEventDownloaded("tournament", tournamentId, "pdf");
         setState("idle");
       } catch (err) {
         setError(`Failed to generate PDF${err instanceof Error ? `: ${err.message}` : "."}`);
@@ -103,7 +105,7 @@ export function ExportAndCompletePdfButton() {
         const data = await fetchActiveTournamentPdfData();
         if (!data) { setError("No active tournament found."); setStep("warn"); return; }
         await downloadPdf(data);
-        const res = await completeTournament();
+        const res = await completeTournament({ pdfDownloaded: true });
         if (res.error) { setError(res.error); setStep("warn"); return; }
         setStep("done");
       } catch (err) {
@@ -171,7 +173,7 @@ export function ExportAndResetSeasonButton() {
         const data = await fetchActiveSeasonPdfData();
         if (!data) { setError("No active season found."); setStep("warn"); return; }
         await downloadPdf(data);
-        const res = await completeSeason();
+        const res = await completeSeason({ pdfDownloaded: true });
         if (res.error) { setError(res.error); setStep("warn"); return; }
         setStep("done");
       } catch (err) {

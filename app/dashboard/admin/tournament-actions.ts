@@ -88,6 +88,14 @@ export type TournamentSummary = {
   championPlayers?: { id?: string | null; username: string; displayName: string | null }[];
   runnerUpPlayers?: { id?: string | null; username: string; displayName: string | null }[];
   topStats?: TopStats;
+  /**
+   * Copied out of `full_archive` by purgeIfFullyDownloaded before the archive is
+   * dropped — see ArchiveResidual in tournament-archive.ts. Present only on an
+   * event whose two exports both reached an admin's disk.
+   */
+  participantCount?: number;
+  formatPreset?: string | null;
+  archivePurgedAt?: string;
 };
 
 async function verifyAdmin() {
@@ -647,7 +655,14 @@ async function computeSummary(statsEnabled: boolean): Promise<TournamentSummary>
   };
 }
 
-export async function completeTournament() {
+/**
+ * `pdfDownloaded` is set by the Export & Complete button, which hands the admin
+ * the PDF on its way through here. It is the only way a completed event can
+ * start life with one of its two downloads already taken — and for a season,
+ * the only way it can ever reach both, since a completed season card has no
+ * PDF button of its own.
+ */
+export async function completeTournament(opts?: { pdfDownloaded?: boolean }) {
   await verifyAdmin();
 
   const { data: settings } = await supabaseAdmin
@@ -709,6 +724,16 @@ export async function completeTournament() {
       await recordEventResults(activeId, fullArchive);
     } catch (e) {
       console.error("[completeTournament] failed to record player event results", e);
+    }
+
+    // Deliberately its own update, not folded into the one above: the column
+    // only exists after the archive-download-purge migration, and a missing
+    // column would fail the whole statement and leave the tournament active.
+    if (opts?.pdfDownloaded) {
+      await supabaseAdmin
+        .from("tournaments")
+        .update({ pdf_downloaded_at: endedAt })
+        .eq("id", activeId);
     }
   }
 
