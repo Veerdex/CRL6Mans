@@ -4525,6 +4525,11 @@ export async function execReportMatchResult(
   // is free to request a sub for their next match and the panel stays clean.
   await supabaseAdmin.from("sub_requests").delete().eq("match_id", matchId);
 
+  // Recording a result is the ruling a dispute was waiting for. Cleared here
+  // rather than in the admin reporter so a forfeit and the bot clear it too, and
+  // so a disputed match drops off the staff list the moment it's settled.
+  await clearScoreDispute(matchId);
+
   const winnerId = homeScore > awayScore ? homeTeam.id : awayScore > homeScore ? awayTeam.id : null;
   const loserId  = homeScore > awayScore ? awayTeam.id : awayScore > homeScore ? homeTeam.id : null;
 

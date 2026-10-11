@@ -422,6 +422,27 @@ export default async function AdminPage() {
   // before the migration. isClaimApprovalRequired degrades to ON by itself.
   const claimApprovalRequired = await isClaimApprovalRequired();
 
+  // Its own query, for the same reason as the comment above: an unknown column
+  // would fail whichever select it was folded into. On a database where
+  // score-dispute-migration.sql hasn't run this comes back empty, which is the
+  // truth — there are no disputes.
+  const { data: disputedRows } = await supabaseAdmin
+    .from("matches")
+    .select("id, score_rejected_home, score_rejected_away, score_rejected_by_team_id")
+    .not("score_disputed_at", "is", null)
+    .is("home_score", null)
+    .order("score_disputed_at", { ascending: true });
+
+  type DisputedRow = {
+    id: string;
+    score_rejected_home: number | null;
+    score_rejected_away: number | null;
+    score_rejected_by_team_id: string | null;
+  };
+  const disputeByMatchId = Object.fromEntries(
+    ((disputedRows ?? []) as DisputedRow[]).map((r) => [r.id, r]),
+  );
+
   const { data: reviewMatchRows } = await supabaseAdmin
     .from("matches")
     .select("id, home_team_id, away_team_id, stage, round, pending_home_score, pending_away_score")
@@ -500,7 +521,9 @@ export default async function AdminPage() {
   );
 
   const discrepancyMatchIds = [...new Set((openDiscrepancyRows ?? []).map(r => r.match_id))];
-  const matchesUnderReviewCount = discrepancyMatchIds.length;
+  // Disputes count toward the same badge: both mean a match is stuck until a
+  // moderator opens this tab.
+  const matchesUnderReviewCount = discrepancyMatchIds.length + (disputedRows ?? []).length;
   const discrepancyPlayerIds = [...new Set((openDiscrepancyRows ?? []).flatMap(r => [r.expected_player_id, r.conflicting_player_id]).filter((id): id is string => !!id))];
 
   const [{ data: discrepancyMatchRows }, { data: discrepancyPlayerRows }] = await Promise.all([
@@ -709,7 +732,10 @@ export default async function AdminPage() {
 
   const statsEnabled = settings?.stats_enabled ?? true;
 
-  const matchRows = (scheduledMatches ?? []).map(m => ({
+  const matchRows = (scheduledMatches ?? []).map(m => {
+    const dispute = disputeByMatchId[m.id];
+    const rejecterId = dispute?.score_rejected_by_team_id ?? null;
+    return {
     id: m.id,
     homeTeamId: m.home_team_id,
     awayTeamId: m.away_team_id,
@@ -724,8 +750,15 @@ export default async function AdminPage() {
     pendingHomeScore: (m.pending_home_score as number | null) ?? null,
     pendingAwayScore: (m.pending_away_score as number | null) ?? null,
     scoreConfirmed: (m.score_confirmed as boolean) ?? false,
+    disputed: !!dispute,
+    disputedHomeScore: dispute?.score_rejected_home ?? null,
+    disputedAwayScore: dispute?.score_rejected_away ?? null,
+    // The team that rejected. The claim itself came from the other one, which is
+    // all staff need to read the disagreement off the card.
+    disputeRejecterName: rejecterId ? (teamNameById[rejecterId] ?? null) : null,
     players: eligiblePlayersForMatch(m),
-  }));
+    };
+  });
 
   // Build sub request cards
   type RawSubRequest = {
@@ -1262,8 +1295,8 @@ export default async function AdminPage() {
         isDefaultTab
         defaultOpen={false}
         description={statsEnabled
-          ? "Report scores for scheduled matches, including per-game replay uploads that get parsed for scoreboard stats. Only matches with both teams already assigned show up here. The grey count is matches waiting to be reported; the blue count is matches with a submitted replay awaiting identity review."
-          : "Report scores for scheduled matches. This event isn't tracking player stats, so there are no replay uploads — just the series score. Only matches with both teams already assigned show up here."}
+          ? "Report scores for scheduled matches, including per-game replay uploads that get parsed for scoreboard stats. Only matches with both teams already assigned show up here. The grey count is matches waiting to be reported; the blue count is matches that need you — a disputed result, or a submitted replay awaiting identity review. Disputed matches are listed first."
+          : "Report scores for scheduled matches. This event isn't tracking player stats, so there are no replay uploads — just the series score. Only matches with both teams already assigned show up here. Disputed matches are listed first."}
       >
         <MatchReporter matches={matchRows} statsEnabled={statsEnabled} />
       </AdminSubSection>

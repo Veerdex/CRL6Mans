@@ -537,7 +537,7 @@ function ConfirmResultModal({
             disabled={busy}
             className="px-4 py-2 bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            {cancelling ? "Cancelling…" : "No"}
+            {cancelling ? "Rejecting…" : "No"}
           </button>
         </div>
         {error && <p className="text-xs text-red-400 text-center">{error}</p>}
@@ -566,7 +566,7 @@ function OpponentSubmittedView({
 }) {
   const router = useRouter();
   const [confirming, startConfirm] = useTransition();
-  const [disputing, startDispute] = useTransition();
+  const [rejecting, startReject] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const remaining = useConfirmCountdown(scoreSubmittedAt, isTournament);
@@ -587,7 +587,7 @@ function OpponentSubmittedView({
 
   function handleNo() {
     setError(null);
-    startDispute(async () => {
+    startReject(async () => {
       const res = await cancelSeriesSubmission(matchId);
       if (res.error) { setError(res.error); return; }
       router.refresh();
@@ -623,17 +623,17 @@ function OpponentSubmittedView({
         <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={() => { setError(null); setShowModal(true); }}
-            disabled={confirming || disputing}
+            disabled={confirming || rejecting}
             className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
           >
             Confirm Result
           </button>
           <button
             onClick={handleNo}
-            disabled={confirming || disputing}
+            disabled={confirming || rejecting}
             className="px-4 py-1.5 bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            {disputing ? "Rejecting…" : "Reject"}
+            {rejecting ? "Rejecting…" : "Reject"}
           </button>
           {error && !showModal && <span className="text-xs text-red-400">{error}</span>}
         </div>
@@ -645,7 +645,7 @@ function OpponentSubmittedView({
           myWins={myWins}
           theirWins={theirWins}
           confirming={confirming}
-          cancelling={disputing}
+          cancelling={rejecting}
           error={error}
           onConfirm={handleConfirm}
           onNo={handleNo}

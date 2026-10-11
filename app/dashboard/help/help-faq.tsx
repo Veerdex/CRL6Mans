@@ -63,7 +63,11 @@ const SECTIONS: Section[] = [
       },
       {
         q: "How do I report a match result?",
-        a: "Any approved player on either team (not just the captain) can upload the series' replay files from the My Team page and submit the score. The other team then confirms or disputes it — if nobody responds in time, it auto-finalizes on its own.",
+        a: "Any approved player on either team (not just the captain) can upload the series' replay files from the My Team page and submit the score. The other team then confirms or rejects it — if nobody responds in time, it auto-finalizes on its own.",
+      },
+      {
+        q: "The other team rejected our score — what happens now?",
+        a: "Nothing is final, and staff aren't involved yet. If you got the score wrong, just submit it again. If your score was right and they rejected it anyway, hit Dispute: staff get notified, and they record the official result themselves. Neither team can report that match while it's disputed.",
       },
       {
         q: "I need a substitute for an upcoming match — how does that work?",

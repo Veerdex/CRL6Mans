@@ -542,8 +542,9 @@ export async function uploadGameReplay(
   return { homeTeamWon, replayId: replayData.replayId, stats, unmatchedNames };
 }
 
-// Either captain can retract / dispute a pending submission.
-// Clears all pending fields so both sides can start fresh.
+// Either team can retract or reject a pending submission. Clears all pending
+// fields so both sides can start fresh — and records the claim it threw out, so
+// the submitting team has something to dispute if it stands by its score.
 export async function cancelSeriesSubmission(
   matchId: string
 ): Promise<{ error?: string }> {

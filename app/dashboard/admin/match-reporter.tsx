@@ -21,6 +21,10 @@ type MatchData = {
   pendingHomeScore: number | null;
   pendingAwayScore: number | null;
   scoreConfirmed: boolean;
+  disputed: boolean;
+  disputedHomeScore: number | null;
+  disputedAwayScore: number | null;
+  disputeRejecterName: string | null;
   players: PlayerOption[]; // eligible players for this match (both rosters + subs)
 };
 
@@ -607,6 +611,19 @@ function MatchEntry({
           </p>
         )}
 
+        {/* Deliberately doesn't prefill the inputs: the whole reason this is here
+            is that the contested score may be the wrong one. */}
+        {match.disputed && (
+          <p className="text-[10px] pl-20 text-red-400">
+            ⚖️ Disputed
+            {match.disputedHomeScore !== null && (
+              <> · claimed {match.disputedHomeScore} – {match.disputedAwayScore}</>
+            )}
+            {match.disputeRejecterName && <> · rejected by {match.disputeRejecterName}</>}
+            {" "}· neither team can report until you enter the result
+          </p>
+        )}
+
         {scheduleLabel && (
           <p className={`text-[10px] pl-20 ${match.scheduleAccepted ? "text-emerald-400" : "text-amber-400"}`}>
             {match.scheduleAccepted ? "✅" : "📅"} {scheduleLabel}
@@ -701,7 +718,12 @@ export function MatchReporter({
     setReported(rs => [{ id, summary }, ...rs]);
   }
 
-  const byStage = pending.reduce<Record<string, MatchData[]>>((acc, m) => {
+  // Disputed matches are lifted out of their stage group entirely. A dispute is
+  // the one state here that is blocking two teams right now, and buried in the
+  // middle of forty scheduled matches it reads as just another unreported one.
+  const disputed = pending.filter(m => m.disputed);
+
+  const byStage = pending.filter(m => !m.disputed).reduce<Record<string, MatchData[]>>((acc, m) => {
     if (!acc[m.stage]) acc[m.stage] = [];
     acc[m.stage].push(m);
     return acc;
@@ -720,6 +742,23 @@ export function MatchReporter({
           This event isn&apos;t tracking player stats, so there are no replays to upload — enter the
           series score for each match.
         </p>
+      )}
+
+      {disputed.length > 0 && (
+        <div className="bg-zinc-900 border border-red-800/60 rounded-xl overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-red-900/50 bg-red-950/30">
+            <p className="text-xs font-semibold text-red-300 uppercase tracking-wider">
+              Disputed · ruling needed
+            </p>
+            <p className="text-[10px] text-red-400/80 mt-0.5">
+              The two teams couldn&apos;t agree. Entering a score here settles it and
+              reopens reporting.
+            </p>
+          </div>
+          {disputed.map(m => (
+            <MatchEntry key={m.id} match={m} statsEnabled={statsEnabled} onReported={onReported} />
+          ))}
+        </div>
       )}
 
       {sortedStages.map(stage => (
