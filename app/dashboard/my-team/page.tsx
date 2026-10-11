@@ -856,11 +856,11 @@ export default async function MyTeamPage() {
                   <PlayerAvatar discordId={p.discord_id} avatar={p.avatar} username={p.username} className="w-9 h-9" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors min-w-0">
+                      <span className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors min-w-0 truncate">
                         <PlayerName displayName={p.display_name ?? null} username={p.username} discordId={p.discord_id} />
                       </span>
                       {p.is_captain && (
-                        <span className="text-[10px] font-bold text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] font-bold text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded shrink-0">
                           CAPTAIN
                         </span>
                       )}
