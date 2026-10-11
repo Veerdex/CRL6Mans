@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { exportTournamentArchive, markEventDownloaded, type TournamentArchive } from "./tournament-archive";
 import { toSafeDataUrl } from "./image-data-url";
+import { LocalTime } from "../local-time";
 
 // Logos must be self-contained in the downloaded file — it's meant to be kept
 // on the admin's device and re-opened anytime, so a live storage URL that
@@ -42,10 +43,10 @@ function downloadJson(archive: TournamentArchive, name: string) {
  * the space-saving it is.
  */
 export function ArchivePurgedNote({ purgedAt }: { purgedAt: string }) {
-  const when = new Date(purgedAt);
   return (
-    <span className="text-xs text-zinc-500" title={`Archive removed from the database on ${when.toLocaleString()}`}>
-      Archive downloaded · cleared from DB
+    <span className="text-xs text-zinc-500">
+      Archive downloaded · cleared from DB{" "}
+      <LocalTime iso={purgedAt} dateOnly className="text-zinc-500" />
     </span>
   );
 }

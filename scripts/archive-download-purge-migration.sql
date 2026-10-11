@@ -17,9 +17,15 @@ alter table seasons     add column if not exists archive_downloaded_at timestamp
 -- How much the purge stands to reclaim, largest first. Postgres frees a
 -- TOASTed jsonb for reuse on autovacuum rather than returning it to the OS, so
 -- expect the reported database size to hold steady while headroom grows.
-select 'tournaments' as table_name, name, pg_size_pretty(pg_column_size(full_archive)::bigint) as archive_size
+-- Ordered by the raw byte count, not the pretty string -- sorting the latter as
+-- text puts "9 kB" above "120 MB".
+select 'tournaments' as table_name, name,
+       pg_size_pretty(pg_column_size(full_archive)::bigint) as archive_size,
+       pg_column_size(full_archive)::bigint as bytes
   from tournaments where full_archive is not null
 union all
-select 'seasons', name, pg_size_pretty(pg_column_size(full_archive)::bigint)
+select 'seasons', name,
+       pg_size_pretty(pg_column_size(full_archive)::bigint),
+       pg_column_size(full_archive)::bigint
   from seasons where full_archive is not null
-order by table_name, archive_size desc;
+order by bytes desc;
