@@ -2762,16 +2762,23 @@ function teamTag(name: string, roles: Array<{ id: string; name: string }>) {
 // Teams now sit in that channel while check-in is still outstanding (it opens with
 // the window), so making them leave for the website was the one step nobody did.
 async function checkInCmd(userId: string, channelId: string) {
-  const { data: me } = await supabaseAdmin.from("players")
-    .select("team_id").eq("discord_id", userId).maybeSingle();
+  // All three depend only on the invocation, so they go out together — the command
+  // answers Discord inline and has three seconds for everything.
+  const [{ data: me }, isTournament, { data: here }] = await Promise.all([
+    supabaseAdmin.from("players").select("team_id").eq("discord_id", userId).maybeSingle(),
+    isTournamentActive(),
+    // In a match channel the channel names the match, so there is nothing to resolve.
+    channelId
+      ? supabaseAdmin.from("matches").select("id, home_team_id, away_team_id")
+          .eq("discord_channel_id", channelId).eq("status", "scheduled").maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  // Checked before the channel is consulted: a standalone season's matches have
+  // channels too, and checkInTeam would answer one of those with "check-in hasn't
+  // opened yet" — promising a window that is never going to open.
+  if (!isTournament) return ephemeralReply("❌ Check-in only applies to tournament matches.");
   if (!me?.team_id) return ephemeralReply("❌ You're not on a team.");
   const teamId = me.team_id as string;
-
-  // In a match channel the channel names the match, so there is nothing to resolve.
-  const { data: here } = channelId
-    ? await supabaseAdmin.from("matches").select("id, home_team_id, away_team_id")
-        .eq("discord_channel_id", channelId).eq("status", "scheduled").maybeSingle()
-    : { data: null };
 
   let matchId: string;
   if (here) {
@@ -2779,8 +2786,6 @@ async function checkInCmd(userId: string, channelId: string) {
       return ephemeralReply("❌ This isn't your match.");
     matchId = here.id as string;
   } else {
-    if (!(await isTournamentActive()))
-      return ephemeralReply("❌ Check-in only applies to tournament matches.");
     const { data: mine } = await supabaseAdmin.from("matches")
       .select("id, stage, match_number, checkin_deadline")
       .eq("status", "scheduled")
@@ -2801,9 +2806,10 @@ async function checkInCmd(userId: string, channelId: string) {
 
   const myTeamId = result.isHome ? result.homeTeamId : result.awayTeamId;
   const oppTeamId = result.isHome ? result.awayTeamId : result.homeTeamId;
-  const [{ data: myTeam }, { data: oppTeam }] = await Promise.all([
+  const [{ data: myTeam }, { data: oppTeam }, roles] = await Promise.all([
     supabaseAdmin.from("teams").select("name").eq("id", myTeamId).single(),
     supabaseAdmin.from("teams").select("name").eq("id", oppTeamId).single(),
+    getGuildRoles(),
   ]);
   const myName = myTeam?.name ?? "Your team";
   const oppName = oppTeam?.name ?? "the other team";
@@ -2817,7 +2823,6 @@ async function checkInCmd(userId: string, channelId: string) {
 
   // Only the success announcement is public; every refusal above stays private so a
   // shared match channel doesn't fill with one team's mistakes.
-  const roles = await getGuildRoles();
   const myTag = teamTag(myName, roles);
   const oppTag = teamTag(oppName, roles);
   const content = result.bothIn
@@ -2834,7 +2839,7 @@ async function checkInCmd(userId: string, channelId: string) {
     return { type: 4, data: { content, allowed_mentions } };
   if (result.discordChannelId)
     await sendChannelMessage(result.discordChannelId, content, undefined, allowed_mentions).catch(() => {});
-  return ephemeralReply(content);
+  return { type: 4, data: { content, flags: 64, allowed_mentions } };
 }
 
 export async function isTournamentActive(): Promise<boolean> {
