@@ -164,7 +164,7 @@ export default async function WagersPage() {
     ) {
       return false;
     }
-    if (activeTournamentId) return true;
+    if (activeTournamentId) return m.status === "scheduled";
     return (
       !(m.home_checked_in && m.away_checked_in) &&
       !!m.scheduled_at &&

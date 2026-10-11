@@ -18,7 +18,9 @@ import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
 // time, long before a director's later toggle could ever reach them. Locking
 // here (rather than only on first bet, in placeBets' lockMatchBettingMode) is
 // what keeps a director's toggle from flipping matches that are already
-// scheduled and visible/bettable but haven't had a bet placed yet.
+// scheduled and visible/bettable but haven't had a bet placed yet. That reach
+// stops at a tournament, whose matches are bettable without ever being accepted
+// into a schedule — there lockMatchBettingMode on the first bet is the only lock.
 export async function freezeUnfrozenMatchPredictions(): Promise<void> {
   const [{ data: ls }, { data: allMatches }] = await Promise.all([
     supabaseAdmin.from("league_settings").select("season_format, betting_mode").single(),

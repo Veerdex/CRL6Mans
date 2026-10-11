@@ -134,12 +134,13 @@ async function isTournamentEvent(): Promise<boolean> {
   return !!(data?.active_tournament_id as string | null | undefined);
 }
 
-// Backstop lock: matches are normally locked to a betting mode already by
-// freezeUnfrozenMatchPredictions (app/lib/match-predictions.ts), the moment
-// they get both teams assigned. This only does anything in the narrow window
-// before that cron has run — a conditional write so concurrent first-bets
-// can't race, and later toggle flips don't affect matches that already have
-// action on them.
+// Backstop lock: a season match is normally locked to a betting mode already by
+// freezeUnfrozenMatchPredictions (app/lib/match-predictions.ts), which locks on
+// schedule_accepted, so for those this only covers the window before that cron has
+// run. A tournament match never gets schedule_accepted, so this *is* its only lock —
+// its mode is whatever was global when the first bet landed, and a director's toggle
+// moves the still-untouched ones. A conditional write so concurrent first-bets can't
+// race, and later toggle flips don't affect matches that already have action on them.
 async function lockMatchBettingMode(matchId: string, currentMode: string | null, globalMode: BettingMode): Promise<BettingMode> {
   if (currentMode === "pool" || currentMode === "fixed") return currentMode;
   await supabaseAdmin.from("matches").update({ betting_mode: globalMode }).eq("id", matchId).is("betting_mode", null);
@@ -200,7 +201,15 @@ function isBettingClosed(match: MatchBettingState, isTournament: boolean): strin
   if (!match.home_team_id || !match.away_team_id) {
     return "Betting isn't open for this match yet — its teams aren't decided.";
   }
-  if (isTournament) return null;
+  // A seated matchup is "scheduled"; a half-filled bracket slot stays "pending", since
+  // advanceBracketWinner only flips the status once the other slot is already taken. So
+  // this agrees with the check above today, and holds the line if a format ever
+  // scaffolds a row's teams early and rewrites them when the real winners arrive — a
+  // home/away bet silently retargeted to different teams is the one outcome worth
+  // spending a clause on.
+  if (isTournament) {
+    return match.status === "scheduled" ? null : "Betting isn't open for this match yet.";
+  }
   if (match.home_checked_in && match.away_checked_in) {
     return "Betting is closed — this match has already started.";
   }
