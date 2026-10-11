@@ -430,7 +430,9 @@ Podium page will never reflect it at all.
   match's Discord channel opens at the same moment the window does — not
   after both teams have checked in — so the two teams have somewhere to talk
   to each other while they're still getting ready, and the channel's opening
-  message tells them to go and check in. For a round you gave a future start
+  message tells them to check in — either with the `/checkin` command right
+  there in the channel or with the button on My Team, whichever is less
+  friction for them. For a round you gave a future start
   time, that's that time; otherwise it's the moment the matchup is decided.
   The one
   exception is a double-elimination **bracket reset**, which skips check-in
@@ -940,6 +942,18 @@ its own (pick confirmations during a draft, match-channel setup, etc.).
 - `/site` — replies with the league website link.
 - `/pick <player>` — the only way a captain actually submits a live-draft
   pick (see "The Live Draft" above).
+- `/checkin` — checks a player's team in for its tournament match, exactly
+  as the button on My Team does. Run in the match's own Discord channel it
+  needs nothing else; run anywhere else it finds the team's one match with
+  check-in open, and asks the player to run it in the channel if somehow
+  more than one is. Any player on either team can check their own team in.
+  The confirmation is posted publicly in the match channel and pings the
+  other team with the time they have left; everything else it might say
+  ("not your match", "window closed", "already checked in") is shown only
+  to the player who ran it. Adding this command to the server is a manual
+  step for the developer, separate from deploying the site — if `/checkin`
+  doesn't appear in Discord's command list after a release, that step hasn't
+  been run yet and the website button still works in the meantime.
 
 **Staff commands** live under `/admin`, and which subcommands a given staff
 member can actually run depends on their rank:

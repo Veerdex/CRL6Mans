@@ -9,7 +9,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { roleMention, notifyMatchChannel } from "@/app/lib/match-notifications";
 import { canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { pushToAdmins } from "@/app/lib/push";
-import { createChannelIfCheckInOpen, processExpiredCheckIns, openReadyMatchChannels } from "@/app/lib/discord-bot";
+import { checkInTeam, createChannelIfCheckInOpen, processExpiredCheckIns, openReadyMatchChannels } from "@/app/lib/discord-bot";
 
 type AdminSchedule = { type: string; playAt: string; deadlineAt: string };
 
@@ -298,48 +298,16 @@ export async function rejectMatchTime(
 
 // ─── Tournament check-in ────────────────────────────────────────────────────────
 
-const CHECKIN_WINDOW_MS = 10 * 60 * 1000;
-
 export async function checkInForMatch(
   matchId: string,
 ): Promise<{ ok?: boolean; error?: string }> {
   const ctx = await getCaptainContext(matchId);
   if (!ctx.ok) return { error: ctx.error };
-  const { myTeamId } = ctx;
 
-  const { data: m } = await supabaseAdmin
-    .from("matches")
-    .select("home_team_id, away_team_id, checkin_deadline, home_checked_in, away_checked_in")
-    .eq("id", matchId)
-    .maybeSingle();
-  if (!m) return { error: "Match not found." };
-  if (!m.checkin_deadline) return { error: "Check-in hasn't opened yet." };
-
-  const deadline = new Date(m.checkin_deadline as string).getTime();
-  const now = Date.now();
-  if (now < deadline - CHECKIN_WINDOW_MS) return { error: "Check-in hasn't opened yet." };
-  if (now > deadline) return { error: "The check-in window has closed." };
-
-  const isHome = myTeamId === m.home_team_id;
-  await supabaseAdmin
-    .from("matches")
-    .update({ [isHome ? "home_checked_in" : "away_checked_in"]: true })
-    .eq("id", matchId);
-
-  // The match goes live the moment the second team is in. Stamped by its own
-  // conditional update rather than a read of the other team's flag: such a read
-  // sees the row from *before* this write, so two captains checking in at the same
-  // moment would each see the other as false and nobody would stamp. Here
-  // whichever update lands second matches the filter and wins; a repeat is a
-  // no-op against the is-null guard. Kept separate from the boolean write so a
-  // deploy that lands before the migration breaks the clock, not check-in itself.
-  await supabaseAdmin
-    .from("matches")
-    .update({ started_at: new Date().toISOString() })
-    .eq("id", matchId)
-    .eq("home_checked_in", true)
-    .eq("away_checked_in", true)
-    .is("started_at", null);
+  // Window rules and the started_at stamp live in checkInTeam, shared with the
+  // /checkin slash command so the two surfaces can't disagree.
+  const result = await checkInTeam(matchId, ctx.myTeamId);
+  if (!result.ok) return { error: result.error };
 
   // The channel normally already exists by now — it opens with the check-in window.
   // This stays as the backstop for a window whose pinger tick hasn't landed yet, and

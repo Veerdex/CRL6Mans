@@ -219,6 +219,10 @@ const commands = [
     ],
   },
   {
+    name: "checkin",
+    description: "Check your team in for its tournament match",
+  },
+  {
     name: "pick",
     description: "Pick a player for your team during the snake draft",
     options: [

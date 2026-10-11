@@ -4,7 +4,7 @@ import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfaEnabled, type StaffRole } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
-import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView } from "./discord-api";
+import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView, type AllowedMentions } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -697,7 +697,7 @@ export async function createMatchChannel(
     // bracket reset has no check-in at all and must not be told it does.
     const checkInLine = isBracketReset({ stage: matchInfo.stage, match_number: matchInfo.matchNumber ?? 1 })
       ? ``
-      : `⚠️ **Check in on the website first** — under My Team. Both teams have 10 minutes from when check-in opens, or the match is forfeited.\n\n`;
+      : `⚠️ **Check in first** — run \`/checkin\` right here, or use the button on the website under My Team. Both teams have 10 minutes from when check-in opens, or the match is forfeited.\n\n`;
     message =
       `## Welcome! ##\n\n` +
       `Match: ${homePing} 🏠 **Home**  vs  ${awayPing} ✈️ **Away**\n` +
@@ -2685,6 +2685,158 @@ const checkInWindowOpen = (m: {
   return Date.now() >= new Date(m.checkin_deadline).getTime() - CHECKIN_WINDOW_MS;
 };
 
+export type CheckInOutcome =
+  | {
+      ok: true;
+      alreadyIn: boolean;
+      bothIn: boolean;
+      isHome: boolean;
+      deadline: number;
+      homeTeamId: string;
+      awayTeamId: string;
+      discordChannelId: string | null;
+    }
+  | { ok: false; error: string };
+
+// The single place a team's check-in is validated and written. The My Team action
+// and the /checkin slash command both go through it, so the two can't drift on what
+// the window means or on how started_at gets stamped. Callers own the permission
+// question (who may act for this team) and the messaging; this owns the rules.
+export async function checkInTeam(matchId: string, teamId: string): Promise<CheckInOutcome> {
+  const { data: m } = await supabaseAdmin.from("matches")
+    .select("status, stage, match_number, home_team_id, away_team_id, checkin_deadline, home_checked_in, away_checked_in, discord_channel_id")
+    .eq("id", matchId).maybeSingle();
+  if (!m) return { ok: false, error: "Match not found." };
+  if (m.status !== "scheduled") return { ok: false, error: "That match is already finished." };
+  if (teamId !== m.home_team_id && teamId !== m.away_team_id)
+    return { ok: false, error: "Your team isn't in that match." };
+  if (isBracketReset(m))
+    return { ok: false, error: "The bracket reset has no check-in — both teams are already here. Just play it." };
+  if (!m.checkin_deadline) return { ok: false, error: "Check-in hasn't opened yet." };
+
+  const deadline = new Date(m.checkin_deadline as string).getTime();
+  const now = Date.now();
+  if (now < deadline - CHECKIN_WINDOW_MS) return { ok: false, error: "Check-in hasn't opened yet." };
+  if (now > deadline) return { ok: false, error: "The check-in window has closed." };
+
+  const isHome = teamId === m.home_team_id;
+  const alreadyIn = !!(isHome ? m.home_checked_in : m.away_checked_in);
+  const base = {
+    ok: true as const, alreadyIn, isHome, deadline,
+    homeTeamId: m.home_team_id as string,
+    awayTeamId: m.away_team_id as string,
+    discordChannelId: (m.discord_channel_id as string | null) ?? null,
+  };
+  if (alreadyIn) return { ...base, bothIn: !!(m.home_checked_in && m.away_checked_in) };
+
+  // Selected back so bothIn reflects the row after this write rather than the read
+  // above — the opponent may have checked in between the two, and a caller told
+  // "still waiting on them" would be announcing the wrong thing to the channel.
+  const { data: after } = await supabaseAdmin.from("matches")
+    .update({ [isHome ? "home_checked_in" : "away_checked_in"]: true })
+    .eq("id", matchId).eq("status", "scheduled")
+    .select("home_checked_in, away_checked_in").maybeSingle();
+  if (!after) return { ok: false, error: "That match is already finished." };
+
+  // Stamped by its own conditional update rather than from a read of the other
+  // team's flag: such a read predates this write, so two captains checking in at
+  // once would each see the other as not-yet-in and nobody would stamp the clock.
+  // Kept separate from the boolean write so a deploy landing before the migration
+  // breaks the clock rather than check-in itself.
+  await supabaseAdmin.from("matches")
+    .update({ started_at: new Date().toISOString() })
+    .eq("id", matchId).eq("home_checked_in", true).eq("away_checked_in", true).is("started_at", null);
+
+  return { ...base, bothIn: !!(after.home_checked_in && after.away_checked_in) };
+}
+
+// A mention plus its role ID, so the caller can name the role in allowed_mentions
+// instead of letting Discord parse the content. Team names are player-supplied and
+// one matching the @everyone role would otherwise ping the server through the bot.
+function teamTag(name: string, roles: Array<{ id: string; name: string }>) {
+  const id = roles.find((r) => r.name === name)?.id;
+  return { text: id ? `<@&${id}>` : `**${name}**`, id };
+}
+
+// /checkin — the same check-in as the My Team button, from the match's own channel.
+// Teams now sit in that channel while check-in is still outstanding (it opens with
+// the window), so making them leave for the website was the one step nobody did.
+async function checkInCmd(userId: string, channelId: string) {
+  const { data: me } = await supabaseAdmin.from("players")
+    .select("team_id").eq("discord_id", userId).maybeSingle();
+  if (!me?.team_id) return ephemeralReply("❌ You're not on a team.");
+  const teamId = me.team_id as string;
+
+  // In a match channel the channel names the match, so there is nothing to resolve.
+  const { data: here } = channelId
+    ? await supabaseAdmin.from("matches").select("id, home_team_id, away_team_id")
+        .eq("discord_channel_id", channelId).eq("status", "scheduled").maybeSingle()
+    : { data: null };
+
+  let matchId: string;
+  if (here) {
+    if (here.home_team_id !== teamId && here.away_team_id !== teamId)
+      return ephemeralReply("❌ This isn't your match.");
+    matchId = here.id as string;
+  } else {
+    if (!(await isTournamentActive()))
+      return ephemeralReply("❌ Check-in only applies to tournament matches.");
+    const { data: mine } = await supabaseAdmin.from("matches")
+      .select("id, stage, match_number, checkin_deadline")
+      .eq("status", "scheduled")
+      .not("checkin_deadline", "is", null)
+      .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
+    const open = (mine ?? []).filter(
+      (m) => checkInWindowOpen(m) && Date.now() <= new Date(m.checkin_deadline as string).getTime(),
+    );
+    if (open.length === 0)
+      return ephemeralReply("❌ You have no match with check-in open right now.");
+    if (open.length > 1)
+      return ephemeralReply("❌ You have more than one match with check-in open — run `/checkin` in the match's own channel.");
+    matchId = open[0].id as string;
+  }
+
+  const result = await checkInTeam(matchId, teamId);
+  if (!result.ok) return ephemeralReply(`❌ ${result.error}`);
+
+  const myTeamId = result.isHome ? result.homeTeamId : result.awayTeamId;
+  const oppTeamId = result.isHome ? result.awayTeamId : result.homeTeamId;
+  const [{ data: myTeam }, { data: oppTeam }] = await Promise.all([
+    supabaseAdmin.from("teams").select("name").eq("id", myTeamId).single(),
+    supabaseAdmin.from("teams").select("name").eq("id", oppTeamId).single(),
+  ]);
+  const myName = myTeam?.name ?? "Your team";
+  const oppName = oppTeam?.name ?? "the other team";
+
+  if (result.alreadyIn)
+    return ephemeralReply(
+      result.bothIn
+        ? `✅ **${myName}** is already checked in, and so is **${oppName}** — you're clear to play.`
+        : `✅ **${myName}** is already checked in. Still waiting on **${oppName}**.`,
+    );
+
+  // Only the success announcement is public; every refusal above stays private so a
+  // shared match channel doesn't fill with one team's mistakes.
+  const roles = await getGuildRoles();
+  const myTag = teamTag(myName, roles);
+  const oppTag = teamTag(oppName, roles);
+  const content = result.bothIn
+    ? `✅ ${myTag.text} checked in — both teams are in. ${oppTag.text}, you're clear to play. Good luck!`
+    : `✅ **${myName}** checked in. ${oppTag.text} — you have until <t:${Math.floor(result.deadline / 1000)}:R> to \`/checkin\` or the match is forfeited.`;
+  const allowed_mentions: AllowedMentions = {
+    parse: [],
+    roles: [myTag.id, oppTag.id].filter((id): id is string => !!id),
+  };
+
+  // Run in the match's channel, the reply *is* the announcement. Anywhere else,
+  // confirm privately and post once in the channel — one visible message either way.
+  if (channelId && channelId === result.discordChannelId)
+    return { type: 4, data: { content, allowed_mentions } };
+  if (result.discordChannelId)
+    await sendChannelMessage(result.discordChannelId, content, undefined, allowed_mentions).catch(() => {});
+  return ephemeralReply(content);
+}
+
 export async function isTournamentActive(): Promise<boolean> {
   const { data } = await supabaseAdmin.from("league_settings").select("active_tournament_id").maybeSingle();
   return !!(data?.active_tournament_id as string | null | undefined);
@@ -4428,6 +4580,7 @@ export async function handleCommand(interaction: Interaction) {
     case "totalusers":    return totalUsers();
     case "playerinfo":    return playerInfo(String(opt(interaction, "username")));
     case "pick":          return pickPlayer(userId, String(opt(interaction, "player")));
+    case "checkin":       return checkInCmd(userId, interaction.channel_id ?? interaction.channel?.id ?? "");
     case "postclip":      return postClip(
       userId,
       String(opt(interaction, "url")),
