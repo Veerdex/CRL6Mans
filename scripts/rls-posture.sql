@@ -28,8 +28,8 @@
 --      rows. Part 3d is the standing check for that.
 --
 -- Safe to run against production, and safe to re-run. Everything in Part 2 is
--- already true there, so those statements are no-ops; Part 1 is the only thing
--- in this file that changes anything live. Run this last, after any other
+-- already true there, so those statements are no-ops; Parts 1 and 4 are the two
+-- things in this file that change anything live. Run this last, after any other
 -- migration — it is the backstop that makes a re-run of an older file harmless.
 --
 -- Part 2 uses `alter table if exists` because four of these tables (wagers,
@@ -158,15 +158,26 @@ where pronamespace = 'public'::regnamespace
   and has_function_privilege('anon', oid, 'execute');
 
 -- ─────────────────────────────────────────────
--- PART 4 — the one decision that needs a human.
+-- PART 4 — drop the public read policy on `players`.
 --
--- `players` carries a hand-made policy:
+-- It was hand-made, and read:
 --     "Public read approved players"  SELECT  {public}  using (status = 'approved')
 --
--- So anyone holding the anon key can read every approved player's row: discord
--- snowflake, display name, MMR, team_id, is_captain, draft_entered. Pending,
--- rejected and banned rows are filtered out, so ban_reason and kick_reason are
--- not reachable through it.
+-- `{public}` is the pseudo-role every role inherits, so this covered anon. It
+-- was most likely not deliberate: a policy created without a TO clause gets
+-- {public} by default.
+--
+-- A policy filters rows, never columns, so this published all 38 columns of
+-- every approved player's row to anyone holding the anon key — 35 rows at the
+-- time of writing. Among them discord_id (enough to DM every league member),
+-- tracker_url, all six MMR columns, crl_coins, roster state, and two that stand
+-- out: mfa_enabled, which enumerates who has Discord 2FA off and which gates
+-- the admin panel, and session_version, the ban/kick revocation counter.
+-- Neither grants access — the session JWT is signed with SESSION_SECRET, so a
+-- forged token fails verification regardless — but neither belongs in public.
+--
+-- The `status = 'approved'` filter did hold up where it mattered: ban_reason,
+-- kick_reason and kicked_until were non-null in 0 of the 35 readable rows.
 --
 -- The exposure is latent rather than live, and this was checked in both
 -- applications that share this Supabase project — the anon key belongs to the
@@ -186,15 +197,31 @@ where pronamespace = 'public'::regnamespace
 -- draft page ever moves to Supabase realtime.
 --
 -- The queue bot also never reads this table; it has its own
--- crl6mansqueuebot_players. So nothing known reads `players` with the anon key,
--- and dropping the policy should be safe:
+-- crl6mansqueuebot_players. Nothing in either repo reads `players` with the anon
+-- key — every read in this app goes through supabaseAdmin, which bypasses RLS
+-- and so is unaffected by this drop.
 --
---   drop policy "Public read approved players" on players;
+-- The residual risk is intent rather than code: the 27 `using (true)` policies
+-- on the crl6mansqueuebot_* tables were hand-made by someone for some client,
+-- and that reasoning is recorded nowhere. If something outside both repos was
+-- reading this table, it stops here. Reversible — the recreate is below. Do it
+-- outside a queue window, not during a live draft, and watch the queue bot
+-- afterwards.
 --
--- Not dropped here because this file is meant to be a no-op on production apart
--- from Part 1, and because "nothing known" is not "nothing" — the 27
--- `using (true)` policies on the crl6mansqueuebot_* tables were made by hand by
--- someone, for some client, and that intent is not recorded anywhere in either
--- repo. Reversible either way. Do it outside a queue window, not during a live
--- draft, and watch the queue bot afterwards.
+-- Verify from outside afterwards: `players` should flip from READABLE to
+-- "empty or filtered" in node scripts/check-anon-exposure.mjs, which is the
+-- whole table becoming default-deny like every other one.
+-- ─────────────────────────────────────────────
+drop policy if exists "Public read approved players" on players;
+
+-- To put it back:
+--
+--   create policy "Public read approved players" on players
+--     for select to anon, authenticated using (status = 'approved');
+--
+-- Note `to anon, authenticated` rather than the original's implicit {public} —
+-- same reach in practice, but it states the intent instead of inheriting it.
+-- If a public player list is ever actually wanted, the narrower shape is a view
+-- over just the columns meant to be published, created with
+-- `security_invoker = true` so it does not run as its owner and around RLS.
 -- ─────────────────────────────────────────────
