@@ -19,9 +19,27 @@
 --      app used to read the balance and write back `read - cost`, erasing any
 --      credit that landed in between.
 --
--- Safe to run before the matching deploy: increment_crl_coins keeps its exact
--- signature and behaviour, and now writes a ledger row too, so currently
--- deployed code starts producing ledger rows the moment this lands.
+-- RUN THIS BEFORE DEPLOYING THE CODE THAT GOES WITH IT, not after. The new
+-- settlement path marks each wager settled and *then* credits it, so deployed
+-- without these functions it would flip every bet to won/void, fail the credit
+-- because credit_crl_coins does not exist, and fail to record the failure
+-- because wager_settlement_failures does not exist either — settled-but-unpaid
+-- with no record, on every match. That is the incident above, on repeat. Bet
+-- placement and the dashboard grants break in the same window.
+--
+-- The other direction is safe: increment_crl_coins keeps its exact signature and
+-- behaviour, and now writes a ledger row too, so currently deployed code starts
+-- producing ledger rows the moment this lands.
+--
+-- plpgsql resolves column names on first call, not at create time, so a clean
+-- run does not prove the bodies work. Smoke-test both shapes afterwards — a
+-- zero amount moves no coins and leaves one ledger row each:
+--
+--   select credit_crl_coins('<your discord snowflake>', 0, 'migration smoke test');
+--   select * from adjust_crl_coins('<your accounts.id>', 0, 'migration smoke test');
+--
+-- Expect 1 from the first and one row with applied = 0 from the second. If
+-- either errors, do not deploy.
 -- ─────────────────────────────────────────────
 
 create table if not exists crl_coin_transactions (
