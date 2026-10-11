@@ -119,13 +119,13 @@ export function MmrConfirmPanel({
         <p className="text-[10px] uppercase tracking-wider text-zinc-500 text-center">Season peak</p>
         <p className="text-[10px] uppercase tracking-wider text-zinc-500 text-center">All time peak</p>
 
-        <span className="text-xs font-semibold text-zinc-400">3v3</span>
-        <MmrField label="Season Peak 3v3" value={values.current_3v3} onChange={set("current_3v3")} disabled={busy} />
-        <MmrField label="All Time Peak 3v3" value={values.peak_3v3} onChange={set("peak_3v3")} disabled={busy} />
-
         <span className="text-xs font-semibold text-zinc-400">2v2</span>
         <MmrField label="Season Peak 2v2" value={values.current_2v2} onChange={set("current_2v2")} disabled={busy} />
         <MmrField label="All Time Peak 2v2" value={values.peak_2v2} onChange={set("peak_2v2")} disabled={busy} />
+
+        <span className="text-xs font-semibold text-zinc-400">3v3</span>
+        <MmrField label="Season Peak 3v3" value={values.current_3v3} onChange={set("current_3v3")} disabled={busy} />
+        <MmrField label="All Time Peak 3v3" value={values.peak_3v3} onChange={set("peak_3v3")} disabled={busy} />
       </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
