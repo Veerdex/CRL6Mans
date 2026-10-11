@@ -197,7 +197,7 @@ Used in tournament-scheduler cron and admin web actions for signup open/close, d
 
 - Endpoint: `POST /api/discord/interactions` — Ed25519-verified with `tweetnacl`.
 - Deferred commands (long-running): acknowledged immediately, result sent via `followUp()` using `after()` so the handler can exceed the 3-second Discord limit.
-- `DEFERRED_COMMANDS = ["openround", "score", "syncroles"]` — only commands with actual implementations that take >3s. Auction draft commands (`nominate`, `bid`, `endround`, `budget`) are commented out in `register-commands.mjs` and excluded from `DEFERRED_COMMANDS`; their handler code is preserved for future use.
+- `DEFERRED_COMMANDS = ["openround", "postclip", "profile", "stats", "coins", "sub", "approve", "reject", "dispute"]` — commands that take >3s, plus the ones whose reply should be private: **deferring forces the reply ephemeral**, so a command answering publicly must stay out of the set. `syncroles` is deferred as an `/admin` subcommand instead (`DEFERRED_ADMIN_SUBCOMMANDS`). Auction draft commands (`nominate`, `bid`, `endround`, `budget`) are commented out in `register-commands.mjs` and excluded; their handler code is preserved for future use.
 - All slash command logic lives in `app/lib/discord-bot.ts`.
 
 ### Match channel messages

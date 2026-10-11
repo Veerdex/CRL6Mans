@@ -73,6 +73,10 @@ const SECTIONS: Section[] = [
         q: "I need a substitute for an upcoming match — how does that work?",
         a: "Request one from your My Team page. You can only pick from players who've marked themselves sub-available, and their Rank Value has to be at or below the player they're replacing (with a small cushion for lower-rated outgoing players). The opposing team accepts or rejects the request directly.",
       },
+      {
+        q: "The other team rejected our sub request — what happens now?",
+        a: "Same as a rejected score: cancel it and request a different sub, or stand by the one you asked for. Report it from My Team, or run /dispute target:sub in Discord — staff get notified and can approve the sub over your opponent's objection.",
+      },
     ],
   },
   {
