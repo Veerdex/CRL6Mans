@@ -4,7 +4,7 @@ import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfaEnabled, type StaffRole } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { ptDate, ptWallToUtc } from "./pt-time";
-import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView } from "./discord-api";
+import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView, type DiscordEmbed } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -35,6 +35,10 @@ import {
   type ChannelPost,
 } from "./match-embeds";
 import { announceClip, clipsChannelId, createClip } from "./clip-submit";
+import { profileEmbed, statsEmbed, coinsEmbed } from "./command-embeds";
+import { loadPlayerProfile } from "./player-profile";
+import { fetchAllTimeTotals, type CareerTotals } from "./career-stats";
+import { mvpScore, shootingPct } from "./stats-math";
 import { kickAccount, banAccount, findAccountByDiscordId, DEFAULT_KICK_TIMEOUT_MS, type RevokedPatron } from "./moderation";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
@@ -67,6 +71,11 @@ const ephemeralReply = (content: string) => ({ type: 4, data: { content, flags: 
 // only — returning this from a direct reply would send an empty message, which
 // Discord rejects.
 const silentReply = () => ({ type: 4, data: { content: "", flags: 64 } });
+// Embed-bodied replies. No allowed_mentions on either: a mention inside an embed
+// notifies nobody, and `content` — the only place a ping could live — is left
+// empty, so there is nothing for Discord to resolve.
+const embedReply = (embed: DiscordEmbed) => ({ type: 4, data: { embeds: [embed] } });
+const ephemeralEmbedReply = (embed: DiscordEmbed) => ({ type: 4, data: { embeds: [embed], flags: 64 } });
 
 // Pace Discord channel/category create & delete operations so bulk work (season
 // start, /openround, and especially match simulation) stays under Discord's
@@ -2150,6 +2159,114 @@ async function playerInfo(username: string) {
     `Peak 3v3: ${data.peak_3v3} | Current: ${data.current_3v3}\n` +
     `Peak 2v2: ${data.peak_2v2} | Current: ${data.current_2v2}\n` +
     `Rank Value: ${rv.toFixed(0)}\nTracker: ${data.tracker_url}`
+  );
+}
+
+// The read-only lookups. Each takes an optional target, and Discord sends an
+// omitted USER option as nothing at all — `opt` turns that into "", which reads
+// as "me". Every subject is resolved through `accounts` (Tier 1), so a player
+// who has signed in but never registered still has a profile to show.
+const noAccount = (isSelf: boolean) =>
+  ephemeralReply(
+    isSelf
+      ? `❌ You don't have a ${APP_NAME} account yet — sign in on the site first.`
+      : "❌ That player has never signed in to the site, so there's nothing to show.",
+  );
+
+async function profileCmd(userId: string, targetId: string) {
+  const subject = targetId || userId;
+  const profile = await loadPlayerProfile({ discordId: subject });
+  if (!profile) return noAccount(subject === userId);
+  return ephemeralEmbedReply(
+    profileEmbed({
+      username: profile.identity.username,
+      displayName: profile.identity.displayName,
+      discordId: profile.identity.discordId,
+      avatar: profile.identity.avatar,
+      teamName: profile.teamName,
+      isCaptain: profile.isCaptain,
+      careerPoints: profile.careerPoints,
+      rankValue: profile.rankValue,
+      ...profile.ranks,
+    }),
+  );
+}
+
+const NO_STATS: CareerTotals = { games: 0, goals: 0, assists: 0, saves: 0, shots: 0, score: 0, demos: 0, demoed: 0 };
+
+async function statsCmd(userId: string, targetId: string) {
+  const subject = targetId || userId;
+  const { data: account } = await supabaseAdmin
+    .from("accounts").select("id, username, display_name, avatar")
+    .eq("discord_id", subject).maybeSingle();
+  if (!account) return noAccount(subject === userId);
+
+  // fetchAllTimeTotals is the same merge the Stats tab reads — career rollups,
+  // seeded rows and the live event's games — so /stats can't disagree with the
+  // website about a player's career. It scans all three tables, which is why
+  // this command is deferred.
+  const [totals, { data: tierThree }] = await Promise.all([
+    fetchAllTimeTotals(),
+    supabaseAdmin.from("players").select("team_id").eq("id", account.id).maybeSingle(),
+  ]);
+  const { data: team } = tierThree?.team_id
+    ? await supabaseAdmin.from("teams").select("name").eq("id", tierThree.team_id).maybeSingle()
+    : { data: null };
+
+  const t = totals.get(account.id) ?? NO_STATS;
+  const forMath = {
+    games: t.games,
+    totalGoals: t.goals,
+    totalAssists: t.assists,
+    totalSaves: t.saves,
+    totalShots: t.shots,
+    totalScore: t.score,
+  };
+  return ephemeralEmbedReply(
+    statsEmbed({
+      username: account.username,
+      displayName: account.display_name,
+      discordId: subject,
+      avatar: account.avatar,
+      teamName: team?.name ?? null,
+      ...t,
+      mvp: mvpScore(forMath),
+      shootingPct: shootingPct(forMath),
+    }),
+  );
+}
+
+// Public, unlike the other two: a balance is already on the site's Westside
+// Wages leaderboard for everyone to see. The standings list repeats that page's
+// eligibility exactly — every non-rejected account, seeded test accounts
+// excluded — and the rank is derived from it rather than from a count query so
+// tied balances share a rank here the way they do there.
+async function coinsCmd(userId: string, targetId: string) {
+  const subject = targetId || userId;
+  const [{ data: account }, { data: standings }] = await Promise.all([
+    supabaseAdmin.from("accounts")
+      .select("username, display_name, avatar, crl_coins")
+      .eq("discord_id", subject).maybeSingle(),
+    supabaseAdmin.from("accounts")
+      .select("discord_id, crl_coins")
+      .in("status", ["unregistered", "pending", "approved"])
+      .not("discord_id", "like", "test_%"),
+  ]);
+  if (!account) return noAccount(subject === userId);
+
+  const rows = (standings ?? []) as { discord_id: string | null; crl_coins: number | null }[];
+  const ranked = rows.some((r) => r.discord_id === subject);
+  const coins = account.crl_coins ?? 0;
+  return embedReply(
+    coinsEmbed({
+      username: account.username,
+      displayName: account.display_name,
+      discordId: subject,
+      avatar: account.avatar,
+      coins,
+      rank: ranked ? rows.filter((r) => (r.crl_coins ?? 0) > coins).length + 1 : null,
+      totalRanked: ranked ? rows.length : null,
+    }),
   );
 }
 
@@ -4588,6 +4705,9 @@ export async function handleCommand(interaction: Interaction) {
     case "playerinfo":    return playerInfo(String(opt(interaction, "username")));
     case "pick":          return pickPlayer(userId, String(opt(interaction, "player")));
     case "checkin":       return checkInCmd(userId, interaction.channel_id ?? interaction.channel?.id ?? "");
+    case "profile":       return profileCmd(userId, String(opt(interaction, "user")));
+    case "stats":         return statsCmd(userId, String(opt(interaction, "user")));
+    case "coins":         return coinsCmd(userId, String(opt(interaction, "user")));
     case "postclip":      return postClip(
       userId,
       String(opt(interaction, "url")),

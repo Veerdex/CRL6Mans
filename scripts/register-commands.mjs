@@ -222,6 +222,28 @@ const commands = [
     name: "checkin",
     description: "Check your team in for its tournament match",
   },
+  // The `user` option is optional on all three: omitted means yourself.
+  {
+    name: "profile",
+    description: "Show a player's career points, peak MMRs and Rank Value (only you see it)",
+    options: [
+      { name: "user", description: "Player to look up — defaults to you", type: USER, required: false },
+    ],
+  },
+  {
+    name: "stats",
+    description: "Show a player's all-time scoreboard stats (only you see it)",
+    options: [
+      { name: "user", description: "Player to look up — defaults to you", type: USER, required: false },
+    ],
+  },
+  {
+    name: "coins",
+    description: "Show a player's Westside Wages balance and leaderboard place",
+    options: [
+      { name: "user", description: "Player to look up — defaults to you", type: USER, required: false },
+    ],
+  },
   {
     name: "pick",
     description: "Pick a player for your team during the snake draft",

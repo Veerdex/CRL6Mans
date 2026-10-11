@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { PlayerName } from "@/app/dashboard/player-name";
+import { mvpScore, shootingPct } from "@/app/lib/stats-math";
 
 export type PlayerStatRow = {
   playerId: string;
@@ -23,20 +24,6 @@ export type PlayerStatRow = {
 type SortKey = "mvp" | "goals" | "assists" | "saves" | "score" | "shots" | "shootingPct" | "demos" | "demoed"
              | "totalGoals" | "totalAssists" | "totalSaves" | "totalScore" | "totalShots" | "totalDemos" | "totalDemoed";
 type SortDir = "desc" | "asc";
-
-function mvpScore(row: PlayerStatRow): number {
-  const { games, totalGoals, totalAssists, totalSaves, totalShots, totalScore } = row;
-  if (games === 0) return 0;
-  return (
-    (totalGoals + totalAssists + totalSaves + totalShots / 10) / (games * 4) +
-    totalScore / games / 1000
-  );
-}
-
-function shootingPct(row: PlayerStatRow): number {
-  if (row.totalShots === 0) return 0;
-  return (row.totalGoals / row.totalShots) * 100;
-}
 
 function sortValue(row: PlayerStatRow, key: SortKey): number {
   const g = row.games;

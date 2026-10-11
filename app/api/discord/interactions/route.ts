@@ -2,8 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import nacl from "tweetnacl";
 import { handleCommand, handleAutocomplete, handleModalSubmit } from "@/app/lib/discord-bot";
+import type { DiscordEmbed } from "@/app/lib/discord-api";
 
-const DEFERRED_COMMANDS = new Set(["openround", "postclip"]);
+// Deferral forces the reply ephemeral, which is what every command here wants
+// anyway: /profile and /stats are private by design, and the public half of
+// /sub, /approve and /reject is the embed their handler posts into the match
+// channel, not the reply the invoker sees. /coins is deliberately absent — its
+// reply is public, so it has to answer inside Discord's three seconds.
+const DEFERRED_COMMANDS = new Set([
+  "openround", "postclip", "profile", "stats", "sub", "approve", "reject",
+]);
 // Subcommands of /admin that are slow enough to need deferral (matched against
 // interaction.data.options[0].name, since Discord nests subcommand names one level deep).
 const DEFERRED_ADMIN_SUBCOMMANDS = new Set(["syncroles", "disconnect", "wipe", "resyncmoderation", "kick", "ban"]);
@@ -21,7 +29,7 @@ function verify(publicKey: string, signature: string, timestamp: string, body: s
   }
 }
 
-async function followUp(token: string, content: string) {
+async function followUp(token: string, content: string, embeds?: DiscordEmbed[]) {
   const appId = process.env.DISCORD_CLIENT_ID;
   if (!appId) { console.error("[followUp] DISCORD_CLIENT_ID is not set"); return; }
   await fetch(`https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original`, {
@@ -30,7 +38,11 @@ async function followUp(token: string, content: string) {
     // Deferred output can carry text an admin typed (a kick reason, say), and this
     // path drops whatever allowed_mentions the handler set. Nothing here needs to
     // ping, so nothing does.
-    body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
+    //
+    // `content` is sent even when empty: this edits a placeholder that may already
+    // hold text, so an embed-only reply has to clear it explicitly rather than
+    // leave the previous content standing.
+    body: JSON.stringify({ content, embeds: embeds ?? [], allowed_mentions: { parse: [] } }),
   });
 }
 
@@ -124,8 +136,13 @@ export async function POST(req: NextRequest) {
       after(async () => {
         try {
           const result = await handleCommand(interaction);
-          const content = (result as { data?: { content?: string } }).data?.content ?? "✅ Done.";
-          if (content) await followUp(token, content);
+          const data = (result as { data?: { content?: string; embeds?: DiscordEmbed[] } }).data;
+          const embeds = data?.embeds;
+          // An embed-only reply has no content, so the emptiness test has to
+          // consider both — otherwise it reads as silentReply and the embed is
+          // discarded along with the placeholder.
+          const content = data?.content ?? (embeds?.length ? "" : "✅ Done.");
+          if (content || embeds?.length) await followUp(token, content, embeds);
           else await discardDeferred(token);
         } catch (err) {
           console.error("[discord deferred error]", err);
