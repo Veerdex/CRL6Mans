@@ -83,6 +83,9 @@ const ALL: Array<[string, ChannelPost]> = [
   ["adminTimeDeclined", adminTimeDeclinedPost()],
   ["subRequested", subRequestedPost({ teamName: "Top Tier", oppPing: AWAY, playerOut: player("alice"), sub: player("bob"), reason: "sick" })],
   ["subRequested/noReason", subRequestedPost({ teamName: "Top Tier", oppPing: AWAY, playerOut: player("alice"), sub: player("bob"), reason: null })],
+  // `/sub` with the optional reason omitted sends "" rather than null, since
+  // Discord's option list simply has no entry and opt() falls back to "".
+  ["subRequested/blankReason", subRequestedPost({ teamName: "Top Tier", oppPing: AWAY, playerOut: player("alice"), sub: player("bob"), reason: "" })],
   ["subAccepted", subAcceptedPost({ teamName: "Top Tier", playerOut: "alice" })],
   ["subRejected", subRejectedPost("Top Tier")],
   ["subEscalated", subEscalatedPost({ teamName: "Top Tier", modPing: rolePing("300") })],

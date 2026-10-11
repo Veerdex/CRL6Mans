@@ -207,7 +207,7 @@ export function seriesSubmittedPost(args: {
     title: "Series result submitted",
     color: BRAND_ORANGE,
     description: `**${args.teamName}** submitted the series result: **${args.homeWins}–${args.awayWins}**.`,
-    footer: { text: "Head to the website to confirm or dispute it." },
+    footer: { text: "Run /approve series or /reject series right here, or use the website under My Team." },
   });
 }
 
@@ -358,7 +358,7 @@ export function subRequestedPost(args: {
       DESC_LIMIT,
     ),
     fields: [rankField("Out", args.playerOut), rankField("Sub", args.sub)],
-    footer: { text: "Head to the website to accept or reject this substitution." },
+    footer: { text: "Run /approve sub or /reject sub right here, or use the website under My Team." },
   });
 }
 
