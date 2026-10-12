@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { LEGACY_SIXMANS } from "@/app/lib/legacy-sixmans";
 import type { PublicLeagueStats } from "@/app/lib/public-league-stats";
 import { loadPublicLeagueStats } from "./stats-actions";
 
@@ -89,13 +90,25 @@ function Body({ stats }: { stats: PublicLeagueStats }) {
       </Section>
 
       {sixMans && (
-        <Section title="Private 6mans queue" subtitle="Ranked pickup games run in our Discord">
+        <Section title="6mans queue" subtitle="Ranked pickup games in our Discord, on our own bot since August 2026">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
             <Tile value={n(sixMans.players)} label="Players" />
             <Tile value={n(sixMans.series)} label="Series played" />
           </div>
         </Section>
       )}
+
+      {/* Series and matches are never summed into one figure: ours counts a
+          best-of, and the old bot's report may have been a single game. */}
+      <Section
+        title={`6mans queue, ${LEGACY_SIXMANS.firstYear}–${String(LEGACY_SIXMANS.lastYear).slice(2)}`}
+        subtitle="The same queue, on the bot we ran before ours"
+      >
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+          <Tile value={n(LEGACY_SIXMANS.players)} label="Players" />
+          <Tile value={`~${n(LEGACY_SIXMANS.matches)}`} label="Matches" />
+        </div>
+      </Section>
     </div>
   );
 }
