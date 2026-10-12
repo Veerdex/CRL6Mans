@@ -164,6 +164,24 @@ export async function getGuildRoles(): Promise<Array<{ id: string; name: string 
   return fetchRoles();
 }
 
+// Guild size for the public login stats panel. `?with_counts=true` on the guild
+// itself is the only way to read a member count without the GUILD_MEMBERS
+// privileged intent, which this bot does not hold — listing members would 403.
+// The counts are Discord's own approximations and that is fine for a headline
+// figure. Null means the read failed, never "the server is empty", so the caller
+// hides the tile instead of publishing a zero.
+export async function getGuildCounts(): Promise<{ members: number; online: number } | null> {
+  if (!GUILD_ID || !BOT_TOKEN) return null;
+  const res = await fetch(`${API}/guilds/${GUILD_ID}?with_counts=true`, { headers: botHeaders() });
+  if (!res.ok) {
+    console.error(`[getGuildCounts] HTTP ${res.status}`, await res.text());
+    return null;
+  }
+  const guild = await res.json() as { approximate_member_count?: number; approximate_presence_count?: number };
+  if (typeof guild.approximate_member_count !== "number") return null;
+  return { members: guild.approximate_member_count, online: guild.approximate_presence_count ?? 0 };
+}
+
 export async function getGuildChannels(): Promise<Array<{ id: string; name: string; parent_id?: string | null; type?: number; position?: number }>> {
   if (!GUILD_ID || !BOT_TOKEN) return [];
   const res = await fetch(`${API}/guilds/${GUILD_ID}/channels`, { headers: botHeaders() });

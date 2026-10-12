@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { APP_NAME } from "@/app/lib/constants";
+import { LeagueStatsButton, LeagueStatsDialog } from "./stats-modal";
 
 const VIDEO_ID = "NBFVztq7OlU";
 const IDLE_MS = 3000;  // mouse-still delay before the login card fades out
@@ -11,6 +12,7 @@ const FADE_MS = 1500;  // login card opacity transition
 
 export function LoginClient({ error }: { error?: string }) {
   const [cardVisible, setCardVisible] = useState(true);
+  const [statsOpen, setStatsOpen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const ytReadyRef = useRef(false);
   const unlockedRef = useRef(false);
@@ -117,7 +119,18 @@ export function LoginClient({ error }: { error?: string }) {
   // Mouse idle tracking — card visibility only. Volume used to duck to 0 on
   // every mousemove and ramp back up on the idle timer, which meant the sound
   // came and went with the cursor; it now ramps once and stays put.
+  //
+  // The timer is disarmed while the stats panel is open, and `showCard` keeps
+  // the card up regardless. Reading the panel means holding the mouse still,
+  // which would otherwise fade the card out underneath it — and the card is what
+  // carries the button, so closing would leave nothing to press until the cursor
+  // moved again. Closing re-shows the card and re-arms a full idle window.
   useEffect(() => {
+    if (statsOpen) {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      return;
+    }
+
     const onMove = () => {
       setCardVisible(true);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
@@ -131,7 +144,9 @@ export function LoginClient({ error }: { error?: string }) {
       window.removeEventListener("mousemove", onMove);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
-  }, []);
+  }, [statsOpen]);
+
+  const showCard = cardVisible || statsOpen;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-zinc-950">
@@ -170,9 +185,9 @@ export function LoginClient({ error }: { error?: string }) {
       {/* Login card */}
       <div
         style={{
-          opacity: cardVisible ? 1 : 0,
+          opacity: showCard ? 1 : 0,
           transition: `opacity ${FADE_MS}ms ease-in-out`,
-          pointerEvents: cardVisible ? "auto" : "none",
+          pointerEvents: showCard ? "auto" : "none",
         }}
         className="relative z-[2] w-full max-w-sm p-8 space-y-8 bg-zinc-900/90 backdrop-blur-sm rounded-2xl border border-zinc-800"
       >
@@ -203,10 +218,23 @@ export function LoginClient({ error }: { error?: string }) {
           Login with Discord
         </a>
 
+        <LeagueStatsButton onClick={() => setStatsOpen(true)} />
+
         <p className="text-center text-xs text-zinc-500">
           By logging in, you agree to our terms of service.
         </p>
       </div>
+
+      {/* A sibling of the card, never a child: the card's backdrop-blur makes it
+          the containing block for a fixed descendant, which would size this to
+          max-w-sm, and the idle fade would take an open panel down with it. */}
+      <LeagueStatsDialog
+        open={statsOpen}
+        onClose={() => {
+          setStatsOpen(false);
+          setCardVisible(true);
+        }}
+      />
     </div>
   );
 }
