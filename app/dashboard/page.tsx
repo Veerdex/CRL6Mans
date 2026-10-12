@@ -419,23 +419,26 @@ export default async function DashboardPage({
                 {activeEventTeamCount > 0 && <span>{activeEventTeamCount} teams</span>}
               </div>
             </div>
-            {/* Same stack as TournamentJoinCard's right rail, minus the Join button —
-                the badge sits above the pool whether or not there is a pool to show. */}
+            {/* Same stack as TournamentJoinCard's right rail, minus the Join button.
+                The box itself is unconditional, exactly as on the open and upcoming
+                cards: an event whose prizes aren't set yet reads $0 rather than
+                dropping the pool out of the card entirely. Only the per-placement
+                breakdown is gated, since three $0 lines say nothing the total doesn't. */}
             <div className="shrink-0 flex flex-col items-center gap-2">
               <span className="px-2 py-0.5 rounded-md bg-zinc-800/70 border border-zinc-600/50 text-[13.5px] font-semibold tracking-wide text-zinc-300 tabular-nums whitespace-nowrap">
                 {teamSizeLabel(activeEventTeamSize)}
               </span>
-              {activeEventTotalPrize > 0 && (
-                <div className="flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-4 py-2 min-w-[110px]">
-                  <p className="text-[11px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
-                  <p className="text-xl font-bold text-amber-400 tabular-nums">${activeEventTotalPrize.toLocaleString()}</p>
+              <div className="flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-4 py-2 min-w-[110px]">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
+                <p className="text-xl font-bold text-amber-400 tabular-nums">${activeEventTotalPrize.toLocaleString()}</p>
+                {activeEventTotalPrize > 0 && (
                   <div className="mt-1 text-[12.375px] text-zinc-400 space-y-0.5">
                     <p>1st: <span className="text-zinc-200">${(activeEventPrize1st ?? 0).toLocaleString()}</span></p>
                     <p>2nd: <span className="text-zinc-200">${(activeEventPrize2nd ?? 0).toLocaleString()}</span></p>
                     <p>3rd-4th: <span className="text-zinc-200">${(activeEventPrize3rd4th ?? 0).toLocaleString()}</span></p>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </Link>
