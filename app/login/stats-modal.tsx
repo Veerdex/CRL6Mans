@@ -160,7 +160,7 @@ export function LeagueStatsDialog({ open, onClose }: { open: boolean; onClose: (
           </svg>
         </button>
 
-        <h2 id="league-stats-title" className="text-xl font-bold text-[#e88a24] pr-10">
+        <h2 id="league-stats-title" className="text-2xl sm:text-3xl font-bold text-[#e88a24] pr-12">
           League Stats
         </h2>
 
