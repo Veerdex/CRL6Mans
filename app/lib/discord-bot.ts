@@ -4668,7 +4668,11 @@ export async function execReportMatchResult(
   // deploy landing first has to cost the bracket its FF label, not every result
   // report — including the sweep's own no-show forfeits. A 1–0 that nothing
   // distinguishes from a played game is exactly what this column exists to fix.
-  if (forfeit) await supabaseAdmin.from("matches").update({ forfeit: true }).eq("id", matchId);
+  //
+  // Written on every report rather than only on a forfeit, so re-reporting a
+  // match that was forfeited — an admin reopening a no-show and the teams then
+  // playing it — clears the flag instead of labelling a real series FF.
+  await supabaseAdmin.from("matches").update({ forfeit }).eq("id", matchId);
 
   // A match's sub requests are consumed once it's played — clear them so the team
   // is free to request a sub for their next match and the panel stays clean.
@@ -4935,9 +4939,10 @@ export async function execDisqualifyTeam(teamId: string): Promise<{ ok: boolean;
 // left every bet on the match pending forever -- coins neither paid out nor
 // returned, with nothing logged.
 //
-// It cannot be swept up afterwards either: `forfeit` is a parameter and is never
-// written to the match row, so after the fact nothing can tell a refund from a
-// settlement, and guessing wrong pays out bets on a game that was never played.
+// It cannot be swept up afterwards either: `matches.forfeit` is persisted now,
+// but by a separate best-effort update that is simply missing before the
+// migration runs -- so a sweep still can't tell a refund from a settlement, and
+// guessing wrong pays out bets on a game that was never played.
 // This is the only moment that distinction is known, so it is awaited rather
 // than left to float -- a match report is worth a few hundred ms to not lose
 // track of players' coins.
