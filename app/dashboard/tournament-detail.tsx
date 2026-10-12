@@ -488,8 +488,8 @@ export async function TournamentDetailView({
                     </div>
                     <p className="text-xs text-zinc-500">{stageDescription(slot.key, stageType)}</p>
                     {groupDetails && <p className="text-xs text-zinc-500">{groupDetails}</p>}
-                    {/* A stage configured as several brackets (DE: winners incl.
-                        grand final, losers) gets a labelled row each; a
+                    {/* A stage configured as several blocks (DE: winners,
+                        losers, grand final) gets a labelled row each; a
                         single-block stage keeps its unlabelled row. */}
                     <div className="pt-2 border-t border-zinc-800 space-y-1">
                       {boBlocks.map((block) => {

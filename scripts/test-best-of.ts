@@ -29,7 +29,7 @@ test("a config saved before the split still resolves to the values it was saved 
   assert.equal(resolveBestOf(DE_GF, 1, maxRounds, legacy), 7);
 });
 
-test("normalizeRoundBestOf is idempotent and leaves a split config alone", () => {
+test("normalizeRoundBestOf is idempotent and leaves a fully-split config alone", () => {
   const legacy: RoundBestOfConfig = { double_elimination: tiers(1, 5, 5, 7) };
   const once = normalizeRoundBestOf(legacy);
   assert.deepEqual(normalizeRoundBestOf(once), once);
@@ -38,9 +38,23 @@ test("normalizeRoundBestOf is idempotent and leaves a split config alone", () =>
     double_elimination: tiers(1, 1, 1, 1),
     de_winners: tiers(3, 3, 5, 7),
     de_losers: tiers(1, 1, 3, 5),
+    de_grand_final: { mode: "flat", value: 5 },
   };
   assert.deepEqual(normalizeRoundBestOf(split), split);
   assert.deepEqual(normalizeRoundBestOf(undefined), {});
+});
+
+test("the grand final is derived as a flat block, from the nearest key it was split out of", () => {
+  // Production shape: the winners/losers split was saved, the grand final split
+  // wasn't. It inherits the winners finals tier — the value it already resolved
+  // to — rather than reverting to BO3.
+  const preGf = normalizeRoundBestOf({ de_winners: tiers(3, 3, 5, 7), de_losers: tiers(1, 1, 1, 3) });
+  assert.deepEqual(preGf.de_grand_final, { mode: "flat", value: 7 });
+
+  // Pre-split, with no de_winners to read: straight from the oldest key.
+  const preSplit = normalizeRoundBestOf({ double_elimination: tiers(1, 5, 5, 7) });
+  assert.deepEqual(preSplit.de_grand_final, { mode: "flat", value: 7 });
+  assert.deepEqual(normalizeRoundBestOf(preSplit), preSplit);
 });
 
 test("the two brackets resolve independently once split", () => {
@@ -54,20 +68,39 @@ test("the two brackets resolve independently once split", () => {
   assert.equal(resolveBestOf(DE_LOSERS, 3, maxRounds, split), 1);
   assert.equal(resolveBestOf(DE_LOSERS, 4, maxRounds, split), 3);
 
-  // The grand final answers to the winners block's finals tier.
+  // Only derived from the winners finals tier, so it matches until it's set.
   assert.equal(resolveBestOf(DE_GF, 1, maxRounds, split), 7);
 });
 
-test("the DE preset defaults to one entry per bracket and no legacy key", () => {
+test("the grand final is independent of the winners bracket once set", () => {
+  const config: RoundBestOfConfig = {
+    de_winners: tiers(3, 3, 5, 5),
+    de_losers: tiers(1, 1, 1, 3),
+    de_grand_final: { mode: "flat", value: 7 },
+  };
+  // The winners final and the grand final both sit on the finals tier; the whole
+  // point of the split is that they no longer have to be the same length.
+  assert.equal(resolveBestOf(DE_WINNERS, 3, maxRounds, config), 5);
+  assert.equal(resolveBestOf(DE_GF, 1, maxRounds, config), 7);
+
+  // Moving the winners bracket no longer drags the title series with it.
+  const longerWb = { ...config, de_winners: tiers(7, 7, 7, 7) };
+  assert.equal(resolveBestOf(DE_GF, 1, maxRounds, longerWb), 7);
+});
+
+test("the DE preset defaults to one entry per block and no legacy key", () => {
   const defaults = defaultRoundBestOfForPreset("double_elimination");
-  assert.deepEqual(Object.keys(defaults).sort(), ["de_losers", "de_winners"]);
+  assert.deepEqual(Object.keys(defaults).sort(), ["de_grand_final", "de_losers", "de_winners"]);
+  // One match, so one value — never a tier grid.
+  assert.deepEqual(defaults.de_grand_final, { mode: "flat", value: 3 });
 
   // Still one stage in the chain, so the emblem row and the stage cards are
   // unchanged — the split lives inside the stage.
   const slots = STAGE_SLOTS_BY_PRESET.double_elimination;
   assert.equal(slots.length, 1);
   assert.equal(slots[0].key, "double_elimination");
-  assert.equal(bestOfBlocks(slots[0]).length, 2);
+  assert.equal(bestOfBlocks(slots[0]).length, 3);
+  assert.equal(bestOfBlocks(slots[0]).find((b) => b.key === "de_grand_final")?.kind, "flat");
 });
 
 test("lengthening either bracket lengthens the schedule estimate", () => {
@@ -77,6 +110,9 @@ test("lengthening either bracket lengthens the schedule estimate", () => {
   const baseline = minutes(base);
   assert.ok(minutes({ ...base, de_winners: tiers(7, 7, 7, 7) }) > baseline);
   assert.ok(minutes({ ...base, de_losers: tiers(7, 7, 7, 7) }) > baseline);
+  // The grand final is its own wall-clock slot, so its setting has to move the
+  // estimate on its own or the block reads as inert.
+  assert.ok(minutes({ ...base, de_grand_final: { mode: "flat", value: 7 } }) > baseline);
 
   // A legacy config estimates as the block it was saved with, rather than
   // falling through to the default.

@@ -364,7 +364,12 @@ since they go to the Swiss stage rather than straight to the bracket.
 **Best-of length** can be set as one flat value that applies to an entire
 stage (used for Group and Swiss stages), or scaled up round-by-round for
 bracket-shaped stages — a shorter best-of for standard rounds, increasing at
-quarterfinals, semifinals, and the final.
+quarterfinals, semifinals, and the final. A Double Elimination bracket is
+one stage but three separate best-of blocks: Winners Bracket, Losers
+Bracket, and Grand Final. The losers side is playing elimination while the
+winners side beside it is only playing for position, and the title series
+is usually longer than the winners-bracket final that feeds it — so none of
+the three has to match the others.
 
 ### The Season / Tournament tab
 
@@ -1228,7 +1233,10 @@ Moderators too, it's noted.
     the groups, and how many rounds the group stage runs.
   - A Best-Of setting appears per stage that needs one — either one flat
     best-of value for every match in that stage, or separate values for
-    Standard / Quarterfinal / Semifinal / Final matches.
+    Standard / Quarterfinal / Semifinal / Final matches. A Double
+    Elimination stage shows three blocks instead of one: Winners Bracket
+    and Losers Bracket get their own tier grids, and the Grand Final gets a
+    single flat value, being one match.
   - A Stage Schedule block lists every stage in order with an estimated
     real-world duration for each (based on the best-of settings and team
     count) and a date/time field for when it should begin; picking a start

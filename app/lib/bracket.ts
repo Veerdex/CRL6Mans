@@ -966,23 +966,25 @@ export type StageSlotKey =
   | "hybrid";
 
 // What a best-of setting is keyed on, which is finer-grained than a stage: a DE
-// bracket is one stage but two independently-configurable brackets, since a
-// winners-side round and the losers-side round beside it carry different stakes.
+// bracket is one stage but three independently-configurable blocks, since a
+// winners-side round, the losers-side round beside it and the grand final all
+// carry different stakes.
 // These extra keys are deliberately NOT StageSlotKeys — they must never reach
 // stageEmblem/stageShortLabel/stageDescription or the preset's stage chain, and
 // keeping the unions separate is what makes tsc prove it.
-export type BestOfKey = StageSlotKey | "de_winners" | "de_losers";
+export type BestOfKey = StageSlotKey | "de_winners" | "de_losers" | "de_grand_final";
 
-// The grand final answers to the winners block: it is the winners bracket's
-// deciding round in everything but name, and the alternative is a third settings
-// block for a single match.
+// The grand final gets its own key rather than answering to the winners block:
+// both resolve to the finals tier, so sharing one forced the title match and the
+// winners-bracket final to exactly the same length.
 export function getBestOfKey(stage: string): BestOfKey | null {
   if (stage.startsWith(GROUP_STAGE_PREFIX)) return "group";
   if (stage === SWISS_STAGE) return "swiss";
   if (stage === SE_QUALIFIER) return "se_qualifier";
   if (stage === DE_QUALIFIER_WINNERS || stage === DE_QUALIFIER_LOSERS) return "de_qualifier";
-  if (stage === DE_WINNERS || stage === DE_GF) return "de_winners";
+  if (stage === DE_WINNERS) return "de_winners";
   if (stage === DE_LOSERS) return "de_losers";
+  if (stage === DE_GF) return "de_grand_final";
   if (stage === "single_elimination") return "single_elimination";
   if (stage.startsWith("hybrid")) return "hybrid";
   return null;

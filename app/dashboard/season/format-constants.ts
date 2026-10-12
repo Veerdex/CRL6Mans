@@ -203,8 +203,9 @@ export type StageSlotDef = {
   kind: "flat" | "tiered";
   // A stage whose best-of is configured as more than one block. The slot stays
   // one entry in the preset's chain — one emblem, one description, one stage
-  // card — and these are the settings groups rendered inside it.
-  subSlots?: { key: BestOfKey; label: string }[];
+  // card — and these are the settings groups rendered inside it. A block may
+  // override the stage's kind: a single-match block has no tier ladder to scale.
+  subSlots?: { key: BestOfKey; label: string; kind?: "flat" | "tiered" }[];
 };
 
 // Ordered list of each preset's stages, and the one list every stage chain is
@@ -228,9 +229,14 @@ export const STAGE_SLOTS_BY_PRESET: Record<PresetId, StageSlotDef[]> = {
       // Two brackets run side by side at different stakes: a winners-bracket
       // round decides who stays undefeated, while the losers round beside it is
       // elimination. One tier grid for both could only ever suit one of them.
+      // The grand final is a third block because it is a different match from
+      // the winners final even though both land on the finals tier — a format
+      // that runs its bracket short and the title series long is the normal
+      // case, not an exception. One match, so one value: flat.
       subSlots: [
-        { key: "de_winners", label: "Winners Bracket (incl. Grand Final)" },
+        { key: "de_winners", label: "Winners Bracket" },
         { key: "de_losers", label: "Losers Bracket" },
+        { key: "de_grand_final", label: "Grand Final", kind: "flat" },
       ],
     },
   ],
@@ -276,31 +282,64 @@ export type BestOfBlock = { key: BestOfKey; label: string; kind: "flat" | "tiere
 // than indexing on slot.key, so a split stage can't be half-handled.
 export function bestOfBlocks(slot: StageSlotDef): BestOfBlock[] {
   if (!slot.subSlots) return [{ key: slot.key, label: slot.label, kind: slot.kind }];
-  return slot.subSlots.map((s) => ({ ...s, kind: slot.kind }));
+  return slot.subSlots.map((s) => ({ ...s, kind: s.kind ?? slot.kind }));
 }
 
-// Stages whose best-of used to be one block and is now several, mapped to the
-// key the single block was stored under. A tournament configured before the
-// split has only that key, and every consumer — both editors' initial state and
-// dirty checks, the read-only summaries, resolveBestOf, computeStageSchedule —
-// must see the values the admin actually set rather than fall through to
+// Which kind each block is edited as, read off the slot defs so it can't drift
+// from what the editors render. Legacy keys a block was split out of aren't in
+// here — nothing edits those any more.
+const BLOCK_KIND_BY_KEY: Partial<Record<BestOfKey, "flat" | "tiered">> = (() => {
+  const kinds: Partial<Record<BestOfKey, "flat" | "tiered">> = {};
+  for (const slots of Object.values(STAGE_SLOTS_BY_PRESET)) {
+    for (const slot of slots) {
+      for (const block of bestOfBlocks(slot)) kinds[block.key] = block.kind;
+    }
+  }
+  return kinds;
+})();
+
+// Carrying an inherited block across a kind boundary: a tiered block becomes the
+// value its finals tier already resolved to, which for the grand final is the
+// exact number the old combined winners block produced for it.
+function coerceToKind(config: StageBestOfConfig, kind: "flat" | "tiered"): StageBestOfConfig {
+  if (kind === "flat") {
+    return config.mode === "flat" ? config : { mode: "flat", value: config.tiers.finals };
+  }
+  if (config.mode === "tiered") return config;
+  const { value } = config;
+  return { mode: "tiered", tiers: { standard: value, quarterfinals: value, semifinals: value, finals: value } };
+}
+
+// Stages whose best-of used to be fewer blocks than it is now, mapped to the
+// keys a new block inherits from, nearest first. A tournament configured before
+// a split has only the old key, and every consumer — both editors' initial state
+// and dirty checks, the read-only summaries, resolveBestOf, computeStageSchedule
+// — must see the values the admin actually set rather than fall through to
 // defaults: an in-flight DE bracket would otherwise silently revert to BO3, and
-// the editor would read as permanently unsaved.
-const SPLIT_FROM: Partial<Record<BestOfKey, BestOfKey>> = {
-  de_winners: "double_elimination",
-  de_losers: "double_elimination",
+// the editor would read as permanently unsaved. The grand final's chain is two
+// splits deep (double_elimination → de_winners → de_grand_final), which is why
+// these are lists.
+const SPLIT_FROM: Partial<Record<BestOfKey, BestOfKey[]>> = {
+  de_winners: ["double_elimination"],
+  de_losers: ["double_elimination"],
+  de_grand_final: ["de_winners", "double_elimination"],
 };
 
-// Pure and idempotent: fills in a split stage's new keys from the block they
-// were split out of. Saving re-trims to the new keys, so this only ever has work
-// to do until the next save.
+// Pure and idempotent: fills in a split stage's new keys from the blocks they
+// were split out of, coerced to the kind the new block is edited as. Each key
+// reads the partially-filled result, so the fill order doesn't matter — a chain
+// resolves either through its nearest ancestor or straight from the oldest key.
+// Saving re-trims to the new keys, so this only ever has work to do until the
+// next save.
 export function normalizeRoundBestOf(config: RoundBestOfConfig | undefined): RoundBestOfConfig {
   if (!config) return {};
   let result = config;
-  for (const [key, legacyKey] of Object.entries(SPLIT_FROM) as [BestOfKey, BestOfKey][]) {
-    if (result[key] || !config[legacyKey]) continue;
+  for (const [key, legacyKeys] of Object.entries(SPLIT_FROM) as [BestOfKey, BestOfKey[]][]) {
+    if (result[key]) continue;
+    const inherited = legacyKeys.map((k) => result[k]).find((c) => c !== undefined);
+    if (!inherited) continue;
     if (result === config) result = { ...config };
-    result[key] = config[legacyKey];
+    result[key] = coerceToKind(inherited, BLOCK_KIND_BY_KEY[key] ?? "tiered");
   }
   return result;
 }
@@ -366,8 +405,13 @@ function groupStageRounds(teams: number): number {
 // A slot holding one round from each bracket costs the longer of the two, not the
 // losers round alone: the brackets have separate best-of settings, so lengthening
 // only the winners bracket has to move the estimate or the setting looks inert.
-function deDuration(teams: number, wbTiers: Record<RoundTier, BestOf>, lbTiers: Record<RoundTier, BestOf>): number {
-  if (teams <= 2) return gapMin(wbTiers.finals);
+function deDuration(
+  teams: number,
+  wbTiers: Record<RoundTier, BestOf>,
+  lbTiers: Record<RoundTier, BestOf>,
+  gfBestOf: BestOf,
+): number {
+  if (teams <= 2) return gapMin(gfBestOf);
   const wb = log2ceil(teams);
   const lb = 2 * (wb - 1);
   let dur = gapMin(wbTiers[getTier(1, wb)]);
@@ -376,17 +420,21 @@ function deDuration(teams: number, wbTiers: Record<RoundTier, BestOf>, lbTiers: 
     const wbRound = k + 1;
     dur += wbRound <= wb ? Math.max(lbGap, gapMin(wbTiers[getTier(wbRound, wb)])) : lbGap;
   }
-  return dur + gapMin(wbTiers.finals);
+  return dur + gapMin(gfBestOf);
 }
 
 // Swiss runs until every team reaches 3 wins or 3 losses → at most 5 rounds, all standard.
 const SWISS_ROUNDS = 5;
 
-function slotFlatBO(config: RoundBestOfConfig, key: "group" | "swiss"): BestOf {
+// The keys edited as one value rather than a tier grid. Splitting the accessors
+// on this union is what stops a flat block being read for tiers it never has.
+type FlatBestOfKey = "group" | "swiss" | "de_grand_final";
+
+function slotFlatBO(config: RoundBestOfConfig, key: FlatBestOfKey): BestOf {
   const c = config[key];
   return c?.mode === "flat" ? c.value : 3;
 }
-function slotTiers(config: RoundBestOfConfig, key: Exclude<BestOfKey, "group" | "swiss">): Record<RoundTier, BestOf> {
+function slotTiers(config: RoundBestOfConfig, key: Exclude<BestOfKey, FlatBestOfKey>): Record<RoundTier, BestOf> {
   const c = config[key];
   return c?.mode === "tiered" ? c.tiers : DEFAULT_BEST_OF;
 }
@@ -413,7 +461,12 @@ export function computeStageSchedule(
       return [{ key: "bracket", label: "Bracket", estimatedMinutes: seRoundsDuration(log2ceil(teams), slotTiers(config, "single_elimination")) }];
 
     case "double_elimination":
-      return [{ key: "bracket", label: "Bracket", estimatedMinutes: deDuration(teams, slotTiers(config, "de_winners"), slotTiers(config, "de_losers")) }];
+      return [{ key: "bracket", label: "Bracket", estimatedMinutes: deDuration(
+        teams,
+        slotTiers(config, "de_winners"),
+        slotTiers(config, "de_losers"),
+        slotFlatBO(config, "de_grand_final"),
+      ) }];
 
     case "group_single_elimination": {
       const adv = groupMaxAdvancing ?? getDefaultGroupAdvancing(teams);
