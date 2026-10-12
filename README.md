@@ -4,7 +4,7 @@ Web platform and Discord bot for the CRL West 6mans competitive Rocket League le
 
 ## Overview
 
-CRL West 6Mans is a competitive collegiate Rocket League pickup league. Players sign in with Discord, and the platform runs the full season lifecycle:
+CRL West 6Mans runs drafted Rocket League seasons for college players. Players sign in with Discord, and the platform runs the full season lifecycle:
 
 1. **Register** — players sign in via Discord OAuth and submit their Rocket League ranks + tracker; an admin approves them.
 2. **Draft** — approved players enter the draft pool and are placed onto teams (live snake draft, or auto-balance by Rank Value).

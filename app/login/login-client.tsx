@@ -191,10 +191,7 @@ export function LoginClient({ error }: { error?: string }) {
         }}
         className="relative z-[2] w-full max-w-sm p-8 space-y-8 bg-zinc-900/90 backdrop-blur-sm rounded-2xl border border-zinc-800"
       >
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold text-white tracking-tight">{APP_NAME}</h1>
-          <p className="text-zinc-400 text-sm">Competitive Rocket League pickup queue</p>
-        </div>
+        <h1 className="text-3xl font-bold text-white tracking-tight text-center">{APP_NAME}</h1>
 
         {error && (
           <p className="text-center text-sm text-red-400">

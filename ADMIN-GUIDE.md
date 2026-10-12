@@ -749,10 +749,12 @@ home instead of seeing an empty version of this page.
 
 ## Other pages
 
-- **About** (`/dashboard/about`) — a short static page: "CRL 6Mans is a
-  competitive Rocket League pickup queue for college players. Registered
-  players are drafted into teams each season and compete in scrimmages to
-  build skills and rank up."
+- **About** (`/dashboard/about`) — a short static page: "CRL West 6Mans runs
+  drafted Rocket League seasons for college players. Registered players enter
+  the draft pool, are placed on a team, and compete through a full tournament
+  season of scheduled matches, standings and playoffs." Below it sits a line
+  noting the league is not affiliated with or endorsed by Psyonix or the
+  official Collegiate Rocket League; the same line appears on Welcome.
 - **Rules** (`/dashboard/rules`) — the full official rulebook (titled "CRL
   West 6mans Summer League" and labeled with its season year). Participating
   implies agreeing to it; it links out to a master document as the ultimate

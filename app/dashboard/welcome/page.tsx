@@ -24,9 +24,12 @@ export default async function WelcomePage() {
       <section className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-3">
         <h2 className="text-sm font-semibold text-white">What is {APP_NAME}?</h2>
         <p className="text-sm text-zinc-300 leading-relaxed">
-          {APP_NAME} is a competitive collegiate Rocket League pickup league. You register with your
+          {APP_NAME} runs drafted Rocket League seasons for college players. You register with your
           Discord account, enter the draft pool, get placed on a team, and compete through a full
           tournament season — all managed right here on this site.
+        </p>
+        <p className="text-xs text-zinc-500 leading-relaxed">
+          Not affiliated with or endorsed by Psyonix or the official Collegiate Rocket League.
         </p>
       </section>
 

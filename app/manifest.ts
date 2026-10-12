@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: APP_NAME,
     short_name: APP_NAME,
-    description: "Competitive Rocket League pickup queue for CRL West",
+    description: "Drafted Rocket League seasons for college players",
     start_url: "/dashboard",
     display: "standalone",
     background_color: "#09090b",

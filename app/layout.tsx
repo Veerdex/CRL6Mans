@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: APP_NAME,
-  description: "Competitive Rocket League pickup queue",
+  description: "Drafted Rocket League seasons for college players",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

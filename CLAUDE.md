@@ -1,7 +1,9 @@
 # CRL 6Mans — CLAUDE.md
 
 ## What this project is
-A competitive Rocket League pickup-queue web app for a college league. Players register via Discord OAuth, enter a draft pool, get snake-drafted or auto-balanced onto teams, and play a tournament season. Admins manage the full lifecycle from the dashboard.
+A web app running drafted Rocket League seasons for college players. Players register via Discord OAuth, enter a draft pool, get snake-drafted or auto-balanced onto teams, and play a tournament season. Admins manage the full lifecycle from the dashboard.
+
+It is **not** a pickup queue, and no user-facing copy should call it one — that is the separate private 6mans bot in the same Discord (`crl6mansqueuebot_*` tables). The app is also unaffiliated with Psyonix's official Collegiate Rocket League, whose Western Conference it shares both a name and an eligibility boundary with (schools west of the Mississippi), so About and Welcome carry a disclaimer and nothing calls the league "collegiate".
 
 ---
 
