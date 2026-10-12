@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { APP_NAME } from "@/app/lib/constants";
 import { LeagueStatsButton, LeagueStatsDialog } from "./stats-modal";
 
 const VIDEO_ID = "NBFVztq7OlU";
@@ -191,7 +190,13 @@ export function LoginClient({ error }: { error?: string }) {
         }}
         className="relative z-[2] w-full max-w-sm p-8 space-y-8 bg-zinc-900/90 backdrop-blur-sm rounded-2xl border border-zinc-800"
       >
-        <h1 className="text-3xl font-bold text-white tracking-tight text-center">{APP_NAME}</h1>
+        {/* The dashboard's <AppTitle /> colors these two words the other way
+            round — orange West, blue 6Mans — so the wordmark is deliberately
+            spelled out here rather than shared. */}
+        <h1 className="text-3xl font-bold text-white tracking-tight text-center">
+          CRL <span style={{ color: "#3736ac" }}>West</span>{" "}
+          <span style={{ color: "#e88a24" }}>6Mans</span>
+        </h1>
 
         {error && (
           <p className="text-center text-sm text-red-400">
