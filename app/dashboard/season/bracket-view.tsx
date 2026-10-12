@@ -6,6 +6,7 @@ import {
 } from "@/app/lib/bracket";
 import { buildTeamTitles } from "@/app/lib/team-titles";
 import { attachStartedAt } from "@/app/lib/match-live-server";
+import { attachForfeits } from "@/app/lib/forfeits";
 import { GroupStageClient } from "./group-stage-client";
 import { SEBracketDisplay, DEBracketDisplay, DEQualifierBracketDisplay, type Team } from "./bracket-display";
 
@@ -29,7 +30,7 @@ export async function SEBracketView({ stage = "single_elimination" }: { stage?: 
   const teams: Record<string, Team> = {};
   teamsRaw?.forEach((t) => { teams[t.id] = t; });
 
-  return <SEBracketDisplay matches={await attachStartedAt(matchesRaw)} teams={teams} />;
+  return <SEBracketDisplay matches={await attachForfeits(await attachStartedAt(matchesRaw))} teams={teams} />;
 }
 
 export async function DEBracketView() {
@@ -48,7 +49,7 @@ export async function DEBracketView() {
   const teams: Record<string, Team> = {};
   teamsRaw?.forEach((t) => { teams[t.id] = t; });
 
-  return <DEBracketDisplay matches={await attachStartedAt(matchesRaw)} teams={teams} />;
+  return <DEBracketDisplay matches={await attachForfeits(await attachStartedAt(matchesRaw))} teams={teams} />;
 }
 
 export async function DEQualifierBracketView() {
@@ -67,7 +68,7 @@ export async function DEQualifierBracketView() {
   const teams: Record<string, Team> = {};
   teamsRaw?.forEach((t) => { teams[t.id] = t; });
 
-  return <DEQualifierBracketDisplay matches={await attachStartedAt(matchesRaw)} teams={teams} />;
+  return <DEQualifierBracketDisplay matches={await attachForfeits(await attachStartedAt(matchesRaw))} teams={teams} />;
 }
 
 // ── Group Bracket View ────────────────────────────────────────────────────────

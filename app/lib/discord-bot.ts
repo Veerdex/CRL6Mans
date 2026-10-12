@@ -4663,6 +4663,13 @@ export async function execReportMatchResult(
   if (claimError) return { ok: false, message: "Could not report the match." };
   if (!claimed?.length) return { ok: false, message: "Match already reported." };
 
+  // Stamped by its own update rather than riding on the claim above: a select or
+  // update naming a column the migration hasn't added yet fails outright, and a
+  // deploy landing first has to cost the bracket its FF label, not every result
+  // report — including the sweep's own no-show forfeits. A 1–0 that nothing
+  // distinguishes from a played game is exactly what this column exists to fix.
+  if (forfeit) await supabaseAdmin.from("matches").update({ forfeit: true }).eq("id", matchId);
+
   // A match's sub requests are consumed once it's played — clear them so the team
   // is free to request a sub for their next match and the panel stays clean.
   await supabaseAdmin.from("sub_requests").delete().eq("match_id", matchId);

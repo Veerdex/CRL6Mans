@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF } from "@/app/lib/bracket";
 import { buildTeamTitles } from "@/app/lib/team-titles";
 import { attachStartedAt } from "@/app/lib/match-live-server";
+import { attachForfeits } from "@/app/lib/forfeits";
 import { HybridBracketDisplay, type TeamMap } from "./hybrid-display";
 
 export async function HybridBracketView({ variant = "12" }: { variant?: "12" | "8" }) {
@@ -35,5 +36,5 @@ export async function HybridBracketView({ variant = "12" }: { variant?: "12" | "
     teamTitles = buildTeamTitles(playersData ?? []);
   }
 
-  return <HybridBracketDisplay variant={variant} matches={await attachStartedAt(matches)} teams={teams} teamTitles={teamTitles} />;
+  return <HybridBracketDisplay variant={variant} matches={await attachForfeits(await attachStartedAt(matches))} teams={teams} teamTitles={teamTitles} />;
 }

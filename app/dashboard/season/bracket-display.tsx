@@ -36,6 +36,9 @@ export type DBMatch = {
   // Set once both teams have checked in. Optional because the archive viewer's
   // snapshot rows have no such column and are never live.
   started_at?: string | null;
+  // Optional for the same reason: an archive snapshot predates the column, and
+  // a row without it reads as a played result, which is how it rendered before.
+  forfeit?: boolean;
 };
 
 export type Team = { id: string; name: string; logo_url: string | null };
@@ -68,6 +71,19 @@ function slotLabel(
   const hasScores = match.home_score !== null || match.away_score !== null;
   if (hasScores) return "BYE";
   return getFeederLabel(match.round, match.match_number, slot, numR1);
+}
+
+// A forfeit is stored as 1–0 so the bracket can advance someone, but nobody
+// played to that score, so it isn't shown as one: the side that forfeited reads
+// FF and the side that advanced shows nothing at all. The winner still keeps the
+// highlight, which is what marks them as through.
+function ScoreCell({ match, completed, score, won }: { match: DBMatch; completed: boolean; score: number | null; won: boolean }) {
+  if (!completed || score === null) return null;
+  if (match.forfeit) {
+    if (won) return null;
+    return <span className="text-[10px] font-bold shrink-0 w-4 text-right text-red-400">FF</span>;
+  }
+  return <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${won ? "text-white" : "text-zinc-500"}`}>{score}</span>;
 }
 
 // ── Styles per state ──────────────────────────────────────────────────────────
@@ -167,9 +183,7 @@ function MatchBox({ match, teams, numR1, matchId }: { match: DBMatch; teams: Rec
             {homeLabel}
           </TeamLink>
         ) : <SlotText label={homeLabel} faded={homeFaded} />}
-        {completed && match.home_score !== null && (
-          <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${homeWon ? "text-white" : "text-zinc-500"}`}>{match.home_score}</span>
-        )}
+        <ScoreCell match={match} completed={completed} score={match.home_score} won={homeWon} />
       </div>
       <div className="h-px shrink-0 bg-zinc-700/50 mx-2" />
       {/* Away row */}
@@ -181,9 +195,7 @@ function MatchBox({ match, teams, numR1, matchId }: { match: DBMatch; teams: Rec
             {awayLabel}
           </TeamLink>
         ) : <SlotText label={awayLabel} faded={awayFaded} />}
-        {completed && match.away_score !== null && (
-          <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${awayWon ? "text-white" : "text-zinc-500"}`}>{match.away_score}</span>
-        )}
+        <ScoreCell match={match} completed={completed} score={match.away_score} won={awayWon} />
       </div>
     </div>
   );
@@ -395,9 +407,7 @@ function DEMatchBox({
             {homeLabel}
           </TeamLink>
         ) : <SlotText label={homeLabel} faded={homeFaded} />}
-        {completed && match.home_score !== null && (
-          <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${homeWon ? "text-white" : "text-zinc-500"}`}>{match.home_score}</span>
-        )}
+        <ScoreCell match={match} completed={completed} score={match.home_score} won={homeWon} />
       </div>
       <div className="h-px shrink-0 bg-zinc-700/50 mx-2" />
       <div className={`flex flex-1 min-h-0 items-center gap-2 px-2 ${awayWon ? "bg-white/5" : ""}`}>
@@ -408,9 +418,7 @@ function DEMatchBox({
             {awayLabel}
           </TeamLink>
         ) : <SlotText label={awayLabel} faded={awayFaded} />}
-        {completed && match.away_score !== null && (
-          <span className={`text-xs font-mono font-bold shrink-0 w-4 text-right ${awayWon ? "text-white" : "text-zinc-500"}`}>{match.away_score}</span>
-        )}
+        <ScoreCell match={match} completed={completed} score={match.away_score} won={awayWon} />
       </div>
     </div>
   );

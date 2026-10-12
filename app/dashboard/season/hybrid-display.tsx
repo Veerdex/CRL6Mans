@@ -23,6 +23,7 @@ export type MatchRow = {
   away_score: number | null;
   status: string;
   started_at?: string | null;
+  forfeit?: boolean;
 };
 export type TeamMap = Record<string, { name: string; logo_url: string | null }>;
 
@@ -108,11 +109,15 @@ function MatchCard({ node, match, teams, teamTitles, isLeft }: { node: Node; mat
           ) : (
             <SlotText feeder={feeder} />
           )}
-          {done && score !== null && (
-            <span className={`text-xs font-mono font-bold tabular-nums shrink-0 ${won ? "text-emerald-400" : "text-zinc-500"}`}>
-              {score}
-            </span>
-          )}
+          {/* Same rule as the SE/DE cards: a forfeit's 1–0 is bookkeeping, so the
+              side that forfeited reads FF and the side that advanced shows nothing. */}
+          {done && score !== null && (match?.forfeit
+            ? !won && <span className="text-[10px] font-bold shrink-0 text-red-400">FF</span>
+            : (
+              <span className={`text-xs font-mono font-bold tabular-nums shrink-0 ${won ? "text-emerald-400" : "text-zinc-500"}`}>
+                {score}
+              </span>
+            ))}
         </div>
       ))}
     </div>
