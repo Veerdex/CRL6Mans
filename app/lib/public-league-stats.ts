@@ -49,6 +49,7 @@ export type Scoreboard = {
 
 export type PublicLeagueStats = {
   seasons: number;
+  tournaments: number;
   firstSeasonYear: number | null;
   playersAllTime: number;
   latestSeason: { year: number; teams: number } | null;
@@ -160,6 +161,10 @@ async function computePublicLeagueStats(): Promise<PublicLeagueStats> {
   const newest = seasons[seasons.length - 1];
   const newestYear = newest ? yearOf(newest[1].endedAt) : null;
 
+  // A test tournament can never land here: completeTournament takes the isTest
+  // branch, which writes no archive and so never calls recordEventResults.
+  const tournaments = [...byEvent.values()].filter((e) => e.kind === "tournament").length;
+
   const perEvent = new Map<string, { games: number; demos: number }>();
   const scoreboard: Scoreboard = { goals: 0, assists: 0, saves: 0, shots: 0, demos: 0, games: 0 };
   for (const row of seeded) {
@@ -194,6 +199,7 @@ async function computePublicLeagueStats(): Promise<PublicLeagueStats> {
 
   return {
     seasons: seasons.length,
+    tournaments,
     firstSeasonYear,
     playersAllTime: players.size,
     latestSeason: newest && newestYear ? { year: newestYear, teams: newest[1].teams ?? 0 } : null,

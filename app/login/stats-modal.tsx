@@ -63,6 +63,9 @@ function Body({ stats }: { stats: PublicLeagueStats }) {
       <Section title="The league" subtitle={since ? `${since} — four seasons of Summer League` : undefined}>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
           <Tile value={n(stats.seasons)} label="Seasons" note={firstSeasonYear ? `since ${firstSeasonYear}` : undefined} />
+          {stats.tournaments > 0 && (
+            <Tile value={n(stats.tournaments)} label={stats.tournaments === 1 ? "Tournament" : "Tournaments"} note="outside the season" />
+          )}
           <Tile value={n(stats.playersAllTime)} label="Players all-time" />
           {latestSeason && (
             <Tile value={n(latestSeason.teams)} label="Teams" note={`${latestSeason.year} season`} />
