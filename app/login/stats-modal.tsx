@@ -6,12 +6,22 @@ import { loadPublicLeagueStats } from "./stats-actions";
 
 const n = (value: number) => value.toLocaleString("en-US");
 
+// Brand orange #e88a24 and brand blue #3736ac, spelled out the way the sidebar
+// and app title do rather than through the theme tokens: /login renders outside
+// the themed shell, so there is no `--c-*` indirection to read here.
+//
+// Blue carries the surfaces and orange the numbers, never the other way round.
+// #3736ac is dark enough that text set in it disappears on a dark panel, and a
+// fill built on it reads as haze rather than light — the same finding behind the
+// lit-blue field on the support page — so the tile borders use the lighter
+// #605ef0 to actually register as blue at one pixel.
+
 export function LeagueStatsButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center justify-center gap-2 w-full py-2 px-4 text-sm font-medium text-zinc-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors"
+      className="flex items-center justify-center gap-2 w-full py-2 px-4 text-sm font-medium text-[#e88a24] hover:text-white bg-[#e88a24]/10 hover:bg-[#e88a24] border border-[#e88a24]/50 hover:border-[#e88a24] rounded-lg transition-colors"
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
         <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
@@ -23,10 +33,10 @@ export function LeagueStatsButton({ onClick }: { onClick: () => void }) {
 
 function Tile({ value, label, note }: { value: string; label: string; note?: string }) {
   return (
-    <div className="rounded-xl bg-white/5 border border-white/10 px-3 py-3 text-center">
-      <p className="text-2xl font-bold text-white tabular-nums leading-tight">{value}</p>
-      <p className="mt-1 text-[11px] uppercase tracking-wide text-zinc-400">{label}</p>
-      {note && <p className="mt-0.5 text-[10px] text-zinc-500">{note}</p>}
+    <div className="rounded-xl bg-[#3736ac]/25 border border-[#605ef0]/35 px-3 py-3 text-center">
+      <p className="text-2xl font-bold text-[#e88a24] tabular-nums leading-tight">{value}</p>
+      <p className="mt-1 text-[11px] uppercase tracking-wide text-zinc-300">{label}</p>
+      {note && <p className="mt-0.5 text-[10px] text-zinc-400">{note}</p>}
     </div>
   );
 }
@@ -34,9 +44,9 @@ function Tile({ value, label, note }: { value: string; label: string; note?: str
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <section className="space-y-3">
-      <div>
+      <div className="border-l-2 border-[#e88a24] pl-3">
         <h3 className="text-sm font-semibold text-white">{title}</h3>
-        {subtitle && <p className="text-xs text-zinc-500">{subtitle}</p>}
+        {subtitle && <p className="text-xs text-zinc-400">{subtitle}</p>}
       </div>
       {children}
     </section>
@@ -124,20 +134,20 @@ export function LeagueStatsDialog({ open, onClose }: { open: boolean; onClose: (
     >
       <div
         onClick={e => e.stopPropagation()}
-        className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6 sm:p-8 bg-zinc-900/95 border border-zinc-800 rounded-2xl"
+        className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6 sm:p-8 bg-zinc-900/95 bg-gradient-to-b from-[#3736ac]/45 via-[#3736ac]/10 to-transparent border border-[#3736ac] border-t-4 border-t-[#e88a24] rounded-2xl"
       >
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="absolute top-4 right-4 p-1.5 text-zinc-500 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+          className="absolute top-4 right-4 p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-[#e88a24] transition-colors"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
             <path d="M18 6 6 18M6 6l12 12" />
           </svg>
         </button>
 
-        <h2 id="league-stats-title" className="text-xl font-bold text-white pr-10">
+        <h2 id="league-stats-title" className="text-xl font-bold text-[#e88a24] pr-10">
           By the numbers
         </h2>
 
@@ -149,7 +159,7 @@ export function LeagueStatsDialog({ open, onClose }: { open: boolean; onClose: (
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5" aria-hidden="true">
               {Array.from({ length: 6 }, (_, i) => (
-                <div key={i} className="h-[76px] rounded-xl bg-white/5 border border-white/10 animate-pulse" />
+                <div key={i} className="h-[76px] rounded-xl bg-[#3736ac]/25 border border-[#605ef0]/35 animate-pulse" />
               ))}
             </div>
           )}
