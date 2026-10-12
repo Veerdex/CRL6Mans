@@ -161,7 +161,7 @@ export function LeagueStatsDialog({ open, onClose }: { open: boolean; onClose: (
         </button>
 
         <h2 id="league-stats-title" className="text-xl font-bold text-[#e88a24] pr-10">
-          By the numbers
+          League Stats
         </h2>
 
         <div className="mt-6">
