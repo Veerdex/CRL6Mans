@@ -40,12 +40,19 @@ type BadgeGroup = { afterRound: number; w: number; l: number; type: "qualified" 
 // sits flush on the group box's inner edge — home on the left, away on the
 // right. A team with no crest gets the number tile the teams tab shows; an
 // unassigned slot (TBD) gets nothing, so the label stands alone as before.
+//
+// The row height is written into the box rather than reached through
+// `self-stretch aspect-square`: WebKit will not size an aspect-ratio item from
+// its stretched height, so on iOS the image came out at its intrinsic width and
+// the number tile at the width of its digit. Same reasoning as the bracket card.
+const CREST = { width: MH, height: MH }; // the row carries no border of its own
+
 function SwissCrest({ team, side }: { team: Team | undefined; side: "home" | "away" }) {
   if (!team) return null;
-  const box = `self-stretch w-auto h-auto aspect-square shrink-0 ${side === "home" ? "-ml-2" : "-mr-2"}`;
-  if (!team.logo_url) return <DefaultLogo name={team.name} className={`${box} text-[11px]`} />;
+  const box = `shrink-0 ${side === "home" ? "-ml-2" : "-mr-2"}`;
+  if (!team.logo_url) return <DefaultLogo name={team.name} style={CREST} className={`${box} text-[11px]`} />;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={team.logo_url} alt="" className={`${box} object-cover`} />;
+  return <img src={team.logo_url} alt="" style={CREST} className={`${box} object-cover`} />;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────

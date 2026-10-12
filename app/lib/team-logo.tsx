@@ -5,6 +5,8 @@
 // in two different colours. Leaf module: no server imports, so the season
 // displays can render it from the server wrappers and the archive viewer alike.
 
+import type { CSSProperties } from "react";
+
 export const TEAM_GRADIENTS = [
   "from-indigo-600 to-indigo-800", "from-rose-600 to-rose-800",
   "from-emerald-600 to-emerald-800", "from-amber-600 to-amber-800",
@@ -22,16 +24,22 @@ export function teamGradient(name: string): string {
 }
 
 // `className` carries the box: size, radius and text size. The default is the
-// teams tab's tile, so that page renders byte-identically to before.
+// teams tab's tile, so that page renders byte-identically to before. `style` is
+// for the surfaces whose box is a pixel size computed from their own layout
+// constants rather than a Tailwind step — the season displays size their crest
+// off the match row height.
 export function DefaultLogo({
   name,
   className = "w-12 h-12 rounded-lg text-lg",
+  style,
 }: {
   name: string;
   className?: string;
+  style?: CSSProperties;
 }) {
   return (
     <div
+      style={style}
       className={`bg-gradient-to-br ${teamGradient(name)} flex items-center justify-center text-white font-bold shrink-0 ${className}`}
     >
       {teamNumber(name)}

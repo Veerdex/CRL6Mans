@@ -53,6 +53,10 @@ function SlotText({ feeder }: { feeder?: string }) {
   return <span className="flex-1 truncate text-xs text-zinc-600 italic">{feeder ?? "TBD"}</span>;
 }
 
+// The card's border, then the header strip, over the two team rows below it.
+const CREST_SIZE = (MH - 2 - HEAD_H) / 2;
+const CREST = { width: CREST_SIZE, height: CREST_SIZE };
+
 function MatchCard({ node, match, teams, teamTitles, isLeft }: { node: Node; match: MatchRow | undefined; teams: TeamMap; teamTitles: Record<string, string>; isLeft: boolean }) {
   const home = match?.home_team_id ? teams[match.home_team_id] : null;
   const away = match?.away_team_id ? teams[match.away_team_id] : null;
@@ -89,11 +93,13 @@ function MatchCard({ node, match, teams, teamTitles, isLeft }: { node: Node; mat
         >
           {/* Same treatment as the bracket card: the crest fills the row and
               bleeds over px-2.5 to sit flush on the card edge, a team with no
-              crest gets its number tile, and an empty slot keeps a dot. */}
+              crest gets its number tile, and an empty slot keeps a dot — and
+              the square is sized explicitly for the same reason, since WebKit
+              will not derive it from a stretched row height. */}
           {team?.logo_url ? (
-            <img src={team.logo_url} alt="" className="self-stretch w-auto h-auto aspect-square shrink-0 -ml-2.5 object-cover" />
+            <img src={team.logo_url} alt="" style={CREST} className="shrink-0 -ml-2.5 object-cover" />
           ) : team ? (
-            <DefaultLogo name={team.name} className="self-stretch w-auto h-auto aspect-square -ml-2.5 text-sm" />
+            <DefaultLogo name={team.name} style={CREST} className="-ml-2.5 text-sm" />
           ) : (
             <div className="w-2 h-2 rounded-full shrink-0 bg-zinc-700" />
           )}

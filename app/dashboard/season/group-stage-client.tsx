@@ -31,12 +31,19 @@ export type GroupTeam = { id: string; name: string; logo_url: string | null };
 // Squares off against the row height rather than sitting at a fixed 14px. It
 // keeps its corner radius and does not bleed to the row edge the way a bracket
 // card's crest does, because the group badge and the row padding are beside it.
+//
+// The height is written in rather than stretched, because the companion
+// `aspect-square` that used to derive the width from it is only honoured by
+// Blink — in WebKit the image came out at its intrinsic width and the number
+// tile at the width of its digit. Same reasoning as the bracket card.
+const CREST = { width: ROW_H - 2, height: ROW_H - 2 }; // less the row's border
+
 function GroupCrest({ team }: { team: GroupTeam | undefined }) {
   if (!team) return null;
-  const box = "self-stretch w-auto h-auto aspect-square shrink-0 rounded-[3px]";
-  if (!team.logo_url) return <DefaultLogo name={team.name} className={`${box} text-[10px]`} />;
+  const box = "shrink-0 rounded-[3px]";
+  if (!team.logo_url) return <DefaultLogo name={team.name} style={CREST} className={`${box} text-[10px]`} />;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={team.logo_url} alt="" className={`${box} object-cover`} />;
+  return <img src={team.logo_url} alt="" style={CREST} className={`${box} object-cover`} />;
 }
 
 interface GroupStageClientProps {

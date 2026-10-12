@@ -124,11 +124,21 @@ function StateLabel({ match, state }: { match: DBMatch; state: MatchState }) {
 // on the card edge, which the card's overflow-hidden rounds for us. A team with
 // no crest gets the teams tab's number tile at the same size; an empty slot —
 // TBD, or the other side of a bye — keeps a dot, since there is no team to show.
+//
+// The square is sized explicitly and never as `self-stretch aspect-square`.
+// That pair asks the browser to carry the stretched row height back through the
+// aspect ratio into the width; Blink does, WebKit does not — so on every iOS
+// browser the image fell back to its intrinsic width, big enough to swallow the
+// whole card, and the number tile fell back to the width of its own digit, a
+// coloured sliver down the card's edge. Both are the same bug.
+const CREST = (MATCH_H - 2 - 1) / 2; // the card's border, then the row divider
+
 function TeamLogo({ team, faded }: { team: Team | null; faded: boolean }) {
   if (!team) return <div className="w-2 h-2 rounded-full shrink-0 bg-zinc-700" />;
-  const fill = `self-stretch w-auto h-auto aspect-square shrink-0 -ml-2 ${faded ? "opacity-40" : ""}`;
-  if (!team.logo_url) return <DefaultLogo name={team.name} className={`${fill} text-base`} />;
-  return <img src={team.logo_url} alt="" className={`${fill} object-cover`} />;
+  const box = { width: CREST, height: CREST };
+  const fill = `shrink-0 -ml-2 ${faded ? "opacity-40" : ""}`;
+  if (!team.logo_url) return <DefaultLogo name={team.name} style={box} className={`${fill} text-base`} />;
+  return <img src={team.logo_url} alt="" style={box} className={`${fill} object-cover`} />;
 }
 
 // Renders a slot that has no team set.
