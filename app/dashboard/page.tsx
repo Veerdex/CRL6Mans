@@ -351,10 +351,20 @@ export default async function DashboardPage({
 
       {/* Active-event card — covers both a tournament-driven active event and a legacy
           manually-run active season (the two are mutually exclusive states of the same
-          "what's live right now" concept, so they share one enriched 16:9 card). */}
+          "what's live right now" concept, so they share one enriched 16:9 card).
+
+          Unlike the open/upcoming cards below, this one links to the Season tab rather
+          than the event's own detail page: once an event is live the bracket and
+          standings are what you clicked for, and that tab is already relabelled
+          "Tournament" by the same flag that makes this card say Active Tournament. Only
+          the active event lands here — signupWindowOpen() and the Upcoming filter both
+          require status "scheduled", so neither list can hold it. Before the bracket
+          exists the tab opens on Format, which is the right landing for a draft-phase
+          event rather than an empty standings table. */}
       {(activeTournament || seasonActive) && (
-        <div
-          className={`relative aspect-video overflow-hidden border border-indigo-800/40 rounded-xl ${
+        <Link
+          href="/dashboard/season"
+          className={`relative aspect-video overflow-hidden border border-indigo-800/40 rounded-xl block transition-all duration-200 hover:-translate-y-1 hover:border-amber-500/50 hover:shadow-[0_10px_28px_-8px_rgba(232,138,36,0.4)] cursor-pointer ${
             activeEventBackgroundUrl ? "" : "bg-gradient-to-tr from-[#744512] to-[#1c1b56]"
           }`}
         >
@@ -414,7 +424,7 @@ export default async function DashboardPage({
               </div>
             )}
           </div>
-        </div>
+        </Link>
       )}
 
       {/* Season draft block — only when no season is active yet (the active-event card above
