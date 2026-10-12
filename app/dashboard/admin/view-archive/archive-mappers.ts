@@ -18,6 +18,7 @@ export function toDbMatch(m: TournamentArchive["matches"][number]): BracketDBMat
     away_team_id: m.awayTeamId,
     home_score: m.homeScore,
     away_score: m.awayScore,
+    forfeit: m.forfeit ?? false,
   };
 }
 
@@ -37,6 +38,7 @@ export function toGroupMatches(matches: TournamentArchive["matches"]): GroupMatc
   return matches.map((m) => ({
     ...toDbMatch(m),
     groupNum: parseGroupNum(m.stage ?? "") ?? 0,
+    forfeit: m.forfeit ?? false,
   }));
 }
 

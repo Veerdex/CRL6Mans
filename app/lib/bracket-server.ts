@@ -1,6 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
 import { playerRatingFromRow, initialTeamRating } from "./rating";
+import { attachForfeits } from "./forfeits";
 import {
   generateSEMatchInserts, generateDEMatchInserts, generateSEPlaceholderInserts,
   DE_WINNERS, DE_LOSERS, wbLoserTarget,
@@ -129,6 +130,17 @@ async function saveSwissRoundOne(
 async function getDisqualifiedTeamIds(): Promise<Set<string>> {
   const { data } = await supabaseAdmin.from("teams").select("id").eq("is_disqualified", true);
   return new Set((data ?? []).map(t => t.id as string));
+}
+
+// Every stage-advancing path reads the group tables through here, so the forfeit
+// flag computeGroupStandings needs is attached once, in one place. Qualification
+// would otherwise be decided on a goal difference the drawn table doesn't show.
+async function fetchGroupMatches(stages: string[]) {
+  const { data } = await supabaseAdmin
+    .from("matches")
+    .select("id, stage, home_team_id, away_team_id, home_score, away_score, status")
+    .in("stage", stages);
+  return data && (await attachForfeits(data));
 }
 
 // Build a set of canonical "A:B" (lexicographic) keys from completed match history.
@@ -358,10 +370,7 @@ export async function buildAndSaveSEFromGroups(): Promise<{ error?: string; ok?:
 
   // Fetch all group matches
   const stages = Array.from({ length: numGroups }, (_, i) => getGroupStage(i + 1));
-  const { data: allGroupMatches } = await supabaseAdmin
-    .from("matches")
-    .select("stage, home_team_id, away_team_id, home_score, away_score, status")
-    .in("stage", stages);
+  const allGroupMatches = await fetchGroupMatches(stages);
 
   if (!allGroupMatches?.length) return { error: "No group matches found." };
 
@@ -434,10 +443,7 @@ export async function buildAndSaveSwissFromGroups(): Promise<{ error?: string; o
   const qualifiersPerGroup = Math.floor(16 / numGroups);
 
   const stages = Array.from({ length: numGroups }, (_, i) => getGroupStage(i + 1));
-  const { data: allGroupMatches } = await supabaseAdmin
-    .from("matches")
-    .select("stage, home_team_id, away_team_id, home_score, away_score, status")
-    .in("stage", stages);
+  const allGroupMatches = await fetchGroupMatches(stages);
 
   if (!allGroupMatches?.length) return { error: "No group matches found." };
   const pending = allGroupMatches.filter(m => m.status !== "completed");
@@ -703,10 +709,7 @@ export async function buildAndSaveSwissFromGroupsHybrid(): Promise<{ error?: str
 
   const numGroups = getNumGroups(n);
   const stages = Array.from({ length: numGroups }, (_, i) => getGroupStage(i + 1));
-  const { data: allGroupMatches } = await supabaseAdmin
-    .from("matches")
-    .select("stage, home_team_id, away_team_id, home_score, away_score, status")
-    .in("stage", stages);
+  const allGroupMatches = await fetchGroupMatches(stages);
 
   if (!allGroupMatches?.length) return { error: "No group matches found." };
   const pending = allGroupMatches.filter(m => m.status !== "completed");
@@ -765,10 +768,7 @@ export async function buildAndSaveHybridFromSwiss(): Promise<{ error?: string; o
   // Group 1sts → UB seeds
   const numGroups = getNumGroups(n);
   const stages = Array.from({ length: numGroups }, (_, i) => getGroupStage(i + 1));
-  const { data: allGroupMatches } = await supabaseAdmin
-    .from("matches")
-    .select("stage, home_team_id, away_team_id, home_score, away_score, status")
-    .in("stage", stages);
+  const allGroupMatches = await fetchGroupMatches(stages);
 
   if (!allGroupMatches?.length) return { error: "No group matches found." };
   const groupStandings = stages.map(stage =>
@@ -812,10 +812,7 @@ export async function buildAndSaveSwissFromGroupsHybrid8(): Promise<{ error?: st
 
   const numGroups = getNumGroups(n);
   const stages = Array.from({ length: numGroups }, (_, i) => getGroupStage(i + 1));
-  const { data: allGroupMatches } = await supabaseAdmin
-    .from("matches")
-    .select("stage, home_team_id, away_team_id, home_score, away_score, status")
-    .in("stage", stages);
+  const allGroupMatches = await fetchGroupMatches(stages);
 
   if (!allGroupMatches?.length) return { error: "No group matches found." };
   const pending = allGroupMatches.filter(m => m.status !== "completed");
@@ -873,10 +870,7 @@ export async function buildAndSaveHybrid8FromSwiss(): Promise<{ error?: string; 
   // Group 1sts → UB seeds
   const numGroups = getNumGroups(n);
   const stages = Array.from({ length: numGroups }, (_, i) => getGroupStage(i + 1));
-  const { data: allGroupMatches } = await supabaseAdmin
-    .from("matches")
-    .select("stage, home_team_id, away_team_id, home_score, away_score, status")
-    .in("stage", stages);
+  const allGroupMatches = await fetchGroupMatches(stages);
 
   if (!allGroupMatches?.length) return { error: "No group matches found." };
   const groupStandings = stages.map(stage =>

@@ -27,6 +27,7 @@ export type DBMatch = {
   home_team_id: string | null; away_team_id: string | null;
   home_score: number | null; away_score: number | null;
   started_at?: string | null;
+  forfeit?: boolean;
 };
 export type Team       = { id: string; name: string; logo_url: string | null };
 type GMatch     = DBMatch & { w: number; l: number };
@@ -256,9 +257,9 @@ export function SwissBracketDisplay({
                           </div>
                           {/* Series score / live clock / vs — the row has no space
                               above it, so the clock takes the slot the "vs" sits in. */}
-                          <span className={`shrink-0 text-[11px] font-mono tabular-nums w-14 text-center ${done ? "font-bold text-white" : live ? "text-cyan-300" : "text-zinc-600"}`}>
+                          <span className={`shrink-0 text-[11px] font-mono tabular-nums w-14 text-center ${done ? (m.forfeit ? "font-bold text-red-400" : "font-bold text-white") : live ? "text-cyan-300" : "text-zinc-600"}`}>
                             {done
-                              ? `${m.home_score} – ${m.away_score}`
+                              ? (m.forfeit ? "FF" : `${m.home_score} – ${m.away_score}`)
                               : live && m.started_at
                                 ? <LiveClock startedAt={m.started_at} />
                                 : "vs"}

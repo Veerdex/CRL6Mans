@@ -23,6 +23,7 @@ export type GroupMatchRow = {
   home_score: number | null;
   away_score: number | null;
   started_at?: string | null;
+  forfeit: boolean;
 };
 
 export type GroupTeam = { id: string; name: string; logo_url: string | null };
@@ -213,9 +214,16 @@ export function GroupStageClient({ groupNums, matches, teams, qualifiersPerGroup
                       <span className="truncate">{teams[m.home_team_id ?? ""]?.name ?? "?"}</span>
                     </div>
                     {done ? (
-                      <span className="shrink-0 font-mono font-bold text-white text-[11px] tabular-nums px-1">
-                        {m.home_score} – {m.away_score}
-                      </span>
+                      /* A forfeit's score is bookkeeping, not a result anyone
+                         played, and it is left out of GD and GF for the same
+                         reason — so the row reads FF rather than a scoreline. */
+                      m.forfeit ? (
+                        <span className="shrink-0 font-bold text-red-400 text-[10px] px-1">FF</span>
+                      ) : (
+                        <span className="shrink-0 font-mono font-bold text-white text-[11px] tabular-nums px-1">
+                          {m.home_score} – {m.away_score}
+                        </span>
+                      )
                     ) : live && m.started_at ? (
                       // A single row has nothing above it, so the clock takes the "vs" slot.
                       <LiveClock startedAt={m.started_at} className="shrink-0 text-cyan-300 text-[11px] px-1" />

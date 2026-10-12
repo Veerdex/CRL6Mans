@@ -97,8 +97,13 @@ export type GroupStanding = {
 
 // Compute group standings from a set of group matches.
 // Sorted by: wins desc → goalDiff desc → goalsFor desc.
+//
+// `forfeit` is required rather than optional so every caller has to say where it
+// got the flag: this function doesn't only draw the table, it feeds
+// seedGroupQualifiers, so a caller that silently defaulted to false would decide
+// qualification on numbers the table beside it doesn't show.
 export function computeGroupStandings(
-  matches: { home_team_id: string | null; away_team_id: string | null; home_score: number | null; away_score: number | null }[]
+  matches: { home_team_id: string | null; away_team_id: string | null; home_score: number | null; away_score: number | null; forfeit: boolean }[]
 ): GroupStanding[] {
   const stats: Record<string, GroupStanding> = {};
 
@@ -108,10 +113,18 @@ export function computeGroupStandings(
     }
     if (m.home_team_id && m.away_team_id && m.home_score !== null && m.away_score !== null) {
       const d = m.home_score - m.away_score;
-      stats[m.home_team_id].goalsFor += m.home_score;
-      stats[m.home_team_id].goalDiff += d;
-      stats[m.away_team_id].goalsFor += m.away_score;
-      stats[m.away_team_id].goalDiff -= d;
+      // A forfeit still decides the series, so it counts as a win and a loss --
+      // but its score is bookkeeping for the bracket, not games anyone won, so it
+      // contributes nothing to GD or GF. It would otherwise swing the first
+      // tiebreak for qualification, by an amount that depends on which path
+      // recorded it: the check-in sweep writes 1-0, a disqualification writes
+      // the full best-of.
+      if (!m.forfeit) {
+        stats[m.home_team_id].goalsFor += m.home_score;
+        stats[m.home_team_id].goalDiff += d;
+        stats[m.away_team_id].goalsFor += m.away_score;
+        stats[m.away_team_id].goalDiff -= d;
+      }
       if (d > 0) { stats[m.home_team_id].wins++; stats[m.away_team_id].losses++; }
       else        { stats[m.away_team_id].wins++; stats[m.home_team_id].losses++; }
     }

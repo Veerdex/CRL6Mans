@@ -4,9 +4,11 @@
 -- bracket therefore showed a no-show as a score. This column is the only thing
 -- that tells the three apart.
 --
--- execReportMatchResult writes it in its own update, after the claim, so a
--- deploy landing before this migration costs the label rather than every result
--- report. Run this first anyway.
+-- execReportMatchResult writes it in its own update, after the claim, and every
+-- reader goes through attachForfeits, which is its own query too -- so a deploy
+-- landing before this migration costs the FF labels and lets a forfeit's score
+-- back into group GD/GF, rather than breaking result reporting or stalling a
+-- stage. Run this first anyway.
 
 alter table matches add column if not exists forfeit boolean not null default false;
 

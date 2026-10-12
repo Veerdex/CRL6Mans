@@ -45,6 +45,10 @@ export type PlacementMatch = {
   home_score: number | null;
   away_score: number | null;
   status?: string | null;
+  // Required, not optional: group placement ranks on goal difference, and a
+  // forfeit's score must not reach it. A caller with no flag to give says so by
+  // passing false rather than by omitting it.
+  forfeit: boolean;
 };
 
 /** Phases run in this order; placement walks them in reverse. */

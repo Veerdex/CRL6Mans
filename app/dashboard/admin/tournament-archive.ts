@@ -8,6 +8,7 @@ import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { playerRatingFromRow } from "@/app/lib/rating";
 import { fetchAllRows } from "@/app/lib/paginate";
+import { attachForfeits } from "@/app/lib/forfeits";
 import { computePlacementTiers, placementsFromTiers } from "@/app/lib/placement";
 import { prizePoolTotal } from "@/app/lib/career-points";
 import { ARCHIVE_SCHEMA_VERSION } from "./archive-schema";
@@ -69,6 +70,9 @@ export type TournamentArchive = {
     status: string;
     scheduledAt: string | null;
     week: number | null;
+    // Optional because a snapshot taken before the column existed has no flag to
+    // carry; absent reads as a played result, which is how it rendered then.
+    forfeit?: boolean;
   }[];
   playerGameStats: {
     matchId: string;
@@ -113,7 +117,7 @@ export type ArchiveMeta = {
  * Must run BEFORE resetSeason()/completeSeason() wipe matches and teams.
  */
 export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentArchive> {
-  const [allTeams, allMatches, allPlayers, allStats] = await Promise.all([
+  const [allTeams, allMatchRows, allPlayers, allStats] = await Promise.all([
     fetchAllRows((from, to) =>
       supabaseAdmin.from("teams").select("id, name, logo_url, wins, losses").order("id").range(from, to)
     ),
@@ -145,6 +149,12 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
         .range(from, to)
     ),
   ]);
+
+  // The flag is attached here rather than selected above, so a snapshot taken
+  // before the migration loses the FF labels instead of failing outright. It has
+  // to reach both the placement tiers (group rank uses goal difference) and the
+  // stored rows the viewer re-renders from.
+  const allMatches = await attachForfeits(allMatchRows ?? []);
 
   const playerById = new Map((allPlayers ?? []).map((p) => [p.id, p]));
   const teamById = new Map((allTeams ?? []).map((t) => [t.id, t]));
@@ -217,6 +227,7 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
     status: m.status,
     scheduledAt: m.scheduled_at,
     week: m.week,
+    forfeit: m.forfeit,
   }));
 
   const playerGameStats: TournamentArchive["playerGameStats"] = (allStats ?? []).map((s) => {

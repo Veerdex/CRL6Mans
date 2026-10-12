@@ -103,7 +103,7 @@ export async function GroupBracketView({ qualifiersPerGroup, topDirectQualifiers
   const groupNums = [...new Set(matchesRaw.map((m) => parseGroupNum(m.stage)!))].sort((a, b) => a - b);
 
   // Attach groupNum to each match so the client component doesn't need to re-parse stage strings
-  const matches = (await attachStartedAt(matchesRaw)).map((m) => ({ ...m, groupNum: parseGroupNum(m.stage)! }));
+  const matches = (await attachForfeits(await attachStartedAt(matchesRaw))).map((m) => ({ ...m, groupNum: parseGroupNum(m.stage)! }));
 
   return (
     <GroupStageClient
