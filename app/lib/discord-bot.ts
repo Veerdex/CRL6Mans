@@ -706,9 +706,12 @@ export async function createMatchChannel(
 
   // The name check above is the caller's snapshot of the guild, taken before its
   // creation loop started, so a second concurrent pass reads it as clear and opens a
-  // duplicate. Re-read the row instead: every caller only creates for a match whose
-  // discord_channel_id is null, so a non-null one here means another pass already
-  // won. This is the fast path, not the guarantee — the claim below is that.
+  // duplicate. Re-read the row instead. Callers only ever create for a match whose
+  // discord_channel_id is null — a path that re-seats a match that already has a
+  // channel deletes it and nulls the column first, as the disqualification
+  // reinstatement below and channel-debug-actions.ts both do — so a non-null one
+  // here means another pass already won. This is the fast path, not the guarantee;
+  // the claim below is that.
   if (matchInfo?.matchId) {
     const { data: fresh } = await supabaseAdmin.from("matches")
       .select("discord_channel_id")
@@ -729,12 +732,17 @@ export async function createMatchChannel(
   // orphaning the winner's. Must stay ahead of the intro post below, so only the
   // winner announces the match.
   if (matchInfo?.matchId) {
-    const { data: claimed } = await supabaseAdmin.from("matches")
+    const { data: claimed, error: claimError } = await supabaseAdmin.from("matches")
       .update({ discord_channel_id: result.id })
       .eq("id", matchInfo.matchId)
       .is("discord_channel_id", null)
       .select("id");
-    if (!claimed?.length) {
+    // No rows and no error is the one case that means the race was lost. An error
+    // could instead be a commit whose response never came back, and deleting then
+    // would strand the match pointing at a channel that no longer exists — the ready
+    // filter skips a non-null ID, so nothing would ever reopen it. Keeping the
+    // channel risks a duplicate, which is only what this used to do anyway.
+    if (!claimError && !claimed?.length) {
       await deleteChannel(result.id);
       return { created: false, skipped: true };
     }
