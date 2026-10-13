@@ -2548,6 +2548,28 @@ async function reportCmd(i: Interaction, userId: string, channelId: string) {
   const match = reportable[0];
   const reporterIsHome = match.home_team_id === teamId;
 
+  // submitSeriesResultCore runs both of these too, but it runs them *after*
+  // persistGameAnalysis — and it has to, because resolveSubmittedGames reads the
+  // certification rows that persist writes. A refusal down there would therefore
+  // leave this series' rows behind, and the match-wide getUnmatchedByGame would
+  // hand the next clean report's confirm to admin review as "unrecognised
+  // players". seriesReportableByTeam only looks at the score columns, so both
+  // cases genuinely reach here: a match whose check-in hasn't finished, and one
+  // already with staff on a dispute. Gating first also saves seven downloads.
+  const { data: gateRow } = await supabaseAdmin
+    .from("matches")
+    .select("checkin_deadline, home_checked_in, away_checked_in")
+    .eq("id", match.id)
+    .maybeSingle();
+  if (gateRow) {
+    const checkIn = checkInGate(gateRow);
+    if (checkIn) return ephemeralEmbedReply(reportRejectedEmbed({ problem: checkIn }));
+  }
+  if (await isScoreDisputed(match.id))
+    return ephemeralEmbedReply(reportRejectedEmbed({
+      problem: "This match is disputed — staff will record the result",
+    }));
+
   const wonOpt = opt(i, "won");
   const lostOpt = opt(i, "lost");
   const typedScoreGiven = wonOpt !== "" || lostOpt !== "";
