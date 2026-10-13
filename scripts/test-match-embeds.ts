@@ -74,11 +74,11 @@ const ALL: Array<[string, ChannelPost]> = [
   ["tournamentIntro", tournamentIntroPost(introTeams, { name: "crl-abc", password: "123456" }, true)],
   ["tournamentIntro/reset", tournamentIntroPost(introTeams, { name: "crl-abc", password: "123456" }, false)],
   ["seasonIntro", seasonIntroPost(introTeams, 3, { lines: "Play any time: <t:1700000000:D>", coordinate: "- Coordinate a time." }, "<#999>")],
-  ["checkIn/one", checkInPost({ teamName: "Top Tier", oppName: "We Have The Meats", teamPing: HOME, oppPing: AWAY, bothIn: false, deadlineTs: 1700000000 })],
-  ["checkIn/both", checkInPost({ teamName: "Top Tier", oppName: "We Have The Meats", teamPing: HOME, oppPing: AWAY, bothIn: true, deadlineTs: 1700000000 })],
-  ["matchResult/win", matchResultPost({ homeName: "Top Tier", awayName: "We Have The Meats", homePing: HOME, awayPing: AWAY, homeScore: 3, awayScore: 1, winnerName: "Top Tier" })],
-  ["matchResult/draw", matchResultPost({ homeName: "Top Tier", awayName: "We Have The Meats", homePing: HOME, awayPing: AWAY, homeScore: 2, awayScore: 2, winnerName: null })],
-  ["forfeitVote", forfeitVotePost({ teamName: "Top Tier", teamPing: HOME, votes: 1, required: 2 })],
+  ["checkIn/one", checkInPost({ teamName: "Top Tier", teamPing: HOME, oppPing: AWAY, bothIn: false })],
+  ["checkIn/both", checkInPost({ teamName: "Top Tier", teamPing: HOME, oppPing: AWAY, bothIn: true })],
+  ["matchResult/win", matchResultPost({ homeName: "Top Tier", awayName: "We Have The Meats", homePing: HOME, awayPing: AWAY, homeScore: 3, awayScore: 1, forfeit: false })],
+  ["matchResult/forfeit", matchResultPost({ homeName: "Top Tier", awayName: "We Have The Meats", homePing: HOME, awayPing: AWAY, homeScore: 0, awayScore: 2, forfeit: true })],
+  ["forfeitVote", forfeitVotePost({ playerName: "IronHawk", teamPing: HOME, votes: 1, required: 2 })],
   ["seriesSubmitted", seriesSubmittedPost({ ...submitted, homeWins: 3, awayWins: 1 })],
   ["seriesSubmitted/loose", seriesSubmittedPost({ ...submitted, homeWins: 3, awayWins: 1, unmatchedNames: ["Rando"], replayAnalysisMode: "loose" })],
   ["seriesSubmitted/strict", seriesSubmittedPost({ ...submitted, homeWins: 1, awayWins: 3, unmatchedNames: ["Rando"], replayAnalysisMode: "strict" })],
@@ -265,7 +265,7 @@ test("a role pinged twice is whitelisted once", () => {
   const post = matchResultPost({
     homeName: "Top Tier", awayName: "Top Tier",
     homePing: HOME, awayPing: HOME,
-    homeScore: 1, awayScore: 0, winnerName: "Top Tier",
+    homeScore: 1, awayScore: 0, forfeit: false,
   });
   assert.deepEqual(post.allowed_mentions.roles, ["100"]);
 });
@@ -310,36 +310,57 @@ test("both teams are pinged on the intro and the result, one on everything else"
   assert.equal(ALL.find(([n]) => n === "seriesSubmitted")![1].allowed_mentions.roles!.length, 1);
 });
 
-test("the check-in post pings only the opponent until both are in", () => {
-  const one = checkInPost({ teamName: "Top Tier", oppName: "We Have The Meats", teamPing: HOME, oppPing: AWAY, bothIn: false, deadlineTs: 1700000000 });
+test("the check-in post reads the same either way and only the pings differ", () => {
+  const one = checkInPost({ teamName: "Top Tier", teamPing: HOME, oppPing: AWAY, bothIn: false });
   assert.deepEqual(one.allowed_mentions.roles, ["200"]);
-  assert.ok(one.embeds[0].description!.includes("<t:1700000000:R>"));
 
-  const both = checkInPost({ teamName: "Top Tier", oppName: "We Have The Meats", teamPing: HOME, oppPing: AWAY, bothIn: true, deadlineTs: 1700000000 });
+  const both = checkInPost({ teamName: "Top Tier", teamPing: HOME, oppPing: AWAY, bothIn: true });
   assert.deepEqual(both.allowed_mentions.roles, ["100", "200"]);
-  // No deadline once both are in — there is nothing left to be late for.
-  assert.ok(!both.embeds[0].description!.includes("<t:"));
+
+  // One line, the same one: a check-in reports a fact about one team and nothing
+  // else, so the only thing bothIn changes is who hears about it.
+  assert.equal(one.embeds[0].description, "**Top Tier** checked in.");
+  assert.equal(both.embeds[0].description, one.embeds[0].description);
 });
 
-test("the forfeit vote pings the forfeiting team, not the opponent", () => {
-  const post = forfeitVotePost({ teamName: "Top Tier", teamPing: HOME, votes: 1, required: 2 });
+test("the forfeit vote names the voter and pings their team, not the opponent", () => {
+  const post = forfeitVotePost({ playerName: "IronHawk", teamPing: HOME, votes: 1, required: 2 });
   assert.deepEqual(post.allowed_mentions.roles, ["100"]);
   assert.ok(post.embeds[0].description!.includes("1 of 2"));
+  // The player, not the team: the team hasn't decided anything yet.
+  assert.ok(post.embeds[0].description!.startsWith("**IronHawk** has voted to forfeit"));
 });
 
 test("the result embed states the score and the winner", () => {
   const win = matchResultPost({
     homeName: "Top Tier", awayName: "We Have The Meats",
-    homePing: HOME, awayPing: AWAY, homeScore: 3, awayScore: 1, winnerName: "Top Tier",
+    homePing: HOME, awayPing: AWAY, homeScore: 3, awayScore: 1, forfeit: false,
   });
   assert.ok(win.embeds[0].description!.includes("3–1"));
-  assert.ok(win.embeds[0].description!.includes("Top Tier"));
+  assert.ok(win.embeds[0].description!.includes("🏆 **Top Tier** wins!"));
 
-  const draw = matchResultPost({
+  // Either side can be the one that gave it up, and the winner is read off the
+  // scores rather than a passed-in name.
+  const away = matchResultPost({
     homeName: "Top Tier", awayName: "We Have The Meats",
-    homePing: HOME, awayPing: AWAY, homeScore: 2, awayScore: 2, winnerName: null,
+    homePing: HOME, awayPing: AWAY, homeScore: 1, awayScore: 3, forfeit: false,
   });
-  assert.ok(draw.embeds[0].description!.includes("Draw"));
+  assert.ok(away.embeds[0].description!.includes("🏆 **We Have The Meats** wins!"));
+});
+
+test("a forfeit names the side that gave up and shows no scoreline", () => {
+  // The stored score is bookkeeping for the bracket — 1–0 from the check-in
+  // sweeper, the full best-of from a vote or a DQ — and nobody played it.
+  for (const [homeScore, awayScore] of [[0, 2], [0, 1]]) {
+    const ff = matchResultPost({
+      homeName: "Top Tier", awayName: "We Have The Meats",
+      homePing: HOME, awayPing: AWAY, homeScore, awayScore, forfeit: true,
+    });
+    assert.equal(ff.embeds[0].title, "Match forfeited");
+    assert.equal(ff.embeds[0].description, "**Top Tier** forfeited.\n🏆 **We Have The Meats** wins!");
+    assert.ok(!ff.embeds[0].description!.includes("–"));
+    assert.ok(!ff.embeds[0].description!.includes(String(awayScore)));
+  }
 });
 
 test("the submitted embed names the winner, the loser and the series score", () => {

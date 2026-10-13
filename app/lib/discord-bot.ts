@@ -3487,11 +3487,9 @@ async function checkInCmd(userId: string, channelId: string) {
   // shared match channel doesn't fill with one team's mistakes.
   const { content, embeds, allowed_mentions } = checkInPost({
     teamName: myName,
-    oppName,
     teamPing: teamPing(myName, roles),
     oppPing: teamPing(oppName, roles),
     bothIn: result.bothIn,
-    deadlineTs: Math.floor(result.deadline / 1000),
   });
 
   // Omitted when empty — no team here has a role — the way sendChannelMessage
@@ -4132,7 +4130,7 @@ export async function castForfeitVoteCore(args: {
   withdraw?: boolean;
 }): Promise<ForfeitVoteResult> {
   const { data: me } = await supabaseAdmin
-    .from("players").select("id, team_id").eq("discord_id", args.actorDiscordId).maybeSingle();
+    .from("players").select("id, team_id, username").eq("discord_id", args.actorDiscordId).maybeSingle();
   if (!me?.team_id) return { error: "Not on a team" };
   const teamId = me.team_id as string;
   const playerId = me.id as string;
@@ -4239,7 +4237,7 @@ export async function castForfeitVoteCore(args: {
   // match up quietly.
   try {
     await notifyMatchChannel(args.matchId, forfeitVotePost({
-      teamName: names.teamName,
+      playerName: (me.username as string | null) ?? "A player",
       teamPing: teamPing(names.teamName, await getGuildRoles()),
       votes,
       required,
@@ -5284,7 +5282,7 @@ export async function execReportMatchResult(
         awayPing: teamPing(awayTeam.name, roles),
         homeScore,
         awayScore,
-        winnerName,
+        forfeit,
       });
       await sendChannelMessage(
         match.discord_channel_id,

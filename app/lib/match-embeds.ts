@@ -173,34 +173,42 @@ export function seasonIntroPost(
 
 // ─── Check-in ───────────────────────────────────────────────────────────────────
 
+// One line, the same one, whichever team this is. A check-in is a fact about one
+// team and that is all it reports: the channel ends up as two identical lines,
+// which is the shortest thing that still shows both teams are in.
+//
+// `bothIn` therefore decides only who is pinged. The first check-in pings the
+// opponent, because they are the one who still has to act; the second pings both,
+// because the only thing left to tell either side is that the match can start.
 export function checkInPost(args: {
   teamName: string;
-  oppName: string;
   teamPing: Ping | null;
   oppPing: Ping | null;
   bothIn: boolean;
-  deadlineTs: number;
 }): ChannelPost {
-  return args.bothIn
-    ? channelPost([args.teamPing, args.oppPing], {
-        title: "Both teams checked in",
-        color: OK_GREEN,
-        description:
-          `**${args.teamName}** checked in — both teams are in.\n` +
-          `You're clear to play. Good luck!`,
-      })
-    : channelPost([args.oppPing], {
-        title: "Checked in",
-        color: OK_GREEN,
-        description:
-          `**${args.teamName}** checked in.\n` +
-          `**${args.oppName}** — you have until <t:${args.deadlineTs}:R> to check in ` +
-          `(\`/checkin\` here, or on the website) or the match is forfeited.`,
-      });
+  return channelPost(args.bothIn ? [args.teamPing, args.oppPing] : [args.oppPing], {
+    title: "Checked in",
+    color: OK_GREEN,
+    description: `**${args.teamName}** checked in.`,
+  });
 }
 
 // ─── Match result ───────────────────────────────────────────────────────────────
 
+// A forfeited match is never shown as a scoreline. The score it carries is
+// bookkeeping that lets the bracket advance someone — the check-in sweeper writes
+// 1–0, a disqualification or a forfeit vote writes the full best-of — but nobody
+// played those games, so printing them would claim a result that never happened.
+// The same rule the bracket's FF cell and computeGroupStandings already follow.
+//
+// `forfeit` is required rather than optional, like computeGroupStandings' flag, so
+// every caller has to say where it got it: defaulting it to false would silently
+// print a scoreline for exactly the matches that have none.
+//
+// Winner and loser come from the scores rather than a passed-in name, because a
+// draw cannot reach here: validateSeriesScore requires the winning side to have
+// exactly winsNeeded and the other strictly fewer, and every other caller hands
+// in a hard-coded unequal pair.
 export function matchResultPost(args: {
   homeName: string;
   awayName: string;
@@ -208,14 +216,19 @@ export function matchResultPost(args: {
   awayPing: Ping | null;
   homeScore: number;
   awayScore: number;
-  winnerName: string | null;
+  forfeit: boolean;
 }): ChannelPost {
+  const homeWon = args.homeScore > args.awayScore;
+  const winner = homeWon ? args.homeName : args.awayName;
+  const loser = homeWon ? args.awayName : args.homeName;
+
   return channelPost([args.homePing, args.awayPing], {
-    title: "Match result",
-    color: args.winnerName ? OK_GREEN : BRAND_BLUE,
-    description:
-      `**${args.homeName}** ${args.homeScore}–${args.awayScore} **${args.awayName}**\n` +
-      (args.winnerName ? `🏆 **${args.winnerName}** wins!` : "🤝 **Draw**"),
+    title: args.forfeit ? "Match forfeited" : "Match result",
+    color: args.forfeit ? WARN_AMBER : OK_GREEN,
+    description: args.forfeit
+      ? `**${loser}** forfeited.\n🏆 **${winner}** wins!`
+      : `**${args.homeName}** ${args.homeScore}–${args.awayScore} **${args.awayName}**\n` +
+        `🏆 **${winner}** wins!`,
   });
 }
 
@@ -231,8 +244,12 @@ export function matchResultPost(args: {
 // There is no deciding-vote counterpart to this post. The vote that lands the
 // forfeit reports the match, and reporting a match posts matchResultPost and
 // then deletes the channel, so a second embed here would be a race to be read.
+//
+// Names the player who voted, not their team: the team hasn't decided anything
+// yet, and the teammate being asked to agree needs to know who already did.
+// Run through `plain()` because a username is whatever that player set it to.
 export function forfeitVotePost(args: {
-  teamName: string;
+  playerName: string;
   teamPing: Ping | null;
   votes: number;
   required: number;
@@ -241,7 +258,7 @@ export function forfeitVotePost(args: {
     title: "Forfeit vote",
     color: WARN_AMBER,
     description:
-      `**${args.teamName}** has voted to give this match up — **${args.votes} of ${args.required}**. ` +
+      `**${plain(args.playerName)}** has voted to forfeit — **${args.votes} of ${args.required}**. ` +
       `A teammate has to agree before it counts. Until then the series is still on, and ` +
       `whoever voted can take it back.`,
   });
