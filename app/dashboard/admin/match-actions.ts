@@ -156,7 +156,13 @@ export async function adminAnalyzeGameReplay(
   );
 
   const nameToId = new Map<string, string>();
+  // Both sides are tracked, not just home — kept identical to analyzeGameReplay
+  // so a re-analysis here can't read the lobby's sides differently from the
+  // upload that produced the discrepancy card being looked at.
   const homeTrackerNames = new Set<string>();
+  const awayTrackerNames = new Set<string>();
+  const side = (teamId: string | undefined) =>
+    teamId === match.home_team_id ? homeTrackerNames : awayTrackerNames;
   const playerTeamById = new Map<string, string>();
 
   // Pass 1: tracker names (highest priority).
@@ -165,7 +171,7 @@ export async function adminAnalyzeGameReplay(
     if (p.trackerName) {
       const norm = normalizeName(p.trackerName);
       nameToId.set(norm, p.id);
-      if (p.team_id === match.home_team_id) homeTrackerNames.add(norm);
+      side(p.team_id).add(norm);
     }
   }
   // Pass 2: username and display_name fallbacks (only if tracker didn't already match).
@@ -175,7 +181,7 @@ export async function adminAnalyzeGameReplay(
       const norm = normalizeName(name);
       if (nameToId.has(norm)) continue;
       nameToId.set(norm, p.id);
-      if (p.team_id === match.home_team_id) homeTrackerNames.add(norm);
+      side(p.team_id).add(norm);
     }
   }
 
@@ -197,8 +203,6 @@ export async function adminAnalyzeGameReplay(
       (subReq.sub_player_id ? [subReq.sub_player_id] : []);
     if (!candidateIds.length) continue;
 
-    const isHomeTeam = playerOut.team_id === match.home_team_id;
-
     const { data: candidates } = await supabaseAdmin
       .from("players")
       .select("id, username, tracker_url")
@@ -212,7 +216,7 @@ export async function adminAnalyzeGameReplay(
       const norm = normalizeName(trackerName);
       nameToId.set(norm, c.id);
       playerTeamById.set(c.id, playerOut.team_id);
-      if (isHomeTeam) homeTrackerNames.add(norm);
+      side(playerOut.team_id).add(norm);
     }
   }
 
@@ -225,8 +229,13 @@ export async function adminAnalyzeGameReplay(
     const rescue = rescues.get(key);
     if (!rescue) continue;
     nameToId.set(key, rescue.playerId);
-    if (rescue.team === "home") homeTrackerNames.add(key);
-    else if (rescue.team === "away") homeTrackerNames.delete(key);
+    if (rescue.team === "home") {
+      homeTrackerNames.add(key);
+      awayTrackerNames.delete(key);
+    } else if (rescue.team === "away") {
+      awayTrackerNames.add(key);
+      homeTrackerNames.delete(key);
+    }
   }
 
   // Apply admin aka overrides (highest priority — lets admin fix wrong-account plays)
@@ -237,8 +246,15 @@ export async function adminAnalyzeGameReplay(
     // Determine which team the override player is on
     const teamId =
       playerTeamById.get(playerId) ?? resolved.find((p) => p.id === playerId)?.team_id;
-    if (teamId === match.home_team_id) homeTrackerNames.add(norm);
-    else homeTrackerNames.delete(norm);
+    // An override is the admin's final word on which side this name is, so it
+    // sets one set and clears the other rather than only touching home.
+    if (teamId === match.home_team_id) {
+      homeTrackerNames.add(norm);
+      awayTrackerNames.delete(norm);
+    } else {
+      awayTrackerNames.add(norm);
+      homeTrackerNames.delete(norm);
+    }
   }
 
   const unmatched = activePlayers.filter(
@@ -248,16 +264,17 @@ export async function adminAnalyzeGameReplay(
     return { unmatched: unmatched.map((p) => p.name) };
   }
 
-  const team0Hits = activePlayers.filter(
-    (p) => p.team === 0 && homeTrackerNames.has(normalizeName(p.name)),
-  ).length;
-  const team1Hits = activePlayers.filter(
-    (p) => p.team === 1 && homeTrackerNames.has(normalizeName(p.name)),
-  ).length;
-  if (team0Hits === 0 && team1Hits === 0)
+  // Both readings of the lobby, scored the same way analyzeGameReplay does:
+  // blue-is-home is supported by home players on blue and away players on
+  // orange, and the reverse reading by the mirror of that.
+  const on = (team: 0 | 1, names: Set<string>) =>
+    activePlayers.filter((p) => p.team === team && names.has(normalizeName(p.name))).length;
+  const blueIsHomeHits = on(0, homeTrackerNames) + on(1, awayTrackerNames);
+  const blueIsAwayHits = on(1, homeTrackerNames) + on(0, awayTrackerNames);
+  if (blueIsHomeHits === 0 && blueIsAwayHits === 0)
     return { error: "None of these players are on either team in this match." };
 
-  const blueIsHome = team0Hits >= team1Hits;
+  const blueIsHome = blueIsHomeHits >= blueIsAwayHits;
 
   const homeTeamWon = blueIsHome
     ? replayData.team0Score > replayData.team1Score

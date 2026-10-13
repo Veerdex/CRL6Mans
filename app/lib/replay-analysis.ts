@@ -151,15 +151,22 @@ export async function analyzeGameReplay(args: {
 
   // tracker name → player id (for stat writing)
   const nameToId = new Map<string, string>();
-  // home team tracker names (for home/away detection)
+  // Which side each name belongs to, for reading the lobby's sides off. Both
+  // sets are kept, not just home: an away name is just as good a signal, and
+  // counting only home hits meant an unmatched home side made the replay
+  // unreadable even with the away side fully matched. At 3v3 that took all
+  // three home players; at 1v1 it takes one, so the asymmetry had to go.
   const homeTrackerNames = new Set<string>();
+  const awayTrackerNames = new Set<string>();
+  const side = (teamId: string) =>
+    teamId === match.home_team_id ? homeTrackerNames : awayTrackerNames;
 
   // Pass 1: tracker names (highest priority).
   for (const p of resolved) {
     if (p.trackerName) {
       const norm = normalizeName(p.trackerName);
       nameToId.set(norm, p.id);
-      if (p.team_id === match.home_team_id) homeTrackerNames.add(norm);
+      side(p.team_id).add(norm);
     }
   }
   // Pass 2: username and display_name fallbacks (only if tracker didn't already match).
@@ -169,7 +176,7 @@ export async function analyzeGameReplay(args: {
       const norm = normalizeName(name);
       if (nameToId.has(norm)) continue;
       nameToId.set(norm, p.id);
-      if (p.team_id === match.home_team_id) homeTrackerNames.add(norm);
+      side(p.team_id).add(norm);
     }
   }
 
@@ -195,8 +202,6 @@ export async function analyzeGameReplay(args: {
       (subReq.sub_player_id ? [subReq.sub_player_id] : []);
     if (candidateIds.length === 0) continue;
 
-    const isHomeTeam = playerOut.team_id === match.home_team_id;
-
     // Add each sub candidate's tracker alongside the original roster.
     const { data: candidates } = await supabaseAdmin
       .from("players")
@@ -214,7 +219,7 @@ export async function analyzeGameReplay(args: {
       const trackerName = await resolveTrackerName(c.tracker_url);
       if (!trackerName) continue;
       nameToId.set(normalizeName(trackerName), c.id);
-      if (isHomeTeam) homeTrackerNames.add(normalizeName(trackerName));
+      side(playerOut.team_id).add(normalizeName(trackerName));
     }
   }
 
@@ -228,8 +233,15 @@ export async function analyzeGameReplay(args: {
     const rescue = rescues.get(key);
     if (!rescue) continue;
     nameToId.set(key, rescue.playerId);
-    if (rescue.team === "home") homeTrackerNames.add(key);
-    else if (rescue.team === "away") homeTrackerNames.delete(key);
+    // A verified platform ID overrules a name match, so it moves the name
+    // between the sets rather than only adding to one.
+    if (rescue.team === "home") {
+      homeTrackerNames.add(key);
+      awayTrackerNames.delete(key);
+    } else if (rescue.team === "away") {
+      awayTrackerNames.add(key);
+      homeTrackerNames.delete(key);
+    }
   }
 
   // An unrecognised player no longer rejects the replay — the series carries
@@ -240,19 +252,25 @@ export async function analyzeGameReplay(args: {
     .filter(p => !nameToId.has(normalizeName(p.name)))
     .map(p => p.name);
 
-  // Whichever replay team has more home-tracker-name matches is the home team.
-  const team0Hits = activePlayers
-    .filter(p => p.team === 0 && homeTrackerNames.has(normalizeName(p.name))).length;
-  const team1Hits = activePlayers
-    .filter(p => p.team === 1 && homeTrackerNames.has(normalizeName(p.name))).length;
+  // Each reading of the lobby scores both ways round: blue-is-home is supported
+  // by every home player on blue *and* every away player on orange, and the
+  // other reading by the mirror of that. Counting only home names threw away
+  // half the evidence, which at 1v1 was the half that mattered.
+  const on = (team: 0 | 1, names: Set<string>) =>
+    activePlayers.filter(p => p.team === team && names.has(normalizeName(p.name))).length;
+  const blueIsHomeHits = on(0, homeTrackerNames) + on(1, awayTrackerNames);
+  const blueIsAwayHits = on(1, homeTrackerNames) + on(0, awayTrackerNames);
 
-  // With no home-side hit on either team there is nothing to read the sides
-  // off, and team0Hits >= team1Hits would silently call it blue. A replay
-  // nobody in it belongs to is the wrong replay, not a bad one.
-  if (team0Hits === 0 && team1Hits === 0)
+  // With no hit either way round there is nothing to read the sides off, and
+  // `>=` would silently call it blue. A replay nobody in it belongs to is the
+  // wrong replay, not a bad one. Note this is weaker than it looks: one matched
+  // player on either roster is enough, so an unmatched player still warns the
+  // teams rather than rejecting the file, which is the whole point of
+  // unmatchedNames above.
+  if (blueIsHomeHits === 0 && blueIsAwayHits === 0)
     return { error: "Bad replay — none of these players are on either team in this match." };
 
-  const blueIsHome = team0Hits >= team1Hits;
+  const blueIsHome = blueIsHomeHits >= blueIsAwayHits;
 
   const homeTeamWon = blueIsHome
     ? replayData.team0Score > replayData.team1Score
