@@ -536,13 +536,31 @@ async function getOrCreateStageCategory(
 // After a match completes, check if ALL matches in its stage+round are done.
 // If so, delete all channels in every Discord category for that round, then delete the categories.
 export async function cleanupStageCategoryIfComplete(stage: string, round: number): Promise<void> {
-  const { count } = await supabaseAdmin
+  const { data: outstanding } = await supabaseAdmin
     .from("matches")
-    .select("id", { count: "exact", head: true })
+    .select("match_number, home_team_id, away_team_id")
     .eq("stage", stage)
     .eq("round", round)
     .neq("status", "completed");
-  if (count !== 0) return;
+  if (!outstanding) return;
+
+  // The DE bracket reset is played only if the lower-bracket team wins the grand
+  // final. When the winners-bracket team closes it out instead, nothing ever seats
+  // match 2 — advanceBracketWinner's reset branch doesn't run — so its row sits at
+  // `pending` forever, and counting it left the Grand Final category and its
+  // match_discord_categories row orphaned after every DE event decided in one
+  // series. A reset the LB team did trigger is seated and `scheduled` by
+  // advanceBracketWinner before this runs, so it still counts.
+  //
+  // Only an untriggered reset is skipped, not every unseated row: a losers-bracket
+  // match still waiting on a winners-bracket drop is a real match to come, and
+  // dropping its round's category early would delete the channels of the matches
+  // sitting beside it.
+  const remaining = outstanding.filter(
+    m => !(isBracketReset({ stage, match_number: m.match_number as number })
+      && m.home_team_id === null && m.away_team_id === null),
+  );
+  if (remaining.length > 0) return;
 
   // Some stages (hybrid semifinals/grand final, DE grand final) always have a single
   // round and are stored with categoryRound: null instead of the match round — match
@@ -5253,7 +5271,6 @@ export async function execReportMatchResult(
         winnerId!,
         loserId ?? undefined,
       );
-      await cleanupStageCategoryIfComplete(match.stage, match.round);
     }
   }
 
@@ -5295,6 +5312,15 @@ export async function execReportMatchResult(
     // whole round to finish.
     await deleteChannel(match.discord_channel_id);
     await supabaseAdmin.from("matches").update({ discord_channel_id: null }).eq("id", matchId);
+  }
+
+  // Deliberately after the result has been posted and this match's own channel is
+  // gone. The cleanup deletes every channel under the round's category, this one
+  // included, so running it before the post above pulled the channel out from
+  // under it: the send failed into the best-effort catch, and the round's deciding
+  // result — the one with both teams pinged — was never announced anywhere.
+  if (match.stage) {
+    await cleanupStageCategoryIfComplete(match.stage, match.round);
   }
 
   // Fire a completion notification when the championship-deciding match is
