@@ -22,6 +22,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { parseReplay } from "@/app/lib/replay-parser";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
 import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
+import { resolveTeamSize, teamSizeLabel } from "@/app/lib/team-size";
 import {
   evaluateAndPersistGameCertification,
   resolvePlatformIdMatches,
@@ -76,14 +77,23 @@ export async function analyzeGameReplay(args: {
   // Casters appear in the replay with 0 score — exclude them before any validation.
   const activePlayers = replayData.players.filter((p) => p.score > 0);
 
-  // Every league game is a full 3v3 lobby. Reject replays that aren't 3-per-side
-  // (someone left, a 2v2 was uploaded, etc.). Admin-side uploads bypass this.
-  const PLAYERS_PER_TEAM = 3;
+  // A league game is a full lobby at the event's own size. Reject replays that
+  // aren't that many per side — someone left, or a 2v2 was uploaded to a 3v3.
+  // Admin-side uploads bypass this entirely.
+  //
+  // The size comes from league_settings via resolveTeamSize, never a local `?? 3`:
+  // seasons are 3v3, but a tournament authors its own team_size and
+  // activateTournamentRuntime mirrors it in, so a hardcoded 3 rejected every
+  // replay of a 1v1 or 2v2 event outright.
+  const playersPerTeam = await resolveTeamSize();
   const team0Count = activePlayers.filter((p) => p.team === 0).length;
   const team1Count = activePlayers.filter((p) => p.team === 1).length;
-  if (team0Count !== PLAYERS_PER_TEAM || team1Count !== PLAYERS_PER_TEAM)
+  if (team0Count !== playersPerTeam || team1Count !== playersPerTeam)
     return {
-      error: `This replay is ${team0Count}v${team1Count} (${replayData.players.length} player${replayData.players.length === 1 ? "" : "s"}) — a valid game must be ${PLAYERS_PER_TEAM}v${PLAYERS_PER_TEAM} with ${PLAYERS_PER_TEAM * 2} players.`,
+      // Both counts are of the same filtered lobby. Using the raw player count
+      // for the total would contradict the sides it just named whenever a caster
+      // was present — and at 1v1 a single caster is a third of the lobby.
+      error: `This replay is ${team0Count}v${team1Count} (${activePlayers.length} player${activePlayers.length === 1 ? "" : "s"}) — a valid game must be ${teamSizeLabel(playersPerTeam)} with ${playersPerTeam * 2} players.`,
     };
 
   // Reject duplicates already committed to the DB (another match, or a prior
