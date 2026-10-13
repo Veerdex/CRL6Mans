@@ -831,10 +831,14 @@ function ForfeitConfirmModal({
           <p className="text-2xl font-bold text-red-400">
             {decides ? "Give this match up?" : "Vote to forfeit?"}
           </p>
+          {/* A 1v1 team — or a 2v2/3v3 team down to one approved player — needs
+              one vote, so the first press decides with no teammate involved. */}
           <p className="text-sm text-zinc-400">
-            {decides
-              ? "Your teammate has already voted, so this hands your opponent the win right now. It can't be undone from here."
-              : `This takes ${required} votes from your team. The series stays on until a teammate agrees, and you can take your vote back before then.`}
+            {!decides
+              ? `This takes ${required} votes from your team. The series stays on until a teammate agrees, and you can take your vote back before then.`
+              : required === 1
+                ? "This hands your opponent the win right now. It can't be undone from here."
+                : "Your teammate has already voted, so this hands your opponent the win right now. It can't be undone from here."}
           </p>
           <p className="text-xs text-zinc-500">
             A forfeit counts as a loss on your record. Neither team&apos;s rating moves,
@@ -910,7 +914,10 @@ function ForfeitControl({
     <>
       <div className="flex items-center gap-3">
         <button
-          onClick={() => setConfirming(true)}
+          // Refreshed as the modal opens: the tally is as of page load, and a
+          // teammate who voted in Discord since then is the difference between
+          // "cast my vote" and a press that ends the match.
+          onClick={() => { setConfirming(true); router.refresh(); }}
           disabled={busy}
           className="px-4 py-2 bg-transparent hover:bg-red-950/40 disabled:opacity-50 text-red-400 text-sm font-medium rounded-lg border border-red-800/50 transition-colors"
         >

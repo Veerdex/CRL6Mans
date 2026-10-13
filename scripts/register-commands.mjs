@@ -335,7 +335,7 @@ const commands = [
   },
   {
     name: "forfeit",
-    description: "Vote to give your current match up — it takes two teammates to agree",
+    description: "Vote to give your current match up",
     options: [
       {
         name: "withdraw",
