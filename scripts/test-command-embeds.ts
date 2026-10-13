@@ -7,6 +7,8 @@ import {
   statsEmbed,
   coinsEmbed,
   subAckEmbed,
+  reportAckEmbed,
+  reportRejectedEmbed,
   decisionAckEmbed,
   disputeAckEmbed,
   type ProfileEmbedArgs,
@@ -167,6 +169,93 @@ test("player-supplied text is clamped, never allowed to 400 the message", () => 
   assert.ok(sub.description!.length <= 4096);
   assert.ok(sub.fields![0].value.length <= 1024);
   assert.ok(decisionAckEmbed({ target: "sub", approved: true, detail: long }).description!.length <= 4096);
+});
+
+const REPORTED = {
+  homeName: "Top Tier",
+  awayName: "We Have The Meats",
+  oppName: "We Have The Meats",
+};
+
+test("the report acknowledgement reads the winner off home/away, not off the reporter", () => {
+  // The losing team can be the one that reports, so the ack cannot assume the
+  // caller won — and it has to agree with the public embed either way.
+  assert.match(
+    reportAckEmbed({ ...REPORTED, homeWins: 3, awayWins: 1 }).description!,
+    /^\*\*Top Tier\*\* beat \*\*We Have The Meats\*\* \*\*3–1\*\*\.$/,
+  );
+  assert.match(
+    reportAckEmbed({ ...REPORTED, homeWins: 1, awayWins: 3 }).description!,
+    /^\*\*We Have The Meats\*\* beat \*\*Top Tier\*\* \*\*3–1\*\*\.$/,
+  );
+  assert.match(
+    reportAckEmbed({ ...REPORTED, homeWins: 3, awayWins: 1 }).footer!.text,
+    /^We Have The Meats has been notified/,
+  );
+});
+
+test("the report acknowledgement only mentions unmatched players when there were some", () => {
+  const clean = reportAckEmbed({ ...REPORTED, homeWins: 3, awayWins: 0 });
+  assert.equal(clean.fields, undefined);
+
+  const loose = reportAckEmbed({
+    ...REPORTED, homeWins: 3, awayWins: 0, unmatchedNames: ["Rando", "Rando"],
+  });
+  // One entry per player however many games they turned up in.
+  assert.equal(loose.fields![0].value.match(/`Rando`/g)!.length, 1);
+  assert.notEqual(loose.color, clean.color);
+});
+
+test("a rejection says what went wrong and that nothing was saved", () => {
+  const e = reportRejectedEmbed({ problem: "These replays add up to 2–1." });
+  assert.equal(e.title, "Series not reported");
+  assert.equal(e.description, "These replays add up to 2–1.");
+  assert.equal(e.fields, undefined);
+  assert.match(e.footer!.text, /Nothing was saved/);
+  assert.notEqual(e.color, reportAckEmbed({ ...REPORTED, homeWins: 3, awayWins: 0 }).color);
+
+  // An unmatched name is the one rejection a reporter can't fix by retyping, so
+  // it names the players and points at the two ways out.
+  const unmatched = reportRejectedEmbed({
+    problem: "Some players couldn't be matched.",
+    unmatchedNames: ["Rando"],
+  });
+  assert.ok(unmatched.fields![0].value.includes("`Rando`"));
+  assert.ok(unmatched.fields![0].value.includes("tracker"));
+  assert.ok(unmatched.fields![0].value.includes("My Team"));
+});
+
+test("a replay display name can't draw a mention or a chip in a report embed", () => {
+  // Unlike a username or a team name, this string is not league data: it is what
+  // that player typed into Rocket League, and an unmatched one is nobody we know.
+  for (const e of [
+    reportAckEmbed({ ...REPORTED, homeWins: 3, awayWins: 0, unmatchedNames: ["@everyone", "<@&100>"] }),
+    reportRejectedEmbed({ problem: "x", unmatchedNames: ["@everyone", "<@&100>"] }),
+  ]) {
+    const value = e.fields![0].value;
+    assert.ok(!value.includes("@everyone"), value);
+    assert.ok(!value.includes("<@&100>"), value);
+    // Still legible — a zero-width space, not a deletion.
+    assert.ok(value.includes("everyone") && value.includes("100"));
+  }
+  // And a backtick in the name can't close the code span it is wrapped in.
+  const ticks = reportRejectedEmbed({ problem: "x", unmatchedNames: ["a`b"] });
+  assert.ok(ticks.fields![0].value.includes("`a'b`"));
+});
+
+test("report embeds clamp every part that a long name could blow", () => {
+  const long = "x".repeat(5000);
+  const ack = reportAckEmbed({
+    homeName: long, awayName: long, oppName: long, homeWins: 3, awayWins: 0,
+    unmatchedNames: [long],
+  });
+  assert.ok(ack.description!.length <= 4096);
+  assert.ok(ack.footer!.text.length <= 2048);
+  assert.ok(ack.fields![0].value.length <= 1024);
+
+  const rejected = reportRejectedEmbed({ problem: long, unmatchedNames: [long, long + "y"] });
+  assert.ok(rejected.description!.length <= 4096);
+  assert.ok(rejected.fields![0].value.length <= 1024);
 });
 
 test("a builder returns a bare embed, so no ping can hide inside one", () => {

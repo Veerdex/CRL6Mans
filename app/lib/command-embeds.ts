@@ -216,6 +216,94 @@ export function subAckEmbed(a: SubAckEmbedArgs): DiscordEmbed {
   };
 }
 
+// A Rocket League display name read out of a replay is the one string in this
+// module that isn't league data: it is whatever that player typed, and an
+// unmatched one is by definition not someone we have on file. Notifications are
+// not the worry — an embed never sends one — but `<@&123>` would *render* as a
+// real team's chip and `@everyone` as the server-wide one, so the reply would
+// read as something the bot said. A zero-width space leaves it legible and inert.
+// Usernames and team names above go through unchanged on purpose; they are ours.
+const plainReplayName = (s: string): string =>
+  s.replace(/@/g, "@​").replace(/</g, "<​").replace(/`/g, "'");
+
+const replayNameList = (names: string[]): string =>
+  [...new Set(names)].map((n) => `\`${plainReplayName(n)}\``).join(", ");
+
+/**
+ * `/report` accepted the series. Reporter-private, so it says what was recorded
+ * and what the other team now has to do — the channel gets the public embed.
+ *
+ * Takes home/away rather than a winner, the same way seriesSubmittedPost does,
+ * so the private ack and the public post can't disagree about who won.
+ */
+export function reportAckEmbed(args: {
+  homeName: string;
+  awayName: string;
+  homeWins: number;
+  awayWins: number;
+  oppName: string;
+  unmatchedNames?: string[];
+}): DiscordEmbed {
+  const homeWon = args.homeWins > args.awayWins;
+  const unmatched = [...new Set(args.unmatchedNames ?? [])];
+  return {
+    title: "Series reported",
+    color: unmatched.length ? WARN_AMBER : OK_GREEN,
+    description:
+      `**${clamp(homeWon ? args.homeName : args.awayName, 200)}** beat ` +
+      `**${clamp(homeWon ? args.awayName : args.homeName, 200)}** ` +
+      `**${Math.max(args.homeWins, args.awayWins)}–${Math.min(args.homeWins, args.awayWins)}**.`,
+    // Only reachable in loose mode: strict refuses an unmatched player outright,
+    // so there is nothing to tell the reporter after the fact.
+    fields: unmatched.length
+      ? [
+          {
+            name: "Players with no stats",
+            value: clamp(
+              `${replayNameList(unmatched)} didn't match anyone on either roster, so this ` +
+                `series earns them nothing. The other team has been told to check the replays ` +
+                `before approving.`,
+              FIELD_LIMIT,
+            ),
+          },
+        ]
+      : undefined,
+    footer: { text: `${clamp(args.oppName, 200)} has been notified and must approve it.` },
+  };
+}
+
+/**
+ * `/report` refused the series. Nothing is written before every check has passed,
+ * so this always means no state changed — which is the one thing the reporter
+ * can't see for themselves and the footer therefore says.
+ */
+export function reportRejectedEmbed(args: {
+  problem: string;
+  unmatchedNames?: string[];
+}): DiscordEmbed {
+  const unmatched = [...new Set(args.unmatchedNames ?? [])];
+  return {
+    title: "Series not reported",
+    color: BAD_RED,
+    description: clamp(args.problem, 4096),
+    fields: unmatched.length
+      ? [
+          {
+            name: "Players with no match",
+            value: clamp(
+              `${replayNameList(unmatched)} didn't match anyone on either roster. Check that ` +
+                `everyone's tracker in Settings points at the account they played on — if a name ` +
+                `is right and still won't match, report the series on the website under My Team ` +
+                `and staff will match it by hand.`,
+              FIELD_LIMIT,
+            ),
+          },
+        ]
+      : undefined,
+    footer: { text: "Nothing was saved. Fix it and run /report again." },
+  };
+}
+
 /** What `/approve` and `/reject` acted on, for the private confirmation. */
 export type DecisionTarget = "sub" | "series";
 
