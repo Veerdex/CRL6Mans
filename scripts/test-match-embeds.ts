@@ -60,6 +60,13 @@ const introTeams = {
   bestOf: 5,
 };
 
+const submitted = {
+  teamName: "Top Tier",
+  oppPing: AWAY,
+  homeName: "Top Tier",
+  awayName: "We Have The Meats",
+};
+
 // Every post the module can build, so the invariant sweep below can't miss one by
 // being written before a builder was added.
 const ALL: Array<[string, ChannelPost]> = [
@@ -70,7 +77,12 @@ const ALL: Array<[string, ChannelPost]> = [
   ["checkIn/both", checkInPost({ teamName: "Top Tier", oppName: "We Have The Meats", teamPing: HOME, oppPing: AWAY, bothIn: true, deadlineTs: 1700000000 })],
   ["matchResult/win", matchResultPost({ homeName: "Top Tier", awayName: "We Have The Meats", homePing: HOME, awayPing: AWAY, homeScore: 3, awayScore: 1, winnerName: "Top Tier" })],
   ["matchResult/draw", matchResultPost({ homeName: "Top Tier", awayName: "We Have The Meats", homePing: HOME, awayPing: AWAY, homeScore: 2, awayScore: 2, winnerName: null })],
-  ["seriesSubmitted", seriesSubmittedPost({ teamName: "Top Tier", oppPing: AWAY, homeWins: 3, awayWins: 1 })],
+  ["seriesSubmitted", seriesSubmittedPost({ ...submitted, homeWins: 3, awayWins: 1 })],
+  ["seriesSubmitted/loose", seriesSubmittedPost({ ...submitted, homeWins: 3, awayWins: 1, unmatchedNames: ["Rando"], replayAnalysisMode: "loose" })],
+  ["seriesSubmitted/strict", seriesSubmittedPost({ ...submitted, homeWins: 1, awayWins: 3, unmatchedNames: ["Rando"], replayAnalysisMode: "strict" })],
+  // A Rocket League display name is whatever that player typed, and they need not
+  // be one of ours — so the invariant sweep sees the hostile case too.
+  ["seriesSubmitted/hostile", seriesSubmittedPost({ ...submitted, homeWins: 3, awayWins: 0, unmatchedNames: ["@everyone", "@here", "<@&100>", "<@7>"], replayAnalysisMode: "loose" })],
   ["seriesRejected", seriesRejectedPost({ teamName: "Top Tier", oppPing: AWAY })],
   ["seriesEscalated", seriesEscalatedPost({ teamName: "Top Tier", homeWins: 3, awayWins: 1 })],
   ["replayReview", replayReviewPost(3, 1)],
@@ -234,7 +246,7 @@ test("teamPing never resolves a team name onto @everyone or @here", () => {
 });
 
 test("a post with no resolvable ping has empty content and no whitelist", () => {
-  const post = seriesSubmittedPost({ teamName: "Top Tier", oppPing: null, homeWins: 3, awayWins: 0 });
+  const post = seriesSubmittedPost({ ...submitted, oppPing: null, homeWins: 3, awayWins: 0 });
   assert.equal(post.content, "");
   assert.deepEqual(post.allowed_mentions, { parse: [], roles: [] });
   // The embed still says everything; only the notification is lost.
@@ -320,6 +332,73 @@ test("the result embed states the score and the winner", () => {
     homePing: HOME, awayPing: AWAY, homeScore: 2, awayScore: 2, winnerName: null,
   });
   assert.ok(draw.embeds[0].description!.includes("Draw"));
+});
+
+test("the submitted embed names the winner, the loser and the series score", () => {
+  // Home and away are passed through, not reporter-relative: the reporter can be
+  // the losing team, and the embed has to read the same either way.
+  const homeWon = seriesSubmittedPost({ ...submitted, homeWins: 3, awayWins: 1 });
+  assert.equal(
+    homeWon.embeds[0].description,
+    "**Top Tier** beat **We Have The Meats** **3–1**.\nReported by **Top Tier**.",
+  );
+
+  const awayWon = seriesSubmittedPost({ ...submitted, teamName: "We Have The Meats", homeWins: 1, awayWins: 3 });
+  assert.equal(
+    awayWon.embeds[0].description,
+    "**We Have The Meats** beat **Top Tier** **3–1**.\nReported by **We Have The Meats**.",
+  );
+});
+
+test("an unmatched player warns the other team in the language of the active mode", () => {
+  const clean = seriesSubmittedPost({ ...submitted, homeWins: 3, awayWins: 1 });
+  assert.equal(clean.embeds[0].fields, undefined);
+
+  const loose = seriesSubmittedPost({
+    ...submitted, homeWins: 3, awayWins: 1,
+    unmatchedNames: ["Rando", "Rando", "Ghost"],
+    replayAnalysisMode: "loose",
+  });
+  const looseField = loose.embeds[0].fields![0];
+  // Loose submits anyway, so the warning is the only thing standing between a
+  // wrong replay and an approval — it has to tell them to look before approving.
+  assert.ok(looseField.value.includes("Make sure these are the right replays"));
+  assert.ok(looseField.value.includes("`Rando`") && looseField.value.includes("`Ghost`"));
+  // One name per player, however many games they appeared in.
+  assert.equal(looseField.value.match(/`Rando`/g)!.length, 1);
+  assert.notEqual(loose.embeds[0].color, clean.embeds[0].color);
+
+  const strict = seriesSubmittedPost({
+    ...submitted, homeWins: 3, awayWins: 1,
+    unmatchedNames: ["Rando"],
+    replayAnalysisMode: "strict",
+  });
+  assert.ok(strict.embeds[0].fields![0].value.includes("admin"));
+  assert.notEqual(strict.embeds[0].fields![0].name, looseField.name);
+});
+
+test("a replay display name can't draw a mention or a chip", () => {
+  // A player can name their Rocket League account anything, and an unmatched name
+  // is by definition one we don't control. Neither notifies anyone from inside an
+  // embed, but `<@&100>` would render as a real team's chip and `@everyone` as the
+  // server-wide one, so the message would read as something the bot said.
+  const post = seriesSubmittedPost({
+    ...submitted, homeWins: 3, awayWins: 0,
+    unmatchedNames: ["@everyone", "<@&100>"],
+    replayAnalysisMode: "loose",
+  });
+  const value = post.embeds[0].fields![0].value;
+  assert.ok(!value.includes("@everyone"));
+  assert.ok(!value.includes("<@&100>"));
+  // Still legible — a zero-width space, not a deletion.
+  assert.ok(value.includes("everyone") && value.includes("100"));
+  // And the backtick wrapping survives, so the name can't close its own code span.
+  const ticks = seriesSubmittedPost({
+    ...submitted, homeWins: 3, awayWins: 0,
+    unmatchedNames: ["a`b"],
+    replayAnalysisMode: "loose",
+  });
+  assert.ok(ticks.embeds[0].fields![0].value.includes("`a'b`"));
 });
 
 test("the sub request keeps both players' rank detail side by side", () => {

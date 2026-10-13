@@ -24,6 +24,7 @@ import {
 import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 import { analyzeGameReplay, persistGameAnalysis, checkInGate } from "@/app/lib/replay-analysis";
 import { resolveSubmittedGames } from "@/app/lib/replay-identity-certification";
+import { getReplayAnalysisMode } from "@/app/lib/replay-analysis-mode";
 import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
 
@@ -167,11 +168,24 @@ export async function submitSeriesResult(
       supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
     ]);
     if (myTeam?.name && otherTeam?.name) {
+      const iAmHome = player.team_id === match.home_team_id;
+      // Read off the games actually being submitted rather than through
+      // getUnmatchedByGame, which is keyed on the match and would also pick up
+      // rows left by a retracted attempt. A null player_id is the same
+      // predicate analyzeGameReplay used, and it respects an admin who has
+      // since mapped one of those names by hand.
+      const unmatchedNames = games.flatMap((g) =>
+        g.stats.filter((s) => !s.player_id).map((s) => s.replay_name),
+      );
       await notifyMatchChannel(matchId, seriesSubmittedPost({
         teamName: myTeam.name,
         oppPing: teamPing(otherTeam.name, await getGuildRoles()),
+        homeName: iAmHome ? myTeam.name : otherTeam.name,
+        awayName: iAmHome ? otherTeam.name : myTeam.name,
         homeWins,
         awayWins,
+        unmatchedNames,
+        replayAnalysisMode: unmatchedNames.length ? await getReplayAnalysisMode() : undefined,
       }));
     }
   } catch { /* best-effort */ }

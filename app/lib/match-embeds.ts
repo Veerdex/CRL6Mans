@@ -29,6 +29,18 @@ const FIELD_LIMIT = 1024;
 const clamp = (s: string, limit: number): string =>
   s.length <= limit ? s : `${s.slice(0, limit - 1)}…`;
 
+// Names that reach an embed from outside the league's own data — a Rocket League
+// display name read out of a replay file is the worst case, since it is whatever
+// that player typed and they are not necessarily one of ours.
+//
+// This is about what the embed *draws*, not about notifications: a mention in an
+// embed notifies nobody either way. But `<@&123>` would render as a role chip,
+// making a replay look like it named a real team, and `@everyone` would render
+// as the server-wide chip. Both read as something the bot said. A zero-width
+// space after the leading character leaves the name legible and inert.
+const plain = (s: string): string =>
+  s.replace(/@/g, "@​").replace(/</g, "<​").replace(/`/g, "'");
+
 /** A role ping: the text that goes in `content`, and the ID that whitelists it. */
 export type Ping = { text: string; id: string };
 
@@ -209,17 +221,60 @@ export function matchResultPost(args: {
 
 // ─── Score reporting ────────────────────────────────────────────────────────────
 
+// Names the winner and the loser rather than leaving the reader to work out
+// which way round a bare "3–1" goes — the team being asked to approve it is the
+// one that lost more often than not, and an ambiguous scoreline is the thing
+// most likely to get waved through.
+//
+// `unmatchedNames` is the warning the website shows the confirming team in
+// UnmatchedNote, carried into the channel so a captain approving from Discord
+// sees it too. Modes differ in consequence, not just in tone: on loose those
+// players simply get no stats, while on strict the whole series goes to an
+// admin once both teams accept.
 export function seriesSubmittedPost(args: {
   teamName: string;
   oppPing: Ping | null;
+  homeName: string;
+  awayName: string;
   homeWins: number;
   awayWins: number;
+  unmatchedNames?: string[];
+  replayAnalysisMode?: "loose" | "strict";
 }): ChannelPost {
+  const homeWon = args.homeWins > args.awayWins;
+  const winner = homeWon ? args.homeName : args.awayName;
+  const loser = homeWon ? args.awayName : args.homeName;
+  const winnerWins = Math.max(args.homeWins, args.awayWins);
+  const loserWins = Math.min(args.homeWins, args.awayWins);
+
+  const unmatched = [...new Set(args.unmatchedNames ?? [])];
+  const strict = args.replayAnalysisMode === "strict";
+  const fields: DiscordEmbed["fields"] = unmatched.length
+    ? [
+        {
+          name: strict ? "Replays need review" : "Check these replays",
+          value: clamp(
+            `These players in the replays didn't match anyone on either roster: ` +
+              `${unmatched.map((n) => `\`${plain(n)}\``).join(", ")}.\n\n` +
+              (strict
+                ? "The series will go to an admin for review once both teams accept it."
+                : "Make sure these are the right replays before you approve — they won't earn stats for anyone."),
+            FIELD_LIMIT,
+          ),
+        },
+      ]
+    : undefined;
+
   return channelPost([args.oppPing], {
     title: "Series result submitted",
-    color: BRAND_ORANGE,
-    description: `**${args.teamName}** submitted the series result: **${args.homeWins}–${args.awayWins}**.`,
-    footer: { text: "Run /approve series or /reject series right here, or use the website under My Team." },
+    color: unmatched.length ? WARN_AMBER : BRAND_ORANGE,
+    description:
+      `**${plain(winner)}** beat **${plain(loser)}** **${winnerWins}–${loserWins}**.\n` +
+      `Reported by **${plain(args.teamName)}**.`,
+    fields,
+    footer: {
+      text: "Run /approve target:series or /reject target:series right here, or use the website under My Team.",
+    },
   });
 }
 
@@ -395,7 +450,7 @@ export function subRequestedPost(args: {
       DESC_LIMIT,
     ),
     fields: [rankField("Out", args.playerOut), rankField("Sub", args.sub)],
-    footer: { text: "Run /approve sub or /reject sub right here, or use the website under My Team." },
+    footer: { text: "Run /approve target:sub or /reject target:sub right here, or use the website under My Team." },
   });
 }
 
