@@ -704,14 +704,40 @@ export async function createMatchChannel(
   }
   const allowedRoleIds = [homeRole?.id, awayRole?.id, ...staffRoleIds].filter(Boolean) as string[];
 
+  // The name check above is the caller's snapshot of the guild, taken before its
+  // creation loop started, so a second concurrent pass reads it as clear and opens a
+  // duplicate. Re-read the row instead: every caller only creates for a match whose
+  // discord_channel_id is null, so a non-null one here means another pass already
+  // won. This is the fast path, not the guarantee — the claim below is that.
+  if (matchInfo?.matchId) {
+    const { data: fresh } = await supabaseAdmin.from("matches")
+      .select("discord_channel_id")
+      .eq("id", matchInfo.matchId)
+      .maybeSingle();
+    if (fresh?.discord_channel_id) return { created: false, skipped: true };
+  }
+
   const result = await createTextChannel(channelName, categoryId, allowedRoleIds);
   if (!result.id) return { created: false, error: result.error };
 
-  // Record channel ID on the match for targeted cleanup
+  // Record channel ID on the match for targeted cleanup, and claim the row while
+  // doing it: the column holds the result of the work, so there is nothing to claim
+  // with until Discord hands back an ID, and a sentinel written beforehand would
+  // strand the match with no channel if the create then failed. Two passes that both
+  // got past the re-read therefore both create, and `.is(null)` picks the winner —
+  // the loser deletes the channel it just made rather than overwriting the ID and
+  // orphaning the winner's. Must stay ahead of the intro post below, so only the
+  // winner announces the match.
   if (matchInfo?.matchId) {
-    await supabaseAdmin.from("matches")
+    const { data: claimed } = await supabaseAdmin.from("matches")
       .update({ discord_channel_id: result.id })
-      .eq("id", matchInfo.matchId);
+      .eq("id", matchInfo.matchId)
+      .is("discord_channel_id", null)
+      .select("id");
+    if (!claimed?.length) {
+      await deleteChannel(result.id);
+      return { created: false, skipped: true };
+    }
   }
 
   // Use the match's scheduled_at when it's set and in the future so that early
