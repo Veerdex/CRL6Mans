@@ -3634,6 +3634,10 @@ export async function createChannelIfCheckInOpen(matchId: string): Promise<void>
 export async function processExpiredCheckIns(): Promise<void> {
   if (!(await isTournamentActive())) return;
   const now = Date.now();
+  // Fetched lazily on the first forfeit and reused for the rest: a wave of expired
+  // check-ins is one guild-roles read, and a sweep that forfeits nothing pays none.
+  // Every team here already has a channel, so its role predates the sweep.
+  let sweepRoles: GuildRole[] | null = null;
   const { data: matches } = await supabaseAdmin.from("matches")
     .select("id, home_checked_in, away_checked_in, checkin_deadline, checkin_notified, status, home_team_id, away_team_id, stage, match_number")
     .eq("status", "scheduled")
@@ -3665,7 +3669,8 @@ export async function processExpiredCheckIns(): Promise<void> {
     // Expired — forfeit. Winner = the team that checked in (home if neither).
     const neither = !m.home_checked_in && !m.away_checked_in;
     const winnerIsHome = m.home_checked_in || neither;
-    await execReportMatchResult(m.id, winnerIsHome ? 1 : 0, winnerIsHome ? 0 : 1, 0, true);
+    sweepRoles ??= await getGuildRoles();
+    await execReportMatchResult(m.id, winnerIsHome ? 1 : 0, winnerIsHome ? 0 : 1, 0, true, false, sweepRoles);
 
     const winnerTeam = winnerIsHome ? m.home_team_id : m.away_team_id;
     const loserTeam = winnerIsHome ? m.away_team_id : m.home_team_id;
@@ -5192,6 +5197,10 @@ export async function execReportMatchResult(
   goalDiff = 0,
   forfeit = false,
   skipRatingUpdate = false,
+  // A caller reporting several matches in a row passes the guild's roles once, so the
+  // result post below doesn't fetch them per match. openReadyMatchChannels' own list
+  // still wins when it has one, being the fresher of the two.
+  prefetchedRoles?: GuildRole[] | null,
 ): Promise<{ ok: boolean; message: string }> {
   const { data: match } = await supabaseAdmin
     .from("matches")
@@ -5304,7 +5313,7 @@ export async function execReportMatchResult(
 
   if (match.discord_channel_id) {
     try {
-      const roles = await orFetchList(openedWithRoles, getGuildRoles);
+      const roles = await orFetchList(openedWithRoles ?? prefetchedRoles, getGuildRoles);
       const post = matchResultPost({
         homeName: homeTeam.name,
         awayName: awayTeam.name,
