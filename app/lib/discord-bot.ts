@@ -6,7 +6,7 @@ import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfa
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { isActiveTournamentTest, isTestTournament } from "./test-tournament";
 import { ptDate, ptWallToUtc } from "./pt-time";
-import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView, type DiscordEmbed } from "./discord-api";
+import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, ensureRolesWithList, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView, type DiscordEmbed } from "./discord-api";
 import {
   nextMatchNumber, nextSlot,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -81,6 +81,9 @@ import { mvpScore, shootingPct } from "./stats-math";
 import { kickAccount, banAccount, findAccountByDiscordId, DEFAULT_KICK_TIMEOUT_MS, type RevokedPatron } from "./moderation";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
+import { LEAGUE_SETTINGS_CHANNEL_COLUMNS, readyGating, channelContext, staffRoleIdsFrom, type LeagueSettingsRow } from "./league-settings-view";
+import { orFetchList } from "./prefetched";
+import type { GuildRole } from "./guild-role-list";
 
 type Option = { name: string; value: string | number | boolean; focused?: boolean };
 // Discord nests a subcommand's own options one level deeper, under the subcommand entry
@@ -343,12 +346,7 @@ function lobbyCode(seed: string): string {
   return out;
 }
 
-async function getStaffRoleIds(): Promise<string[]> {
-  const map = await getStaffRoleIdMap();
-  return [map.moderator, map.director, map.ceo].filter((id): id is string => !!id);
-}
-
-// Per-tier lookup (as opposed to getStaffRoleIds' flat list) so callers can add/remove
+// Per-tier lookup (as opposed to staffRoleIdsFrom's flat list) so callers can add/remove
 // the Discord role matching a specific staff_roles change.
 export async function getStaffRoleIdMap(): Promise<Record<"moderator" | "director" | "ceo", string | null>> {
   const { data } = await supabaseAdmin
@@ -629,16 +627,17 @@ export async function createMatchChannel(
   if (ctx) {
     resolvedCtx = ctx;
   } else {
-    const { data: settings } = await supabaseAdmin
-      .from("league_settings")
-      .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, match_category_anchor_id, season_format, active_tournament_id")
-      .single();
-    const format = settings?.season_format as { roundBestOf?: RoundBestOfConfig } | null;
-    const [existingChannels, guildRoles, allMatches, staffRoleIds] = await Promise.all([
+    // One league_settings read instead of two — the staff role IDs come off the same
+    // row getStaffRoleIds() would have re-selected them from.
+    const [settings, existingChannels, guildRoles, allMatches] = await Promise.all([
+      supabaseAdmin
+        .from("league_settings")
+        .select(LEAGUE_SETTINGS_CHANNEL_COLUMNS)
+        .single<LeagueSettingsRow<RoundBestOfConfig>>()
+        .then(r => r.data),
       getGuildChannels(),
       getGuildRoles(),
       supabaseAdmin.from("matches").select("stage, round").then(r => r.data ?? []),
-      getStaffRoleIds(),
     ]);
     const maxRoundByStage: Record<string, number> = {};
     allMatches.forEach(m => {
@@ -646,17 +645,11 @@ export async function createMatchChannel(
     });
     resolvedCtx = {
       categoryCache: new Map(),
-      deadlineDay: settings?.match_deadline_day ?? 2,
-      playDay:     settings?.match_play_day   ?? 0,
-      playHour:    settings?.match_play_hour  ?? 19,
-      rulesChannelId: settings?.rules_channel_id ?? null,
-      categoryAnchorId: settings?.match_category_anchor_id ?? null,
+      ...channelContext<RoundBestOfConfig>(settings),
       existingChannels,
       guildRoles,
-      roundBestOf: format?.roundBestOf ?? {},
       maxRoundByStage,
-      staffRoleIds,
-      isTournament: !!(settings?.active_tournament_id as string | null | undefined),
+      staffRoleIds: staffRoleIdsFrom(settings),
     };
   }
 
@@ -697,8 +690,10 @@ export async function createMatchChannel(
   let awayRole = guildRoles.find(r => r.name === awayTeamName);
   if (!homeRole || !awayRole) {
     const needed = [homeTeamName, awayTeamName].filter(n => !guildRoles.find(r => r.name === n));
-    await ensureRoles(needed);
-    const refreshed = await getGuildRoles();
+    // The creates land in the caller's own snapshot, so a later match sharing a team
+    // sees the role instead of re-fetching, and the caller can hand the list on.
+    const { roles: refreshed } = await ensureRolesWithList(needed);
+    for (const r of refreshed) if (!guildRoles.some(g => g.id === r.id)) guildRoles.push(r);
     homeRole = refreshed.find(r => r.name === homeTeamName);
     awayRole = refreshed.find(r => r.name === awayTeamName);
   }
@@ -3150,22 +3145,21 @@ async function openRound(userId: string, roundOverride?: number) {
   const teamNameById: Record<string, string> = {};
   teamsData?.forEach(t => { teamNameById[t.id] = t.name; });
 
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings")
-    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, match_category_anchor_id, season_format, active_tournament_id")
-    .single();
-
   const allTeamNames = [...new Set(
     matches.flatMap(m => [teamNameById[m.home_team_id!], teamNameById[m.away_team_id!]]).filter(Boolean)
   )];
-  await ensureRoles(allTeamNames);
 
-  const format = settings?.season_format as { roundBestOf?: RoundBestOfConfig } | null;
-  const [existingChannels, guildRoles, allMatchRows, staffRoleIds] = await Promise.all([
+  // One league_settings read feeds both the channel context and the staff role IDs,
+  // and ensureRolesWithList' own role fetch doubles as ctx.guildRoles.
+  const [settings, { roles: guildRoles }, existingChannels, allMatchRows] = await Promise.all([
+    supabaseAdmin
+      .from("league_settings")
+      .select(LEAGUE_SETTINGS_CHANNEL_COLUMNS)
+      .single<LeagueSettingsRow<RoundBestOfConfig>>()
+      .then(r => r.data),
+    ensureRolesWithList(allTeamNames),
     getGuildChannels(),
-    getGuildRoles(),
     supabaseAdmin.from("matches").select("stage, round").then(r => r.data ?? []),
-    getStaffRoleIds(),
   ]);
   const maxRoundByStage: Record<string, number> = {};
   allMatchRows.forEach((m: { stage: string; round: number }) => {
@@ -3173,17 +3167,11 @@ async function openRound(userId: string, roundOverride?: number) {
   });
   const ctx: MatchChannelContext = {
     categoryCache:  new Map(),
-    deadlineDay:    settings?.match_deadline_day ?? 2,
-    playDay:        settings?.match_play_day   ?? 0,
-    playHour:       settings?.match_play_hour  ?? 19,
-    rulesChannelId: settings?.rules_channel_id ?? null,
-    categoryAnchorId: settings?.match_category_anchor_id ?? null,
+    ...channelContext<RoundBestOfConfig>(settings),
     existingChannels,
     guildRoles,
-    roundBestOf: format?.roundBestOf ?? {},
     maxRoundByStage,
-    staffRoleIds,
-    isTournament: !!(settings?.active_tournament_id as string | null | undefined),
+    staffRoleIds: staffRoleIdsFrom(settings),
   };
 
   let created = 0;
@@ -3224,7 +3212,7 @@ async function openRound(userId: string, roundOverride?: number) {
 // that already have a channel are skipped, and createMatchChannel creates the
 // match's category lazily only if one doesn't already exist. Called after every
 // match report and every round/stage generation, replacing the need for /openround.
-export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: boolean }): Promise<void> {
+export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: boolean }): Promise<GuildRole[] | null> {
   const ignoreScheduleDeadline = opts?.ignoreScheduleDeadline ?? false;
 
   // Nothing opens before the event actually starts. The bracket is built up to 30
@@ -3234,22 +3222,23 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
   // has processExpiredCheckIns disqualify everyone on the first live tick.
   // execStartSeason sets season_active before its own call below, so a real start
   // is unaffected, as is a manual season, which is always active by this point.
-  if (!(await isSeasonActive())) return;
+  if (!(await isSeasonActive())) return null;
 
   const { data: allMatches } = await supabaseAdmin
     .from("matches")
     .select("id, home_team_id, away_team_id, round, match_number, stage, status, discord_channel_id, scheduled_at, admin_scheduled, home_checked_in, away_checked_in, checkin_deadline");
-  if (!allMatches?.length) return;
+  if (!allMatches?.length) return null;
 
   // Load round schedules. Always gate channels on schedule + previous deadline.
   // Works for both tournament-based seasons (keyed by tournament_id) and standalone
   // seasons (tournament_id IS NULL).
+  // One read for all three consumers — the gating flags here, the channel context
+  // below, and the staff role IDs that getStaffRoleIds() would have fetched again.
   const { data: ls } = await supabaseAdmin
     .from("league_settings")
-    .select("active_tournament_id, round1_manual_start_pending")
-    .single();
-  const activeTournamentId = (ls?.active_tournament_id as string | null) ?? null;
-  const round1ManualStartPending = !!ls?.round1_manual_start_pending;
+    .select(LEAGUE_SETTINGS_CHANNEL_COLUMNS)
+    .single<LeagueSettingsRow<RoundBestOfConfig>>();
+  const { activeTournamentId, round1ManualStartPending } = readyGating(ls);
 
   // The season's opening stage — round 1 of this stage waits for an explicit admin
   // "Start Round" click instead of opening the instant its schedule is set, so a
@@ -3319,26 +3308,19 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
     }
     return true;
   });
-  if (!ready.length) return;
+  if (!ready.length) return null;
 
   const teamIds = [...new Set(ready.flatMap((m) => [m.home_team_id!, m.away_team_id!]))];
   const { data: teamsData } = await supabaseAdmin.from("teams").select("id, name").in("id", teamIds);
   const teamNameById: Record<string, string> = {};
   teamsData?.forEach((t) => { teamNameById[t.id] = t.name; });
 
-  await ensureRoles([...new Set(Object.values(teamNameById))]);
-
-  const { data: settings } = await supabaseAdmin
-    .from("league_settings")
-    .select("match_deadline_day, match_play_day, match_play_hour, rules_channel_id, match_category_anchor_id, season_format, active_tournament_id")
-    .single();
-  const format = settings?.season_format as { roundBestOf?: RoundBestOfConfig } | null;
-  const isTournament = !!(settings?.active_tournament_id as string | null | undefined);
-
-  const [existingChannels, guildRoles, staffRoleIds] = await Promise.all([
+  // ensureRolesWithList hands back the role list its own fetch already loaded, with
+  // anything it just created folded in — so ctx.guildRoles still sees the new roles
+  // without the second GET /guilds/{id}/roles this used to pay for.
+  const [{ roles: guildRoles }, existingChannels] = await Promise.all([
+    ensureRolesWithList([...new Set(Object.values(teamNameById))]),
     getGuildChannels(),
-    getGuildRoles(),
-    getStaffRoleIds(),
   ]);
   const maxRoundByStage: Record<string, number> = {};
   allMatches.forEach((m) => {
@@ -3346,17 +3328,11 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
   });
   const ctx: MatchChannelContext = {
     categoryCache: new Map(),
-    deadlineDay: settings?.match_deadline_day ?? 2,
-    playDay: settings?.match_play_day ?? 0,
-    playHour: settings?.match_play_hour ?? 19,
-    rulesChannelId: settings?.rules_channel_id ?? null,
-    categoryAnchorId: settings?.match_category_anchor_id ?? null,
+    ...channelContext<RoundBestOfConfig>(ls),
     existingChannels,
     guildRoles,
-    roundBestOf: format?.roundBestOf ?? {},
     maxRoundByStage,
-    staffRoleIds,
-    isTournament,
+    staffRoleIds: staffRoleIdsFrom(ls),
   };
 
   for (const m of ready) {
@@ -3375,7 +3351,7 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
       adminScheduled: pinned,
     });
     if (!r.created && r.error) console.error("[openReadyMatchChannels]", r.error);
-    if (r.created && isTournament && !m.checkin_deadline) {
+    if (r.created && isTournamentMode && !m.checkin_deadline) {
       // Only for a match with no check-in window — i.e. the bracket reset. Everything
       // else was told about this match by openCheckInForMatch ("Check in now!" or
       // "Match scheduled") in the loop above, and the channel now opens at the same
@@ -3386,6 +3362,10 @@ export async function openReadyMatchChannels(opts?: { ignoreScheduleDeadline?: b
     }
     await sleep(DISCORD_PACE_MS);
   }
+  // Handed back for callers that would otherwise re-fetch the guild's roles the
+  // moment this returns. createMatchChannel pushes anything it created into this
+  // same array, so it is what a fresh fetch would give them.
+  return guildRoles;
 }
 
 // ─── Tournament check-in ────────────────────────────────────────────────────────
@@ -3819,7 +3799,7 @@ export async function submitSeriesResultCore(args: {
 
   const { data: match } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, home_score, score_confirmed, pending_home_score, score_submitted_by_team_id, result_reported_at, checkin_deadline, home_checked_in, away_checked_in")
+    .select("id, home_team_id, away_team_id, home_score, score_confirmed, pending_home_score, score_submitted_by_team_id, result_reported_at, checkin_deadline, home_checked_in, away_checked_in, discord_channel_id")
     .eq("id", args.matchId)
     .single();
 
@@ -3942,7 +3922,7 @@ export async function submitSeriesResultCore(args: {
         awayWins: args.awayWins,
         unmatchedNames,
         replayAnalysisMode: unmatchedNames.length ? await getReplayAnalysisMode() : undefined,
-      }));
+      }), match.discord_channel_id as string | null);
     }
   } catch { /* best-effort */ }
 
@@ -4008,7 +3988,7 @@ export async function cancelSeriesSubmissionCore(args: {
 
   const { data: match } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, home_score, pending_home_score, pending_away_score, score_submitted_by_team_id")
+    .select("id, home_team_id, away_team_id, home_score, pending_home_score, pending_away_score, score_submitted_by_team_id, discord_channel_id")
     .eq("id", args.matchId)
     .single();
 
@@ -4073,7 +4053,7 @@ export async function cancelSeriesSubmissionCore(args: {
       await notifyMatchChannel(args.matchId, seriesRejectedPost({
         teamName: myTeam.name,
         oppPing: teamPing(otherTeam.name, await getGuildRoles()),
-      }));
+      }), match.discord_channel_id as string | null);
     }
   } catch { /* best-effort */ }
 
@@ -4101,7 +4081,7 @@ export async function disputeSeriesResultCore(args: {
 
   const { data: match } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, home_score, pending_home_score")
+    .select("id, home_team_id, away_team_id, home_score, pending_home_score, discord_channel_id")
     .eq("id", args.matchId)
     .single();
 
@@ -4135,7 +4115,7 @@ export async function disputeSeriesResultCore(args: {
         teamName: myTeam.name,
         homeWins: homeScore,
         awayWins: awayScore,
-      }));
+      }), match.discord_channel_id as string | null);
     }
   } catch { /* best-effort */ }
 
@@ -4188,7 +4168,7 @@ export async function castForfeitVoteCore(args: {
 
   const { data: match } = await supabaseAdmin
     .from("matches")
-    .select("id, home_team_id, away_team_id, home_score, score_confirmed, pending_home_score, score_submitted_by_team_id, checkin_deadline, home_checked_in, away_checked_in")
+    .select("id, home_team_id, away_team_id, home_score, score_confirmed, pending_home_score, score_submitted_by_team_id, checkin_deadline, home_checked_in, away_checked_in, discord_channel_id")
     .eq("id", args.matchId)
     .single();
   if (!match) return { error: "Match not found" };
@@ -4292,7 +4272,7 @@ export async function castForfeitVoteCore(args: {
       teamPing: teamPing(names.teamName, await getGuildRoles()),
       votes,
       required,
-    }));
+    }), match.discord_channel_id as string | null);
   } catch { /* best-effort */ }
 
   return { state: "counted", votes, required, ...names };
@@ -5309,14 +5289,14 @@ export async function execReportMatchResult(
 
   // Open channels for any match whose teams just became free (e.g. the other
   // group/Swiss pairing finishing the round). Format-agnostic; idempotent.
-  await openReadyMatchChannels();
+  let openedWithRoles = await openReadyMatchChannels();
 
   // Auto-advance DE lower-bracket teams whose source slot was a bye. Loop until
   // stable because one resolved bye may unblock another dependent bye.
   if (match.stage === DE_WINNERS || match.stage === DE_LOSERS) {
     // eslint-disable-next-line no-await-in-loop
     while (await resolveDeByeMatches()) {
-      await openReadyMatchChannels();
+      openedWithRoles = (await openReadyMatchChannels()) ?? openedWithRoles;
     }
   }
 
@@ -5324,7 +5304,7 @@ export async function execReportMatchResult(
 
   if (match.discord_channel_id) {
     try {
-      const roles = await getGuildRoles();
+      const roles = await orFetchList(openedWithRoles, getGuildRoles);
       const post = matchResultPost({
         homeName: homeTeam.name,
         awayName: awayTeam.name,

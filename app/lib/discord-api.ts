@@ -1,3 +1,5 @@
+import { mergeCreatedRoles, type GuildRole } from "./guild-role-list";
+
 const GUILD_ID = process.env.DISCORD_GUILD_ID ?? "";
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN ?? "";
 const API = "https://discord.com/api/v10";
@@ -704,15 +706,26 @@ export async function positionCategoryAfter(categoryId: string, afterPosition: n
 
 // Fetch or create all named roles in one batch. Returns name → id map.
 export async function ensureRoles(names: string[]): Promise<Record<string, string>> {
-  if (!GUILD_ID || !BOT_TOKEN) return {};
+  return (await ensureRolesWithList(names)).map;
+}
+
+// Same, but also hands back the guild's full role list with the creates folded in.
+// A caller that needs both was fetching the roles twice — once in here to find the
+// missing names, then again to pick up what was created. `roles` is exactly what
+// that second fetch would have returned.
+export async function ensureRolesWithList(
+  names: string[],
+): Promise<{ map: Record<string, string>; roles: GuildRole[] }> {
+  if (!GUILD_ID || !BOT_TOKEN) return { map: {}, roles: [] };
   const existing = await fetchRoles();
   const map: Record<string, string> = {};
   existing.forEach((r) => { if (names.includes(r.name)) map[r.name] = r.id; });
 
+  const created: Record<string, string> = {};
   const missing = names.filter(n => !map[n]);
   for (const name of missing) {
     const id = await createRole(name);
-    if (id) map[name] = id;
+    if (id) { map[name] = id; created[name] = id; }
   }
-  return map;
+  return { map, roles: mergeCreatedRoles(existing, created) };
 }

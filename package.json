@@ -24,6 +24,9 @@
     "test:decision-targets": "tsc app/lib/decision-targets.ts scripts/test-decision-targets.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-decision-targets.js",
     "test:series-report": "tsc app/lib/series-report.ts scripts/test-series-report.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-series-report.js",
     "test:forfeit-vote": "tsc app/lib/forfeit-vote.ts scripts/test-forfeit-vote.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-forfeit-vote.js",
+    "test:prefetched": "tsc app/lib/prefetched.ts scripts/test-prefetched.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-prefetched.js",
+    "test:guild-role-list": "tsc app/lib/guild-role-list.ts scripts/test-guild-role-list.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-guild-role-list.js",
+    "test:league-settings-view": "tsc app/lib/league-settings-view.ts scripts/test-league-settings-view.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-league-settings-view.js",
     "test:best-of": "tsc -p scripts/tsconfig.test-best-of.json && node --require ./scripts/register-test-path-alias.cjs --test .test-build/scripts/test-best-of.js"
   },
   "dependencies": {
