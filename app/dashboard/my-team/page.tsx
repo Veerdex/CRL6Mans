@@ -7,6 +7,7 @@ import { PlayerName } from "@/app/dashboard/player-name";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { playerRatingFromRow, initialTeamRating } from "@/app/lib/rating";
 import { normalizeTeamSize } from "@/app/lib/team-size";
+import { forfeitVotesRequired } from "@/app/lib/forfeit-vote";
 import {
   getRoundName, getMatchLabel,
   DE_WINNERS, DE_LOSERS, DE_GF,
@@ -220,10 +221,11 @@ export default async function MyTeamPage() {
   // isModeratorVerified and the team lookup are independent — run together.
   const [userIsAdmin, { data: player }] = await Promise.all([
     isModeratorVerified(session.userId),
-    supabaseAdmin.from("players").select("team_id").eq("discord_id", session.userId).single(),
+    supabaseAdmin.from("players").select("id, team_id").eq("discord_id", session.userId).single(),
   ]);
   if (!player?.team_id) redirect("/dashboard");
   const teamId: string = player.team_id;
+  const myPlayerId: string = player.id;
 
   const [
     { data: teamRaw },
@@ -491,6 +493,20 @@ export default async function MyTeamPage() {
   const scoreDispute = nextMatch
     ? await getScoreDisputeState(nextMatch.id)
     : { rejectedByTeamId: null, rejectedHome: null, rejectedAway: null, disputedAt: null };
+
+  // How far along this team's forfeit vote is, counted against the current roster
+  // the same way castForfeitVoteCore counts it. Best-effort: a deploy where
+  // scripts/forfeit-votes-migration.sql hasn't run yet reads null here and draws
+  // as "nobody has voted", and the core refuses rather than acting on a count it
+  // couldn't take.
+  const { data: forfeitVoteRows } = nextMatch
+    ? await supabaseAdmin
+        .from("match_forfeit_votes")
+        .select("player_id")
+        .eq("match_id", nextMatch.id)
+        .in("player_id", sortedRoster.map((p) => p.id))
+    : { data: null };
+  const forfeitVoters = (forfeitVoteRows ?? []).map((r) => r.player_id as string);
 
   // Mirrors checkInGate in series-actions.ts — a stamped deadline means a tournament
   // match, and until both sides clear it neither can upload a replay or report a score.
@@ -852,6 +868,9 @@ export default async function MyTeamPage() {
               statsEnabled={statsEnabled}
               replayAnalysisMode={replayAnalysisMode}
               unmatchedByGame={unmatchedByGame}
+              forfeitVotes={forfeitVoters.length}
+              forfeitRequired={forfeitVotesRequired(teamSize, sortedRoster.length)}
+              iVotedToForfeit={forfeitVoters.includes(myPlayerId)}
             />
           </div>
         )}

@@ -6,13 +6,14 @@ import type { DiscordEmbed } from "@/app/lib/discord-api";
 
 // Deferral forces the reply ephemeral, which is what every command here wants
 // anyway: /profile, /stats and /coins are private by design, and the public half
-// of /sub, /approve, /reject, /dispute and /report is the embed their handler
-// posts into the match channel, not the reply the invoker sees.
+// of /sub, /approve, /reject, /dispute, /report and /forfeit is the embed their
+// handler posts into the match channel, not the reply the invoker sees.
 //
 // /report needs it twice over: downloading and parsing up to seven replays is
 // well past Discord's 3-second limit on its own.
 const DEFERRED_COMMANDS = new Set([
   "openround", "postclip", "profile", "stats", "coins", "sub", "approve", "reject", "dispute", "report",
+  "forfeit",
 ]);
 // Subcommands of /admin that are slow enough to need deferral (matched against
 // interaction.data.options[0].name, since Discord nests subcommand names one level deep).

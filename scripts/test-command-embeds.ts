@@ -11,6 +11,7 @@ import {
   reportRejectedEmbed,
   decisionAckEmbed,
   disputeAckEmbed,
+  forfeitAckEmbed,
   type ProfileEmbedArgs,
   type StatsEmbedArgs,
 } from "../app/lib/command-embeds";
@@ -267,4 +268,36 @@ test("a builder returns a bare embed, so no ping can hide inside one", () => {
   assert.ok(!("content" in e));
   assert.ok(!("allowed_mentions" in e));
   assert.match(e.description!, /@everyone/);
+});
+
+test("each forfeit outcome is a visibly different answer", () => {
+  const args = { teamName: "Top Tier", oppName: "We Have The Meats", votes: 1, required: 2 };
+  const counted = forfeitAckEmbed({ ...args, state: "counted" });
+  const already = forfeitAckEmbed({ ...args, state: "already" });
+  const withdrawn = forfeitAckEmbed({ ...args, state: "withdrawn", votes: 0 });
+  const done = forfeitAckEmbed({ ...args, state: "forfeited", votes: 2 });
+
+  // The titles are the whole point: a repeat press must not read as a second
+  // vote having landed, and a landed forfeit must not read like a vote.
+  const titles = [counted, already, withdrawn, done].map((e) => e.title);
+  assert.equal(new Set(titles).size, 4);
+  assert.match(already.title!, /already/i);
+  assert.match(done.title!, /forfeited/i);
+
+  // A vote that didn't decide anything says so, so nobody re-runs it to check.
+  assert.match(counted.description!, /1 of 2/);
+  assert.match(counted.description!, /still on/i);
+  assert.match(already.description!, /1 of 2/);
+  assert.match(already.description!, /won't add a second/i);
+
+  // Only the terminal one is red; the others haven't ended anything.
+  assert.notEqual(counted.color, done.color);
+  assert.notEqual(withdrawn.color, done.color);
+});
+
+test("the forfeit ack clamps the team names a roster can supply", () => {
+  const long = "x".repeat(5000);
+  const e = forfeitAckEmbed({ state: "forfeited", teamName: long, oppName: long, votes: 2, required: 2 });
+  assert.ok(e.description!.length <= 4096);
+  assert.ok(e.footer!.text.length <= 2048);
 });

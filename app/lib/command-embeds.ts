@@ -304,6 +304,63 @@ export function reportRejectedEmbed(args: {
   };
 }
 
+/**
+ * What `/forfeit` did, for the private receipt.
+ *
+ * Four outcomes, and the one that matters is `state: "counted"`: the vote
+ * landed, the match is still on, and the reply has to say so loudly enough that
+ * nobody runs the command again to check. A deferred reply is ephemeral and can
+ * take a few seconds, which is exactly the gap a player fills by retrying — so
+ * `already` is a distinct state rather than a second `counted`, and withdrawing
+ * is an explicit option rather than what a repeat press does.
+ */
+export function forfeitAckEmbed(args: {
+  state: "counted" | "already" | "withdrawn" | "forfeited";
+  teamName: string;
+  oppName: string;
+  votes: number;
+  required: number;
+}): DiscordEmbed {
+  const team = clamp(args.teamName, 200);
+  const tally = `**${args.votes} of ${args.required}**`;
+
+  if (args.state === "forfeited")
+    return {
+      title: "Match forfeited",
+      color: BAD_RED,
+      description:
+        `**${team}** has given this match up. **${clamp(args.oppName, 200)}** takes the win, ` +
+        `and any bets on the match have been refunded.`,
+      footer: { text: "This can't be undone from here — ask staff if it was a mistake." },
+    };
+
+  if (args.state === "withdrawn")
+    return {
+      title: "Forfeit vote withdrawn",
+      color: OK_GREEN,
+      description: `Your vote is off the board — **${team}** is back to ${tally}. The series is still on.`,
+    };
+
+  if (args.state === "already")
+    return {
+      title: "You already voted to forfeit",
+      color: WARN_AMBER,
+      description:
+        `Nothing changed — **${team}** is still at ${tally}, and running this again ` +
+        `won't add a second vote.`,
+      footer: { text: "Changed your mind? /forfeit withdraw:True takes it back." },
+    };
+
+  return {
+    title: "Forfeit vote counted",
+    color: WARN_AMBER,
+    description:
+      `**${team}** is at ${tally} votes to give this match up. It takes ${args.required} ` +
+      `before the match is forfeited, so the series is still on until a teammate agrees.`,
+    footer: { text: "Changed your mind? /forfeit withdraw:True takes it back." },
+  };
+}
+
 /** What `/approve` and `/reject` acted on, for the private confirmation. */
 export type DecisionTarget = "sub" | "series";
 

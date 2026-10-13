@@ -9,6 +9,7 @@ import {
   disputeSeriesResult,
   uploadGameReplay,
   processScoreConfirmationsNow,
+  castForfeitVote,
 } from "./series-actions";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
 import { checkInForMatch } from "./schedule-actions";
@@ -92,6 +93,13 @@ interface Props {
   // Server-side, so the team that didn't upload sees the same warning while it
   // decides whether to accept. Keyed by game number.
   unmatchedByGame?: Record<number, string[]>;
+  // How far along this team's forfeit vote is. Read best-effort on the server, so
+  // a zero here means "nobody has voted" or "the table isn't migrated yet" — the
+  // core is the one that decides, and it refuses rather than forfeiting on a
+  // count it couldn't take.
+  forfeitVotes?: number;
+  forfeitRequired?: number;
+  iVotedToForfeit?: boolean;
 }
 
 // The whole reason a series can't just submit: names in the replays that
@@ -777,6 +785,154 @@ function DisputedView({
   );
 }
 
+// ── Giving the match up ────────────────────────────────────────────────────────
+//
+// Sits beside Submit in both reporting flows. It takes two teammates (one at
+// 1v1), so this draws the tally rather than a bare button: a player who presses
+// it has to be able to tell that nothing happened yet, or they'll assume the
+// click failed and go looking for an admin.
+//
+// Votes come from the server on every render, so the count here is the count the
+// server will act on — the click never guesses at it.
+// Its own component so the cooldown starts over by mounting — resetting it from
+// an effect when the modal closes is a cascading render.
+function ForfeitConfirmModal({
+  decides, required, busy, error, onCast, onClose,
+}: {
+  decides: boolean;
+  required: number;
+  busy: boolean;
+  error: string | null;
+  onCast: () => void;
+  onClose: () => void;
+}) {
+  // Three seconds, as on the confirm-result modal: this one ends the match, and
+  // it is reachable by a mis-aimed click on a panel whose other button reports a
+  // win.
+  const [cooldown, setCooldown] = useState(3);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const verb = decides ? "Forfeit the match" : "Cast my vote";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      onClick={busy ? undefined : onClose}
+    >
+      <div
+        className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl p-6 space-y-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-center space-y-2">
+          <p className="text-2xl font-bold text-red-400">
+            {decides ? "Give this match up?" : "Vote to forfeit?"}
+          </p>
+          <p className="text-sm text-zinc-400">
+            {decides
+              ? "Your teammate has already voted, so this hands your opponent the win right now. It can't be undone from here."
+              : `This takes ${required} votes from your team. The series stays on until a teammate agrees, and you can take your vote back before then.`}
+          </p>
+          <p className="text-xs text-zinc-500">
+            A forfeit counts as a loss on your record. Neither team&apos;s rating moves,
+            and every bet on the match is refunded.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={onCast}
+            disabled={cooldown > 0 || busy}
+            className="px-4 py-2 bg-red-800 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {busy ? "Submitting…" : cooldown > 0 ? `${verb} (${cooldown})` : verb}
+          </button>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-300 text-sm font-medium rounded-lg transition-colors"
+          >
+            Keep playing
+          </button>
+        </div>
+        {error && <p className="text-xs text-red-400 text-center">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+function ForfeitControl({
+  matchId, votes, required, iVoted,
+}: {
+  matchId: string;
+  votes: number;
+  required: number;
+  iVoted: boolean;
+}) {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // The press that reaches the threshold is the one that ends the series, so it
+  // is worded as giving the match up rather than as a vote.
+  const decides = votes + 1 >= required;
+
+  async function cast(withdraw: boolean) {
+    setBusy(true);
+    setError(null);
+    const res = await castForfeitVote(matchId, withdraw);
+    setBusy(false);
+    if (res.error) { setError(res.error); return; }
+    setConfirming(false);
+    router.refresh();
+  }
+
+  if (iVoted) {
+    return (
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => cast(true)}
+          disabled={busy}
+          className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-amber-300 text-sm font-medium rounded-lg border border-amber-700/40 transition-colors"
+        >
+          {busy ? "Withdrawing…" : `Withdraw forfeit vote (${votes}/${required})`}
+        </button>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setConfirming(true)}
+          disabled={busy}
+          className="px-4 py-2 bg-transparent hover:bg-red-950/40 disabled:opacity-50 text-red-400 text-sm font-medium rounded-lg border border-red-800/50 transition-colors"
+        >
+          {votes > 0 ? `Forfeit (${votes}/${required})` : "Forfeit"}
+        </button>
+        {error && !confirming && <p className="text-xs text-red-400">{error}</p>}
+      </div>
+
+      {confirming && (
+        <ForfeitConfirmModal
+          decides={decides}
+          required={required}
+          busy={busy}
+          error={error}
+          onCast={() => cast(false)}
+          onClose={() => setConfirming(false)}
+        />
+      )}
+    </>
+  );
+}
+
 // ── Main panel ─────────────────────────────────────────────────────────────────
 
 export function SeriesReplayPanel({
@@ -789,6 +945,7 @@ export function SeriesReplayPanel({
   checkinDeadline = null, opponentName = null,
   isTournament = false, statsEnabled = true,
   replayAnalysisMode = "loose", unmatchedByGame = {},
+  forfeitVotes = 0, forfeitRequired = 2, iVotedToForfeit = false,
 }: Props) {
   const router = useRouter();
   const [slots, setSlots] = useState<SlotState[]>(() => initSlots(bestOf));
@@ -1188,7 +1345,7 @@ export function SeriesReplayPanel({
             Your opponent confirms it before it counts.
           </p>
 
-          <div className="flex items-center gap-3 pt-1">
+          <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
               onClick={handleScoreOnlySubmit}
               disabled={submitting || !bothEntered}
@@ -1196,6 +1353,14 @@ export function SeriesReplayPanel({
             >
               {submitting ? "Submitting…" : "Submit Series Result"}
             </button>
+            {/* Not sharing Submit's !bothEntered: a team gives the match up
+                instead of entering a score, not after. */}
+            <ForfeitControl
+              matchId={matchId}
+              votes={forfeitVotes}
+              required={forfeitRequired}
+              iVoted={iVotedToForfeit}
+            />
             {submitError && <p className="text-xs text-red-400">{submitError}</p>}
           </div>
         </div>
@@ -1329,9 +1494,12 @@ export function SeriesReplayPanel({
           Having trouble? If a replay won&apos;t upload, contact an admin to report the score.
         </p>
 
-        {/* Submit (any team member, series decided) */}
-        {seriesOver && (
-          <div className="flex items-center gap-3 pt-1">
+        {/* Submit (any team member, series decided) — Forfeit sits beside it but
+            outside the condition: a team gives a match up *instead* of playing it
+            out, so gating it on the series being decided would show it only once
+            nobody needs it. */}
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          {seriesOver && (
             <button
               onClick={handleSubmit}
               disabled={submitting}
@@ -1339,9 +1507,15 @@ export function SeriesReplayPanel({
             >
               {submitting ? "Submitting…" : "Submit Series Result"}
             </button>
-            {submitError && <p className="text-xs text-red-400">{submitError}</p>}
-          </div>
-        )}
+          )}
+          <ForfeitControl
+            matchId={matchId}
+            votes={forfeitVotes}
+            required={forfeitRequired}
+            iVoted={iVotedToForfeit}
+          />
+          {submitError && <p className="text-xs text-red-400">{submitError}</p>}
+        </div>
       </div>
     </div>
   );

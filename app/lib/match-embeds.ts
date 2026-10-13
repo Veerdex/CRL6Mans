@@ -219,6 +219,34 @@ export function matchResultPost(args: {
   });
 }
 
+// ─── Forfeit ────────────────────────────────────────────────────────────────────
+
+// A teammate has pressed Forfeit and the team is one vote short.
+//
+// Only the forfeiting team is pinged: the vote this is asking for can only come
+// from them, and the other team has nothing to do about it. They still read it
+// in the channel, which is the point of posting it publicly at all — a team
+// cannot give a match up quietly.
+//
+// There is no deciding-vote counterpart to this post. The vote that lands the
+// forfeit reports the match, and reporting a match posts matchResultPost and
+// then deletes the channel, so a second embed here would be a race to be read.
+export function forfeitVotePost(args: {
+  teamName: string;
+  teamPing: Ping | null;
+  votes: number;
+  required: number;
+}): ChannelPost {
+  return channelPost([args.teamPing], {
+    title: "Forfeit vote",
+    color: WARN_AMBER,
+    description:
+      `**${args.teamName}** has voted to give this match up — **${args.votes} of ${args.required}**. ` +
+      `A teammate has to agree before it counts. Until then the series is still on, and ` +
+      `whoever voted can take it back.`,
+  });
+}
+
 // ─── Score reporting ────────────────────────────────────────────────────────────
 
 // Names the winner and the loser rather than leaving the reader to work out

@@ -7,6 +7,7 @@ import {
   tournamentIntroPost,
   seasonIntroPost,
   checkInPost,
+  forfeitVotePost,
   matchResultPost,
   seriesSubmittedPost,
   seriesRejectedPost,
@@ -77,6 +78,7 @@ const ALL: Array<[string, ChannelPost]> = [
   ["checkIn/both", checkInPost({ teamName: "Top Tier", oppName: "We Have The Meats", teamPing: HOME, oppPing: AWAY, bothIn: true, deadlineTs: 1700000000 })],
   ["matchResult/win", matchResultPost({ homeName: "Top Tier", awayName: "We Have The Meats", homePing: HOME, awayPing: AWAY, homeScore: 3, awayScore: 1, winnerName: "Top Tier" })],
   ["matchResult/draw", matchResultPost({ homeName: "Top Tier", awayName: "We Have The Meats", homePing: HOME, awayPing: AWAY, homeScore: 2, awayScore: 2, winnerName: null })],
+  ["forfeitVote", forfeitVotePost({ teamName: "Top Tier", teamPing: HOME, votes: 1, required: 2 })],
   ["seriesSubmitted", seriesSubmittedPost({ ...submitted, homeWins: 3, awayWins: 1 })],
   ["seriesSubmitted/loose", seriesSubmittedPost({ ...submitted, homeWins: 3, awayWins: 1, unmatchedNames: ["Rando"], replayAnalysisMode: "loose" })],
   ["seriesSubmitted/strict", seriesSubmittedPost({ ...submitted, homeWins: 1, awayWins: 3, unmatchedNames: ["Rando"], replayAnalysisMode: "strict" })],
@@ -317,6 +319,12 @@ test("the check-in post pings only the opponent until both are in", () => {
   assert.deepEqual(both.allowed_mentions.roles, ["100", "200"]);
   // No deadline once both are in — there is nothing left to be late for.
   assert.ok(!both.embeds[0].description!.includes("<t:"));
+});
+
+test("the forfeit vote pings the forfeiting team, not the opponent", () => {
+  const post = forfeitVotePost({ teamName: "Top Tier", teamPing: HOME, votes: 1, required: 2 });
+  assert.deepEqual(post.allowed_mentions.roles, ["100"]);
+  assert.ok(post.embeds[0].description!.includes("1 of 2"));
 });
 
 test("the result embed states the score and the winner", () => {

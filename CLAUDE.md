@@ -211,7 +211,7 @@ Used in tournament-scheduler cron and admin web actions for signup open/close, d
 
 - Endpoint: `POST /api/discord/interactions` — Ed25519-verified with `tweetnacl`.
 - Deferred commands (long-running): acknowledged immediately, result sent via `followUp()` using `after()` so the handler can exceed the 3-second Discord limit.
-- `DEFERRED_COMMANDS = ["openround", "postclip", "profile", "stats", "coins", "sub", "approve", "reject", "dispute", "report"]` — commands that take >3s, plus the ones whose reply should be private: **deferring forces the reply ephemeral**, so a command answering publicly must stay out of the set. `syncroles` is deferred as an `/admin` subcommand instead (`DEFERRED_ADMIN_SUBCOMMANDS`). Auction draft commands (`nominate`, `bid`, `endround`, `budget`) are commented out in `register-commands.mjs` and excluded; their handler code is preserved for future use.
+- `DEFERRED_COMMANDS = ["openround", "postclip", "profile", "stats", "coins", "sub", "approve", "reject", "dispute", "report", "forfeit"]` — commands that take >3s, plus the ones whose reply should be private: **deferring forces the reply ephemeral**, so a command answering publicly must stay out of the set. `syncroles` is deferred as an `/admin` subcommand instead (`DEFERRED_ADMIN_SUBCOMMANDS`). Auction draft commands (`nominate`, `bid`, `endround`, `budget`) are commented out in `register-commands.mjs` and excluded; their handler code is preserved for future use.
 - All slash command logic lives in `app/lib/discord-bot.ts`.
 
 ### Match channel messages
@@ -226,13 +226,25 @@ Free text (an admin's rejection reason, a sub reason, a round's schedule lines) 
 
 ### Series reporting — `/report` and its cores
 
-The My Team reporting panel and the bot run the **same four cores**, which live in `discord-bot.ts` rather than a module of their own because `series-actions.ts` already imports `finalizeAcceptedSeries` from it: `submitSeriesResultCore`, `confirmSeriesResultCore`, `cancelSeriesSubmissionCore`, `disputeSeriesResultCore`. Each takes an `actorDiscordId` because a server action reads the session cookie and the bot has none, and **none may be exported from a `"use server"` file** — every export there is a callable endpoint. Their returned prose is **surface-neutral**, naming no command and no page, because both surfaces show it verbatim; `scripts/test-series-report.ts` pins that.
+The My Team reporting panel and the bot run the **same cores**, which live in `discord-bot.ts` rather than a module of their own because `series-actions.ts` already imports `finalizeAcceptedSeries` from it: `submitSeriesResultCore`, `confirmSeriesResultCore`, `cancelSeriesSubmissionCore`, `disputeSeriesResultCore`, `castForfeitVoteCore`. Each takes an `actorDiscordId` because a server action reads the session cookie and the bot has none, and **none may be exported from a `"use server"` file** — every export there is a callable endpoint. Their returned prose is **surface-neutral**, naming no command and no page, because both surfaces show it verbatim; `scripts/test-series-report.ts` pins that.
 
 `/report` is the Discord half, and which half of *it* applies depends on `isStatsTrackingEnabled()`: stats off takes a typed `won`/`lost`, stats on takes `game1..game7` replay attachments and derives the score from them. **Every option is optional** — Discord cannot make one conditionally required, and a required option must precede the optional ones — so `modeMismatch` in `app/lib/series-report.ts` (the pure leaf holding every validation, tested by `npm run test:series-report`) tells a team which half they're in. `opt()` returns `""` for an absent option, so presence is checked rather than read: `Number(opt(i, "lost"))` is a confident `0`.
 
 The analyse/persist split in `app/lib/replay-analysis.ts` (`analyzeGameReplay` / `persistGameAnalysis`) exists for this: `/report` validates the whole series before committing any of it, so a rejected series leaves no certification rows behind. The website keeps per-slot persist because nothing later can reject a slot. `/report` also checks for a duplicate `replayId` **within** the series — `analyzeGameReplay` only looks across other matches, so the same file in `game1` and `game2` would otherwise count a win it never earned. An attachment option is type 11 and carries only the attachment's ID; `filename`, `size` and the signed CDN URL arrive in `interaction.data.resolved.attachments`. That URL is fetched outbound, so a replay never passes through a request body and the site's 4.2 MB cap (Vercel's body limit) doesn't apply — `reportCmd` applies it anyway, for parity rather than platform.
 
 **Strict mode diverges deliberately between the surfaces.** On the website an unmatched replay player is accepted and an admin resolves it after both teams accept; `/report` **rejects at report time**, because the reporter is still at the keyboard and can fix a tracker, whereas by review time nobody is. In loose mode both surfaces accept, and `seriesSubmittedPost` warns the other team in the channel that the replays may be invalid.
+
+### Giving a match up — the Forfeit button and `/forfeit`
+
+`castForfeitVoteCore` is the fifth core, shared by My Team's Forfeit button (beside Submit Series Result) and `/forfeit`. It takes **two players** — one at 1v1 — and `forfeitVotesRequired` in `app/lib/forfeit-vote.ts` (the pure leaf, with `forfeitBlocked` and `forfeitScore`, tested by `npm run test:forfeit-vote`) is the only place that threshold is decided.
+
+- A vote is a **row** in `match_forfeit_votes`, PK `(match_id, player_id)`, so a second press is idempotent rather than a second vote. Withdrawing is an explicit flag (`/forfeit withdraw:True`, or the button flipping to "Withdraw forfeit vote") and **never** what a repeat press does: a deferred slash-command reply is ephemeral and slow enough that a player re-runs the command, and a toggle would answer that by quietly taking their vote back.
+- Votes are counted against the team's **current roster**, not the rows' own `team_id` — a player moved off the team after voting stops counting. `team_id` on the row is audit-only.
+- **Every gate lives in the core**, not the surfaces: `forfeitBlocked` (both teams seated, the match not final, no pending submission from either side), `isScoreDisputed`, and `checkInGate` — before both teams are in, a no-show is the check-in sweeper's forfeit to award, not one roster's decision.
+- The deciding vote reports the match as `execReportMatchResult(..., forfeit: true, skipRatingUpdate: true)` at `winsNeeded`–0, so **neither team's rating moves and every pending wager is refunded** — betting stays open until a score is reported, so a team losing mid-series can refund its own backers by giving up. `bump_team_record` still fires, so it is a loss on the record.
+- The threshold check runs **before** the already-voted answer on purpose: a team at the threshold whose report failed would otherwise be stuck, since everyone who could press has already voted.
+- A non-deciding vote posts `forfeitVotePost` publicly in the match channel, pinging only the forfeiting team — a team can't give a match up quietly. There is no deciding-vote counterpart: that vote posts `matchResultPost` and deletes the channel.
+- My Team's vote read is **best-effort** — a pre-migration deploy reads null and draws as "nobody has voted"; the core refuses rather than acting on a count it couldn't take.
 
 ---
 
@@ -303,6 +315,7 @@ so deletes go Tier 3 → Tier 1 (which then cascades Tier 2).
 | `player_edit_requests` | Pending tracker URL change requests awaiting admin approval (MMR columns are vestigial) |
 | `matches` | Season/tournament match results |
 | `sub_requests` | Substitute player requests |
+| `match_forfeit_votes` | One row per (match, player) vote to give a match up; PK is the dedupe, `team_id` is audit-only |
 | `series` | Best-of series between teams |
 | `staff_roles` | `discord_id` + `role` (`moderator`/`director`/`ceo`) — source of truth for staff permissions |
 | `push_subscriptions` | Web push endpoints for browser notifications |

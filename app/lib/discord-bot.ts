@@ -21,7 +21,7 @@ import { buildAndSaveBracket } from "./bracket-server";
 import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow, calculatePlayerRating } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { matchHasBegun } from "./match-state";
-import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "./team-size";
+import { DEFAULT_TEAM_SIZE, normalizeTeamSize, resolveTeamSize } from "./team-size";
 import { APP_NAME } from "./constants";
 import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft-order";
 import { draftLabel, draftStartEmbed, onTheClockEmbed, pickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
@@ -33,6 +33,7 @@ import {
   seasonIntroPost,
   checkInPost,
   matchResultPost,
+  forfeitVotePost,
   replayReviewPost,
   seriesSubmittedPost,
   seriesRejectedPost,
@@ -40,7 +41,7 @@ import {
   type ChannelPost,
 } from "./match-embeds";
 import { announceClip, clipsChannelId, createClip } from "./clip-submit";
-import { profileEmbed, statsEmbed, coinsEmbed, subAckEmbed, reportAckEmbed, reportRejectedEmbed, decisionAckEmbed, disputeAckEmbed } from "./command-embeds";
+import { profileEmbed, statsEmbed, coinsEmbed, subAckEmbed, reportAckEmbed, reportRejectedEmbed, decisionAckEmbed, disputeAckEmbed, forfeitAckEmbed } from "./command-embeds";
 import {
   teamName,
   submitSubRequestCore,
@@ -73,6 +74,7 @@ import {
   toHomeAway,
   submissionBlocked,
 } from "./series-report";
+import { forfeitVotesRequired, forfeitBlocked, forfeitScore } from "./forfeit-vote";
 import { loadPlayerProfile } from "./player-profile";
 import { fetchAllTimeTotals, isStatsTrackingEnabled, type CareerTotals } from "./career-stats";
 import { mvpScore, shootingPct } from "./stats-math";
@@ -2817,6 +2819,32 @@ async function disputeCmd(userId: string, channelId: string, target: string) {
   }));
 }
 
+async function forfeitCmd(userId: string, channelId: string, withdraw: boolean) {
+  const me = await subjectPlayer(userId);
+  if (!me?.team_id) return ephemeralReply("❌ You're not on a team.");
+
+  const scope = await decidableMatches(me.team_id, channelId);
+  if ("error" in scope) return ephemeralReply(`❌ ${scope.error}`);
+
+  const open = scope.matches.filter((m) => m.home_score === null);
+  if (open.length === 0) return ephemeralReply("ℹ️ You have no match to give up.");
+  if (open.length > 1)
+    return ephemeralReply("❌ You have more than one match open — run `/forfeit` in the match's own channel.");
+
+  const result = await castForfeitVoteCore({
+    matchId: open[0].id, actorDiscordId: userId, withdraw,
+  });
+  if (result.error) return ephemeralReply(`❌ ${result.error}`);
+
+  return ephemeralEmbedReply(forfeitAckEmbed({
+    state: result.state!,
+    teamName: result.teamName!,
+    oppName: result.oppName!,
+    votes: result.votes!,
+    required: result.required!,
+  }));
+}
+
 async function setDraftChannel(userId: string, channelId: string) {
   const denied = await directorGuard(userId);
   if (denied) return denied;
@@ -4100,6 +4128,149 @@ export async function disputeSeriesResultCore(args: {
   }, "match_disputes").catch(() => {});
 
   return { outcome: "pending_admin", homeScore, awayScore };
+}
+
+// ─── Giving a match up ──────────────────────────────────────────────────────────
+//
+// Shared with `/forfeit` for the same reason as the four series cores above: a
+// vote cast on My Team and one cast in the match channel have to count the same.
+//
+// It takes two players (one at 1v1 — see forfeitVotesRequired), and a vote is a
+// row rather than a counter, so pressing again is idempotent instead of a second
+// vote. Withdrawing is an explicit flag and never what a repeat press does: a
+// deferred slash-command reply is ephemeral and takes a moment, which is exactly
+// the gap a player fills by running the command again — and a toggle would answer
+// that by quietly taking their vote back off the board.
+export type ForfeitVoteResult = {
+  error?: string;
+  state?: "counted" | "already" | "withdrawn" | "forfeited";
+  votes?: number;
+  required?: number;
+  teamName?: string;
+  oppName?: string;
+};
+
+export async function castForfeitVoteCore(args: {
+  matchId: string;
+  actorDiscordId: string;
+  withdraw?: boolean;
+}): Promise<ForfeitVoteResult> {
+  const { data: me } = await supabaseAdmin
+    .from("players").select("id, team_id").eq("discord_id", args.actorDiscordId).maybeSingle();
+  if (!me?.team_id) return { error: "Not on a team" };
+  const teamId = me.team_id as string;
+  const playerId = me.id as string;
+
+  const { data: match } = await supabaseAdmin
+    .from("matches")
+    .select("id, home_team_id, away_team_id, home_score, score_confirmed, pending_home_score, score_submitted_by_team_id, checkin_deadline, home_checked_in, away_checked_in")
+    .eq("id", args.matchId)
+    .single();
+  if (!match) return { error: "Match not found" };
+
+  // Every gate lives here rather than in the surfaces. My Team only draws the
+  // button in the reporting views, so it gates by what it renders; a slash
+  // command has no such shape and would otherwise reach a match it has no
+  // business ending.
+  const blocked = forfeitBlocked(match, teamId);
+  if (blocked) return { error: blocked };
+  if (await isScoreDisputed(args.matchId))
+    return { error: "This match is disputed — staff will record the result" };
+  // The same gate reporting uses. Before both teams are in, the match hasn't
+  // started and a no-show is the check-in sweeper's forfeit to award, not a
+  // decision for one roster to take.
+  const checkIn = checkInGate(match);
+  if (checkIn) return { error: checkIn };
+
+  // Counted against the team's *current* roster rather than the vote rows' own
+  // team_id, so a player moved off the team or kicked after voting stops
+  // counting toward it.
+  const [teamSize, { data: rosterRows }] = await Promise.all([
+    resolveTeamSize(),
+    supabaseAdmin.from("players").select("id").eq("team_id", teamId).eq("status", "approved"),
+  ]);
+  const roster = (rosterRows ?? []).map((r) => r.id as string);
+  if (!roster.includes(playerId)) return { error: "Not on a team" };
+  const required = forfeitVotesRequired(teamSize, roster.length);
+
+  const oppId = (match.home_team_id === teamId ? match.away_team_id : match.home_team_id) as string;
+  const [{ data: mine }, myName, oppName] = await Promise.all([
+    supabaseAdmin.from("match_forfeit_votes")
+      .select("player_id").eq("match_id", args.matchId).eq("player_id", playerId).maybeSingle(),
+    teamName(teamId),
+    teamName(oppId),
+  ]);
+  const names = { teamName: myName ?? "Your team", oppName: oppName ?? "The other team" };
+
+  const tally = async () => {
+    const { data } = await supabaseAdmin
+      .from("match_forfeit_votes").select("player_id")
+      .eq("match_id", args.matchId).in("player_id", roster);
+    return (data ?? []).length;
+  };
+
+  if (args.withdraw) {
+    if (!mine) return { error: "You haven't voted to give this match up." };
+    const { error } = await supabaseAdmin.from("match_forfeit_votes")
+      .delete().eq("match_id", args.matchId).eq("player_id", playerId);
+    if (error) return { error: error.message };
+    return { state: "withdrawn", votes: await tally(), required, ...names };
+  }
+
+  const isNewVote = !mine;
+  if (isNewVote) {
+    // Upsert rather than insert: two presses from the same player landing
+    // together would otherwise make one of them a primary-key error instead of
+    // the no-op it is.
+    const { error } = await supabaseAdmin
+      .from("match_forfeit_votes")
+      .upsert(
+        { match_id: args.matchId, player_id: playerId, team_id: teamId },
+        { onConflict: "match_id,player_id" },
+      );
+    if (error) return { error: error.message };
+  }
+
+  const votes = await tally();
+
+  // Reached before the already-voted answer on purpose. A team at the threshold
+  // whose report failed — a transient Supabase error, a missing RPC — would
+  // otherwise be stuck: both votes are already cast, so no later press could
+  // ever retry it.
+  if (votes >= required) {
+    const bestOf = await getBestOfForMatch(args.matchId);
+    const { homeScore, awayScore } = forfeitScore(bestOf, match.home_team_id === teamId);
+    // forfeit: true is what refunds every wager and leaves both ratings where
+    // they were — the games were never played. skipRatingUpdate rides alongside
+    // it as execDisqualifyTeam passes it, so the two paths that award a forfeit
+    // read alike.
+    const reported = await execReportMatchResult(args.matchId, homeScore, awayScore, 0, true, true);
+    // Two teammates pressing at once both clear the threshold and both report.
+    // The status predicate inside execReportMatchResult lets exactly one
+    // through and answers the other with "already reported" — the match is
+    // forfeited either way, so that is this caller's answer too. An opponent
+    // confirming a score in the same moment lands here identically.
+    if (!reported.ok && !/already reported/i.test(reported.message))
+      return { error: reported.message };
+    return { state: "forfeited", votes, required, ...names };
+  }
+
+  if (!isNewVote) return { state: "already", votes, required, ...names };
+
+  // Public, and pinging only the forfeiting team: the vote this is waiting for
+  // can only come from them. The other team reads it in the channel without
+  // being pinged, which is the point of posting at all — a team cannot give a
+  // match up quietly.
+  try {
+    await notifyMatchChannel(args.matchId, forfeitVotePost({
+      teamName: names.teamName,
+      teamPing: teamPing(names.teamName, await getGuildRoles()),
+      votes,
+      required,
+    }));
+  } catch { /* best-effort */ }
+
+  return { state: "counted", votes, required, ...names };
 }
 
 export type ScoreDisputeState = {
@@ -6008,6 +6179,11 @@ export async function handleCommand(interaction: Interaction) {
       userId,
       interaction.channel_id ?? interaction.channel?.id ?? "",
       String(opt(interaction, "target")),
+    );
+    case "forfeit":       return forfeitCmd(
+      userId,
+      interaction.channel_id ?? interaction.channel?.id ?? "",
+      opt(interaction, "withdraw") === true,
     );
     case "postclip":      return postClip(
       userId,

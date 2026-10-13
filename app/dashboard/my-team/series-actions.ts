@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
-// The four series cores live in discord-bot.ts alongside finalizeAcceptedSeries:
+// The series cores live in discord-bot.ts alongside finalizeAcceptedSeries:
 // this file already depends on that module, so putting them anywhere else would
 // make the dependency circular.
 import {
@@ -14,6 +14,7 @@ import {
   confirmSeriesResultCore,
   cancelSeriesSubmissionCore,
   disputeSeriesResultCore,
+  castForfeitVoteCore,
 } from "@/app/lib/discord-bot";
 import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
 import { analyzeGameReplay, persistGameAnalysis, checkInGate } from "@/app/lib/replay-analysis";
@@ -102,6 +103,25 @@ export async function disputeSeriesResult(
   revalidatePath("/dashboard/my-team");
   revalidatePath("/dashboard/admin");
   return {};
+}
+
+// Giving the match up. Two teammates have to agree (one at 1v1), so this returns
+// the tally and the page redraws from it rather than from the click.
+export async function castForfeitVote(
+  matchId: string,
+  withdraw = false,
+): Promise<{ error?: string; state?: string; votes?: number; required?: number }> {
+  const session = await getSessionOrLogin();
+
+  const result = await castForfeitVoteCore({
+    matchId, actorDiscordId: session.userId, withdraw,
+  });
+  if (result.error) return { error: result.error };
+
+  revalidatePath("/dashboard/my-team");
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/season");
+  return { state: result.state, votes: result.votes, required: result.required };
 }
 
 // Client-fired when a confirmation deadline passes while someone has the page open —

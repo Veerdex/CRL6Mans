@@ -334,6 +334,18 @@ const commands = [
     ],
   },
   {
+    name: "forfeit",
+    description: "Vote to give your current match up — it takes two teammates to agree",
+    options: [
+      {
+        name: "withdraw",
+        description: "Take your forfeit vote back instead of casting one",
+        type: BOOLEAN,
+        required: false,
+      },
+    ],
+  },
+  {
     name: "pick",
     description: "Pick a player for your team during the snake draft",
     options: [
