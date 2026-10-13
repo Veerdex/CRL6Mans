@@ -73,8 +73,17 @@ function channelPost(pings: Array<Ping | null>, embed: DiscordEmbed): ChannelPos
 
 // No home/away marking: the only thing the distinction decided in-channel was
 // who creates the lobby, and the lobby field now names that team outright.
-const vs = (homeName: string, awayName: string): string =>
-  `**${homeName}**  vs  **${awayName}**`;
+//
+// Each side is drawn as its role mention, falling back to bold text when the
+// role doesn't resolve. This is presentation only — a mention inside an embed
+// notifies nobody, so the pings `channelPost` puts in `content` are still what
+// reaches the team. It also keeps the content free of player-supplied text:
+// `teamPing` is what resolved these, so the `@everyone` guard still applies.
+const teamLabel = (name: string, ping: Ping | null): string =>
+  ping ? ping.text : `**${name}**`;
+
+const vs = (teams: IntroTeams): string =>
+  `${teamLabel(teams.homeName, teams.homePing)}  vs  ${teamLabel(teams.awayName, teams.awayPing)}`;
 
 // ─── Channel intro ──────────────────────────────────────────────────────────────
 
@@ -105,7 +114,7 @@ export function tournamentIntroPost(
   return channelPost([teams.homePing, teams.awayPing], {
     title: "Match Ready",
     color: BRAND_BLUE,
-    description: vs(teams.homeName, teams.awayName),
+    description: vs(teams),
     fields,
     footer: { text: "Report your result on the website under My Team." },
   });
@@ -124,7 +133,7 @@ export function seasonIntroPost(
   return channelPost([teams.homePing, teams.awayPing], {
     title: clamp(`Welcome to Round ${roundNum}!`, TITLE_LIMIT),
     color: BRAND_BLUE,
-    description: vs(teams.homeName, teams.awayName),
+    description: vs(teams),
     fields: [
       { name: "Format", value: `Best of ${teams.bestOf}`, inline: true },
       { name: "When", value: clamp(schedule.lines, FIELD_LIMIT) },

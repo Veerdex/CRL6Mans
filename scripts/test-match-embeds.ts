@@ -97,12 +97,20 @@ const ALL: Array<[string, ChannelPost]> = [
 
 // ─── The invariant that the whole module exists to protect ──────────────────────
 
-test("no post puts a mention inside an embed", () => {
+test("a mention drawn inside an embed is always pinged in the content too", () => {
   for (const [name, post] of ALL) {
     const json = JSON.stringify(post.embeds);
-    assert.ok(!json.includes("<@"), `${name}: embed contains a mention, which notifies nobody`);
     assert.ok(!json.includes("@everyone"), `${name}: embed contains @everyone`);
     assert.ok(!json.includes("@here"), `${name}: embed contains @here`);
+    assert.ok(!/<@!?\d+>/.test(json), `${name}: embed contains a user mention`);
+    // A role mention inside an embed renders as the role's chip but notifies
+    // nobody, so it is a way of drawing a name and never a way of reaching a
+    // team: whatever is drawn that way must also be pinged in the content.
+    for (const id of [...json.matchAll(/<@&(\d+)>/g)].map((m) => m[1]))
+      assert.ok(
+        post.content.includes(`<@&${id}>`),
+        `${name}: role ${id} is drawn in the embed but never pinged in the content`,
+      );
   }
 });
 
@@ -259,6 +267,21 @@ test("the tournament intro shows the lobby and only mentions check-in when there
   const reset = tournamentIntroPost(introTeams, { name: "crl-abc", password: "hunter2" }, false);
   assert.ok(!JSON.stringify(reset.embeds[0]).includes("/checkin"));
   assert.ok(JSON.stringify(reset.embeds[0]).includes("crl-abc"));
+});
+
+test("the intro draws each team as its role, falling back to bold when there is none", () => {
+  for (const post of [
+    tournamentIntroPost(introTeams, { name: "crl-abc", password: "hunter2" }, true),
+    seasonIntroPost(introTeams, 1, { lines: "soon", coordinate: "- Coordinate." }, "<#1>"),
+  ])
+    assert.equal(post.embeds[0].description, "<@&100>  vs  <@&200>");
+
+  const unrostered = tournamentIntroPost(
+    { ...introTeams, awayName: "Unrostered FC", awayPing: teamPing("Unrostered FC", ROLES) },
+    { name: "crl-abc", password: "hunter2" },
+    true,
+  );
+  assert.equal(unrostered.embeds[0].description, "<@&100>  vs  **Unrostered FC**");
 });
 
 test("both teams are pinged on the intro and the result, one on everything else", () => {
