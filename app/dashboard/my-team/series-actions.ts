@@ -21,11 +21,9 @@ import {
   clearScoreDispute,
   isScoreDisputed,
 } from "@/app/lib/discord-bot";
-import { parseReplay } from "@/app/lib/replay-parser";
 import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
-import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
-import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
-import { evaluateAndPersistGameCertification, resolveSubmittedGames, resolvePlatformIdMatches } from "@/app/lib/replay-identity-certification";
+import { analyzeGameReplay, persistGameAnalysis, checkInGate } from "@/app/lib/replay-analysis";
+import { resolveSubmittedGames } from "@/app/lib/replay-identity-certification";
 import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import type { AnalyzedGameStat, SubmittedGame } from "@/app/dashboard/admin/match-actions";
 
@@ -52,21 +50,6 @@ async function getTeamMember() {
     .single();
 
   return player;
-}
-
-// Neither side may report a tournament result until both teams have checked in.
-// Keyed on the match's own checkin_deadline rather than league_settings.active_tournament_id
-// so it fails open: a season match never gets a deadline stamped, and a tournament match
-// whose window openCheckInForMatch hasn't opened yet (the admin hasn't scheduled the stage
-// start, or the cron hasn't run) stays reportable instead of being stuck with no override.
-function checkInGate(m: {
-  checkin_deadline: string | null;
-  home_checked_in: boolean | null;
-  away_checked_in: boolean | null;
-}): string | null {
-  if (!m.checkin_deadline) return null;
-  if (m.home_checked_in && m.away_checked_in) return null;
-  return "Both teams have to check in before the result can be reported.";
 }
 
 // Captain of either team submits a claimed series result.
@@ -285,6 +268,11 @@ export async function uploadGameReplay(
     if (checkIn) return { error: checkIn };
   }
 
+  // The File checks stay here rather than moving into replay-analysis.ts: the
+  // size cap is Vercel's request-body limit, which only applies to a body that
+  // reaches this function. A Discord attachment is fetched outbound from
+  // cdn.discordapp.com and never passes through it, so /report is bounded by
+  // Discord's own attachment ceiling instead.
   const file = formData.get("replay") as File | null;
   if (!file) return { error: "No file provided" };
   if (!file.name.toLowerCase().endsWith(".replay"))
@@ -293,253 +281,27 @@ export async function uploadGameReplay(
   if (file.size > MAX_REPLAY_BYTES)
     return { error: `File too large (max ${MAX_REPLAY_LABEL})` };
 
-  let replayData;
-  let replayBytes: Buffer;
-  try {
-    replayBytes = Buffer.from(await file.arrayBuffer());
-    replayData = parseReplay(replayBytes);
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Failed to parse replay" };
-  }
-
-  if (replayData.team0Score === replayData.team1Score)
-    return { error: "Replay shows a tied game — please check the file" };
-
-  // Casters appear in the replay with 0 score — exclude them before any validation.
-  const activePlayers = replayData.players.filter((p) => p.score > 0);
-
-  // Every league game is a full 3v3 lobby. Reject replays that aren't 3-per-side
-  // (someone left, a 2v2 was uploaded, etc.). Admin-side uploads bypass this.
-  const PLAYERS_PER_TEAM = 3;
-  const team0Count = activePlayers.filter((p) => p.team === 0).length;
-  const team1Count = activePlayers.filter((p) => p.team === 1).length;
-  if (team0Count !== PLAYERS_PER_TEAM || team1Count !== PLAYERS_PER_TEAM)
-    return {
-      error: `This replay is ${team0Count}v${team1Count} (${replayData.players.length} player${replayData.players.length === 1 ? "" : "s"}) — a valid game must be ${PLAYERS_PER_TEAM}v${PLAYERS_PER_TEAM} with ${PLAYERS_PER_TEAM * 2} players.`,
-    };
-
-  // Reject duplicates already committed to the DB (another match, or a prior
-  // submission of this series). Same-session dupes are caught client-side.
-  if (replayData.replayId) {
-    const { data: existing } = await supabaseAdmin
-      .from("player_game_stats")
-      .select("match_id, game_number")
-      .eq("replay_id", replayData.replayId)
-      .limit(50);
-    const conflict = (existing ?? []).find(
-      (r) => !(r.match_id === matchId && r.game_number === gameNumber),
-    );
-    if (conflict) {
-      return {
-        error: conflict.match_id === matchId
-          ? `This replay was already uploaded as game ${conflict.game_number} of this series.`
-          : "This replay has already been uploaded for another match.",
-      };
-    }
-  }
-
-  const { data: match } = await supabaseAdmin
-    .from("matches")
-    .select("id, home_team_id, away_team_id")
-    .eq("id", matchId)
-    .single();
-
-  if (!match) return { error: "Match not found" };
-  if (match.home_team_id !== player.team_id && match.away_team_id !== player.team_id)
-    return { error: "Your team is not in this match" };
-  if (!match.home_team_id || !match.away_team_id)
-    return { error: "Match is missing team assignments" };
-
-  // Freeze the roster/eligibility snapshot on first replay for this match.
-  // Best-effort: a snapshot failure shouldn't block a player's upload, but it
-  // does mean the Step 6 resolver won't have anything to certify against.
-  const snapshotResult = await ensureMatchIdentitySnapshot(matchId);
-  if (!snapshotResult.ok) console.error(`Failed to create identity snapshot for match ${matchId}: ${snapshotResult.error}`);
-
-  // Fetch both rosters once; resolve tracker names for all players in parallel.
-  const { data: roster } = await supabaseAdmin
-    .from("players")
-    .select("id, username, display_name, tracker_url, team_id")
-    .in("team_id", [match.home_team_id, match.away_team_id])
-    .eq("status", "approved");
-
-  const resolved = await Promise.all(
-    (roster ?? []).map(async (p) => {
-      const trackerName = p.tracker_url ? await resolveTrackerName(p.tracker_url) : null;
-      return { ...p, trackerName };
-    }),
-  );
-
-  // tracker name → player id (for stat writing)
-  const nameToId = new Map<string, string>();
-  // home team tracker names (for home/away detection)
-  const homeTrackerNames = new Set<string>();
-
-  // Pass 1: tracker names (highest priority).
-  for (const p of resolved) {
-    if (p.trackerName) {
-      const norm = normalizeName(p.trackerName);
-      nameToId.set(norm, p.id);
-      if (p.team_id === match.home_team_id) homeTrackerNames.add(norm);
-    }
-  }
-  // Pass 2: username and display_name fallbacks (only if tracker didn't already match).
-  for (const p of resolved) {
-    for (const name of [p.username, p.display_name as string | null | undefined]) {
-      if (!name) continue;
-      const norm = normalizeName(name);
-      if (nameToId.has(norm)) continue;
-      nameToId.set(norm, p.id);
-      if (p.team_id === match.home_team_id) homeTrackerNames.add(norm);
-    }
-  }
-
-  // Apply approved substitutions: ADD each sub candidate's tracker alongside the
-  // original roster (don't remove the player they replace). The rulebook allows a
-  // sub to be swapped in between games of a series, so different games can field
-  // either the original player or the sub — accepting all of them (the 3 rostered
-  // players + the sub) lets every game's lineup match and resolve to the right id.
-  const { data: approvedSubs } = await supabaseAdmin
-    .from("sub_requests")
-    .select("player_out_id, sub_player_ids, sub_player_id")
-    .eq("match_id", matchId)
-    .eq("status", "approved");
-
-  for (const subReq of (approvedSubs ?? [])) {
-    const playerOut = (resolved ?? []).find(
-      (p: { id: string }) => p.id === subReq.player_out_id,
-    ) as { id: string; trackerName: string | null; team_id: string } | undefined;
-    if (!playerOut) continue;
-
-    const candidateIds: string[] =
-      (subReq.sub_player_ids as string[] | null) ??
-      (subReq.sub_player_id ? [subReq.sub_player_id] : []);
-    if (candidateIds.length === 0) continue;
-
-    const isHomeTeam = playerOut.team_id === match.home_team_id;
-
-    // Add each sub candidate's tracker alongside the original roster.
-    const { data: candidates } = await supabaseAdmin
-      .from("players")
-      .select("id, username, tracker_url")
-      .in("id", candidateIds)
-      .eq("status", "approved");
-
-    for (const c of (candidates ?? []) as { id: string; username: string; tracker_url: string | null }[]) {
-      // A tracker name we can't get is not a failure in itself: this loop runs
-      // for every approved sub, including ones who never ended up playing, and a
-      // sub who did play may still resolve below by verified platform ID — the
-      // stronger signal, since that ID survives renames. Leave the unmatched
-      // check as the only thing that can reject a replay.
-      if (!c.tracker_url) continue;
-      const trackerName = await resolveTrackerName(c.tracker_url);
-      if (!trackerName) continue;
-      nameToId.set(normalizeName(trackerName), c.id);
-      if (isHomeTeam) homeTrackerNames.add(normalizeName(trackerName));
-    }
-  }
-
-  // Claimed accounts win. A verified platform ID is tied to the account itself
-  // and survives a rename; a tracker name is a string scraped at registration
-  // that doesn't. So this runs over the whole lobby, not just the players the
-  // name passes missed, and overwrites a name match that disagrees with it.
-  const rescues = await resolvePlatformIdMatches(matchId, activePlayers);
-  for (const p of activePlayers) {
-    const key = normalizeName(p.name);
-    const rescue = rescues.get(key);
-    if (!rescue) continue;
-    nameToId.set(key, rescue.playerId);
-    if (rescue.team === "home") homeTrackerNames.add(key);
-    else if (rescue.team === "away") homeTrackerNames.delete(key);
-  }
-
-  // An unrecognised player no longer rejects the replay — the series carries
-  // the warning instead, and on strict an admin resolves it after both teams
-  // agree the score. Their scoreboard line is kept with a null player_id so
-  // the admin has something to map.
-  const unmatchedNames = activePlayers
-    .filter(p => !nameToId.has(normalizeName(p.name)))
-    .map(p => p.name);
-
-  // Whichever replay team has more home-tracker-name matches is the home team.
-  const team0Hits = activePlayers
-    .filter(p => p.team === 0 && homeTrackerNames.has(normalizeName(p.name))).length;
-  const team1Hits = activePlayers
-    .filter(p => p.team === 1 && homeTrackerNames.has(normalizeName(p.name))).length;
-
-  // With no home-side hit on either team there is nothing to read the sides
-  // off, and team0Hits >= team1Hits would silently call it blue. A replay
-  // nobody in it belongs to is the wrong replay, not a bad one.
-  if (team0Hits === 0 && team1Hits === 0)
-    return { error: "Bad replay — none of these players are on either team in this match." };
-
-  const blueIsHome = team0Hits >= team1Hits;
-
-  const homeTeamWon = blueIsHome
-    ? replayData.team0Score > replayData.team1Score
-    : replayData.team1Score > replayData.team0Score;
-
-  // Each replay player must resolve to a distinct registered player.
-  const resolvedIds = activePlayers
-    .map((p) => nameToId.get(normalizeName(p.name)))
-    .filter((id): id is string => !!id);
-  if (new Set(resolvedIds).size !== resolvedIds.length)
-    return { error: "Two players in this replay map to the same person — each must map to a different player." };
-
-  // If an admin forced a tracker update for this event, the players in this
-  // replay must have re-verified their tracker before it can be submitted.
-  const { data: flaggedInReplay } = await supabaseAdmin
-    .from("players")
-    .select("username, display_name")
-    .in("id", resolvedIds)
-    .eq("must_update_tracker", true);
-  if ((flaggedInReplay ?? []).length) {
-    const names = (flaggedInReplay ?? []).map((p) => p.display_name ?? p.username).join(", ");
-    return {
-      error: `These players must re-verify their tracker before this replay can be submitted: ${names}.`,
-    };
-  }
-
-  const stats: AnalyzedGameStat[] = activePlayers.map((p) => ({
-    player_id: nameToId.get(normalizeName(p.name)) ?? null,
-    replay_name: p.name,
-    goals: p.goals,
-    assists: p.assists,
-    saves: p.saves,
-    shots: p.shots,
-    score: p.score,
-    demos: p.demos,
-    demoed: p.demoed,
-  }));
-
-  const certResult = await evaluateAndPersistGameCertification({
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const analysis = await analyzeGameReplay({
+    teamId: player.team_id,
     matchId,
     gameNumber,
-    replayId: replayData.replayId,
-    activePlayers,
-    stats,
-    homeTeamWon,
-    unmatchedNames,
+    bytes,
   });
+  if ("error" in analysis) return { error: analysis.error };
 
-  // Only keep the raw file for games that failed certification, so an admin
-  // can inspect the original replay on the discrepancy card — certified games
-  // are the common case and storing all of them would burn through the
-  // Supabase Storage free-tier cap for no admin-facing benefit.
-  if (!certResult.certified && replayData.replayId) {
-    const filePath = `${matchId}/${replayData.replayId}.replay`;
-    const { error: uploadError } = await supabaseAdmin.storage
-      .from("match-replays")
-      .upload(filePath, replayBytes, { contentType: "application/octet-stream", upsert: true });
-    if (!uploadError) {
-      await supabaseAdmin
-        .from("replay_identity_certifications")
-        .update({ replay_file_path: filePath })
-        .eq("replay_id", replayData.replayId);
-    }
-  }
+  // One game at a time, persisted as it lands — the panel analyses each slot on
+  // upload and submits the series separately, so there is no later check that
+  // could reject this game and strand its certification row. /report holds the
+  // whole series back until it has validated all of it, then persists.
+  await persistGameAnalysis({ matchId, gameNumber, bytes, analysis });
 
-  return { homeTeamWon, replayId: replayData.replayId, stats, unmatchedNames };
+  return {
+    homeTeamWon: analysis.homeTeamWon,
+    replayId: analysis.replayId,
+    stats: analysis.stats,
+    unmatchedNames: analysis.unmatchedNames,
+  };
 }
 
 // Either team can retract or reject a pending submission. Clears all pending

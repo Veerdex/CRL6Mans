@@ -22,6 +22,7 @@
     "test:de-cross-seed": "tsc app/lib/bracket.ts scripts/test-de-cross-seed.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-de-cross-seed.js",
     "test:command-embeds": "tsc app/lib/command-embeds.ts app/lib/stats-math.ts scripts/test-command-embeds.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-command-embeds.js",
     "test:decision-targets": "tsc app/lib/decision-targets.ts scripts/test-decision-targets.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-decision-targets.js",
+    "test:series-report": "tsc app/lib/series-report.ts scripts/test-series-report.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-series-report.js",
     "test:best-of": "tsc -p scripts/tsconfig.test-best-of.json && node --require ./scripts/register-test-path-alias.cjs --test .test-build/scripts/test-best-of.js"
   },
   "dependencies": {
