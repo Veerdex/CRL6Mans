@@ -282,6 +282,11 @@ test("the intro draws each team as its role, falling back to bold when there is 
     true,
   );
   assert.equal(unrostered.embeds[0].description, "<@&100>  vs  **Unrostered FC**");
+
+  const lobbyOf = (p: ChannelPost) => p.embeds[0].fields!.find((f) => f.name === "Lobby")!.value;
+  assert.ok(lobbyOf(tournamentIntroPost(introTeams, { name: "crl-abc", password: "hunter2" }, true))
+    .startsWith("<@&200> makes the lobby"));
+  assert.ok(lobbyOf(unrostered).startsWith("**Unrostered FC** makes the lobby"));
 });
 
 test("both teams are pinged on the intro and the result, one on everything else", () => {

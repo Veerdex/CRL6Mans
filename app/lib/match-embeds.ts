@@ -106,8 +106,16 @@ export function tournamentIntroPost(
   const fields: DiscordEmbed["fields"] = [
     { name: "Format", value: `Best of ${teams.bestOf}`, inline: true },
     {
-      name: clamp(`${teams.awayName} makes the lobby`, TITLE_LIMIT),
-      value: `Name: \`${lobby.name}\`\nPassword: \`${lobby.password}\``,
+      // The team that makes the lobby is named in the value, not the heading:
+      // a field name renders as literal text, so a mention there would read as
+      // a raw `<@&id>`. Clamped because the fallback branch puts a
+      // player-supplied team name in it.
+      name: "Lobby",
+      value: clamp(
+        `${teamLabel(teams.awayName, teams.awayPing)} makes the lobby\n` +
+          `Name: \`${lobby.name}\`\nPassword: \`${lobby.password}\``,
+        FIELD_LIMIT,
+      ),
     },
     { name: "Commands", value: commands.map((c) => `\`${c}\``).join("\n") },
   ];
