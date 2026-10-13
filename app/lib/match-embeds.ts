@@ -71,8 +71,10 @@ function channelPost(pings: Array<Ping | null>, embed: DiscordEmbed): ChannelPos
   };
 }
 
+// No home/away marking: the only thing the distinction decided in-channel was
+// who creates the lobby, and the lobby field now names that team outright.
 const vs = (homeName: string, awayName: string): string =>
-  `**${homeName}** 🏠 Home  vs  **${awayName}** ✈️ Away`;
+  `**${homeName}**  vs  **${awayName}**`;
 
 // ─── Channel intro ──────────────────────────────────────────────────────────────
 
@@ -89,24 +91,17 @@ export function tournamentIntroPost(
   lobby: { name: string; password: string },
   needsCheckIn: boolean,
 ): ChannelPost {
+  // A bracket reset has no check-in at all and must not be told it does, so
+  // `/checkin` is the one entry gated on the flag rather than the whole field.
+  const commands = [...(needsCheckIn ? ["/checkin"] : []), "/sub", "/approve", "/reject", "/dispute"];
   const fields: DiscordEmbed["fields"] = [
     { name: "Format", value: `Best of ${teams.bestOf}`, inline: true },
+    {
+      name: clamp(`${teams.awayName} makes the lobby`, TITLE_LIMIT),
+      value: `Name: \`${lobby.name}\`\nPassword: \`${lobby.password}\``,
+    },
+    { name: "Commands", value: commands.map((c) => `\`${c}\``).join("\n") },
   ];
-  // The channel opens with the check-in window rather than after it, so the first
-  // thing in it has to be the thing that forfeits you if you skip it. A bracket
-  // reset has no check-in at all and must not be told it does.
-  if (needsCheckIn) {
-    fields.push({
-      name: "⚠️ Check in first",
-      value:
-        "Run `/checkin` right here, or use the button on the website under My Team.\n" +
-        "Both teams have **10 minutes** from when check-in opens, or the match is forfeited.",
-    });
-  }
-  fields.push({
-    name: clamp(`Private Match Lobby — ${teams.awayName} (Away) creates it`, TITLE_LIMIT),
-    value: `Room Name: \`${lobby.name}\`\nPassword: \`${lobby.password}\``,
-  });
   return channelPost([teams.homePing, teams.awayPing], {
     title: "Match Ready",
     color: BRAND_BLUE,
