@@ -146,7 +146,19 @@ test("a pending submission blocks both teams, each for its own reason", () => {
   // Without this branch the second team's report would overwrite the first
   // team's claim and then wait on that team to approve numbers it never sent.
   assert.match(msg(submissionBlocked(pending, "away")), /other team already reported/);
-  assert.match(msg(submissionBlocked(pending, "away")), /\/approve target:series/);
+  assert.match(msg(submissionBlocked(pending, "away")), /approve or reject/);
+});
+
+test("the block wording names no command and no page, so both surfaces can show it", () => {
+  // These strings are shown verbatim on the website and in Discord, like the ones
+  // the sibling cores return. "Retract" is a button in one place and /reject in
+  // the other, so naming either would be wrong on the other surface.
+  const pending = { ...OPEN, pending_home_score: 3, score_submitted_by_team_id: "home" };
+  for (const teamId of ["home", "away", "stranger"]) {
+    const blocked = msg(submissionBlocked(pending, teamId));
+    assert.ok(!blocked.includes("/"), blocked);
+    assert.ok(!blocked.includes("My Team"), blocked);
+  }
 });
 
 test("a retracted or rejected submission reopens reporting", () => {

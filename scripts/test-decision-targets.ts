@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   openMatchIds,
   seriesAwaitingTeam,
+  seriesReportableByTeam,
   subRequestsAwaitingTeam,
   seriesDisputableByTeam,
   subRequestsDisputableByTeam,
@@ -20,6 +21,7 @@ const match = (over: Partial<DecidableMatch> & { id: string }): DecidableMatch =
   home_team_id: MINE,
   away_team_id: THEIRS,
   home_score: null,
+  score_confirmed: null,
   pending_home_score: null,
   pending_away_score: null,
   score_submitted_by_team_id: null,
@@ -75,6 +77,13 @@ test("a 0–0 pending score is still a pending score", () => {
 
 test("only unfinished matches are offered to the sub-request query", () => {
   assert.deepEqual(openMatchIds(MATCHES), ["m-nothing", "m-theirs", "m-ours"]);
+});
+
+test("a match with anything pending is not reportable, whoever submitted it", () => {
+  // The mirror image of seriesAwaitingTeam: /report offers only the row nobody
+  // has claimed yet, so its own team's pending submission has to drop out too —
+  // a correction goes through a retraction, not a second report.
+  assert.deepEqual(seriesReportableByTeam(MATCHES).map((m) => m.id), ["m-nothing"]);
 });
 
 test("a team cannot decide its own sub request", () => {

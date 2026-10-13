@@ -127,8 +127,12 @@ export type ReportableMatch = {
 // numbers it never submitted.
 //
 // It blocks the submitter too, matching the website: WaitingView offers
-// "Retract submission", not a resubmit, so a correction goes through /reject
+// "Retract submission", not a resubmit, so a correction goes through a retraction
 // rather than over the top of the pending row.
+//
+// The wording names no command and no page. Both surfaces show these strings
+// verbatim, the same way confirmSeriesResultCore's do, and a retraction is a
+// button on the website and a /reject on Discord.
 export function submissionBlocked(m: ReportableMatch, teamId: string): string | null {
   if (m.home_team_id !== teamId && m.away_team_id !== teamId)
     return "This isn't your match.";
@@ -136,7 +140,7 @@ export function submissionBlocked(m: ReportableMatch, teamId: string): string | 
     return "This match is already final.";
   if (m.pending_home_score !== null && m.score_submitted_by_team_id !== null)
     return m.score_submitted_by_team_id === teamId
-      ? "You've already reported this series — the other team has to approve it. Retract it from My Team if the score was wrong."
-      : "The other team already reported this series. Answer it with `/approve target:series` or `/reject target:series`.";
+      ? "You've already reported this series — the other team has to approve it. Retract it first if the score was wrong."
+      : "The other team already reported this series — approve or reject it instead.";
   return null;
 }

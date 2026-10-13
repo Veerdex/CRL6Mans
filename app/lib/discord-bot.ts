@@ -34,12 +34,13 @@ import {
   checkInPost,
   matchResultPost,
   replayReviewPost,
+  seriesSubmittedPost,
   seriesRejectedPost,
   seriesEscalatedPost,
   type ChannelPost,
 } from "./match-embeds";
 import { announceClip, clipsChannelId, createClip } from "./clip-submit";
-import { profileEmbed, statsEmbed, coinsEmbed, subAckEmbed, decisionAckEmbed, disputeAckEmbed } from "./command-embeds";
+import { profileEmbed, statsEmbed, coinsEmbed, subAckEmbed, reportAckEmbed, reportRejectedEmbed, decisionAckEmbed, disputeAckEmbed } from "./command-embeds";
 import {
   teamName,
   submitSubRequestCore,
@@ -51,6 +52,7 @@ import {
   openMatchIds,
   seriesAwaitingTeam,
   subRequestsAwaitingTeam,
+  seriesReportableByTeam,
   seriesDisputableByTeam,
   subRequestsDisputableByTeam,
   type DecidableMatch,
@@ -58,8 +60,21 @@ import {
   type DisputableMatch,
   type DisputableSubRow,
 } from "./decision-targets";
+import { resolveSubmittedGames } from "./replay-identity-certification";
+import type { SubmittedGame } from "@/app/dashboard/admin/match-actions";
+import { analyzeGameReplay, persistGameAnalysis, checkInGate, type GameAnalysis } from "./replay-analysis";
+import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL, REPLAY_TYPE_MESSAGE, fileExtension, formatBytes } from "./upload-limits";
+import {
+  parseTypedScore,
+  modeMismatch,
+  replaySlotProblem,
+  seriesShapeProblem,
+  seriesScoreFrom,
+  toHomeAway,
+  submissionBlocked,
+} from "./series-report";
 import { loadPlayerProfile } from "./player-profile";
-import { fetchAllTimeTotals, type CareerTotals } from "./career-stats";
+import { fetchAllTimeTotals, isStatsTrackingEnabled, type CareerTotals } from "./career-stats";
 import { mvpScore, shootingPct } from "./stats-math";
 import { kickAccount, banAccount, findAccountByDiscordId, DEFAULT_KICK_TIMEOUT_MS, type RevokedPatron } from "./moderation";
 import { STAGE_ORDER, canonicalStage } from "@/app/dashboard/admin/schedule-utils";
@@ -76,6 +91,13 @@ type Interaction = {
   data: {
     name?: string;
     options?: SubOption[];
+    // An attachment option (type 11) carries only the attachment's ID as its
+    // value; the filename, size and signed CDN URL arrive here. That URL is
+    // fetched outbound, so a /report replay never passes through a request body
+    // and is bounded by Discord's upload ceiling, not the platform's.
+    resolved?: {
+      attachments?: Record<string, { id: string; filename: string; size: number; url: string }>;
+    };
     custom_id?: string;
     components?: Array<{ type: number; components: Array<{ custom_id: string; value: string }> }>;
   };
@@ -2367,7 +2389,7 @@ async function subCmd(userId: string, outId: string, inId: string, reason: strin
 }
 
 const DECIDABLE_COLUMNS =
-  "id, home_team_id, away_team_id, home_score, pending_home_score, pending_away_score, score_submitted_by_team_id";
+  "id, home_team_id, away_team_id, home_score, score_confirmed, pending_home_score, pending_away_score, score_submitted_by_team_id";
 
 // Channel first, exactly like /checkin: in a match channel the channel names the
 // match and there is nothing to resolve. Anywhere else, every unfinished match
@@ -2479,6 +2501,178 @@ async function decisionCmd(userId: string, channelId: string, target: string, ap
       : `You confirmed ${line}. The match is final.`;
 
   return ephemeralEmbedReply(decisionAckEmbed({ target: "series", approved: approve, detail }));
+}
+
+// ─── /report ────────────────────────────────────────────────────────────────────
+//
+// The Discord half of the My Team reporting panel, and which half it is depends
+// on the event. With stats off there is nothing to read but the score, so the
+// team types it. With stats on the score is whatever the replays say, so typing
+// it as well would only produce a second answer that could disagree.
+//
+// Every option is optional. Discord cannot make one conditionally required, and
+// required options must come before optional ones — so a `won` that is required
+// for a stats-off event would be required for every event. The handler decides
+// instead, and modeMismatch tells a team which half they are in when they guess
+// wrong. That is also why presence is checked rather than read: optFrom returns
+// "" for an absent option, so `Number(opt(i, "lost"))` is a confident 0 and
+// `/report won:3` with `lost` forgotten would otherwise be a valid 3–0.
+
+// Highest BestOf is 7, so seven slots covers every series the league can run.
+const REPORT_SLOTS = 7;
+
+async function reportCmd(i: Interaction, userId: string, channelId: string) {
+  const me = await subjectPlayer(userId);
+  if (!me?.team_id) return ephemeralReply("❌ You're not on a team.");
+  const teamId = me.team_id;
+
+  const scope = await decidableMatches(teamId, channelId);
+  if ("error" in scope) return ephemeralReply(`❌ ${scope.error}`);
+
+  const reportable = seriesReportableByTeam(scope.matches);
+  if (reportable.length === 0) {
+    // Scoped to one match — in its channel, or because the team has one match
+    // left — submissionBlocked can say *why* instead of "nothing to report",
+    // which is the difference between "the other team got there first" and a
+    // command that looks broken.
+    const open = scope.matches.filter((m) => m.home_score === null);
+    return ephemeralReply(
+      `❌ ${open.length === 1
+        ? submissionBlocked(open[0], teamId) ?? "There's nothing to report on that match."
+        : "You have no match waiting on a result."}`,
+    );
+  }
+  if (reportable.length > 1)
+    return ephemeralReply("❌ You have more than one match to report — run `/report` in the match's own channel.");
+
+  const match = reportable[0];
+  const reporterIsHome = match.home_team_id === teamId;
+
+  const wonOpt = opt(i, "won");
+  const lostOpt = opt(i, "lost");
+  const typedScoreGiven = wonOpt !== "" || lostOpt !== "";
+
+  const attachments = i.data.resolved?.attachments ?? {};
+  const slots: Array<{ gameNumber: number; url: string; filename: string; size: number }> = [];
+  for (let n = 1; n <= REPORT_SLOTS; n++) {
+    const id = String(opt(i, `game${n}`) || "");
+    const att = id ? attachments[id] : undefined;
+    if (att) slots.push({ gameNumber: n, url: att.url, filename: att.filename, size: att.size });
+  }
+
+  const statsEnabled = await isStatsTrackingEnabled();
+  const mismatch = modeMismatch({ statsEnabled, typedScoreGiven, replayCount: slots.length });
+  if (mismatch) return ephemeralEmbedReply(reportRejectedEmbed({ problem: mismatch }));
+
+  const bestOf = await getBestOfForMatch(match.id);
+
+  if (!statsEnabled) {
+    const typed = parseTypedScore(wonOpt, lostOpt);
+    if ("error" in typed) return ephemeralEmbedReply(reportRejectedEmbed({ problem: typed.error }));
+    return finishReport(match.id, userId, toHomeAway(typed, reporterIsHome), []);
+  }
+
+  const slotProblem = replaySlotProblem(slots.map((s) => s.gameNumber), bestOf);
+  if (slotProblem) return ephemeralEmbedReply(reportRejectedEmbed({ problem: slotProblem }));
+
+  // Parse the whole series before committing any of it. analyzeGameReplay only
+  // reads, so a series that fails one of the checks below leaves no certification
+  // rows behind — the thing that would otherwise make the next clean report look
+  // like it had unmatched players.
+  const analyses: Array<{ gameNumber: number; bytes: Buffer; analysis: GameAnalysis }> = [];
+  for (const slot of slots) {
+    const named = `Game ${slot.gameNumber}`;
+    if (fileExtension(slot.filename) !== "replay")
+      return ephemeralEmbedReply(reportRejectedEmbed({
+        problem: `${named} isn't a .replay file. ${REPLAY_TYPE_MESSAGE}`,
+      }));
+    // The same ceiling the website applies, for parity rather than platform: a
+    // Discord attachment never passes through a request body, so nothing here
+    // forces it, but a file one surface takes and the other refuses would be
+    // the more confusing answer.
+    if (slot.size > MAX_REPLAY_BYTES)
+      return ephemeralEmbedReply(reportRejectedEmbed({
+        problem: `${named} is ${formatBytes(slot.size)}. A replay must be ${MAX_REPLAY_LABEL} or smaller.`,
+      }));
+
+    let bytes: Buffer;
+    try {
+      const res = await fetch(slot.url);
+      if (!res.ok) throw new Error(String(res.status));
+      bytes = Buffer.from(await res.arrayBuffer());
+    } catch {
+      return ephemeralEmbedReply(reportRejectedEmbed({
+        problem: `${named} couldn't be downloaded from Discord. Try running \`/report\` again.`,
+      }));
+    }
+
+    const analysis = await analyzeGameReplay({ teamId, matchId: match.id, gameNumber: slot.gameNumber, bytes });
+    if ("error" in analysis)
+      return ephemeralEmbedReply(reportRejectedEmbed({ problem: `${named}: ${analysis.error}` }));
+
+    // Within the series, which analyzeGameReplay can't see: it checks a replay
+    // against other *matches*, so the same file attached to game1 and game2
+    // would pass twice and count a win it never earned.
+    const twin = analyses.find((a) => a.analysis.replayId && a.analysis.replayId === analysis.replayId);
+    if (twin)
+      return ephemeralEmbedReply(reportRejectedEmbed({
+        problem: `${named} is the same replay as game ${twin.gameNumber}. Attach each game of the series once.`,
+      }));
+
+    analyses.push({ gameNumber: slot.gameNumber, bytes, analysis });
+  }
+
+  const wonByReporter = analyses.map((a) => a.analysis.homeTeamWon === reporterIsHome);
+  const shapeProblem = seriesShapeProblem(wonByReporter, bestOf);
+  if (shapeProblem) return ephemeralEmbedReply(reportRejectedEmbed({ problem: shapeProblem }));
+
+  const unmatched = analyses.flatMap((a) => a.analysis.unmatchedNames);
+  // Strict means an unrecognised player stops the series, so it stops here —
+  // before anything is written — rather than at the admin review the website
+  // routes it to after both teams have accepted. On Discord the reporter is
+  // still at the keyboard and can fix a tracker; by review time nobody is.
+  if (unmatched.length && (await getReplayAnalysisMode()) === "strict")
+    return ephemeralEmbedReply(reportRejectedEmbed({
+      problem: "Replay analysis is set to strict, so every player in a replay has to be matched to a roster.",
+      unmatchedNames: unmatched,
+    }));
+
+  for (const a of analyses)
+    await persistGameAnalysis({ matchId: match.id, gameNumber: a.gameNumber, bytes: a.bytes, analysis: a.analysis });
+
+  const games: SubmittedGame[] = analyses.map((a) => ({
+    gameNumber: a.gameNumber,
+    replayId: a.analysis.replayId,
+    stats: a.analysis.stats,
+  }));
+  return finishReport(
+    match.id, userId,
+    toHomeAway(seriesScoreFrom(wonByReporter), reporterIsHome),
+    games,
+  );
+}
+
+// The tail both halves share: the core does the writing and the real validating,
+// and the reply is the reporter's own receipt — the channel already has the
+// public embed, naming the unmatched players for the other team to check.
+async function finishReport(
+  matchId: string,
+  userId: string,
+  score: { homeWins: number; awayWins: number },
+  games: SubmittedGame[],
+) {
+  const result = await submitSeriesResultCore({
+    matchId, actorDiscordId: userId, homeWins: score.homeWins, awayWins: score.awayWins, games,
+  });
+  if (result.error) return ephemeralEmbedReply(reportRejectedEmbed({ problem: result.error }));
+
+  return ephemeralEmbedReply(reportAckEmbed({
+    homeName: result.homeName ?? "Home",
+    awayName: result.awayName ?? "Away",
+    homeWins: score.homeWins, awayWins: score.awayWins,
+    oppName: result.oppName ?? "The other team",
+    unmatchedNames: result.unmatchedNames,
+  }));
 }
 
 // One literal rather than a concatenation: the client infers the row type from
@@ -3496,9 +3690,9 @@ export async function finalizeAcceptedSeries(
   return "pending_admin";
 }
 
-// ─── Series confirm / dispute, shared with the website ──────────────────────────
+// ─── Series report / confirm / dispute, shared with the website ─────────────────
 //
-// These two live here rather than in a module of their own because
+// These live here rather than in a module of their own because
 // app/dashboard/my-team/series-actions.ts already imports finalizeAcceptedSeries
 // from this file — a separate module would have to import it back, and the cycle
 // would break at runtime. series-actions.ts keeps the session read, the redirect
@@ -3519,6 +3713,174 @@ export type SeriesDecision = {
   homeScore?: number;
   awayScore?: number;
 };
+
+// What the caller needs to acknowledge a report without re-querying: who the two
+// teams were, and which replay names the resolver couldn't place. /report's
+// private reply says both; the website's panel already has them on screen.
+export type SeriesSubmission = {
+  error?: string;
+  homeName?: string;
+  awayName?: string;
+  oppName?: string;
+  unmatchedNames?: string[];
+};
+
+// Reporting a series, shared with /report for the same reason as the three cores
+// below.
+//
+// Every write sits under the last gate, so a refused report leaves the match
+// exactly as it found it. That is what lets /report parse a whole series of
+// replays — and check the score they add up to — before committing any of it,
+// while the website's panel keeps persisting each replay as its slot is filled.
+export async function submitSeriesResultCore(args: {
+  matchId: string;
+  actorDiscordId: string;
+  homeWins: number;
+  awayWins: number;
+  games?: SubmittedGame[];
+}): Promise<SeriesSubmission> {
+  const teamId = await teamIdOfDiscordId(args.actorDiscordId);
+  if (!teamId) return { error: "Not on a team" };
+
+  const { data: match } = await supabaseAdmin
+    .from("matches")
+    .select("id, home_team_id, away_team_id, home_score, score_confirmed, pending_home_score, score_submitted_by_team_id, result_reported_at, checkin_deadline, home_checked_in, away_checked_in")
+    .eq("id", args.matchId)
+    .single();
+
+  if (!match) return { error: "Match not found" };
+  const blocked = submissionBlocked(match, teamId);
+  if (blocked) return { error: blocked };
+  if (await isScoreDisputed(args.matchId))
+    return { error: "This match is disputed — staff will record the result" };
+  const checkIn = checkInGate(match);
+  if (checkIn) return { error: checkIn };
+
+  if (!Number.isInteger(args.homeWins) || !Number.isInteger(args.awayWins) ||
+      args.homeWins < 0 || args.awayWins < 0)
+    return { error: "Scores must be non-negative whole numbers." };
+  const bestOf = await getBestOfForMatch(args.matchId);
+  const boError = validateSeriesScore(args.homeWins, args.awayWins, bestOf);
+  if (boError) return { error: boError };
+
+  // A stats-disabled event reports the series score only. Dropping the games
+  // here (before the identity gate) means a stale client that still holds
+  // uploaded replays submits a plain score instead of failing certification.
+  let games = (await isStatsTrackingEnabled()) ? args.games ?? [] : [];
+
+  // Guard against a replay already committed to a different match.
+  const replayIds = games.map((g) => g.replayId).filter((id): id is string => !!id);
+  if (replayIds.length) {
+    const { data: existing } = await supabaseAdmin
+      .from("player_game_stats")
+      .select("replay_id, match_id")
+      .in("replay_id", replayIds);
+    if ((existing ?? []).some((r) => r.match_id !== args.matchId))
+      return { error: "One of these replays was already uploaded for another match." };
+  }
+
+  // Swaps in server-persisted, resolver-checked stats. Doesn't block: the
+  // loose/strict mode decides what happens to a series with unmatched players,
+  // and it decides after the opponent has accepted.
+  const gate = await resolveSubmittedGames(args.matchId, games);
+  games = gate.games;
+
+  const { error } = await supabaseAdmin
+    .from("matches")
+    .update({
+      pending_home_score:         args.homeWins,
+      pending_away_score:         args.awayWins,
+      score_submitted_by_team_id: teamId,
+      score_confirmed:            false,
+      score_submitted_at:         new Date().toISOString(),
+      // One-way betting latch — a retraction clears everything else on this row,
+      // but the score is already public in the match channel by then.
+      result_reported_at:         match.result_reported_at ?? new Date().toISOString(),
+    })
+    .eq("id", args.matchId);
+
+  if (error) return { error: error.message };
+
+  // A resubmission supersedes any earlier rejection: the new claim gets its own
+  // confirm/reject round, so the old one must not leave a Dispute button behind.
+  await clearScoreDispute(args.matchId);
+
+  // Best-effort — identity_status is a visibility column, not load-bearing for
+  // submission, and must not fail the whole request if the migration adding it
+  // hasn't been run against this DB yet. Supabase returns query errors in the
+  // result rather than throwing, so this is deliberately fire-and-forget.
+  try {
+    await supabaseAdmin.from("matches").update({ identity_status: gate.identityStatus }).eq("id", args.matchId);
+  } catch {
+    // ignored — see comment above
+  }
+
+  // Persist replay stats now that the series is being submitted (replace any prior set).
+  try {
+    await supabaseAdmin.from("player_game_stats").delete().eq("match_id", args.matchId);
+    const rows = games.flatMap((g) =>
+      g.stats.map((s) => ({
+        player_id: s.player_id,
+        match_id: args.matchId,
+        game_number: g.gameNumber,
+        replay_id: g.replayId,
+        replay_name: s.replay_name,
+        goals: s.goals,
+        assists: s.assists,
+        saves: s.saves,
+        shots: s.shots,
+        score: s.score,
+        demos: s.demos,
+        demoed: s.demoed,
+      })),
+    );
+    if (rows.length) await supabaseAdmin.from("player_game_stats").insert(rows);
+  } catch { /* best-effort */ }
+
+  // Read off the games actually being submitted rather than through
+  // getUnmatchedByGame, which is keyed on the match and would also pick up rows
+  // left by a retracted attempt. A null player_id is the same predicate the
+  // analysis used, and it respects an admin who has since mapped a name by hand.
+  const unmatchedNames = games.flatMap((g) =>
+    g.stats.filter((s) => !s.player_id).map((s) => s.replay_name),
+  );
+
+  // Outside the notify's try: the caller acknowledges the report with these
+  // names whether or not the channel post lands.
+  const otherTeamId = teamId === match.home_team_id ? match.away_team_id : match.home_team_id;
+  const [{ data: myTeam }, { data: otherTeam }] = await Promise.all([
+    supabaseAdmin.from("teams").select("name").eq("id", teamId).single(),
+    supabaseAdmin.from("teams").select("name").eq("id", otherTeamId).single(),
+  ]);
+  const iAmHome = teamId === match.home_team_id;
+  const homeName = (iAmHome ? myTeam?.name : otherTeam?.name) as string | undefined;
+  const awayName = (iAmHome ? otherTeam?.name : myTeam?.name) as string | undefined;
+
+  try {
+    if (myTeam?.name && otherTeam?.name) {
+      await notifyMatchChannel(args.matchId, seriesSubmittedPost({
+        teamName: myTeam.name,
+        oppPing: teamPing(otherTeam.name, await getGuildRoles()),
+        homeName: homeName!,
+        awayName: awayName!,
+        homeWins: args.homeWins,
+        awayWins: args.awayWins,
+        unmatchedNames,
+        replayAnalysisMode: unmatchedNames.length ? await getReplayAnalysisMode() : undefined,
+      }));
+    }
+  } catch { /* best-effort */ }
+
+  // No staff push here. A submission is the routine case: the opponent confirms
+  // it, or processExpiredScoreConfirmations auto-finalises it in 5-15 minutes, and
+  // either way staff have nothing to do. Pinging them on every submission buried
+  // the cases that do need them. Staff are notified when a match actually stalls:
+  // finalizeAcceptedSeries pushes "Replay Review Required" when strict mode finds
+  // unrecognised players. The submission is still visible in the admin panel's
+  // pending list the whole time.
+
+  return { homeName, awayName, oppName: otherTeam?.name as string | undefined, unmatchedNames };
+}
 
 export async function confirmSeriesResultCore(args: {
   matchId: string;
@@ -5600,6 +5962,13 @@ export async function handleCommand(interaction: Interaction) {
       String(opt(interaction, "sub_out")),
       String(opt(interaction, "sub_in")),
       String(opt(interaction, "reason")),
+    );
+    // Takes the whole interaction: the attachment options carry only IDs, and the
+    // files they name live in data.resolved.
+    case "report":        return reportCmd(
+      interaction,
+      userId,
+      interaction.channel_id ?? interaction.channel?.id ?? "",
     );
     case "approve":       return decisionCmd(
       userId,

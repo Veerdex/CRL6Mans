@@ -16,6 +16,7 @@ const BOOLEAN = 5;
 const USER = 6;
 const CHANNEL = 7;
 const ROLE = 8;
+const ATTACHMENT = 11;
 
 const commands = [
   {
@@ -253,6 +254,30 @@ const commands = [
       { name: "sub_out", description: "Your teammate who can't play", type: USER, required: true },
       { name: "sub_in", description: "The substitute coming in", type: USER, required: true },
       { name: "reason", description: "Shown to the opposing team", type: STRING, required: false },
+    ],
+  },
+  {
+    name: "report",
+    // Which match is not an option here either, for the same reason as /sub: it
+    // is the one match of yours with nothing pending on it, and in a match
+    // channel it is that channel's match.
+    //
+    // Every option is optional, and has to be: Discord cannot make one
+    // conditionally required, and a required option must come before the
+    // optional ones — so `won` being required for a stats-off event would make
+    // it required for every event. Which half applies is decided by whether the
+    // event tracks stats, and reportCmd says so when a team guesses wrong.
+    description: "Report your match result — the series score, or the replays if this event tracks stats",
+    options: [
+      { name: "won", description: "Games you won (events without stat tracking)", type: INTEGER, required: false, min_value: 0, max_value: 4 },
+      { name: "lost", description: "Games you lost (events without stat tracking)", type: INTEGER, required: false, min_value: 0, max_value: 4 },
+      // Seven slots because the longest series the league can run is a Bo7.
+      ...Array.from({ length: 7 }, (_, n) => ({
+        name: `game${n + 1}`,
+        description: `Game ${n + 1} replay file (events with stat tracking)`,
+        type: ATTACHMENT,
+        required: false,
+      })),
     ],
   },
   // `target` is required on all three, so Discord makes the caller say which kind

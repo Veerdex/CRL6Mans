@@ -22,6 +22,9 @@ export type DecidableMatch = {
   home_team_id: string | null;
   away_team_id: string | null;
   home_score: number | null;
+  // Carried so the row satisfies series-report.ts's ReportableMatch, which
+  // submissionBlocked reads — /report scopes a match with these same rows.
+  score_confirmed: boolean | null;
   pending_home_score: number | null;
   pending_away_score: number | null;
   score_submitted_by_team_id: string | null;
@@ -47,6 +50,19 @@ export function seriesAwaitingTeam(matches: DecidableMatch[], teamId: string): D
       m.score_submitted_by_team_id !== null &&
       m.score_submitted_by_team_id !== teamId,
   );
+}
+
+/**
+ * Matches this team could report a result for: unfinished, with nothing pending.
+ *
+ * The mirror image of seriesAwaitingTeam, and the narrowing /report picks a match
+ * with. It is only a target filter — submissionBlocked in series-report.ts is the
+ * guard, and submitSeriesResultCore runs it on the row it actually writes to.
+ * Membership isn't checked here because the caller has already scoped the rows to
+ * this team's matches, exactly as the sub filters assume.
+ */
+export function seriesReportableByTeam(matches: DecidableMatch[]): DecidableMatch[] {
+  return matches.filter((m) => m.home_score === null && m.pending_home_score === null);
 }
 
 /**

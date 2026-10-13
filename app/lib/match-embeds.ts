@@ -114,7 +114,7 @@ export function tournamentIntroPost(
 ): ChannelPost {
   // A bracket reset has no check-in at all and must not be told it does, so
   // `/checkin` is the one entry gated on the flag rather than the whole field.
-  const commands = [...(needsCheckIn ? ["/checkin"] : []), "/sub", "/approve", "/reject", "/dispute"];
+  const commands = [...(needsCheckIn ? ["/checkin"] : []), "/report", "/sub", "/approve", "/reject", "/dispute"];
   const fields: DiscordEmbed["fields"] = [
     { name: "Format", value: `Best of ${teams.bestOf}`, inline: true },
     {
@@ -136,7 +136,7 @@ export function tournamentIntroPost(
     color: BRAND_BLUE,
     description: vs(teams),
     fields,
-    footer: { text: "Report your result on the website under My Team." },
+    footer: { text: "Report your result with /report here, or on the website under My Team." },
   });
 }
 
@@ -163,7 +163,7 @@ export function seasonIntroPost(
           `${schedule.coordinate}\n` +
             `• Need a sub? Follow the procedure in the rulebook (${rulesRef}). ` +
             `A match played with an illegal sub is forfeited.\n` +
-            `• Report your result on the website under My Team.`,
+            `• Report your result with \`/report\` here, or on the website under My Team.`,
           FIELD_LIMIT,
         ),
       },
