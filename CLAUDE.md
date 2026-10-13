@@ -214,6 +214,14 @@ Used in tournament-scheduler cron and admin web actions for signup open/close, d
 - `DEFERRED_COMMANDS = ["openround", "postclip", "profile", "stats", "coins", "sub", "approve", "reject", "dispute", "report", "forfeit"]` — commands that take >3s, plus the ones whose reply should be private: **deferring forces the reply ephemeral**, so a command answering publicly must stay out of the set. `syncroles` is deferred as an `/admin` subcommand instead (`DEFERRED_ADMIN_SUBCOMMANDS`). Auction draft commands (`nominate`, `bid`, `endround`, `budget`) are commented out in `register-commands.mjs` and excluded; their handler code is preserved for future use.
 - All slash command logic lives in `app/lib/discord-bot.ts`.
 
+### Where the match commands can be run
+
+`/report`, `/dispute`, `/forfeit`, `/approve`, `/reject`, `/checkin` and `/sub` work **only inside a match's own channel**. `decidableMatches` resolves the match from `matches.discord_channel_id` and refuses anywhere else — it deliberately does **not** fall back to the team's open matches, because a team with one match left would then succeed from the lobby, which is the whole thing the scoping exists to stop. `/checkin` resolves the same way inline (its query also pins `status = "scheduled"`, so a miss means "not a match channel" *or* "match already under way" and its wording has to read true for both). `/sub` is gated on `decidableMatches` purely for the channel check — its core still picks the team's next match, not the channel's.
+
+**This replaces a hand-maintained Discord allowlist, and depends on the Discord side staying open.** Editing per-command channel permissions requires a **Bearer** token with `applications.commands.permissions.update` from a guild admin — a bot token errors — so the bot cannot maintain that list as match channels come and go. The match commands are therefore set to **All Channels** in Server Settings → Integrations, with the code as the only gate. Narrowing them back to specific channels, or resetting the integration-wide default to none, silently kills them in every match channel. `/pick` is the exception that still rides a Discord-side override, because the draft channel is long-lived.
+
+Because scope is now exactly one match, and `submitSubRequestCore` permits only one active sub request per team, every "more than one waiting — run it in the match's own channel" branch became unreachable and is gone. The remaining cost is deliberate: a match whose channel failed to open or was deleted can't be decided from Discord at all, and My Team is the surface for that.
+
 ### Match channel messages
 
 Every message the bot posts into a **match channel** is an embed built in `app/lib/match-embeds.ts` — a pure leaf like `draft-embeds.ts`, tested by `npm run test:match-embeds`. Nothing else should format one: the intro, check-in, score reporting, scheduling, replay review and every sub notification all go through a builder there.

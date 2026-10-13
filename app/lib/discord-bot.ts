@@ -2346,11 +2346,16 @@ async function subjectPlayer(discordId: string) {
   return data as { id: string; username: string | null; team_id: string | null } | null;
 }
 
-async function subCmd(userId: string, outId: string, inId: string, reason: string) {
+async function subCmd(userId: string, channelId: string, outId: string, inId: string, reason: string) {
   const [me, playerOut, subIn] = await Promise.all([
     subjectPlayer(userId), subjectPlayer(outId), subjectPlayer(inId),
   ]);
   if (!me?.team_id) return ephemeralReply("❌ You're not on a team.");
+  // Scoped the same way as every other match command, even though the core picks
+  // the team's next match rather than this one: without it /sub is the one way
+  // back into the lobby once the commands are open to every channel.
+  const scope = await decidableMatches(me.team_id, channelId);
+  if ("error" in scope) return ephemeralReply(`❌ ${scope.error}`);
   if (!playerOut) return ephemeralReply("❌ The player you're subbing out isn't a registered player.");
   if (!subIn) return ephemeralReply("❌ The player you're subbing in isn't a registered player.");
 
@@ -2393,29 +2398,29 @@ async function subCmd(userId: string, outId: string, inId: string, reason: strin
 const DECIDABLE_COLUMNS =
   "id, home_team_id, away_team_id, home_score, score_confirmed, pending_home_score, pending_away_score, score_submitted_by_team_id";
 
-// Channel first, exactly like /checkin: in a match channel the channel names the
-// match and there is nothing to resolve. Anywhere else, every unfinished match
-// the team is in is a candidate, and more than one waiting decision is refused
-// rather than guessed at.
+const NOT_A_MATCH_CHANNEL = "Run this in your match's own channel — this isn't one.";
+
+// Channel **only**: the channel names the match, and anywhere else is refused
+// rather than resolved from the team's open matches. This is the whole of the
+// channel scoping — Discord's per-command channel allowlist used to be what kept
+// these out of the lobby, and maintaining it by hand as match channels come and
+// go is what this replaces. Resolving from the team would reopen that door, since
+// a team with one match left would succeed from anywhere.
+//
+// The cost is deliberate: a match whose channel failed to open, or was deleted,
+// can't be decided from Discord at all. My Team is the surface for that.
 async function decidableMatches(
   teamId: string, channelId: string,
 ): Promise<{ matches: DecidableMatch[] } | { error: string }> {
-  if (channelId) {
-    const { data: here } = await supabaseAdmin
-      .from("matches").select(DECIDABLE_COLUMNS)
-      .eq("discord_channel_id", channelId).maybeSingle();
-    if (here) {
-      const m = here as DecidableMatch;
-      if (m.home_team_id !== teamId && m.away_team_id !== teamId)
-        return { error: "This isn't your match." };
-      return { matches: [m] };
-    }
-  }
-  const { data } = await supabaseAdmin
+  if (!channelId) return { error: NOT_A_MATCH_CHANNEL };
+  const { data: here } = await supabaseAdmin
     .from("matches").select(DECIDABLE_COLUMNS)
-    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
-    .is("home_score", null);
-  return { matches: (data ?? []) as DecidableMatch[] };
+    .eq("discord_channel_id", channelId).maybeSingle();
+  if (!here) return { error: NOT_A_MATCH_CHANNEL };
+  const m = here as DecidableMatch;
+  if (m.home_team_id !== teamId && m.away_team_id !== teamId)
+    return { error: "This isn't your match." };
+  return { matches: [m] };
 }
 
 async function subsAwaitingMe(matches: DecidableMatch[], teamId: string) {
@@ -2453,9 +2458,6 @@ async function decisionCmd(userId: string, channelId: string, target: string, ap
         "no sub request is waiting on your team",
         series.length ? "series result" : "", "series",
       );
-    if (subs.length > 1)
-      return ephemeralReply(`❌ More than one sub request is waiting on you — run \`${other}\` in the match's own channel.`);
-
     const req = subs[0];
     const result = approve
       ? await acceptSubRequestCore({ requestId: req.id, actorDiscordId: userId, staffOverride: false })
@@ -2476,9 +2478,6 @@ async function decisionCmd(userId: string, channelId: string, target: string, ap
       "no series result is waiting on your approval",
       subs.length ? "sub request" : "", "sub",
     );
-  if (series.length > 1)
-    return ephemeralReply(`❌ More than one series result is waiting on you — run \`${other}\` in the match's own channel.`);
-
   const match = series[0];
   const result = approve
     ? await confirmSeriesResultCore({ matchId: match.id, actorDiscordId: userId })
@@ -2533,19 +2532,16 @@ async function reportCmd(i: Interaction, userId: string, channelId: string) {
 
   const reportable = seriesReportableByTeam(scope.matches);
   if (reportable.length === 0) {
-    // Scoped to one match — in its channel, or because the team has one match
-    // left — submissionBlocked can say *why* instead of "nothing to report",
-    // which is the difference between "the other team got there first" and a
-    // command that looks broken.
+    // The channel names exactly one match, so submissionBlocked can say *why*
+    // instead of "nothing to report" — the difference between "the other team got
+    // there first" and a command that looks broken.
     const open = scope.matches.filter((m) => m.home_score === null);
     return ephemeralReply(
       `❌ ${open.length === 1
         ? submissionBlocked(open[0], teamId) ?? "There's nothing to report on that match."
-        : "You have no match waiting on a result."}`,
+        : "This match has already been reported."}`,
     );
   }
-  if (reportable.length > 1)
-    return ephemeralReply("❌ You have more than one match to report — run `/report` in the match's own channel.");
 
   const match = reportable[0];
   const reporterIsHome = match.home_team_id === teamId;
@@ -2775,9 +2771,6 @@ async function disputeCmd(userId: string, channelId: string, target: string) {
         series.length ? "series result" : "", "series",
       );
     }
-    if (subs.length > 1)
-      return ephemeralReply("❌ More than one of your rejected sub requests is open — run `/dispute` in the match's own channel.");
-
     const result = await escalateSubRequestCore({
       requestId: subs[0].id, actorDiscordId: userId, staffOverride: false,
     });
@@ -2799,9 +2792,6 @@ async function disputeCmd(userId: string, channelId: string, target: string) {
       subs.length ? "sub request" : "", "sub",
     );
   }
-  if (series.length > 1)
-    return ephemeralReply("❌ More than one of your rejected results is open — run `/dispute` in the match's own channel.");
-
   const match = series[0];
   const result = await disputeSeriesResultCore({ matchId: match.id, actorDiscordId: userId });
   if (result.error) return ephemeralReply(`❌ ${result.error}`);
@@ -2827,9 +2817,7 @@ async function forfeitCmd(userId: string, channelId: string, withdraw: boolean) 
   if ("error" in scope) return ephemeralReply(`❌ ${scope.error}`);
 
   const open = scope.matches.filter((m) => m.home_score === null);
-  if (open.length === 0) return ephemeralReply("ℹ️ You have no match to give up.");
-  if (open.length > 1)
-    return ephemeralReply("❌ You have more than one match open — run `/forfeit` in the match's own channel.");
+  if (open.length === 0) return ephemeralReply("ℹ️ This match has already been reported.");
 
   const result = await castForfeitVoteCore({
     matchId: open[0].id, actorDiscordId: userId, withdraw,
@@ -3466,26 +3454,14 @@ async function checkInCmd(userId: string, channelId: string) {
   if (!me?.team_id) return ephemeralReply("❌ You're not on a team.");
   const teamId = me.team_id as string;
 
-  let matchId: string;
-  if (here) {
-    if (here.home_team_id !== teamId && here.away_team_id !== teamId)
-      return ephemeralReply("❌ This isn't your match.");
-    matchId = here.id as string;
-  } else {
-    const { data: mine } = await supabaseAdmin.from("matches")
-      .select("id, stage, match_number, checkin_deadline")
-      .eq("status", "scheduled")
-      .not("checkin_deadline", "is", null)
-      .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
-    const open = (mine ?? []).filter(
-      (m) => checkInWindowOpen(m) && Date.now() <= new Date(m.checkin_deadline as string).getTime(),
-    );
-    if (open.length === 0)
-      return ephemeralReply("❌ You have no match with check-in open right now.");
-    if (open.length > 1)
-      return ephemeralReply("❌ You have more than one match with check-in open — run `/checkin` in the match's own channel.");
-    matchId = open[0].id as string;
-  }
+  // The channel query is scoped to a scheduled match, so a miss is either "not a
+  // match channel" or "a match channel whose match is already under way" — the
+  // reply has to read true for both.
+  if (!here)
+    return ephemeralReply("❌ Run `/checkin` in your match's own channel — this one has no match waiting on check-in.");
+  if (here.home_team_id !== teamId && here.away_team_id !== teamId)
+    return ephemeralReply("❌ This isn't your match.");
+  const matchId = here.id as string;
 
   const result = await checkInTeam(matchId, teamId);
   if (!result.ok) return ephemeralReply(`❌ ${result.error}`);
@@ -6152,6 +6128,7 @@ export async function handleCommand(interaction: Interaction) {
     // the command picker, where "out" alone could be read as "opt out".
     case "sub":           return subCmd(
       userId,
+      interaction.channel_id ?? interaction.channel?.id ?? "",
       String(opt(interaction, "sub_out")),
       String(opt(interaction, "sub_in")),
       String(opt(interaction, "reason")),
