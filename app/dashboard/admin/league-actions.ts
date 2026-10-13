@@ -1040,20 +1040,45 @@ async function stripTeamRolesFromPlayers(): Promise<{
 
   const { data: allTeams } = await supabaseAdmin.from("teams").select("name, discord_role_id");
   const guildRoles = await getGuildRoles();
-  // At 1v1 a team's name is its player's name, so matching guild roles by team
-  // name would strip whatever unrelated role happens to share it.
-  const teamNames = new Set(
-    (await resolveTeamSize()) === 1
-      ? []
-      : (allTeams ?? []).map(t => (t.name as string | null) ?? "").filter(Boolean)
+
+  // Matching a guild role by team name is the fallback for a team whose role was
+  // made by hand and never recorded on the row — not a second way of finding a
+  // role we already hold the ID for. This guild carries two different roles both
+  // named "Prism": one a team's, one another program's, handed out by that
+  // program's own bot. Stripping every role that shared a team's name took the
+  // second one off three people who have nothing to do with the league.
+  //
+  // So a team with a stored ID is resolved by that ID alone, and an unrecorded
+  // name matching more than one role is left alone rather than guessed at. The
+  // cost is a team role nobody strips, which an admin can see and fix, against
+  // silently reaching into a role that was never ours.
+  //
+  // At 1v1 the fallback is off entirely: a team's name is its player's name,
+  // which collides with far more than a team role.
+  const soloEvent = (await resolveTeamSize()) === 1;
+  const unrecordedNames = new Set(
+    soloEvent ? [] : (allTeams ?? [])
+      .filter(t => !t.discord_role_id)
+      .map(t => (t.name as string | null) ?? "")
+      .filter(Boolean)
   );
+  const byUnrecordedName: string[] = [];
+  for (const name of unrecordedNames) {
+    const matches = guildRoles.filter(r => r.name === name);
+    if (matches.length === 1) byUnrecordedName.push(matches[0].id);
+    else if (matches.length > 1) {
+      console.error(`[stripTeamRolesFromPlayers] team "${name}" records no role ID and ${matches.length} guild roles share that name — left alone`);
+    }
+  }
+
   const roleIds = new Set<string>([
     ...guildRoles.filter(r =>
       r.name === "Drafted" || r.name === "Captain" || r.name === "EnteredDraft"
     ).map(r => r.id),
     ...(await tournamentRoleIdsToStrip(guildRoles)),
     ...(allTeams ?? []).map(t => t.discord_role_id).filter((id): id is string => !!id),
-    ...guildRoles.filter(r => teamNames.has(r.name) || /^Team \d+$/.test(r.name)).map(r => r.id),
+    ...byUnrecordedName,
+    ...guildRoles.filter(r => /^Team \d+$/.test(r.name)).map(r => r.id),
   ]);
   if (roleIds.size === 0) return { ok: 0, removed: 0, byStatus, players: realDiscordIds.length };
 
