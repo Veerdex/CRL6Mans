@@ -7,10 +7,14 @@ import { supabaseAdmin } from "./supabase";
 import { isModerator } from "./players";
 
 // A test tournament is staff-only while it runs: players can't see it on the
-// dashboard, its event tabs are hidden from them, and its pushes are rerouted
-// away from the league to the staff who opted into test-tournament
-// notifications — off by default, so a test run is silent for everyone until
-// someone turns it on (see testTournament on PushPayload and
+// dashboard and its event tabs are hidden from them.
+//
+// Its pushes are not redirected at staff. An audience scoped to the event — a
+// team, the draft pool, a tournament's entrants — is made of that event's own
+// participants, so it is delivered normally and containment comes from who was
+// rostered. What is suppressed is a push wider than the event (pushToAllApproved),
+// and what still reaches staff is a test event's staff operations, under the
+// opt-in test_tournaments category (see testTournament on PushPayload and
 // pushToTestTournamentAdmins).
 
 export async function isTestTournament(tournamentId: string | null | undefined): Promise<boolean> {

@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { supabaseAdmin } from "./supabase";
 import { recordNotification } from "./notifications";
 import { developerDiscordIds } from "./players";
-import { isActiveTournamentTest, isTestTournament } from "./test-tournament";
+import { isActiveTournamentTest } from "./test-tournament";
 import { adminCategoryEnabled, type AdminNotificationCategory } from "./admin-notification-prefs";
 
 webpush.setVapidDetails(
@@ -20,10 +20,22 @@ export type PushPayload = {
   url?: string;
   tag?: string;
   category?: NotificationCategory;
-  // About a test tournament: delivered to developers only, whatever audience
-  // the caller named. Left unset, pushToTeam, pushToEnteredDraft and the
-  // match-scoped admin categories infer it from the active tournament, since
-  // those audiences only exist inside the running event.
+  // About a test tournament. It does not redirect a player-facing push to staff:
+  // an audience scoped to the event (a team, the draft pool, a tournament's
+  // entrants or roster, a named list of players) is made of that event's own
+  // participants, so it is delivered normally and containment comes from who was
+  // rostered rather than from redirection.
+  //
+  // What it does is suppress a push whose audience is wider than the event:
+  // pushToAllApproved records the notice for staff and sends nothing, since a
+  // test event is not news to the league. That one can't be inferred — the same
+  // helper carries genuine league-wide announcements that must still go out while
+  // a test happens to be running — so a tournament caller sets it explicitly.
+  //
+  // Staff operations about a test event (a dispute, a sub request, a schedule
+  // approval) are a separate matter: pushToAdmins still infers it for those and
+  // routes them to the opt-in test_tournaments category, so a moderator who isn't
+  // running the test isn't paged about a fake match.
   testTournament?: boolean;
 };
 
@@ -153,10 +165,16 @@ async function sendToSubscriptions(
 // comes first and is never gated on notificationsEnabled(), which reads a
 // per-request cookie — gating it would mean the same event is filed when a cron
 // fires it and silently dropped when an admin does.
-// Where every push about a test tournament ends up, whatever audience the caller
-// named — opt-in, so by default a test run is silent for staff as well as
-// players. Terminal on purpose: routing it back through pushToAdmins would
-// re-enter that function's own test branch and recurse forever.
+// Where a test event's *staff* notifications go — a dispute, a sub request, a
+// schedule approval, routed here by pushToAdmins so a moderator who isn't running
+// the test isn't paged about a fake match. Opt-in, so by default a test run is
+// silent for staff too. Terminal on purpose: routing it back through pushToAdmins
+// would re-enter that function's own test branch and recurse forever.
+//
+// It is no longer where player-facing pushes end up. An audience scoped to the
+// event is made of that event's participants, so those are delivered normally;
+// sending them here instead turned one check-in notice per player into one per
+// match per side for whoever had the toggle on.
 //
 // DEVELOPER_DISCORD_IDS are unioned in because getStaffRole resolves them as CEO
 // without a staff_roles row, so the plain staff query can miss exactly the
@@ -190,7 +208,6 @@ export async function pushToTestTournamentAdmins(payload: PushPayload): Promise<
 }
 
 export async function pushToUser(discordId: string, payload: PushPayload) {
-  if (payload.testTournament) return void (await pushToTestTournamentAdmins(payload));
   await recordNotification({ kind: "users", discordIds: [discordId] }, payload);
   if (!(await notificationsEnabled())) return;
   const { data } = await supabaseAdmin
@@ -250,8 +267,21 @@ function filterByCategory(
     .filter(Boolean);
 }
 
+// A test event's lifecycle is not news to the league, so a flagged push here is
+// suppressed rather than sent — and rather than redirected at staff, who would get
+// a player-facing announcement about an event most of them aren't in. The feed row
+// is still written, under the opt-in test_tournaments category, so the run leaves a
+// trace a tester can go and read; recording it as `all` instead would put the test
+// event in every player's in-app feed, which is the thing being avoided.
+//
+// Deliberately not inferred from the active tournament: this helper is also the
+// transport for genuine league-wide announcements, which have to keep going out
+// while a test is running.
 export async function pushToAllApproved(payload: PushPayload) {
-  if (payload.testTournament) return void (await pushToTestTournamentAdmins(payload));
+  if (payload.testTournament) {
+    await recordNotification({ kind: "admins", adminCategory: "test_tournaments" }, payload);
+    return;
+  }
   await recordNotification({ kind: "all" }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players, error } = await supabaseAdmin
@@ -273,7 +303,6 @@ export async function pushToAllApproved(payload: PushPayload) {
 
 export async function pushToDiscordIds(discordIds: string[], payload: PushPayload) {
   if (!discordIds.length) return;
-  if (payload.testTournament) return void (await pushToTestTournamentAdmins(payload));
   await recordNotification({ kind: "users", discordIds }, payload);
   if (!(await notificationsEnabled())) return;
   const { data } = await supabaseAdmin
@@ -284,7 +313,6 @@ export async function pushToDiscordIds(discordIds: string[], payload: PushPayloa
 }
 
 export async function pushToTeam(teamId: string, payload: PushPayload) {
-  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToTestTournamentAdmins(payload));
   await recordNotification({ kind: "team", teamId }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players } = await supabaseAdmin
@@ -302,7 +330,6 @@ export async function pushToTeam(teamId: string, payload: PushPayload) {
 }
 
 export async function pushToEnteredDraft(payload: PushPayload) {
-  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToTestTournamentAdmins(payload));
   await recordNotification({ kind: "draft" }, payload);
   if (!(await notificationsEnabled())) return;
   const { data: players, error } = await supabaseAdmin
@@ -380,10 +407,6 @@ export async function pushToTournamentEntrants(
   joinMode: string | null | undefined,
   payload: PushPayload
 ) {
-  // Asked of the tournament in hand rather than through isActiveTournamentTest:
-  // these two fire before activation (sign-ups closing, the 24h reminder), when
-  // the tournament isn't yet league_settings.active_tournament_id.
-  if (payload.testTournament ?? (await isTestTournament(tournamentId))) return void (await pushToTestTournamentAdmins(payload));
   await pushToPlayerIds(await tournamentEntrantPlayerIds(tournamentId, joinMode), payload);
 }
 
@@ -403,7 +426,6 @@ export async function pushToTournamentRoster(
   joinMode: string | null | undefined,
   payload: PushPayload
 ) {
-  if (payload.testTournament ?? (await isTestTournament(tournamentId))) return void (await pushToTestTournamentAdmins(payload));
   const entrantIds = await tournamentEntrantPlayerIds(tournamentId, joinMode);
   if (!entrantIds.length) return;
   const { data: rostered } = await supabaseAdmin
@@ -424,7 +446,6 @@ export async function pushToTournamentRoster(
  * worse than sending them nothing.
  */
 export async function pushToRosteredPlayers(payload: PushPayload) {
-  if (payload.testTournament ?? (await isActiveTournamentTest())) return void (await pushToTestTournamentAdmins(payload));
   const { data: players } = await supabaseAdmin
     .from("players")
     .select("id")

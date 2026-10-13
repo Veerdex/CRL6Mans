@@ -50,7 +50,7 @@ const ITEMS: { key: string; label: string; desc: string }[] = [
   { key: "registrations",   label: "Pending Registrations",    desc: "When a new player submits a registration." },
   { key: "profile_changes", label: "Profile Change Requests",  desc: "When a player requests an MMR / tracker change." },
   { key: "schedule_approvals", label: "Schedule Approvals",    desc: "When two teams agree on a time outside the scheduled window." },
-  { key: "test_tournaments",   label: "Test Tournaments",      desc: "Off by default. A test tournament's notifications never reach players — turn this on to receive them yourself while running one." },
+  { key: "test_tournaments",   label: "Test Tournaments",      desc: "Off by default. Staff notifications about a test event — disputes, sub requests, schedule approvals — plus the league-wide announcements it suppresses. Players rostered onto a test team get their own match notifications either way." },
 ];
 
 export function AdminNotificationToggles({ initial }: { initial: Record<string, boolean> }) {

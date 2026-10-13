@@ -1100,14 +1100,13 @@ async function notifyPoolCutoff(
     .update({ draft_not_selected_reason: reason })
     .in("id", cut.map(p => p.id));
 
-  // pushToDiscordIds reroutes only on an explicit flag — it can't infer, since it
-  // is also the transport for notices that have nothing to do with an event.
+  // No testTournament flag: these are the event's own sign-ups, so a test event's
+  // cut list is made of its own participants and goes to them.
   await pushToDiscordIds(cut.map(p => p.discord_id).filter((id): id is string => !!id), {
     title: "Not Selected",
     body: reason,
     url: "/dashboard",
     tag: "draft-not-selected",
-    testTournament: await isActiveTournamentTest(),
   });
 }
 
