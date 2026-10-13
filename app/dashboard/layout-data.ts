@@ -61,6 +61,7 @@ export type DashboardChromeData = CoinGrants & {
   staffRole: StaffRole | null;
   mfaOk: boolean;
   hasTeams: boolean;
+  hasLiveBracket: boolean;
   hasPodium: boolean;
   hasSponsors: boolean;
   needsPlatformClaim: boolean;
@@ -286,6 +287,18 @@ async function fetchHasPodium(): Promise<boolean> {
   return anyChamp(podSeasons) || anyChamp(podTournaments);
 }
 
+// The same count the season page gates its own content on, so the nav link and
+// the page can't disagree during the half-hour the bracket exists before the
+// event starts — otherwise settling the seeding early is unreachable.
+async function fetchHasLiveBracket(): Promise<boolean> {
+  const { count } = await supabaseAdmin
+    .from("matches")
+    .select("*", { count: "exact", head: true })
+    .not("stage", "is", null)
+    .eq("status", "scheduled");
+  return (count ?? 0) > 0;
+}
+
 async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
   const t0 = perfNow();
 
@@ -311,8 +324,9 @@ async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
   ]);
   const tSettings = perfNow();
 
-  const [hasTeams, hasPodium, hasSponsors, needsPlatformClaim] = await Promise.all([
+  const [hasTeams, hasLiveBracket, hasPodium, hasSponsors, needsPlatformClaim] = await Promise.all([
     fetchHasTeams(settings.activeTournamentId),
+    fetchHasLiveBracket(),
     fetchHasPodium(),
     fetchHasSponsors(),
     fetchNeedsPlatformClaim(userId, playerInfo),
@@ -332,7 +346,7 @@ async function loadWaterfall(userId: string): Promise<DashboardChromeData> {
     );
   }
 
-  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasPodium, hasSponsors, needsPlatformClaim, decorations };
+  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasLiveBracket, hasPodium, hasSponsors, needsPlatformClaim, decorations };
 }
 
 async function loadBulk(userId: string): Promise<DashboardChromeData> {
@@ -352,6 +366,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     staffRole,
     mfaOk,
     hasTeams,
+    hasLiveBracket,
     hasPodium,
     hasSponsors,
     needsPlatformClaim,
@@ -365,6 +380,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     getStaffRole(userId),
     hasMfaEnabled(userId),
     settingsPromise.then((s) => fetchHasTeams(s.activeTournamentId)),
+    fetchHasLiveBracket(),
     fetchHasPodium(),
     fetchHasSponsors(),
     playerInfoPromise.then((info) => fetchNeedsPlatformClaim(userId, info)),
@@ -375,7 +391,7 @@ async function loadBulk(userId: string): Promise<DashboardChromeData> {
     console.log(`[layout timing] mode=bulk · total ${(perfNow() - t0).toFixed(0)}ms`);
   }
 
-  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasPodium, hasSponsors, needsPlatformClaim, decorations };
+  return { playerInfo, ...grants, settings, hasPlayers, navSponsors, staffRole, mfaOk, hasTeams, hasLiveBracket, hasPodium, hasSponsors, needsPlatformClaim, decorations };
 }
 
 export function loadDashboardChrome(userId: string): Promise<DashboardChromeData> {

@@ -246,6 +246,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     staffRole,
     mfaOk,
     hasTeams,
+    hasLiveBracket,
     hasPodium,
     hasSponsors,
     needsPlatformClaim,
@@ -266,10 +267,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ? { seasonActive: false, draftActive: false, activeTournamentId: null }
     : settings;
   const hasActiveContent = seasonActive || !!activeTournamentId;
+  // The bracket is built up to 30 minutes before the first matches, and the
+  // season page renders it on the same condition — so the tab has to open on
+  // the bracket existing, not on the event having started.
+  const bracketVisible = seasonActive || (hasLiveBracket && !hideTestEvent);
 
   const priorityHrefs: string[] = [];
   if (draftActive) priorityHrefs.push("/dashboard/draft");
-  if (seasonActive) priorityHrefs.push("/dashboard/season");
+  if (bracketVisible) priorityHrefs.push("/dashboard/season");
 
   // Players/Stats/Podium/Wagers/Settings are visible to every logged-in player
   // regardless of registration status — Settings itself renders a reduced view
@@ -302,7 +307,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       ...(teamId ? ["myteam"] : []),
       ...(hasTeams ? ["teams"] : []),
       ...(draftActive ? ["draft"] : []),
-      ...(seasonActive ? ["season"] : []),
+      ...(bracketVisible ? ["season"] : []),
       // Manual seasons only — tournaments have no round scheduling, so the tab
       // would open on an empty page. season_active is true for both, since a
       // tournament runs through the same season machinery.
