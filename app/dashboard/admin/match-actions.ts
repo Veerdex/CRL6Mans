@@ -161,7 +161,11 @@ export async function adminAnalyzeGameReplay(
   // upload that produced the discrepancy card being looked at.
   const homeTrackerNames = new Set<string>();
   const awayTrackerNames = new Set<string>();
-  const side = (teamId: string | undefined) =>
+  // Safe to default to away: every caller passes a team_id that came from the
+  // roster query above, which is scoped to this match's two teams. The aka
+  // override loop is the one place a third team_id can turn up, and it picks a
+  // set explicitly rather than coming through here.
+  const side = (teamId: string) =>
     teamId === match.home_team_id ? homeTrackerNames : awayTrackerNames;
   const playerTeamById = new Map<string, string>();
 
@@ -248,12 +252,22 @@ export async function adminAnalyzeGameReplay(
       playerTeamById.get(playerId) ?? resolved.find((p) => p.id === playerId)?.team_id;
     // An override is the admin's final word on which side this name is, so it
     // sets one set and clears the other rather than only touching home.
+    //
+    // The third branch is not dead: an admin can map a replay name to someone on
+    // neither roster — a ringer, or a sub who was never approved — and `teamId`
+    // is then undefined. That has to mean "no evidence either way", which is what
+    // it meant before both sets were counted. Lumping it in with away would make
+    // it a vote for the away side, and at 1v1 one spurious vote is enough to tie
+    // the two readings and let `>=` invert the winner silently.
     if (teamId === match.home_team_id) {
       homeTrackerNames.add(norm);
       awayTrackerNames.delete(norm);
-    } else {
+    } else if (teamId === match.away_team_id) {
       awayTrackerNames.add(norm);
       homeTrackerNames.delete(norm);
+    } else {
+      homeTrackerNames.delete(norm);
+      awayTrackerNames.delete(norm);
     }
   }
 
