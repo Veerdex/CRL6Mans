@@ -117,7 +117,7 @@ export function TeamSignupPanel({
           )}
           <p className="text-[21px] text-zinc-400 mt-1">
             {registrationOpen || incomingInvites.some((i) => i.canAccept)
-              ? `Form a team of ${teamSize} (plus an optional extra as substitute).`
+              ? "Form a team"
               : "Registration is closed."}
           </p>
           {countdown && <div className="mt-1"><CountdownLabel label={countdown.label} iso={countdown.iso} /></div>}
