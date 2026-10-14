@@ -7,8 +7,10 @@ import { NAV_LAYOUTS, NAV_LAYOUT_COOKIE, type NavLayout } from "@/app/lib/nav-la
 
 const ONE_YEAR = 60 * 60 * 24 * 365;
 
-export type { NavLayout };
-
+// Don't re-export the type from here. The "use server" transform emits a
+// runtime reference for every export name, but a type binding is erased, so
+// the whole chunk throws `NavLayout is not defined` on evaluation and every
+// action the Settings page can call 500s. Import it from lib/nav-layout.
 export async function setNavLayout(layout: NavLayout) {
   if (!NAV_LAYOUTS.includes(layout)) return { error: "Invalid layout." };
 

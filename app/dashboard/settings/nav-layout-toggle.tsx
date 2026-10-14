@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setNavLayout, type NavLayout } from "./nav-layout-actions";
+import { setNavLayout } from "./nav-layout-actions";
+import type { NavLayout } from "@/app/lib/nav-layout";
 
 const OPTIONS: { value: NavLayout; label: string }[] = [
   { value: "sidebar", label: "Sidebar" },
