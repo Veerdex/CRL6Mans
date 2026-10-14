@@ -153,6 +153,19 @@ async function heirToCaptaincy(signupId: string) {
     .sort((a, b) => b.rating - a.rating || a.respondedAt.localeCompare(b.respondedAt))[0];
 }
 
+// Asked on every join, with no freshness window — see joinTournament. The flag
+// is what ties the stamp to a player who actually looked at the numbers, so the
+// write belongs on the confirmed pass of each action rather than beside the
+// popup that collects them.
+type SignupResult = { error?: string; ok?: boolean; message?: string; confirmMmr?: boolean };
+
+async function markTrackerConfirmed(playerId: string) {
+  await supabaseAdmin
+    .from("players")
+    .update({ tracker_confirmed_at: new Date().toISOString(), must_update_tracker: false })
+    .eq("id", playerId);
+}
+
 async function checkJoinGate(playerId: string, statsEnabled: boolean): Promise<string | null> {
   if (!(await joinGateApplies(statsEnabled))) return null;
   if (await hasActiveVerifiedPlatformAccount(playerId, new Date())) return null;
@@ -163,7 +176,11 @@ function refresh() {
   revalidatePath("/dashboard");
 }
 
-export async function createTeam(tournamentId: string, name: string) {
+export async function createTeam(
+  tournamentId: string,
+  name: string,
+  confirmedMmr = false,
+): Promise<SignupResult> {
   const { ctx, error } = await getContext(tournamentId);
   if (error || !ctx) return { error: error ?? "Unavailable." };
   if (!signupWindowOpen(ctx.window, await hasEarlySignupAccess(ctx.discordId)))
@@ -181,6 +198,11 @@ export async function createTeam(tournamentId: string, name: string) {
 
   if (await nameTaken(ctx.tournamentId, trimmed))
     return { error: "A team with that name already exists." };
+
+  // The Join button opens the popup before the name form, so this is the
+  // backstop for any other caller rather than the path a player takes.
+  if (!confirmedMmr) return { confirmMmr: true };
+  await markTrackerConfirmed(ctx.playerId);
 
   const { data: team, error: insErr } = await supabaseAdmin
     .from("team_signups")
@@ -318,7 +340,11 @@ export async function revokeInvite(memberId: string) {
   return { ok: true, message: "Invite revoked." };
 }
 
-export async function respondInvite(memberId: string, accept: boolean) {
+export async function respondInvite(
+  memberId: string,
+  accept: boolean,
+  confirmedMmr = false,
+): Promise<SignupResult> {
   const signup = await signupForMember(memberId);
   if (!signup) return { error: "Invite not found." };
   const { ctx, error } = await getContext(signup.tournamentId);
@@ -349,6 +375,11 @@ export async function respondInvite(memberId: string, accept: boolean) {
 
   const gateError = await checkJoinGate(ctx.playerId, ctx.statsEnabled);
   if (gateError) return { error: gateError };
+
+  // Last gate before the write, so a closed window or a full roster is refused
+  // without first making the player confirm MMR for a team they can't join.
+  if (!confirmedMmr) return { confirmMmr: true };
+  await markTrackerConfirmed(ctx.playerId);
 
   await supabaseAdmin
     .from("team_signup_members")

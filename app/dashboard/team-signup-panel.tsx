@@ -19,7 +19,8 @@ import { CountdownLabel } from "./countdown-label";
 import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import type { PublicSponsor } from "@/app/lib/sponsors-public";
 import { formatPromoDescription } from "@/app/lib/sponsor-promo";
-import { ModalShell } from "./mmr-confirm-panel";
+import { ModalShell, TEAM_MMR_DESCRIPTION } from "./mmr-confirm-panel";
+import { MmrConfirmModal } from "./mmr-confirm-modal";
 
 export function TeamSignupPanel({
   view,
@@ -58,6 +59,8 @@ export function TeamSignupPanel({
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
+  const [joinMmrOpen, setJoinMmrOpen] = useState(false);
+  const [confirmInviteId, setConfirmInviteId] = useState<string | null>(null);
 
   const flash = (msg: string | undefined, ok: boolean) => {
     setFeedback({ msg: msg ?? "", ok });
@@ -66,6 +69,18 @@ export function TeamSignupPanel({
   const run = (fn: () => Promise<{ ok?: boolean; error?: string; message?: string }>) =>
     startTransition(async () => {
       const res = await fn();
+      flash(res.error ?? res.message, !res.error);
+    });
+
+  // Not `run`: a `{ confirmMmr: true }` carries neither message nor error, so
+  // that helper would flash an empty line instead of opening the popup. The
+  // memberId stays in state across the confirmed call, so the popup reads
+  // "Joining…" rather than vanishing mid-write.
+  const acceptInvite = (memberId: string, confirmedMmr = false) =>
+    startTransition(async () => {
+      const res = await respondInvite(memberId, true, confirmedMmr);
+      if (res.confirmMmr) { setConfirmInviteId(memberId); return; }
+      setConfirmInviteId(null);
       flash(res.error ?? res.message, !res.error);
     });
 
@@ -132,7 +147,7 @@ export function TeamSignupPanel({
             stop its own. */}
         {!myTeam && registrationOpen && (
           <button
-            onClick={(e) => { e.stopPropagation(); setCreateOpen(true); }}
+            onClick={(e) => { e.stopPropagation(); setJoinMmrOpen(true); }}
             disabled={isPending}
             className="px-4 py-2 rounded-lg text-[21px] font-semibold transition-colors bg-emerald-600 hover:bg-emerald-500 text-white"
           >
@@ -180,7 +195,7 @@ export function TeamSignupPanel({
                     <span className="text-zinc-500"> · {inv.creatorName}</span>
                   </span>
                   <button
-                    onClick={() => run(() => respondInvite(inv.memberId, true))}
+                    onClick={() => acceptInvite(inv.memberId)}
                     disabled={isPending || !inv.canAccept}
                     className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-lg font-medium rounded-lg"
                   >
@@ -203,6 +218,27 @@ export function TeamSignupPanel({
           )}
         </div>
       )}
+
+      {/* Join asks for MMR first and opens the name form on confirm, so the two
+          dialogs come one after the other rather than stacked. Nothing is
+          written until Create team, so a player who stops at the name form has
+          only restamped their own tracker confirmation. */}
+      <MmrConfirmModal
+        open={joinMmrOpen}
+        isPending={false}
+        confirmLabel="Confirm and continue"
+        description={TEAM_MMR_DESCRIPTION}
+        onConfirm={() => { setJoinMmrOpen(false); setCreateOpen(true); }}
+        onClose={() => setJoinMmrOpen(false)}
+      />
+
+      <MmrConfirmModal
+        open={!!confirmInviteId}
+        isPending={isPending}
+        description={TEAM_MMR_DESCRIPTION}
+        onConfirm={() => { if (confirmInviteId) acceptInvite(confirmInviteId, true); }}
+        onClose={() => setConfirmInviteId(null)}
+      />
 
       {createOpen && (
         <CreateTeamModal
@@ -275,7 +311,8 @@ function CreateTeamModal({
     if (!name.trim()) return;
     setError(null);
     startTransition(async () => {
-      const res = await createTeam(tournamentId, name);
+      // `true` because the Join button already collected the confirmation.
+      const res = await createTeam(tournamentId, name, true);
       if (res.error) { setError(res.error); return; }
       onCreated(res.message ?? "Team created.");
     });

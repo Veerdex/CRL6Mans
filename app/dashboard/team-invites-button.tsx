@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { respondInvite } from "./team-signup-actions";
-import { ModalShell } from "./mmr-confirm-panel";
+import { ModalShell, TEAM_MMR_DESCRIPTION } from "./mmr-confirm-panel";
+import { MmrConfirmModal } from "./mmr-confirm-modal";
 
 // One list across every open team-formation tournament: an invite is something
 // the player has, not something a particular card has, and the cards only show
@@ -34,15 +35,22 @@ export function TeamInvitesButton({ invites }: { invites: TeamInvite[] }) {
 
 function InvitesModal({ invites, onClose }: { invites: TeamInvite[]; onClose: () => void }) {
   const [note, setNote] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const respond = (memberId: string, accept: boolean) =>
+  // Accepting asks for MMR first; declining never does. The memberId stays in
+  // state across the confirmed call so the popup reads "Joining…" rather than
+  // closing mid-write.
+  const respond = (memberId: string, accept: boolean, confirmedMmr = false) =>
     startTransition(async () => {
-      const res = await respondInvite(memberId, accept);
+      const res = await respondInvite(memberId, accept, confirmedMmr);
+      if (res.confirmMmr) { setConfirmId(memberId); return; }
+      setConfirmId(null);
       setNote({ msg: res.error ?? res.message ?? "", ok: !res.error });
     });
 
   return (
+    <>
     <ModalShell onClose={onClose} maxWidthClass="max-w-lg">
       <h2 className="text-base font-semibold text-white">Team invites</h2>
 
@@ -107,5 +115,16 @@ function InvitesModal({ invites, onClose }: { invites: TeamInvite[]; onClose: ()
         Close
       </button>
     </ModalShell>
+
+    {/* After the list's ModalShell, so its portal is appended later and lands
+        on top of it at the same z-index. */}
+    <MmrConfirmModal
+      open={!!confirmId}
+      isPending={isPending}
+      description={TEAM_MMR_DESCRIPTION}
+      onConfirm={() => { if (confirmId) respond(confirmId, true, true); }}
+      onClose={() => setConfirmId(null)}
+    />
+    </>
   );
 }

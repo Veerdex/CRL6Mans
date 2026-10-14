@@ -4,32 +4,38 @@ import { useEffect, useState } from "react";
 import { getOwnMmrForJoin, saveOwnMmr } from "./settings/actions";
 import { MmrConfirmPanel, ModalShell, mmrChanged, type MmrValues } from "./mmr-confirm-panel";
 
+type Labels = { busyLabel?: string; confirmLabel?: string; description?: string };
+
 export function MmrConfirmModal({
   open,
   onConfirm,
   onClose,
   isPending,
+  ...labels
 }: {
   open: boolean;
   onConfirm: () => void;
   onClose: () => void;
   isPending: boolean;
-}) {
+} & Labels) {
   if (!open) return null;
   // Inner is mounted fresh on each open, so edits, errors and the cooldown all
   // reset — there is nothing to clear by hand.
-  return <Inner onConfirm={onConfirm} onClose={onClose} isPending={isPending} />;
+  return <Inner onConfirm={onConfirm} onClose={onClose} isPending={isPending} {...labels} />;
 }
 
 function Inner({
   onConfirm,
   onClose,
   isPending,
+  busyLabel = "Joining…",
+  confirmLabel,
+  description,
 }: {
   onConfirm: () => void;
   onClose: () => void;
   isPending: boolean;
-}) {
+} & Labels) {
   const [loaded, setLoaded] = useState<{ trackerUrl: string | null; values: MmrValues } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -90,8 +96,10 @@ function Inner({
       trackerUrl={loaded.trackerUrl}
       initial={loaded.values}
       busy={saving || isPending}
-      busyLabel={saving ? "Saving…" : "Joining…"}
+      busyLabel={saving ? "Saving…" : busyLabel}
       error={error}
+      confirmLabel={confirmLabel}
+      description={description}
       onConfirm={handleConfirm}
       onClose={onClose}
     />

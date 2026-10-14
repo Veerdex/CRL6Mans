@@ -14,6 +14,11 @@ export type MmrValues = {
 
 export const CONFIRM_COOLDOWN_SECONDS = 3;
 
+// A pre-formed team is never drafted, so the default copy's "who you get
+// drafted with" doesn't hold on the team-signup surfaces.
+export const TEAM_MMR_DESCRIPTION =
+  "Your MMR decides your rating and your team's seed. Check these against your tracker and correct anything that's changed.";
+
 export function mmrChanged(a: MmrValues, b: MmrValues): boolean {
   return (
     Number(a.peak_2v2) !== Number(b.peak_2v2) ||
@@ -89,7 +94,7 @@ function MmrField({
  */
 export function MmrConfirmPanel({
   trackerUrl, initial, busy, busyLabel = "Joining…", error, confirmLabel = "Confirm and join",
-  onConfirm, onClose,
+  description, onConfirm, onClose,
 }: {
   trackerUrl: string | null;
   initial: MmrValues;
@@ -97,6 +102,7 @@ export function MmrConfirmPanel({
   busyLabel?: string;
   error: string | null;
   confirmLabel?: string;
+  description?: string;
   onConfirm: (values: MmrValues) => void;
   onClose: () => void;
 }) {
@@ -116,8 +122,8 @@ export function MmrConfirmPanel({
     <ModalShell onClose={onClose}>
       <h2 className="text-base font-semibold text-white">Confirm your MMR</h2>
       <p className="text-sm text-zinc-400">
-        Your MMR decides your rating and who you get drafted with. Check these against
-        your tracker and correct anything that&apos;s changed.
+        {description ??
+          "Your MMR decides your rating and who you get drafted with. Check these against your tracker and correct anything that's changed."}
       </p>
 
       <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
