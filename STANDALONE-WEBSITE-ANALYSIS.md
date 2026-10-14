@@ -42,6 +42,15 @@ again at `app/lib/discord-bot.ts:3373`), and the penalty for missing the window 
 **forfeit**. A notification that does not arrive is not an inconvenience — it is a lost
 match. At 3% reach, the website alone cannot run a check-in window.
 
+This bites hardest in bracket play. `openCheckInForMatch` honours a `round_schedules`
+time when one exists and is still in the future — so a season with a published schedule is
+the weaker case, because players know when to be there. But with no schedule, or a
+schedule already past, **the window opens the instant the matchup seats** — that is, the
+moment the previous round's result lands. The comment at `discord-bot.ts:3571-3576` spells
+out the trap directly: a player trusting a displayed time could be forfeited on a window
+that had already closed. In that case the notification is the *only* signal a match has
+started, which is precisely why reach matters there.
+
 ---
 
 ## Pros of going standalone
@@ -55,14 +64,15 @@ connection (so treat these as indicative, not production figures):
 
 Worth stating plainly: most of the 3–4 minutes that wave visibly took was waiting for a
 sweep trigger and navigating between pages, **not** Discord. And commits `52d8b93` and
-`6a56a06` already trim the Discord portion further. The ceiling on this win is real but
-modest — tens of seconds on batch operations, a few hundred milliseconds elsewhere.
+`6a56a06` trim the Discord portion further — both are committed but **not yet deployed**,
+so the figures above do not include them. The ceiling on this win is real but modest —
+tens of seconds on batch operations, a few hundred milliseconds elsewhere.
 
 Page loads barely change. Only `app/dashboard/register/page.tsx` makes a Discord call
 while rendering (`isGuildMember`, ~250 ms). `my-team/page.tsx` imports only DB-only
 helpers from `discord-bot.ts`.
 
-### 2. 8,220 lines of integration stop needing maintenance
+### 2. Less integration code to maintain
 
 | File | LOC |
 |---|---|
@@ -75,10 +85,17 @@ helpers from `discord-bot.ts`.
 | `app/lib/clip-embeds.ts` | 56 |
 | `app/lib/match-notifications.ts` | 37 |
 
-That is a large surface carrying real complexity: embed-vs-content mention rules (a
-mention inside an embed notifies nobody), the 1024-character field limit, role
-resolution through `teamPing`, channel permission overwrites that live in Discord rather
-than the database.
+**Read that total carefully: it is 8,220 lines across files that *touch* Discord, not
+8,220 deletable lines.** `discord-bot.ts` alone is 6,222 of them, and it also holds the
+draft and season orchestration plus the five shared series cores — all of which a
+standalone site still needs. Going standalone would *move* most of that code, not remove
+it. The genuinely deletable portion is the REST wrappers and the embed builders, and it
+has not been measured.
+
+What does go away is a class of complexity peculiar to Discord: embed-vs-content mention
+rules (a mention inside an embed notifies nobody), the 1024-character field limit, role
+resolution through `teamPing`, and channel permission overwrites that live in Discord
+rather than in the database.
 
 ### 3. Discord-side configuration that cannot be automated goes away
 Editing per-command channel permissions needs a **Bearer** token with
@@ -88,8 +105,9 @@ have to be set to **All Channels** by hand in Server Settings → Integrations, 
 narrowing them again silently kills them everywhere. Permanent manual configuration, with
 a silent failure mode.
 
-The guild also holds **206 of Discord's 250-role limit**, which is a ceiling the league
-will eventually hit as teams accumulate.
+The guild also holds **206 of Discord's 250-role limit**, a ceiling the league will
+eventually hit as teams accumulate — though part of that count belongs to the other
+program sharing the server, so the headroom problem is not entirely the league's own.
 
 ### 4. One surface to design, test and document
 Right now every player-facing flow exists twice. The duplication is handled well — five
@@ -99,9 +117,10 @@ their prose kept deliberately surface-neutral and pinned by
 `scripts/test-series-report.ts` — but it is still two sets of copy, two sets of error
 paths, and two places a change has to land.
 
-### 5. No third-party outage or policy risk
+### 5. No Discord outage or policy risk
 Discord rate limits, API deprecations, and terms changes stop being able to break the
-league's operations.
+league's operations. Note this is dependency **moved**, not removed: a standalone site
+leans on an email provider and on the browser vendors' push services instead.
 
 ### 6. Full control over presentation
 Embeds are constrained: Discord's own colours, field limits, and layout. A web UI has none
@@ -148,21 +167,37 @@ minutes." None of that has a home on the website.
 Replacing it means per-match chat: storage, realtime transport, moderation, mobile
 notifications, history, and search.
 
-### 4. The dispute audit trail disappears
-Every bot message into a match channel goes through `app/lib/match-embeds.ts`, so the
-negotiation, the check-ins, the submissions and the disputes all sit in one scrollback an
-admin can read when resolving a disagreement. Standalone, that becomes an append-only
-per-match event log plus a viewer to build.
+### 4. Live dispute evidence goes away — but it is less of a loss than it looks
+Every bot message into a match channel goes through `app/lib/match-embeds.ts`, so while a
+dispute is open the negotiation, the check-ins and the submissions all sit in one
+scrollback an admin can read.
 
-### 5. Enforcement loses its teeth
+**That scrollback is not an archive, though.** `execReportMatchResult` deletes the match
+channel as soon as it posts the result — `discord-bot.ts:5335`, on *every* result, not
+just forfeits — and nulls `discord_channel_id`. So the evidence exists only until the
+match is reported, and is gone permanently afterwards. Add that a match whose channel
+failed to open or was deleted has no trail at all.
+
+This con therefore partly inverts: a standalone append-only per-match event log is work to
+build, but it would be **more durable than what exists today**, because it would survive
+the result being reported.
+
+### 5. Enforcement stops being automatic
 `app/lib/moderation.ts` imports `addRole`, `removeRole`, `removeRoleById`,
 `timeoutMember`, and `banMember`. Line 102-103 applies the `Kicked` role plus a timeout;
 line 196 calls `banMember(discordId)`, which removes the person from the guild outright.
 `/resyncmoderation` re-applies all of it if the guild is reconfigured.
 
 A website-only ban blocks login. It does not remove someone from the community space —
-and the community space is where griefing actually happens. This one has no replacement,
-because you cannot eject somebody from a community you do not host.
+and the community space is where griefing actually happens.
+
+To be precise about the size of this loss: the guild would still exist either way, since
+it also hosts the private 6mans queue bot, so staff could still ban, kick and time out
+**by hand** in Discord. What standalone actually costs is the **automation** — one
+moderation action on the site currently applies the site-side and Discord-side
+consequences together, and `/resyncmoderation` can re-apply the whole state. Afterwards
+that becomes two manual steps in two places, with the attendant drift when someone
+forgets the second one.
 
 ### 6. The recruiting funnel is the Discord
 The guild has **501 members, 196 online**, against 57 real accounts.
@@ -225,8 +260,8 @@ versus "push reaches 1 of 29."
 | Admin MFA | Free via OAuth callback | TOTP enrollment, secrets, recovery codes, re-check cadence |
 | Notification delivery | Push at 3%, no fallback | Email provider, plus a PWA-adoption drive or a mobile app |
 | Match coordination | No free text on the site | Per-match chat: storage, realtime, moderation, history, search |
-| Dispute evidence | Channel scrollback | Append-only per-match event log and viewer |
-| Moderation enforcement | Guild ban/kick/timeout | **No replacement exists** |
+| Dispute evidence | Channel scrollback, destroyed when the result posts | Append-only per-match event log and viewer — more durable than today |
+| Moderation enforcement | Site + Discord action in one step | Site-side stays; Discord-side becomes manual, and `/resyncmoderation` is lost |
 | Recruiting | Guild-gated registration | A discovery channel the league does not currently have |
 
 Rough order of effort: authentication and the account migration are the hard blockers.
@@ -238,26 +273,33 @@ it is gated on player behaviour, not on code.
 ## Verdict
 
 The latency case for dropping Discord is real but small: tens of seconds on batch
-operations, a few hundred milliseconds on individual actions, already shrinking. The
-maintenance case is stronger — 8,220 lines plus permanently manual Discord-side
-configuration with a silent failure mode.
+operations, a few hundred milliseconds on individual actions, and already shrinking. The
+maintenance case is stronger, though smaller than the 8,220-line figure suggests, since
+most of that code moves rather than disappears — the solid part of it is the permanently
+manual Discord-side configuration with a silent failure mode.
 
 Neither outweighs the fact that **the website cannot currently notify its players**, and
 that a missed 10-minute check-in costs a team the match. Add that Discord is also the only
-login, the only source of admin MFA, the only coordination space, and the only enforcement
-mechanism, and standalone is not a simplification — it is four new systems to build before
-the league can run a single event, one of which (enforcement) has no replacement at all.
+login and the only source of admin MFA, and standalone is not a simplification — it is
+three substantial systems (auth, contactable identities, notification delivery) to build
+before the league can run a single event, plus a coordination surface it has never had.
+
+The two cons worth *discounting* when weighing this up are the ones that sound worst:
+moderation enforcement does not vanish, it becomes manual; and the dispute trail is
+already destroyed when a result posts, so replacing it would be an improvement.
 
 ### The middle path, if the goal is less Discord dependence
 In rough order of value for effort:
 
 1. **Raise push adoption deliberately.** It is the single highest-leverage item, and the
    only one that changes the 3%. It caps well below 100% because it needs a per-player,
-   per-browser grant — but 3% → 60% changes what the website is capable of.
+   per-browser grant, and no target here is forecastable from the data — but any
+   substantial improvement changes what the website is capable of doing unaided.
 2. **Add an email column and collect addresses**, while Discord still works as the channel
    for asking. This is the prerequisite for every later step, and it is cheap now and
    expensive later.
-3. **Keep trimming Discord latency** where it is free, as `52d8b93` and `6a56a06` did.
+3. **Keep trimming Discord latency** where it is free, as `52d8b93` and `6a56a06` do —
+   starting by deploying those two.
 4. **Keep the shared-core pattern.** It is what makes two surfaces affordable, and it is
    also what would make a future reduction in Discord scope straightforward.
 
