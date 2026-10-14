@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  beginTeamSignup,
   createTeam,
   invitePlayer,
   renameTeam,
@@ -76,6 +77,16 @@ export function TeamSignupPanel({
   // that helper would flash an empty line instead of opening the popup. The
   // memberId stays in state across the confirmed call, so the popup reads
   // "Joining…" rather than vanishing mid-write.
+  // Pressing Join answers the gates before the popup, so someone without a
+  // claimed platform account is told so instead of confirming their MMR for a
+  // team they can't create.
+  const startJoin = () =>
+    startTransition(async () => {
+      const res = await beginTeamSignup(tournamentId);
+      if (res.error) { flash(res.error, false); return; }
+      setJoinMmrOpen(true);
+    });
+
   const acceptInvite = (memberId: string, confirmedMmr = false) =>
     startTransition(async () => {
       const res = await respondInvite(memberId, true, confirmedMmr);
@@ -147,7 +158,7 @@ export function TeamSignupPanel({
             stop its own. */}
         {!myTeam && registrationOpen && (
           <button
-            onClick={(e) => { e.stopPropagation(); setJoinMmrOpen(true); }}
+            onClick={(e) => { e.stopPropagation(); startJoin(); }}
             disabled={isPending}
             className="px-4 py-2 rounded-lg text-[21px] font-semibold transition-colors bg-emerald-600 hover:bg-emerald-500 text-white"
           >

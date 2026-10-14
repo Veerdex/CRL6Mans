@@ -176,6 +176,26 @@ function refresh() {
   revalidatePath("/dashboard");
 }
 
+// The Join button's pre-flight. Everything createTeam can refuse without a name
+// in hand, run in createTeam's own order, so the claimed-account requirement is
+// answered before the MMR popup rather than after the team is named — which is
+// the order joinTournament has always used for player mode. createTeam keeps
+// every one of these gates; this only moves where a player meets them, so a
+// window that shuts between the two calls is still caught.
+export async function beginTeamSignup(tournamentId: string): Promise<SignupResult> {
+  const { ctx, error } = await getContext(tournamentId);
+  if (error || !ctx) return { error: error ?? "Unavailable." };
+  if (!signupWindowOpen(ctx.window, await hasEarlySignupAccess(ctx.discordId)))
+    return { error: "Team registration is closed." };
+
+  if (await findMyTeam(ctx.playerId, ctx.tournamentId)) return { error: "You're already on a team." };
+
+  const gateError = await checkJoinGate(ctx.playerId, ctx.statsEnabled);
+  if (gateError) return { error: gateError };
+
+  return { ok: true };
+}
+
 export async function createTeam(
   tournamentId: string,
   name: string,
