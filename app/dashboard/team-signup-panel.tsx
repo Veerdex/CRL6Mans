@@ -220,9 +220,7 @@ export function TeamSignupPanel({
       )}
 
       {/* Join asks for MMR first and opens the name form on confirm, so the two
-          dialogs come one after the other rather than stacked. Nothing is
-          written until Create team, so a player who stops at the name form has
-          only restamped their own tracker confirmation. */}
+          dialogs come one after the other rather than stacked. */}
       <MmrConfirmModal
         open={joinMmrOpen}
         isPending={false}

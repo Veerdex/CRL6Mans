@@ -376,8 +376,9 @@ export async function respondInvite(
   const gateError = await checkJoinGate(ctx.playerId, ctx.statsEnabled);
   if (gateError) return { error: gateError };
 
-  // Last gate before the write, so a closed window or a full roster is refused
-  // without first making the player confirm MMR for a team they can't join.
+  // Last gate before the write, so a closed window, already being on a team,
+  // or a missing platform account is refused without first making the player
+  // confirm MMR for an invite they can't take.
   if (!confirmedMmr) return { confirmMmr: true };
   await markTrackerConfirmed(ctx.playerId);
 
