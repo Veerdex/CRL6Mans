@@ -666,8 +666,6 @@ export function TournamentManager({
             </div>
           )}
 
-          {/* Nothing checks a minimum when teams sign up pre-formed, and the
-              server drops the values in that mode. */}
           {isPlayers && (
             <>
               <div>
