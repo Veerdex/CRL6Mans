@@ -264,6 +264,13 @@ function CreateTeamModal({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // Built outside the JSX so the space between it and "to fill" survives —
+  // inline, JSX ate the one before the line break.
+  const toInvite =
+    teamSize - 1 > 0
+      ? `${teamSize - 1} more player${teamSize - 1 === 1 ? "" : "s"}`
+      : "an optional substitute";
+
   const submit = () => {
     if (!name.trim()) return;
     setError(null);
@@ -278,8 +285,8 @@ function CreateTeamModal({
     <ModalShell onClose={onClose} maxWidthClass="max-w-lg">
       <h2 className="text-base font-semibold text-white">Create your team</h2>
       <p className="text-sm text-zinc-400">
-        You&apos;ll be captain. Name the team, then invite {teamSize - 1 > 0 ? `${teamSize - 1} more player${teamSize - 1 === 1 ? "" : "s"}` : "an optional substitute"} to
-        fill the roster — the team only enters once it&apos;s full.
+        You&apos;ll be captain. Name the team, then invite {toInvite} to fill the
+        roster — the team only enters once it&apos;s full.
       </p>
       <input
         value={name}

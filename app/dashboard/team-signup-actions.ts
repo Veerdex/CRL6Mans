@@ -8,6 +8,7 @@ import { isModerator } from "@/app/lib/players";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { playerRatingFromRow } from "@/app/lib/rating";
+import { pushToUser } from "@/app/lib/push";
 import {
   hasEarlySignupAccess,
   playerHasEarlySignupAccess,
@@ -25,8 +26,10 @@ const rosterMax = (teamSize: number) => teamSize + 1;
 // everyone they invite, so each action resolves it from whoever governs it.
 type Ctx = {
   playerId: string;
+  playerName: string;
   discordId: string;
   tournamentId: string;
+  tournamentName: string;
   teamSize: number;
   statsEnabled: boolean;
   window: SignupWindowRow;
@@ -40,7 +43,7 @@ async function getContext(tournamentId: string): Promise<{ ctx?: Ctx; error?: st
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("id, status")
+    .select("id, status, username, display_name")
     .eq("discord_id", session.userId)
     .single();
   if (!player) return { error: "No player profile found." };
@@ -48,7 +51,7 @@ async function getContext(tournamentId: string): Promise<{ ctx?: Ctx; error?: st
 
   const { data: t } = await supabaseAdmin
     .from("tournaments")
-    .select("join_mode, signups_open, signups_closed, status, draft_open_at, draft_close_at, team_size, stats_enabled, is_test")
+    .select("name, join_mode, signups_open, signups_closed, status, draft_open_at, draft_close_at, team_size, stats_enabled, is_test")
     .eq("id", tournamentId)
     .single();
   if (!t || (t.is_test && !(await isModerator(session.userId)))) return { error: "Tournament not found." };
@@ -57,8 +60,10 @@ async function getContext(tournamentId: string): Promise<{ ctx?: Ctx; error?: st
   return {
     ctx: {
       playerId: player.id,
+      playerName: player.display_name ?? player.username ?? "A player",
       discordId: session.userId,
       tournamentId,
+      tournamentName: (t.name as string | null) ?? "a tournament",
       teamSize: normalizeTeamSize((t as { team_size?: number }).team_size),
       statsEnabled: (t as { stats_enabled?: boolean | null }).stats_enabled ?? true,
       window: t as SignupWindowRow,
@@ -215,7 +220,7 @@ export async function invitePlayer(tournamentId: string, targetPlayerId: string)
 
   const { data: team } = await supabaseAdmin
     .from("team_signups")
-    .select("id, team_signup_members(player_id, status)")
+    .select("id, name, team_signup_members(player_id, status)")
     .eq("tournament_id", ctx.tournamentId)
     .eq("creator_player_id", ctx.playerId)
     .maybeSingle();
@@ -230,7 +235,7 @@ export async function invitePlayer(tournamentId: string, targetPlayerId: string)
     return { error: "That player is already invited or on the team." };
 
   const { data: target } = await supabaseAdmin
-    .from("players").select("id, status").eq("id", targetPlayerId).single();
+    .from("players").select("id, status, discord_id").eq("id", targetPlayerId).single();
   if (!target || target.status !== "approved") return { error: "That player isn't approved." };
 
   const targetTeam = await findMyTeam(targetPlayerId, ctx.tournamentId);
@@ -242,6 +247,18 @@ export async function invitePlayer(tournamentId: string, targetPlayerId: string)
     status: "invited",
   });
   if (insErr) return { error: insErr.message };
+
+  // Unconditional: an invite the player never sees is an invite that expires.
+  // The card only shows it to someone without a team, and a Discord DM isn't on
+  // offer here, so this notice is the only thing that reaches them.
+  if (target.discord_id)
+    pushToUser(target.discord_id as string, {
+      title: "Team Invite",
+      body: `${ctx.playerName} invited you to join ${team.name} for ${ctx.tournamentName}.`,
+      url: "/dashboard",
+      tag: "team-invite",
+      category: "tournament",
+    }).catch(() => {});
 
   refresh();
   return { ok: true, message: "Invite sent." };
