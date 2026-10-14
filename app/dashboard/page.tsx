@@ -499,9 +499,10 @@ export default async function DashboardPage({
               />
             );
           })}
-          {/* Team mode has no single join button to stand in for, and its panel needs
-              the teamViews only built for approved players, so it degrades to the
-              read-only card instead. */}
+          {/* Team mode's panel needs the teamViews only built for approved players,
+              so it degrades to the read-only card instead. Its Join button could
+              stand in with a RegisterPromptModal the way TournamentJoinCard's does,
+              but that wants the view's shape to be optional first. */}
           {!isApproved && openTeamTs.map((t) => {
             const timeline = buildTimeline(t, false, endIsoFor(t));
             const sponsorId = (t as { sponsor_id?: string | null }).sponsor_id ?? null;

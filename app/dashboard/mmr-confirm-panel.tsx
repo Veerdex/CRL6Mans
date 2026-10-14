@@ -34,7 +34,15 @@ export function mmrChanged(a: MmrValues, b: MmrValues): boolean {
 // The stopPropagation calls below are not redundant under a portal — React events
 // bubble along the React tree, so without them a click in the modal reaches the
 // card's onClick and navigates away.
-export function ModalShell({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+export function ModalShell({
+  onClose,
+  children,
+  maxWidthClass = "max-w-md",
+}: {
+  onClose: () => void;
+  children: React.ReactNode;
+  maxWidthClass?: string;
+}) {
   const mounted = useMounted();
   if (!mounted) return null;
   return createPortal(
@@ -43,7 +51,7 @@ export function ModalShell({ onClose, children }: { onClose: () => void; childre
       onClick={(e) => { e.stopPropagation(); onClose(); }}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-xl flex flex-col gap-3"
+        className={`w-full ${maxWidthClass} rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-xl flex flex-col gap-3`}
         onClick={(e) => e.stopPropagation()}
       >
         {children}

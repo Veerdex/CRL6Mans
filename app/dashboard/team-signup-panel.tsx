@@ -18,6 +18,7 @@ import { CountdownLabel } from "./countdown-label";
 import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import type { PublicSponsor } from "@/app/lib/sponsors-public";
 import { formatPromoDescription } from "@/app/lib/sponsor-promo";
+import { ModalShell } from "./mmr-confirm-panel";
 
 export function TeamSignupPanel({
   view,
@@ -53,9 +54,9 @@ export function TeamSignupPanel({
   const backgroundUrl = sponsor?.background_image_url ?? fallbackBackgroundUrl ?? null;
   const { myTeam, incomingInvites, invitable, registrationOpen } = view;
   const [isPending, startTransition] = useTransition();
-  const [name, setName] = useState("");
   const [inviteId, setInviteId] = useState("");
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const flash = (msg: string | undefined, ok: boolean) => {
     setFeedback({ msg: msg ?? "", ok });
@@ -122,7 +123,24 @@ export function TeamSignupPanel({
           </p>
           {countdown && <div className="mt-1"><CountdownLabel label={countdown.label} iso={countdown.iso} /></div>}
         </div>
-        <div className="shrink-0 flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-3 py-1.5 min-w-[90px]">
+        <div className="shrink-0 flex flex-col items-center gap-2">
+        <span className="px-2 py-0.5 rounded-md bg-zinc-800/70 border border-zinc-600/50 text-[13.5px] font-semibold tracking-wide text-zinc-300 tabular-nums whitespace-nowrap">
+          {teamSize}v{teamSize}
+        </span>
+        {/* Stands where TournamentJoinCard's Join button does, so both join modes
+            read the same on the card. The card itself navigates on click and this
+            rail is outside the stopPropagation wrapper below, so the button has to
+            stop its own. */}
+        {!myTeam && registrationOpen && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setCreateOpen(true); }}
+            disabled={isPending}
+            className="px-4 py-2 rounded-lg text-[21px] font-semibold transition-colors bg-emerald-600 hover:bg-emerald-500 text-white"
+          >
+            Join
+          </button>
+        )}
+        <div className="flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-3 py-1.5 min-w-[90px]">
           <p className="text-[11.25px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
           <p className="text-[20.25px] font-bold text-amber-400 tabular-nums">${totalPrizePool.toLocaleString()}</p>
           {totalPrizePool > 0 && (
@@ -132,6 +150,7 @@ export function TeamSignupPanel({
               <p>3rd-4th: <span className="text-zinc-200">${(prize3rd4th ?? 0).toLocaleString()}</span></p>
             </div>
           )}
+        </div>
         </div>
       </div>
 
@@ -240,28 +259,21 @@ export function TeamSignupPanel({
             </div>
           )}
 
-          {/* Create a team */}
-          {registrationOpen && (
-            <div className="flex gap-2">
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your team name"
-                maxLength={30}
-                className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-[21px] text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              />
-              <button
-                onClick={() => { if (name.trim()) run(() => createTeam(tournamentId, name)); }}
-                disabled={isPending || !name.trim()}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-[21px] font-medium rounded-lg transition-colors"
-              >
-                Create team
-              </button>
-            </div>
+          {!registrationOpen && incomingInvites.length === 0 && (
+            <p className="text-[21px] text-zinc-500">Team registration is closed.</p>
           )}
         </div>
       )}
       </div>
+
+      {createOpen && (
+        <CreateTeamModal
+          tournamentId={tournamentId}
+          teamSize={teamSize}
+          onClose={() => setCreateOpen(false)}
+          onCreated={(msg) => { setCreateOpen(false); flash(msg, true); }}
+        />
+      )}
 
       {feedback && (
         <p className={`relative text-[21px] ${feedback.ok ? "text-emerald-400" : "text-red-400"}`}>{feedback.msg}</p>
@@ -278,5 +290,71 @@ export function TeamSignupPanel({
       )}
       </div>
     </div>
+  );
+}
+
+// The Join button's popup. Portaled by ModalShell, which the card needs: the card
+// clips its children (overflow-hidden) and navigates on click, and a portal keeps
+// the dialog out of both. Its own error state matters too — the card's feedback
+// line sits behind the backdrop, so a rejected name has to report in here.
+function CreateTeamModal({
+  tournamentId,
+  teamSize,
+  onClose,
+  onCreated,
+}: {
+  tournamentId: string;
+  teamSize: number;
+  onClose: () => void;
+  onCreated: (message: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const submit = () => {
+    if (!name.trim()) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await createTeam(tournamentId, name);
+      if (res.error) { setError(res.error); return; }
+      onCreated(res.message ?? "Team created.");
+    });
+  };
+
+  return (
+    <ModalShell onClose={onClose} maxWidthClass="max-w-lg">
+      <h2 className="text-base font-semibold text-white">Create your team</h2>
+      <p className="text-sm text-zinc-400">
+        You&apos;ll be captain. Name the team, then invite {teamSize - 1 > 0 ? `${teamSize - 1} more player${teamSize - 1 === 1 ? "" : "s"}` : "an optional substitute"} to
+        fill the roster — the team only enters once it&apos;s full.
+      </p>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+        placeholder="Your team name"
+        maxLength={30}
+        autoFocus
+        className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+      />
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <div className="flex flex-col gap-2 mt-1">
+        <button
+          onClick={submit}
+          disabled={isPending || !name.trim()}
+          className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
+        >
+          {isPending ? "Creating…" : "Create team"}
+        </button>
+        <button
+          onClick={onClose}
+          disabled={isPending}
+          className="w-full px-4 py-1.5 text-zinc-500 hover:text-zinc-300 text-sm transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </ModalShell>
   );
 }
