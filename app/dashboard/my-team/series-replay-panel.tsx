@@ -223,8 +223,8 @@ function TeamLogo({ team, size }: { team: SeriesTeamInfo | null; size: "sm" | "l
   );
 }
 
-function TeamColumn({ team, side }: { team: SeriesTeamInfo | null; side: "home" | "away" }) {
-  const align = side === "home" ? "items-end text-right" : "items-start text-left";
+function TeamColumn({ team, side }: { team: SeriesTeamInfo | null; side: "left" | "right" }) {
+  const align = side === "left" ? "items-end text-right" : "items-start text-left";
   return (
     <div className={`flex flex-col gap-2 min-w-0 w-32 ${align}`}>
       <TeamLogo team={team} size="lg" />
@@ -247,6 +247,51 @@ function TeamColumn({ team, side }: { team: SeriesTeamInfo | null; side: "home" 
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// The teams-and-score row every view in this panel opens with.
+//
+// On My Team your own team is always the left column, whichever side of the
+// fixture the bracket put you on — the page is read from one team's point of
+// view, so a scoreboard that silently flips sides between rounds is read wrong.
+// The scores are swapped with the teams rather than separately, which is the
+// whole reason this lives in one component: eight views previously repeated the
+// row, and a score mapped to the wrong column is invisible until it is a
+// reported result.
+//
+// Which side is nominally home is still carried by the Home/Away badge on the
+// schedule panel, so ordering by team does not lose it.
+function SeriesScoreboard({
+  homeTeam, awayTeam, myTeamId, homeScore, awayScore, scoreClassName, caption,
+}: {
+  homeTeam: SeriesTeamInfo | null;
+  awayTeam: SeriesTeamInfo | null;
+  myTeamId: string;
+  homeScore?: number | string | null;
+  awayScore?: number | string | null;
+  scoreClassName?: string;
+  caption?: React.ReactNode;
+}) {
+  const iAmHome = myTeamId === homeTeam?.id;
+  const leftTeam = iAmHome ? homeTeam : awayTeam;
+  const rightTeam = iAmHome ? awayTeam : homeTeam;
+  const leftScore = iAmHome ? homeScore : awayScore;
+  const rightScore = iAmHome ? awayScore : homeScore;
+  const missing = (v: number | string | null | undefined) => v === null || v === undefined || v === "";
+  const hasScore = !missing(leftScore) && !missing(rightScore);
+
+  return (
+    <div className="flex items-start gap-4">
+      <TeamColumn team={leftTeam} side="left" />
+      <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
+        <p className={`text-3xl font-bold font-mono tabular-nums ${scoreClassName ?? "text-white"}`}>
+          {hasScore ? `${leftScore} – ${rightScore}` : "– – –"}
+        </p>
+        {caption}
+      </div>
+      <TeamColumn team={rightTeam} side="right" />
     </div>
   );
 }
@@ -280,10 +325,11 @@ function CheckInSide({ label, done }: { label: string; done: boolean }) {
  * the server refuses the other two.
  */
 function CheckInView({
-  homeTeam, awayTeam, bestOf, matchId, iCheckedIn, oppCheckedIn, checkinDeadline, opponentName,
+  homeTeam, awayTeam, myTeamId, bestOf, matchId, iCheckedIn, oppCheckedIn, checkinDeadline, opponentName,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
+  myTeamId: string;
   bestOf: number;
   matchId: string;
   iCheckedIn: boolean;
@@ -310,14 +356,13 @@ function CheckInView({
 
   return (
     <div className="p-5 space-y-6">
-      <div className="flex items-start gap-4">
-        <TeamColumn team={homeTeam} side="home" />
-        <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
-          <p className="text-3xl font-bold font-mono text-zinc-600 tabular-nums">– – –</p>
-          <p className="text-xs text-zinc-600 uppercase tracking-wider text-center">BO{bestOf}</p>
-        </div>
-        <TeamColumn team={awayTeam} side="away" />
-      </div>
+      <SeriesScoreboard
+        homeTeam={homeTeam}
+        awayTeam={awayTeam}
+        myTeamId={myTeamId}
+        scoreClassName="text-zinc-600"
+        caption={<p className="text-xs text-zinc-600 uppercase tracking-wider text-center">BO{bestOf}</p>}
+      />
 
       <div className="rounded-xl border border-zinc-700 bg-zinc-800/40 px-5 py-6 space-y-4 text-center">
         {deadline === null ? (
@@ -388,25 +433,24 @@ function CheckInView({
 // ── Confirmed / awaiting-admin view ────────────────────────────────────────────
 
 function ConfirmedView({
-  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, awaitingReview,
+  homeTeam, awayTeam, myTeamId, pendingHomeScore, pendingAwayScore, awaitingReview,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
+  myTeamId: string;
   pendingHomeScore: number;
   pendingAwayScore: number;
   awaitingReview: boolean;
 }) {
   return (
     <div className="p-5 space-y-4">
-      <div className="flex items-start gap-4">
-        <TeamColumn team={homeTeam} side="home" />
-        <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
-          <p className="text-3xl font-bold font-mono text-white tabular-nums">
-            {pendingHomeScore} – {pendingAwayScore}
-          </p>
-        </div>
-        <TeamColumn team={awayTeam} side="away" />
-      </div>
+      <SeriesScoreboard
+        homeTeam={homeTeam}
+        awayTeam={awayTeam}
+        myTeamId={myTeamId}
+        homeScore={pendingHomeScore}
+        awayScore={pendingAwayScore}
+      />
       <div className="bg-emerald-950/40 border border-emerald-700/40 rounded-lg px-4 py-3 text-center space-y-1">
         <p className="text-sm font-semibold text-emerald-300">Both captains confirmed this result</p>
         <p className="text-xs text-emerald-600">
@@ -422,11 +466,12 @@ function ConfirmedView({
 // ── Pending-confirmation view (shown to whichever captain submitted) ───────────
 
 function WaitingView({
-  homeTeam, awayTeam, pendingHomeScore, pendingAwayScore, matchId, scoreSubmittedAt, isTournament,
+  homeTeam, awayTeam, myTeamId, pendingHomeScore, pendingAwayScore, matchId, scoreSubmittedAt, isTournament,
   unmatchedNames, mode,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
+  myTeamId: string;
   pendingHomeScore: number;
   pendingAwayScore: number;
   matchId: string;
@@ -451,15 +496,13 @@ function WaitingView({
 
   return (
     <div className="p-5 space-y-4">
-      <div className="flex items-start gap-4">
-        <TeamColumn team={homeTeam} side="home" />
-        <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
-          <p className="text-3xl font-bold font-mono text-white tabular-nums">
-            {pendingHomeScore} – {pendingAwayScore}
-          </p>
-        </div>
-        <TeamColumn team={awayTeam} side="away" />
-      </div>
+      <SeriesScoreboard
+        homeTeam={homeTeam}
+        awayTeam={awayTeam}
+        myTeamId={myTeamId}
+        homeScore={pendingHomeScore}
+        awayScore={pendingAwayScore}
+      />
       <UnmatchedNote names={unmatchedNames} mode={mode} />
       <div className="bg-amber-950/40 border border-amber-700/40 rounded-lg px-4 py-3 space-y-2">
         <p className="text-sm font-semibold text-amber-300">Result submitted — awaiting opponent confirmation</p>
@@ -604,15 +647,13 @@ function OpponentSubmittedView({
 
   return (
     <div className="p-5 space-y-4">
-      <div className="flex items-start gap-4">
-        <TeamColumn team={homeTeam} side="home" />
-        <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
-          <p className="text-3xl font-bold font-mono text-white tabular-nums">
-            {pendingHomeScore} – {pendingAwayScore}
-          </p>
-        </div>
-        <TeamColumn team={awayTeam} side="away" />
-      </div>
+      <SeriesScoreboard
+        homeTeam={homeTeam}
+        awayTeam={awayTeam}
+        myTeamId={myTeamId}
+        homeScore={pendingHomeScore}
+        awayScore={pendingAwayScore}
+      />
       <UnmatchedNote names={unmatchedNames} mode={mode} />
       <div className="bg-indigo-950/40 border border-indigo-700/40 rounded-lg px-4 py-3 space-y-3">
         <div>
@@ -669,6 +710,7 @@ function OpponentSubmittedView({
 function RejectedView({
   homeTeam,
   awayTeam,
+  myTeamId,
   rejectedHome,
   rejectedAway,
   rejecterName,
@@ -677,6 +719,7 @@ function RejectedView({
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
+  myTeamId: string;
   rejectedHome: number | null;
   rejectedAway: number | null;
   rejecterName: string;
@@ -701,15 +744,14 @@ function RejectedView({
   return (
     <div className="p-5 space-y-4">
       {hadScore && (
-        <div className="flex items-start gap-4">
-          <TeamColumn team={homeTeam} side="home" />
-          <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
-            <p className="text-3xl font-bold font-mono text-zinc-500 line-through tabular-nums">
-              {rejectedHome} – {rejectedAway}
-            </p>
-          </div>
-          <TeamColumn team={awayTeam} side="away" />
-        </div>
+        <SeriesScoreboard
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          myTeamId={myTeamId}
+          homeScore={rejectedHome}
+          awayScore={rejectedAway}
+          scoreClassName="text-zinc-500 line-through"
+        />
       )}
       <div className="text-center space-y-1">
         <p className="text-3xl">✋</p>
@@ -750,11 +792,13 @@ function RejectedView({
 function DisputedView({
   homeTeam,
   awayTeam,
+  myTeamId,
   rejectedHome,
   rejectedAway,
 }: {
   homeTeam: SeriesTeamInfo | null;
   awayTeam: SeriesTeamInfo | null;
+  myTeamId: string;
   rejectedHome: number | null;
   rejectedAway: number | null;
 }) {
@@ -762,16 +806,14 @@ function DisputedView({
   return (
     <div className="p-5 space-y-4">
       {hadScore && (
-        <div className="flex items-start gap-4">
-          <TeamColumn team={homeTeam} side="home" />
-          <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
-            <p className="text-3xl font-bold font-mono text-white tabular-nums">
-              {rejectedHome} – {rejectedAway}
-            </p>
-            <p className="text-[11px] uppercase tracking-wide text-red-400">in question</p>
-          </div>
-          <TeamColumn team={awayTeam} side="away" />
-        </div>
+        <SeriesScoreboard
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          myTeamId={myTeamId}
+          homeScore={rejectedHome}
+          awayScore={rejectedAway}
+          caption={<p className="text-[11px] uppercase tracking-wide text-red-400">in question</p>}
+        />
       )}
       <div className="text-center space-y-2">
         <p className="text-3xl">⚖️</p>
@@ -1147,6 +1189,7 @@ export function SeriesReplayPanel({
         <DisputedView
           homeTeam={homeTeam}
           awayTeam={awayTeam}
+          myTeamId={myTeamId}
           rejectedHome={scoreRejectedHome}
           rejectedAway={scoreRejectedAway}
         />
@@ -1163,6 +1206,7 @@ export function SeriesReplayPanel({
         <ConfirmedView
           homeTeam={homeTeam}
           awayTeam={awayTeam}
+          myTeamId={myTeamId}
           pendingHomeScore={pendingHomeScore}
           pendingAwayScore={pendingAwayScore}
           awaitingReview={replayAnalysisMode === "strict" && seriesUnmatched.length > 0}
@@ -1180,6 +1224,7 @@ export function SeriesReplayPanel({
         <WaitingView
           homeTeam={homeTeam}
           awayTeam={awayTeam}
+          myTeamId={myTeamId}
           pendingHomeScore={pendingHomeScore}
           pendingAwayScore={pendingAwayScore}
           matchId={matchId}
@@ -1234,6 +1279,7 @@ export function SeriesReplayPanel({
         <RejectedView
           homeTeam={homeTeam}
           awayTeam={awayTeam}
+          myTeamId={myTeamId}
           rejectedHome={scoreRejectedHome}
           rejectedAway={scoreRejectedAway}
           rejecterName={rejecter.name}
@@ -1274,6 +1320,7 @@ export function SeriesReplayPanel({
         <CheckInView
           homeTeam={homeTeam}
           awayTeam={awayTeam}
+          myTeamId={myTeamId}
           bestOf={bestOf}
           matchId={matchId}
           iCheckedIn={iCheckedIn}
@@ -1313,36 +1360,38 @@ export function SeriesReplayPanel({
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
         {header}
         <div className="p-5 space-y-6">
-          <div className="flex items-start gap-4">
-            <TeamColumn team={homeTeam} side="home" />
-            <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
-              <p className="text-3xl font-bold font-mono text-white tabular-nums">
-                {bothEntered ? `${homeScoreInput} – ${awayScoreInput}` : "– – –"}
-              </p>
+          <SeriesScoreboard
+            homeTeam={homeTeam}
+            awayTeam={awayTeam}
+            myTeamId={myTeamId}
+            homeScore={homeScoreInput}
+            awayScore={awayScoreInput}
+            caption={
               <p className="text-xs text-zinc-600 uppercase tracking-wider text-center">
                 {previewWinner ? `${previewWinner.name} wins` : `BO${bestOf}`}
               </p>
-            </div>
-            <TeamColumn team={awayTeam} side="away" />
-          </div>
+            }
+          />
 
           <div>
             <p className="text-xs text-zinc-400 mb-2.5">
               Enter how many games each team won — not the goals in a game.
             </p>
+            {/* Same order as the scoreboard above — my team's field on the left,
+                or the two rows disagree about which number is whose. */}
             <div className="flex items-end gap-3">
               <ScoreField
-                team={homeTeam}
-                isMine={iAmHome}
-                value={homeScoreInput}
-                onChange={setHomeScoreInput}
+                team={iAmHome ? homeTeam : awayTeam}
+                isMine
+                value={iAmHome ? homeScoreInput : awayScoreInput}
+                onChange={iAmHome ? setHomeScoreInput : setAwayScoreInput}
               />
               <span className="pb-3 text-lg font-bold text-zinc-600">–</span>
               <ScoreField
-                team={awayTeam}
-                isMine={!iAmHome}
-                value={awayScoreInput}
-                onChange={setAwayScoreInput}
+                team={iAmHome ? awayTeam : homeTeam}
+                isMine={false}
+                value={iAmHome ? awayScoreInput : homeScoreInput}
+                onChange={iAmHome ? setAwayScoreInput : setHomeScoreInput}
               />
             </div>
           </div>
@@ -1393,20 +1442,20 @@ export function SeriesReplayPanel({
 
       <div className="p-5 space-y-6">
         {/* Teams + score header */}
-        <div className="flex items-start gap-4">
-          <TeamColumn team={homeTeam} side="home" />
-          <div className="flex-1 flex flex-col items-center justify-center pt-3 gap-1.5 min-w-0">
-            <p className="text-3xl font-bold font-mono text-white tabular-nums">
-              {homeWins} – {awayWins}
-            </p>
+        <SeriesScoreboard
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          myTeamId={myTeamId}
+          homeScore={homeWins}
+          awayScore={awayWins}
+          caption={
             <p className="text-xs text-zinc-600 uppercase tracking-wider text-center">
               {seriesWinner
                 ? `${seriesWinner.name} wins`
                 : `BO${needed * 2 - 1}`}
             </p>
-          </div>
-          <TeamColumn team={awayTeam} side="away" />
-        </div>
+          }
+        />
 
         {/* Game slots */}
         <div className="space-y-2">
