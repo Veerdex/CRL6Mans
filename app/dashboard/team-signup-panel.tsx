@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   createTeam,
   invitePlayer,
+  renameTeam,
   revokeInvite,
   respondInvite,
   leaveTeam,
@@ -54,9 +55,9 @@ export function TeamSignupPanel({
   const backgroundUrl = sponsor?.background_image_url ?? fallbackBackgroundUrl ?? null;
   const { myTeam, incomingInvites, invitable, registrationOpen } = view;
   const [isPending, startTransition] = useTransition();
-  const [inviteId, setInviteId] = useState("");
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
 
   const flash = (msg: string | undefined, ok: boolean) => {
     setFeedback({ msg: msg ?? "", ok });
@@ -67,8 +68,6 @@ export function TeamSignupPanel({
       const res = await fn();
       flash(res.error ?? res.message, !res.error);
     });
-
-  const acceptedCount = myTeam?.members.filter((m) => m.status === "accepted").length ?? 0;
 
   return (
     <div
@@ -140,6 +139,17 @@ export function TeamSignupPanel({
             Join
           </button>
         )}
+        {/* Deliberately not gated on registrationOpen: with the roster moved
+            into the popup, this is the only way to see your own team on the
+            card once the window shuts. */}
+        {myTeam && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setTeamOpen(true); }}
+            className="px-4 py-2 rounded-lg text-[21px] font-semibold transition-colors bg-blue-600 hover:bg-blue-500 text-white"
+          >
+            Team
+          </button>
+        )}
         <div className="flex flex-col items-center text-center bg-zinc-800/60 border border-amber-700/40 rounded-lg px-3 py-1.5 min-w-[90px]">
           <p className="text-[11.25px] uppercase tracking-wide text-zinc-500">Prize Pool</p>
           <p className="text-[20.25px] font-bold text-amber-400 tabular-nums">${totalPrizePool.toLocaleString()}</p>
@@ -154,83 +164,12 @@ export function TeamSignupPanel({
         </div>
       </div>
 
-      {/* Already on a team */}
-      <div onClick={(e) => e.stopPropagation()} className="relative space-y-4">
-      {myTeam ? (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl font-bold text-white">{myTeam.name}</span>
-            <span className="text-lg text-zinc-500">{acceptedCount}/{teamSize} starters{acceptedCount > teamSize ? " +sub" : ""}</span>
-          </div>
-
-          <ul className="space-y-1.5">
-            {myTeam.members.map((m) => (
-              <li key={m.memberId} className="flex items-center gap-2 text-[21px]">
-                <span className="text-zinc-200"><PlayerName displayName={m.display_name ?? null} username={m.username} discordId={m.discord_id} /></span>
-                {m.isCreator && <span className="text-[15px] font-bold text-yellow-400">CAPTAIN</span>}
-                {m.status === "invited" && (
-                  <span className="text-[15px] font-medium text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">PENDING</span>
-                )}
-                {myTeam.isCreator && m.status === "invited" && registrationOpen && (
-                  <button
-                    onClick={() => run(() => revokeInvite(m.memberId))}
-                    disabled={isPending}
-                    className="ml-auto text-lg text-zinc-500 hover:text-red-400"
-                  >
-                    Revoke
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-
-          {/* Creator: invite */}
-          {myTeam.isCreator && registrationOpen && myTeam.members.length < 4 && (
-            <div className="flex gap-2 pt-1">
-              <select
-                value={inviteId}
-                onChange={(e) => setInviteId(e.target.value)}
-                className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-[21px] text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                <option value="">Invite a player…</option>
-                {invitable.map((p) => (
-                  <option key={p.id} value={p.id}>{p.display_name ?? p.username}</option>
-                ))}
-              </select>
-              <button
-                onClick={() => { if (inviteId) { run(() => invitePlayer(tournamentId, inviteId)); setInviteId(""); } }}
-                disabled={isPending || !inviteId}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-[21px] font-medium rounded-lg transition-colors"
-              >
-                Invite
-              </button>
-            </div>
-          )}
-
-          {/* Leave / disband */}
-          <div className="pt-1">
-            {myTeam.isCreator ? (
-              <button
-                onClick={() => run(() => disbandTeam(tournamentId))}
-                disabled={isPending}
-                className="text-lg text-zinc-500 hover:text-red-400"
-              >
-                Disband team
-              </button>
-            ) : (
-              <button
-                onClick={() => run(() => leaveTeam(tournamentId))}
-                disabled={isPending}
-                className="text-lg text-zinc-500 hover:text-red-400"
-              >
-                Leave team
-              </button>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {/* Incoming invites */}
+      {/* The roster, invites out and leaving all live in the Team popup now —
+          the card carries nothing but the button that opens it. Invites *in*
+          stay here: hiding one behind a button the player may never press
+          would lose it. */}
+      {!myTeam && (
+        <div onClick={(e) => e.stopPropagation()} className="relative space-y-4">
           {incomingInvites.length > 0 && (
             <div className="space-y-2">
               <p className="text-lg font-medium text-zinc-400">Invites</p>
@@ -264,7 +203,6 @@ export function TeamSignupPanel({
           )}
         </div>
       )}
-      </div>
 
       {createOpen && (
         <CreateTeamModal
@@ -272,6 +210,20 @@ export function TeamSignupPanel({
           teamSize={teamSize}
           onClose={() => setCreateOpen(false)}
           onCreated={(msg) => { setCreateOpen(false); flash(msg, true); }}
+        />
+      )}
+
+      {/* `myTeam` in the condition, not just `teamOpen`: a successful Leave
+          revalidates it to null, which is what dismisses the popup. */}
+      {teamOpen && myTeam && (
+        <TeamModal
+          tournamentId={tournamentId}
+          teamSize={teamSize}
+          team={myTeam}
+          invitable={invitable}
+          registrationOpen={registrationOpen}
+          onClose={() => setTeamOpen(false)}
+          onLeft={(msg) => { setTeamOpen(false); flash(msg, true); }}
         />
       )}
 
@@ -353,6 +305,158 @@ function CreateTeamModal({
           className="w-full px-4 py-1.5 text-zinc-500 hover:text-zinc-300 text-sm transition-colors"
         >
           Cancel
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// What the Team button opens: the whole roster, and everything a member can do
+// to it. `team`, `invitable` and `registrationOpen` come from the panel's live
+// props rather than a copy taken at open time, so every action's
+// revalidatePath redraws the popup in place.
+function TeamModal({
+  tournamentId,
+  teamSize,
+  team,
+  invitable,
+  registrationOpen,
+  onClose,
+  onLeft,
+}: {
+  tournamentId: string;
+  teamSize: number;
+  team: NonNullable<TeamSignupView["myTeam"]>;
+  invitable: TeamSignupView["invitable"];
+  registrationOpen: boolean;
+  onClose: () => void;
+  onLeft: (message: string) => void;
+}) {
+  const [inviteId, setInviteId] = useState("");
+  const [name, setName] = useState(team.name);
+  const [note, setNote] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const acceptedCount = team.members.filter((m) => m.status === "accepted").length;
+  const rosterMax = teamSize + 1;
+  const canEdit = team.isCreator && registrationOpen;
+
+  const run = (fn: () => Promise<{ ok?: boolean; error?: string; message?: string }>) =>
+    startTransition(async () => {
+      const res = await fn();
+      setNote({ msg: res.error ?? res.message ?? "", ok: !res.error });
+    });
+
+  // Leaving reports on the card instead: the popup it would report in is the
+  // thing that disappears.
+  const leave = (fn: () => Promise<{ error?: string; message?: string }>) =>
+    startTransition(async () => {
+      const res = await fn();
+      if (res.error) { setNote({ msg: res.error, ok: false }); return; }
+      onLeft(res.message ?? "You left the team.");
+    });
+
+  return (
+    <ModalShell onClose={onClose} maxWidthClass="max-w-lg">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-base font-semibold text-white break-words">{team.name}</h2>
+        <span className="text-xs text-zinc-500 tabular-nums shrink-0">
+          {acceptedCount}/{teamSize} starters{acceptedCount > teamSize ? " +sub" : ""}
+        </span>
+      </div>
+
+      {canEdit && (
+        <div className="flex gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && name.trim() !== team.name) run(() => renameTeam(tournamentId, name)); }}
+            placeholder="Team name"
+            maxLength={30}
+            aria-label="Team name"
+            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+          <button
+            onClick={() => run(() => renameTeam(tournamentId, name))}
+            disabled={isPending || !name.trim() || name.trim() === team.name}
+            className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
+          >
+            Rename
+          </button>
+        </div>
+      )}
+
+      <ul className="space-y-1.5">
+        {team.members.map((m) => (
+          <li key={m.memberId} className="flex items-center gap-2 text-sm">
+            <span className="text-zinc-200">
+              <PlayerName displayName={m.display_name ?? null} username={m.username} discordId={m.discord_id} />
+            </span>
+            {m.isCreator && <span className="text-[11px] font-bold text-yellow-400">CAPTAIN</span>}
+            {m.status === "invited" && (
+              <span className="text-[11px] font-medium text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">PENDING</span>
+            )}
+            {canEdit && m.status === "invited" && (
+              <button
+                onClick={() => run(() => revokeInvite(m.memberId))}
+                disabled={isPending}
+                className="ml-auto text-xs text-zinc-500 hover:text-red-400"
+              >
+                Revoke
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {canEdit && team.members.length < rosterMax && (
+        <div className="flex gap-2">
+          <select
+            value={inviteId}
+            onChange={(e) => setInviteId(e.target.value)}
+            aria-label="Invite a player"
+            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          >
+            <option value="">Invite a player…</option>
+            {invitable.map((p) => (
+              <option key={p.id} value={p.id}>{p.display_name ?? p.username}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => { if (inviteId) { run(() => invitePlayer(tournamentId, inviteId)); setInviteId(""); } }}
+            disabled={isPending || !inviteId}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Invite
+          </button>
+        </div>
+      )}
+
+      {note && <p className={`text-sm ${note.ok ? "text-emerald-400" : "text-red-400"}`}>{note.msg}</p>}
+
+      <div className="flex flex-col gap-2 mt-1">
+        <button
+          onClick={() => leave(() => leaveTeam(tournamentId))}
+          disabled={isPending}
+          className="w-full px-4 py-2 bg-red-900/40 hover:bg-red-900/60 border border-red-800/60 disabled:opacity-50 text-red-300 text-sm font-semibold rounded-lg transition-colors"
+        >
+          Leave team
+        </button>
+        {team.isCreator && (
+          <button
+            onClick={() => leave(() => disbandTeam(tournamentId))}
+            disabled={isPending}
+            className="w-full text-xs text-zinc-600 hover:text-red-400 transition-colors"
+          >
+            Disband the team instead
+          </button>
+        )}
+        <button
+          onClick={onClose}
+          disabled={isPending}
+          className="w-full px-4 py-1.5 text-zinc-500 hover:text-zinc-300 text-sm transition-colors"
+        >
+          Close
         </button>
       </div>
     </ModalShell>

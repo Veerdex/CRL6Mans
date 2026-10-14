@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { isModerator } from "@/app/lib/players";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { normalizeTeamSize } from "@/app/lib/team-size";
+import { playerRatingFromRow } from "@/app/lib/rating";
 import {
   hasEarlySignupAccess,
   playerHasEarlySignupAccess,
@@ -92,6 +93,61 @@ async function signupForMember(
   return { tournamentId: ts.tournament_id as string, creatorPlayerId: ts.creator_player_id as string };
 }
 
+// Shared by createTeam and renameTeam so a rename can't slip a name past the
+// rules the create form enforces.
+function teamNameError(trimmed: string): string | null {
+  if (!trimmed) return "Team name is required.";
+  if (trimmed.length > 30) return "Team name is too long (30 char max).";
+  if (!/^[a-zA-Z0-9 ]+$/.test(trimmed))
+    return "Team name can only contain letters, numbers, and spaces.";
+  return null;
+}
+
+/** `exceptId` is what lets a team change its own name's casing. */
+async function nameTaken(tournamentId: string, trimmed: string, exceptId?: string) {
+  let q = supabaseAdmin
+    .from("team_signups")
+    .select("id")
+    .eq("tournament_id", tournamentId)
+    .ilike("name", trimmed);
+  if (exceptId) q = q.neq("id", exceptId);
+  const { data } = await q.maybeSingle();
+  return !!data;
+}
+
+// Captaincy belongs to the highest-RV player, so a captain leaving hands the
+// team to whoever activation would have made captain anyway. Ties break on who
+// accepted first.
+async function heirToCaptaincy(signupId: string) {
+  const { data: members } = await supabaseAdmin
+    .from("team_signup_members")
+    .select("player_id, responded_at")
+    .eq("team_signup_id", signupId)
+    .eq("status", "accepted");
+  if (!members?.length) return null;
+
+  const { data: rows } = await supabaseAdmin
+    .from("players")
+    .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .in(
+      "id",
+      members.map((m) => m.player_id)
+    );
+  const byId = new Map((rows ?? []).map((p) => [p.id as string, p]));
+
+  return members
+    .map((m) => {
+      const p = byId.get(m.player_id as string);
+      return {
+        playerId: m.player_id as string,
+        name: (p?.display_name as string | null) ?? (p?.username as string | undefined) ?? "a teammate",
+        rating: p ? playerRatingFromRow(p) : 0,
+        respondedAt: (m.responded_at as string | null) ?? "",
+      };
+    })
+    .sort((a, b) => b.rating - a.rating || a.respondedAt.localeCompare(b.respondedAt))[0];
+}
+
 async function checkJoinGate(playerId: string, statsEnabled: boolean): Promise<string | null> {
   if (!(await joinGateApplies(statsEnabled))) return null;
   if (await hasActiveVerifiedPlatformAccount(playerId, new Date())) return null;
@@ -109,9 +165,8 @@ export async function createTeam(tournamentId: string, name: string) {
     return { error: "Team registration is closed." };
 
   const trimmed = name.trim();
-  if (!trimmed) return { error: "Team name is required." };
-  if (trimmed.length > 30) return { error: "Team name is too long (30 char max)." };
-  if (!/^[a-zA-Z0-9 ]+$/.test(trimmed)) return { error: "Team name can only contain letters, numbers, and spaces." };
+  const nameError = teamNameError(trimmed);
+  if (nameError) return { error: nameError };
 
   const existing = await findMyTeam(ctx.playerId, ctx.tournamentId);
   if (existing) return { error: "You're already on a team." };
@@ -119,13 +174,8 @@ export async function createTeam(tournamentId: string, name: string) {
   const gateError = await checkJoinGate(ctx.playerId, ctx.statsEnabled);
   if (gateError) return { error: gateError };
 
-  const { data: dup } = await supabaseAdmin
-    .from("team_signups")
-    .select("id")
-    .eq("tournament_id", ctx.tournamentId)
-    .ilike("name", trimmed)
-    .maybeSingle();
-  if (dup) return { error: "A team with that name already exists." };
+  if (await nameTaken(ctx.tournamentId, trimmed))
+    return { error: "A team with that name already exists." };
 
   const { data: team, error: insErr } = await supabaseAdmin
     .from("team_signups")
@@ -195,6 +245,40 @@ export async function invitePlayer(tournamentId: string, targetPlayerId: string)
 
   refresh();
   return { ok: true, message: "Invite sent." };
+}
+
+export async function renameTeam(tournamentId: string, name: string) {
+  const { ctx, error } = await getContext(tournamentId);
+  if (error || !ctx) return { error: error ?? "Unavailable." };
+  // Gated on the window because the name is copied into `teams` and the
+  // Discord role at activation — a rename after that wouldn't follow it.
+  if (!signupWindowOpen(ctx.window, await hasEarlySignupAccess(ctx.discordId)))
+    return { error: "Team registration is closed." };
+
+  const trimmed = name.trim();
+  const nameError = teamNameError(trimmed);
+  if (nameError) return { error: nameError };
+
+  const { data: team } = await supabaseAdmin
+    .from("team_signups")
+    .select("id, name")
+    .eq("tournament_id", ctx.tournamentId)
+    .eq("creator_player_id", ctx.playerId)
+    .maybeSingle();
+  if (!team) return { error: "Only a team's captain can rename it." };
+  if (team.name === trimmed) return { ok: true, message: "Team name unchanged." };
+
+  if (await nameTaken(ctx.tournamentId, trimmed, team.id))
+    return { error: "A team with that name already exists." };
+
+  const { error: updErr } = await supabaseAdmin
+    .from("team_signups")
+    .update({ name: trimmed })
+    .eq("id", team.id);
+  if (updErr) return { error: updErr.message };
+
+  refresh();
+  return { ok: true, message: `Team renamed to "${trimmed}".` };
 }
 
 export async function revokeInvite(memberId: string) {
@@ -292,14 +376,30 @@ export async function leaveTeam(tournamentId: string) {
 
   const team = await findMyTeam(ctx.playerId, ctx.tournamentId);
   if (!team) return { error: "You're not on a team." };
-  if (team.creator_player_id === ctx.playerId)
-    return { error: "The creator can't leave — disband the team instead." };
 
   await supabaseAdmin
     .from("team_signup_members")
     .delete()
     .eq("team_signup_id", team.id)
     .eq("player_id", ctx.playerId);
+
+  let handover = "";
+  if (team.creator_player_id === ctx.playerId) {
+    const heir = await heirToCaptaincy(team.id);
+    // Nobody accepted but the captain, so there is no team to hand over —
+    // deleting it cascades the pending invites away, as disbandTeam does. An
+    // invitee is never promoted into a team they haven't joined.
+    if (!heir) {
+      await supabaseAdmin.from("team_signups").delete().eq("id", team.id);
+      refresh();
+      return { ok: true, message: "You left, and the team was disbanded." };
+    }
+    await supabaseAdmin
+      .from("team_signups")
+      .update({ creator_player_id: heir.playerId })
+      .eq("id", team.id);
+    handover = ` ${heir.name} is now captain.`;
+  }
 
   const { count } = await supabaseAdmin
     .from("team_signup_members")
@@ -310,7 +410,7 @@ export async function leaveTeam(tournamentId: string) {
     await supabaseAdmin.from("team_signups").update({ formed_at: null }).eq("id", team.id);
 
   refresh();
-  return { ok: true, message: "You left the team." };
+  return { ok: true, message: `You left the team.${handover}` };
 }
 
 export async function disbandTeam(tournamentId: string) {
