@@ -15,9 +15,9 @@
 
 import { supabaseAdmin } from "./supabase";
 import { sendChannelMessage, getGuildRoles } from "./discord-api";
+import { moderatorPing } from "./match-notifications";
 import {
   teamPing,
-  rolePing,
   subRequestedPost,
   subAcceptedPost,
   subRejectedPost,
@@ -362,13 +362,10 @@ export async function escalateSubRequestCore(args: {
   try {
     const match = await getMatchTeams(request.match_id);
     if (match?.discord_channel_id) {
-      const myName = await teamName(request.team_id);
-      const { data: ls } = await supabaseAdmin
-        .from("league_settings").select("moderator_role_id").single();
-      const modRoleId = ls?.moderator_role_id as string | null;
-      // The by-name fallback is kept, unlike the team pings: "moderator" is a league-
-      // owned role name, not a player-supplied one, so there's no @everyone hole here.
-      const modPing = rolePing(modRoleId) ?? teamPing("moderator", await getGuildRoles());
+      const [myName, modPing] = await Promise.all([
+        teamName(request.team_id),
+        moderatorPing(),
+      ]);
       await postToChannel(match.discord_channel_id, subEscalatedPost({
         teamName: myName ?? "A team",
         modPing,

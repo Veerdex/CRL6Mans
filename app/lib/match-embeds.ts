@@ -338,15 +338,20 @@ export function seriesRejectedPost(args: { teamName: string; oppPing: Ping | nul
   });
 }
 
-// The rejected team stood by its score, so staff now own the match. No ping:
-// the teams can read this but there is nothing left for them to do, and the
-// people who have to act are notified by push instead.
+// The rejected team stood by its score, so staff now own the match. The ping is
+// the moderators', not either team's: the teams can read this but there is
+// nothing left for them to do, while staff cannot act on what they never saw.
+// Push alone was the old answer and it is not enough — a browser subscription
+// can be absent, stale or rejected outright, and then a disputed match sits
+// until someone happens to open the admin panel. Same reasoning, and now the
+// same ping, as subEscalatedPost.
 export function seriesEscalatedPost(args: {
   teamName: string;
   homeWins: number;
   awayWins: number;
+  modPing: Ping | null;
 }): ChannelPost {
-  return channelPost([], {
+  return channelPost([args.modPing], {
     title: "Result disputed — staff reviewing",
     color: BAD_RED,
     description:

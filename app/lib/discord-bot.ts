@@ -26,7 +26,7 @@ import { APP_NAME } from "./constants";
 import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft-order";
 import { draftLabel, draftStartEmbed, onTheClockEmbed, pickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "./solo-team";
-import { notifyMatchChannel } from "./match-notifications";
+import { notifyMatchChannel, moderatorPing } from "./match-notifications";
 import {
   teamPing,
   tournamentIntroPost,
@@ -4113,13 +4113,16 @@ export async function disputeSeriesResultCore(args: {
   const awayScore = rejection.rejectedAway ?? 0;
 
   try {
-    const { data: myTeam } = await supabaseAdmin
-      .from("teams").select("name").eq("id", teamId).single();
+    const [{ data: myTeam }, modPing] = await Promise.all([
+      supabaseAdmin.from("teams").select("name").eq("id", teamId).single(),
+      moderatorPing(),
+    ]);
     if (myTeam?.name) {
       await notifyMatchChannel(args.matchId, seriesEscalatedPost({
         teamName: myTeam.name,
         homeWins: homeScore,
         awayWins: awayScore,
+        modPing,
       }), match.discord_channel_id as string | null);
     }
   } catch { /* best-effort */ }

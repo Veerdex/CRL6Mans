@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "./supabase";
-import { sendChannelMessage } from "./discord-api";
+import { sendChannelMessage, getGuildRoles } from "./discord-api";
 import { orFetch } from "./prefetched";
-import type { ChannelPost } from "./match-embeds";
+import { rolePing, teamPing, type ChannelPost, type Ping } from "./match-embeds";
 
 // Sends a message to the private Discord channel stored on a match record.
 // Silently no-ops if the match has no discord_channel_id.
@@ -34,4 +34,22 @@ export async function notifyMatchChannel(
     post.embeds,
     post.allowed_mentions,
   );
+}
+
+// The ping for "staff need to look at this match", shared by the two escalations
+// that pull staff into a match channel: a disputed series result and a reported
+// sub rejection. One copy, because the fallback is the subtle part — the stored
+// moderator_role_id is the real answer, and the by-name lookup only covers a
+// league that never ran `/admin setmoderatorid`.
+//
+// That fallback is safe here in a way the team pings are not: "moderator" is a
+// league-owned role name, not a player-supplied one, so there is no path to
+// matching @everyone by name.
+export async function moderatorPing(): Promise<Ping | null> {
+  const { data } = await supabaseAdmin
+    .from("league_settings")
+    .select("moderator_role_id")
+    .single();
+  const roleId = (data?.moderator_role_id as string | null) ?? null;
+  return rolePing(roleId) ?? teamPing("moderator", await getGuildRoles());
 }

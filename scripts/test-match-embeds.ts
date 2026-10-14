@@ -86,7 +86,7 @@ const ALL: Array<[string, ChannelPost]> = [
   // be one of ours — so the invariant sweep sees the hostile case too.
   ["seriesSubmitted/hostile", seriesSubmittedPost({ ...submitted, homeWins: 3, awayWins: 0, unmatchedNames: ["@everyone", "@here", "<@&100>", "<@7>"], replayAnalysisMode: "loose" })],
   ["seriesRejected", seriesRejectedPost({ teamName: "Top Tier", oppPing: AWAY })],
-  ["seriesEscalated", seriesEscalatedPost({ teamName: "Top Tier", homeWins: 3, awayWins: 1 })],
+  ["seriesEscalated", seriesEscalatedPost({ teamName: "Top Tier", homeWins: 3, awayWins: 1, modPing: rolePing("300") })],
   ["replayReview", replayReviewPost(3, 1)],
   ["replayRejected", replayRejectedPost("Game 2 replay is from a different match.")],
   ["timeProposed", timeProposedPost({ teamName: "Top Tier", oppPing: AWAY, ts: 1700000000, isNewTime: false, note: "Head to the website." })],
