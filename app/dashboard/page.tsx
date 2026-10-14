@@ -12,6 +12,7 @@ import DraftCard from "./draft-card";
 import { TeamSignupPanel } from "./team-signup-panel";
 import { TournamentJoinCard } from "./tournament-join-card";
 import { getTeamSignupView, type TeamSignupView } from "./team-signup-data";
+import { TeamInvitesButton, type TeamInvite } from "./team-invites-button";
 import { earlySignupAccessByPlayerId, hasEarlySignupAccess, inEarlySignupWindow, signupWindowOpen, type SignupWindowRow } from "@/app/lib/signup-window";
 import { PastEvents, presetLabel, type PastEvent } from "./past-events";
 import { PresetEmblemRow } from "./preset-emblem-row";
@@ -240,6 +241,22 @@ export default async function DashboardPage({
   // Team-signup views per open team tournament.
   const teamViews: Record<string, TeamSignupView> = Object.fromEntries(teamViewEntries);
 
+  // Flattened for the Invites button on the Open Tournaments row. The cards
+  // each draw only their own invites, and only to a player without a team in
+  // that event, so this is the one place every invite is reachable at once.
+  const teamInvites: TeamInvite[] = openTeamTs.flatMap((t) => {
+    const view = teamViews[t.id];
+    if (!view) return [];
+    return view.incomingInvites.map((inv) => ({
+      memberId: inv.memberId,
+      tournamentName: t.name,
+      teamName: inv.teamName,
+      creatorName: inv.creatorName,
+      canAccept: inv.canAccept,
+      onTeam: !!view.myTeam,
+    }));
+  });
+
   // Sign-up counts for every team-mode card, which is what the projected end
   // time is sized against. teamViews only covers open tournaments and only from
   // the viewer's perspective, so this is a separate count.
@@ -467,7 +484,14 @@ export default async function DashboardPage({
           tournament vanished from their home page for the whole sign-up window. */}
       {openTournaments.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-[21px] font-semibold text-zinc-300">Open Tournaments</h2>
+          {/* The Invites button rides this row rather than a card because it
+              spans every open team-formation tournament. It shows whenever one
+              is open, count included, so the place invites turn up doesn't
+              move depending on whether any are waiting. */}
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-[21px] font-semibold text-zinc-300">Open Tournaments</h2>
+            {isApproved && openTeamTs.length > 0 && <TeamInvitesButton invites={teamInvites} />}
+          </div>
           {openPlayerTs.map((t) => {
             const timeline = buildTimeline(t, false, endIsoFor(t));
             const nextEvent = nextTimelineEvent(timeline, now);

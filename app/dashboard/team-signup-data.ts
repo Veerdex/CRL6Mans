@@ -96,19 +96,21 @@ export async function getTeamSignupView(
       }
     : null;
 
-  // Invites addressed to me (only relevant if I'm not yet on a team)
-  const inviteRows = myTeam
-    ? []
-    : signups.flatMap((s) =>
-        s.team_signup_members
-          .filter((m) => m.player_id === playerId && m.status === "invited")
-          .map((m) => ({
-            memberId: m.id,
-            teamName: s.name,
-            creatorPlayerId: s.creator_player_id,
-            creatorName: playerById.get(s.creator_player_id)?.username ?? "Unknown",
-          }))
-      );
+  // Invites addressed to me, listed even once I'm on a team: creating or
+  // joining one doesn't clear invites already sent to me, and an invite I can't
+  // see is one I can't decline. Being on a team blocks accepting, not seeing —
+  // the card only draws these when I have no team, but the Invites button on
+  // the Open Tournaments row draws them either way.
+  const inviteRows = signups.flatMap((s) =>
+    s.team_signup_members
+      .filter((m) => m.player_id === playerId && m.status === "invited")
+      .map((m) => ({
+        memberId: m.id,
+        teamName: s.name,
+        creatorPlayerId: s.creator_player_id,
+        creatorName: playerById.get(s.creator_player_id)?.username ?? "Unknown",
+      }))
+  );
 
   // Whoever governs each action decides its window: the creator once I'm on a
   // team (their Early Signup Access covers the roster they built), my own
