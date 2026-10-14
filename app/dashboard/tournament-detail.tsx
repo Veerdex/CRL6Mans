@@ -349,7 +349,7 @@ export async function TournamentDetailView({
             </div>
           </div>
 
-          {(t.min_mmr_2v2 || t.min_mmr_3v3) && (
+          {t.join_mode === "players" && (t.min_mmr_2v2 || t.min_mmr_3v3) && (
             <p className="text-[15px] text-zinc-500">
               Req:{" "}
               {[t.min_mmr_2v2 ? `${t.min_mmr_2v2} 2v2` : null, t.min_mmr_3v3 ? `${t.min_mmr_3v3} 3v3` : null]

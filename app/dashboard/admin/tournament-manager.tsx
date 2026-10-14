@@ -666,31 +666,37 @@ export function TournamentManager({
             </div>
           )}
 
-          <div>
-            <label className={labelCls}>Min 2v2 MMR requirement (optional)</label>
-            <input
-              type="number"
-              min={0}
-              max={3000}
-              className={inputCls}
-              value={form.minMmr2v2}
-              onChange={(e) => setForm({ ...form, minMmr2v2: e.target.value })}
-              placeholder="No minimum"
-            />
-          </div>
+          {/* Nothing checks a minimum when teams sign up pre-formed, and the
+              server drops the values in that mode. */}
+          {isPlayers && (
+            <>
+              <div>
+                <label className={labelCls}>Min 2v2 MMR requirement (optional)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={3000}
+                  className={inputCls}
+                  value={form.minMmr2v2}
+                  onChange={(e) => setForm({ ...form, minMmr2v2: e.target.value })}
+                  placeholder="No minimum"
+                />
+              </div>
 
-          <div>
-            <label className={labelCls}>Min 3v3 MMR requirement (optional)</label>
-            <input
-              type="number"
-              min={0}
-              max={3000}
-              className={inputCls}
-              value={form.minMmr3v3}
-              onChange={(e) => setForm({ ...form, minMmr3v3: e.target.value })}
-              placeholder="No minimum"
-            />
-          </div>
+              <div>
+                <label className={labelCls}>Min 3v3 MMR requirement (optional)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={3000}
+                  className={inputCls}
+                  value={form.minMmr3v3}
+                  onChange={(e) => setForm({ ...form, minMmr3v3: e.target.value })}
+                  placeholder="No minimum"
+                />
+              </div>
+            </>
+          )}
 
           <div>
             <label className={labelCls}>Sponsor / Design (optional)</label>

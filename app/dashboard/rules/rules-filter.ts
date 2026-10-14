@@ -20,13 +20,17 @@ export function tournamentRulesContext(
   },
   hasPlayoffs: boolean
 ): RulesContext {
+  // A minimum is only checked on the player sign-up path, so a team-mode event
+  // reads as having none even if a stale value is still stored on the row —
+  // {{MMR_NOTE}} sits in Section 2, which stays visible in both modes.
+  const teamMode = t.join_mode === "teams";
   return {
     scope: "tournament",
     joinMode: t.join_mode,
     teamAssignment: t.team_assignment,
     hasPlayoffs,
-    minMmr2v2: t.min_mmr_2v2,
-    minMmr3v3: t.min_mmr_3v3,
+    minMmr2v2: teamMode ? null : t.min_mmr_2v2,
+    minMmr3v3: teamMode ? null : t.min_mmr_3v3,
   };
 }
 

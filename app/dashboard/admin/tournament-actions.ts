@@ -157,8 +157,14 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
   if (teamLimit && minTeams && teamLimit < minTeams)
     return { error: "Max teams must be greater than or equal to min teams." };
 
-  const min2v2 = input.min_mmr_2v2 != null && input.min_mmr_2v2 !== (null as unknown) ? Number(input.min_mmr_2v2) : null;
-  const min3v3 = input.min_mmr_3v3 != null && input.min_mmr_3v3 !== (null as unknown) ? Number(input.min_mmr_3v3) : null;
+  // Only the player sign-up path checks a minimum, so a team-mode event stores
+  // none — the detail page and the Rules page would otherwise advertise a
+  // requirement nothing enforces. Dropped before the range checks, so a value
+  // typed and then hidden by a mode switch can't fail a save on a field the
+  // admin can no longer see.
+  const collectsMinMmr = input.join_mode === "players";
+  const min2v2 = collectsMinMmr && input.min_mmr_2v2 != null ? Number(input.min_mmr_2v2) : null;
+  const min3v3 = collectsMinMmr && input.min_mmr_3v3 != null ? Number(input.min_mmr_3v3) : null;
   if (min2v2 !== null && (!Number.isInteger(min2v2) || min2v2 < 0 || min2v2 > 3000))
     return { error: "Min 2v2 MMR must be between 0 and 3000." };
   if (min3v3 !== null && (!Number.isInteger(min3v3) || min3v3 < 0 || min3v3 > 3000))
