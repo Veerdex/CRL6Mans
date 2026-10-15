@@ -2,7 +2,7 @@
 
 import { useActionState, useTransition } from "react";
 import { requestProfileChange, cancelProfileRequest, dismissRejectedRequest } from "./actions";
-import { earlySeasonPrompt, seasonPeakLabel, type EarlySeasonNotice } from "@/app/lib/rl-season";
+import { seasonPeakLabel, type EarlySeasonNotice } from "@/app/lib/rl-season";
 
 export type PlayerSettings = {
   tracker_url: string;
@@ -98,18 +98,11 @@ export function SettingsForm({
           <p className="text-xs text-zinc-500">Changing this needs admin approval.</p>
         </div>
 
-        <div className="space-y-3">
-          {earlySeason && (
-            <p className="text-xs text-amber-300 bg-amber-950/40 border border-amber-700/50 rounded-lg px-3 py-2">
-              {earlySeasonPrompt(earlySeason)}
-            </p>
-          )}
-          <div className="grid grid-cols-2 gap-4">
-            <MMRInput name="current_2v2" label={seasonPeakLabel("2v2", !!earlySeason)} defaultValue={current.current_2v2} />
-            <MMRInput name="peak_2v2"    label="All Time Peak 2v2" defaultValue={current.peak_2v2} />
-            <MMRInput name="current_3v3" label={seasonPeakLabel("3v3", !!earlySeason)} defaultValue={current.current_3v3} />
-            <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={current.peak_3v3} />
-          </div>
+        <div className="grid grid-cols-2 gap-4">
+          <MMRInput name="current_2v2" label={seasonPeakLabel("2v2", earlySeason)} defaultValue={current.current_2v2} />
+          <MMRInput name="peak_2v2"    label="All Time Peak 2v2" defaultValue={current.peak_2v2} />
+          <MMRInput name="current_3v3" label={seasonPeakLabel("3v3", earlySeason)} defaultValue={current.current_3v3} />
+          <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={current.peak_3v3} />
         </div>
 
         <div className="flex items-center justify-between p-4 bg-zinc-800 border border-zinc-700 rounded-lg">

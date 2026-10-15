@@ -86,21 +86,17 @@ export function earlySeasonNotice(
   };
 }
 
-/** "Last Season Peak 3v3" while the notice is set, "Season Peak 3v3" otherwise. */
-export function seasonPeakLabel(playlist: "2v2" | "3v3", early: boolean): string {
-  return `${early ? "Last Season Peak" : "Season Peak"} ${playlist}`;
+/**
+ * "Season 23 Peak" while the notice is set, "Season Peak" otherwise. Naming the
+ * season on the box is the whole instruction — no prose accompanies it, so this
+ * has to read unambiguously on its own.
+ */
+export function seasonPeakTitle(notice: EarlySeasonNotice | null): string {
+  if (!notice) return "Season Peak";
+  return notice.previousSeason ? `Season ${notice.previousSeason} Peak` : "Last Season Peak";
 }
 
-/** One sentence, shared verbatim by every surface that collects MMR. */
-export function earlySeasonPrompt(notice: EarlySeasonNotice): string {
-  const last = notice.previousSeason ? `Season ${notice.previousSeason}` : "last season";
-  const when =
-    notice.daysIn === 0 ? "today" : notice.daysIn === 1 ? "yesterday" : `${notice.daysIn} days ago`;
-  // Names the boxes: the note sits above all four, and a player who read it as
-  // covering All Time Peak too would lower `peak_*` to last season's number.
-  return (
-    `Rocket League Season ${notice.season} started ${when}, so this season's ranks are still` +
-    ` settling after the reset. Put your ${last} peaks in the Last Season Peak boxes —` +
-    ` All Time Peak is still your all-time best.`
-  );
+/** The same, qualified by playlist: "Season 23 Peak 3v3". */
+export function seasonPeakLabel(playlist: "2v2" | "3v3", notice: EarlySeasonNotice | null): string {
+  return `${seasonPeakTitle(notice)} ${playlist}`;
 }

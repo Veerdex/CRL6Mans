@@ -7,8 +7,8 @@ import {
   currentRlSeason,
   daysIntoRlSeason,
   earlySeasonNotice,
-  earlySeasonPrompt,
   seasonPeakLabel,
+  seasonPeakTitle,
 } from "../app/lib/rl-season";
 
 const S24 = "2026-09-23T16:00:00Z";
@@ -77,32 +77,24 @@ test("the oldest season in the table has no previous one to name", () => {
   assert.equal(earlySeasonNotice(at(oldest.startedAt))?.previousSeason, null);
 });
 
-// ─── Copy ───────────────────────────────────────────────────────────────────────
+// ─── Labels ─────────────────────────────────────────────────────────────────────
+// The label is the entire instruction — no prose accompanies it — so it has to
+// name the season a player should read off their tracker, and never the live one.
 
-test("the prompt names last season, never the live one, as the value to enter", () => {
-  const prompt = earlySeasonPrompt(earlySeasonNotice(daysAfter(S24, 5))!);
-  assert.match(prompt, /Season 24 started 5 days ago/);
-  assert.match(prompt, /Put your Season 23 peaks in the Last Season Peak boxes/);
+test("the label names last season by number while the window is open", () => {
+  const early = earlySeasonNotice(daysAfter(S24, 5));
+  assert.equal(seasonPeakTitle(early), "Season 23 Peak");
+  assert.equal(seasonPeakLabel("3v3", early), "Season 23 Peak 3v3");
+  assert.equal(seasonPeakLabel("2v2", early), "Season 23 Peak 2v2");
 });
 
-test("the prompt names the boxes, so nobody lowers their all-time peak", () => {
-  const prompt = earlySeasonPrompt(earlySeasonNotice(daysAfter(S24, 5))!);
-  assert.match(prompt, /All Time Peak is still your all-time best/);
+test("the label goes back to the unqualified one once the window closes", () => {
+  assert.equal(seasonPeakTitle(null), "Season Peak");
+  assert.equal(seasonPeakLabel("3v3", null), "Season Peak 3v3");
+  assert.equal(seasonPeakLabel("2v2", earlySeasonNotice(daysAfter(S24, EARLY_SEASON_DAYS))), "Season Peak 2v2");
 });
 
-test("day zero and day one read as English, not as a count", () => {
-  assert.match(earlySeasonPrompt(earlySeasonNotice(at(S24))!), /started today/);
-  assert.match(earlySeasonPrompt(earlySeasonNotice(daysAfter(S24, 1))!), /started yesterday/);
-});
-
-test("with no previous season named, the prompt still asks for last season's", () => {
+test("with no previous season to number, the label still says last season", () => {
   const oldest = RL_SEASONS[0];
-  const prompt = earlySeasonPrompt(earlySeasonNotice(at(oldest.startedAt))!);
-  assert.match(prompt, /Put your last season peaks in the Last Season Peak boxes/);
-});
-
-test("the input label switches to last season and back", () => {
-  assert.equal(seasonPeakLabel("3v3", true), "Last Season Peak 3v3");
-  assert.equal(seasonPeakLabel("3v3", false), "Season Peak 3v3");
-  assert.equal(seasonPeakLabel("2v2", true), "Last Season Peak 2v2");
+  assert.equal(seasonPeakTitle(earlySeasonNotice(at(oldest.startedAt))), "Last Season Peak");
 });
