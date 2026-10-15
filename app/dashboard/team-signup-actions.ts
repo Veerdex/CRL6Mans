@@ -8,6 +8,7 @@ import { isModerator } from "@/app/lib/players";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { playerRatingFromRow } from "@/app/lib/rating";
+import { hasMmrOnFile, MMR_REQUIRED_MESSAGE } from "@/app/lib/mmr-on-file";
 import { pushToUser } from "@/app/lib/push";
 import {
   hasEarlySignupAccess,
@@ -32,6 +33,7 @@ type Ctx = {
   tournamentName: string;
   teamSize: number;
   statsEnabled: boolean;
+  mmrOnFile: boolean;
   window: SignupWindowRow;
 };
 
@@ -43,7 +45,7 @@ async function getContext(tournamentId: string): Promise<{ ctx?: Ctx; error?: st
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("id, status, username, display_name")
+    .select("id, status, username, display_name, peak_2v2, peak_3v3")
     .eq("discord_id", session.userId)
     .single();
   if (!player) return { error: "No player profile found." };
@@ -66,6 +68,7 @@ async function getContext(tournamentId: string): Promise<{ ctx?: Ctx; error?: st
       tournamentName: (t.name as string | null) ?? "a tournament",
       teamSize: normalizeTeamSize((t as { team_size?: number }).team_size),
       statsEnabled: (t as { stats_enabled?: boolean | null }).stats_enabled ?? true,
+      mmrOnFile: hasMmrOnFile(player as { peak_2v2?: string; peak_3v3?: string }),
       window: t as SignupWindowRow,
     },
   };
@@ -222,6 +225,7 @@ export async function createTeam(
   // The Join button opens the popup before the name form, so this is the
   // backstop for any other caller rather than the path a player takes.
   if (!confirmedMmr) return { confirmMmr: true };
+  if (!ctx.mmrOnFile) return { error: MMR_REQUIRED_MESSAGE };
   await markTrackerConfirmed(ctx.playerId);
 
   const { data: team, error: insErr } = await supabaseAdmin
@@ -400,6 +404,7 @@ export async function respondInvite(
   // or a missing platform account is refused without first making the player
   // confirm MMR for an invite they can't take.
   if (!confirmedMmr) return { confirmMmr: true };
+  if (!ctx.mmrOnFile) return { error: MMR_REQUIRED_MESSAGE };
   await markTrackerConfirmed(ctx.playerId);
 
   await supabaseAdmin

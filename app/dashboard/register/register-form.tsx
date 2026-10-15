@@ -8,10 +8,6 @@ import { checkUploadFile, DOCUMENT_TYPES, MAX_UPLOAD_LABEL } from "@/app/lib/upl
 
 export type ExistingPlayerData = {
   tracker_url: string;
-  peak_3v3: string;
-  current_3v3: string;
-  peak_2v2: string;
-  current_2v2: string;
   college_image_url: string;
   sub_willing: boolean;
 };
@@ -82,13 +78,10 @@ export function RegisterForm({ isResubmit, existing }: Props) {
           placeholder="https://rocketleague.tracker.network/rocket-league/profile/..."
           className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-500"
         />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <MMRInput name="peak_2v2"    label="All Time Peak 2v2" defaultValue={existing?.peak_2v2} />
-        <MMRInput name="current_2v2" label="Season Peak 2v2"   defaultValue={existing?.current_2v2} />
-        <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={existing?.peak_3v3} />
-        <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={existing?.current_3v3} />
+        <p className="text-xs text-zinc-500">
+          You enter your MMR when you join an event, not here — it only has to be
+          current then.
+        </p>
       </div>
 
       <div className="space-y-1">
@@ -167,32 +160,5 @@ export function RegisterForm({ isResubmit, existing }: Props) {
         onCancel={() => setShowSensitiveModal(false)}
       />
     </form>
-  );
-}
-
-function MMRInput({
-  name, label, defaultValue,
-}: {
-  name: string;
-  label: string;
-  defaultValue?: string;
-}) {
-  return (
-    <div className="space-y-1">
-      <label htmlFor={name} className="block text-sm font-medium text-zinc-300">
-        {label}
-      </label>
-      <input
-        id={name}
-        name={name}
-        type="number"
-        min={0}
-        max={3000}
-        required
-        defaultValue={defaultValue ?? ""}
-        placeholder="e.g. 1420"
-        className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-zinc-500"
-      />
-    </div>
   );
 }

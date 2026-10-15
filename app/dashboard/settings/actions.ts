@@ -8,6 +8,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { pushToAdmins } from "@/app/lib/push";
 import { isCurrentlyKicked } from "@/app/lib/players";
 import { applyPlayerRVChangeToTeamRating } from "@/app/lib/discord-bot";
+import { hasMmrOnFile } from "@/app/lib/mmr-on-file";
 
 function validateMmr(label: string, val: string): string | null {
   const n = Number(val);
@@ -208,13 +209,21 @@ export async function getOwnMmrForJoin(): Promise<{
     }>();
   if (!player) return { error: "No player record for your account." };
 
+  // A player who has never reported their ranks gets empty boxes, not the four
+  // zeros the columns default to: registration doesn't collect MMR, and a
+  // prefilled 0 is something a player can confirm straight through without
+  // reading. Blank can't be — the panel won't submit it. hasMmrOnFile is the
+  // same test the join actions refuse on.
+  const onFile = hasMmrOnFile(player);
+  const show = (v: string | null) => (onFile ? String(v ?? "") : "");
+
   return {
     tracker_url: player.tracker_url,
     values: {
-      peak_3v3:    String(player.peak_3v3 ?? ""),
-      current_3v3: String(player.current_3v3 ?? ""),
-      peak_2v2:    String(player.peak_2v2 ?? ""),
-      current_2v2: String(player.current_2v2 ?? ""),
+      peak_3v3:    show(player.peak_3v3),
+      current_3v3: show(player.current_3v3),
+      peak_2v2:    show(player.peak_2v2),
+      current_2v2: show(player.current_2v2),
     },
   };
 }

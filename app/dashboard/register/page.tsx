@@ -11,8 +11,8 @@ export default async function RegisterPage() {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  // Registration status lives on accounts (Tier 1) now; tracker/MMR fields
-  // to pre-fill a resubmission live on pending_players (Tier 2).
+  // Registration status lives on accounts (Tier 1) now; the tracker URL to
+  // pre-fill a resubmission lives on pending_players (Tier 2).
   const { data: account } = await supabaseAdmin
     .from("accounts")
     .select("id, status, is_guest")
@@ -25,7 +25,7 @@ export default async function RegisterPage() {
     account
       ? supabaseAdmin
           .from("pending_players")
-          .select("tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, college_image_url, sub_willing")
+          .select("tracker_url, college_image_url, sub_willing")
           .eq("account_id", account.id)
           .single()
       : Promise.resolve({ data: null }),
@@ -73,10 +73,6 @@ export default async function RegisterPage() {
   const existingData: ExistingPlayerData | null = isResubmit && existing
     ? {
         tracker_url:       existing.tracker_url,
-        peak_3v3:          existing.peak_3v3,
-        current_3v3:       existing.current_3v3,
-        peak_2v2:          existing.peak_2v2,
-        current_2v2:       existing.current_2v2,
         college_image_url: proofUrl ?? "",
         sub_willing:       existing.sub_willing ?? false,
       }
@@ -88,7 +84,7 @@ export default async function RegisterPage() {
         {isResubmit ? "Re-submit Registration" : "Register"}
       </h1>
       <p className="text-zinc-400 text-sm mb-8">
-        Fill out your ranks and upload proof of college enrollment to register.
+        Link your tracker and upload proof of college enrollment to register.
         An admin will review your submission.
       </p>
 

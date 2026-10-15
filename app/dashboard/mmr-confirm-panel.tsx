@@ -117,13 +117,25 @@ export function MmrConfirmPanel({
 
   const set = (key: keyof MmrValues) => (v: string) => setValues((p) => ({ ...p, [key]: v }));
   const cooling = secondsLeft > 0;
+  // Blank, not zero: a player who has never reported their ranks arrives with
+  // empty boxes (see getOwnMmrForJoin), and the join actions refuse a roster
+  // slot to a rating built from nothing. Zero stays enterable — it's a real
+  // answer for a playlist you've never placed in.
+  const incomplete = (Object.keys(values) as (keyof MmrValues)[]).some((k) => !values[k].trim());
+  // Read off the mount-time values rather than the live ones, so the wording
+  // doesn't change under a player who is halfway through typing.
+  const firstTime = (Object.keys(initial) as (keyof MmrValues)[]).some((k) => !initial[k].trim());
 
   return (
     <ModalShell onClose={onClose}>
-      <h2 className="text-base font-semibold text-white">Confirm your MMR</h2>
+      <h2 className="text-base font-semibold text-white">
+        {firstTime ? "Enter your MMR" : "Confirm your MMR"}
+      </h2>
       <p className="text-sm text-zinc-400">
-        {description ??
-          "Your MMR decides your rating and who you get drafted with. Check these against your tracker and correct anything that's changed."}
+        {firstTime
+          ? "Your MMR decides your rating and who you get drafted with. Read all four off your tracker to join."
+          : description ??
+            "Your MMR decides your rating and who you get drafted with. Check these against your tracker and correct anything that's changed."}
       </p>
 
       <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
@@ -163,10 +175,16 @@ export function MmrConfirmPanel({
       <div className="flex flex-col gap-2 mt-1">
         <button
           onClick={() => onConfirm(values)}
-          disabled={busy || cooling}
+          disabled={busy || cooling || incomplete}
           className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:hover:bg-emerald-600 text-white text-sm font-semibold rounded-lg transition-colors"
         >
-          {busy ? busyLabel : cooling ? `Confirm in ${secondsLeft}…` : confirmLabel}
+          {busy
+            ? busyLabel
+            : incomplete
+              ? "Fill in all four"
+              : cooling
+                ? `Confirm in ${secondsLeft}…`
+                : confirmLabel}
         </button>
         <button
           onClick={onClose}

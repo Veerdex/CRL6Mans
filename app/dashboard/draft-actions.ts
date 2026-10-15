@@ -10,6 +10,7 @@ import { isGuildMember } from "@/app/lib/discord-api";
 import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { isCurrentlyKicked } from "@/app/lib/players";
+import { hasMmrOnFile, MMR_REQUIRED_MESSAGE } from "@/app/lib/mmr-on-file";
 
 export async function triggerAutoPick(): Promise<{ done: boolean }> {
   // Fired by the draft client when a pick deadline passes. execAutoPick is
@@ -51,6 +52,14 @@ export async function enterDraft(confirmedMmr = false): Promise<{ error?: string
   // event being joined.
   if ((await joinGateApplies(settings.stats_enabled ?? true)) && !(await hasActiveVerifiedPlatformAccount(player.id, new Date())))
     return { error: "You need a verified platform account before joining the draft. Add one in Settings → Platform Accounts." };
+
+  // A player who has never reported their ranks is asked before the MMR gate
+  // below, not after: registration doesn't collect MMR, so gating first would
+  // refuse them on the zeros they've had no chance to replace. The confirmed
+  // pass re-reads the row, so the gate still runs against real numbers.
+  const onFile = hasMmrOnFile(player as { peak_2v2?: string; peak_3v3?: string });
+  if (!confirmedMmr && !onFile) return { confirmMmr: true };
+  if (confirmedMmr && !onFile) return { error: MMR_REQUIRED_MESSAGE };
 
   // Minimum MMR gate — qualifies by meeting either the 2v2 or 3v3 threshold.
   const min2v2 = (settings.min_mmr_2v2 as number | null) ?? null;

@@ -10,6 +10,17 @@ import { deleteCollegeIdImage } from "@/app/lib/college-ids";
 import { recordStaffAction } from "@/app/lib/staff-contributions";
 import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
 
+/**
+ * What an admin can change while deciding a registration. Narrower than
+ * PlayerEditFields because the form no longer collects MMR — the player enters
+ * it at the join confirmation, so there is nothing here to review against a
+ * tracker. updatePlayerData still takes the full set.
+ */
+export type RegistrationApprovalFields = {
+  username: string;
+  tracker_url: string;
+};
+
 export type PlayerEditFields = {
   username: string;
   peak_3v3: string;
@@ -55,12 +66,13 @@ function validateMmrFields(fields: PlayerEditFields): string | null {
 
 export async function approvePlayerWithEdits(
   id: string,
-  fields: PlayerEditFields
+  fields: RegistrationApprovalFields
 ): Promise<{ error?: string; ok?: boolean }> {
   await assertAdmin();
-  const mmrError = validateMmrFields(fields);
-  if (mmrError) return { error: mmrError };
-  const editable = pickEditableFields(fields);
+  const editable = {
+    username:    fields.username,
+    tracker_url: fields.tracker_url,
+  };
   const now = new Date().toISOString();
 
   const { data: account } = await supabaseAdmin
@@ -71,14 +83,15 @@ export async function approvePlayerWithEdits(
   if (!account?.discord_id) return { error: "Account not found." };
 
   // Tier 2 (pending_players) stays the source of truth for MMR/tracker going
-  // forward. sub_willing/tracker_confirmed_at are read here so the new Tier 3
-  // row can seed from them below; college_image_url is read so the proof can be
-  // purged once the approval is committed. Read before anything is written: an
-  // account with no Tier 2 row cannot be approved, and finding that out after
-  // the status flip would strand it approved with no roster row.
+  // forward. sub_willing/tracker_confirmed_at and the four MMR columns are read
+  // here so the new Tier 3 row can seed from them below; college_image_url is
+  // read so the proof can be purged once the approval is committed. Read before
+  // anything is written: an account with no Tier 2 row cannot be approved, and
+  // finding that out after the status flip would strand it approved with no
+  // roster row.
   const { data: pending } = await supabaseAdmin
     .from("pending_players")
-    .select("college_image_url, sub_willing, tracker_confirmed_at")
+    .select("college_image_url, sub_willing, tracker_confirmed_at, peak_3v3, current_3v3, peak_2v2, current_2v2")
     .eq("account_id", id)
     .maybeSingle();
   if (!pending) {
@@ -114,10 +127,6 @@ export async function approvePlayerWithEdits(
   const { error: pendingError } = await supabaseAdmin
     .from("pending_players")
     .update({
-      peak_3v3: editable.peak_3v3,
-      current_3v3: editable.current_3v3,
-      peak_2v2: editable.peak_2v2,
-      current_2v2: editable.current_2v2,
       tracker_url: editable.tracker_url,
       updated_at: now,
     })
@@ -126,7 +135,10 @@ export async function approvePlayerWithEdits(
 
   // Tier 3 (players) is created here, id = account id. Many not-yet-migrated
   // call sites (draft/bracket/team-balancing logic) still read MMR straight off
-  // `players`, so those columns are mirrored here rather than left at defaults.
+  // `players`, so those columns are mirrored from Tier 2 rather than left at
+  // defaults — which for a registration submitted since the form stopped
+  // asking means the Tier 2 default, until the player's first join confirmation
+  // writes real numbers to both tiers.
   const { error: insertError } = await supabaseAdmin.from("players").upsert(
     {
       id,
@@ -135,10 +147,10 @@ export async function approvePlayerWithEdits(
       username: editable.username,
       display_name: account.display_name ?? null,
       status: "approved",
-      peak_3v3: editable.peak_3v3,
-      current_3v3: editable.current_3v3,
-      peak_2v2: editable.peak_2v2,
-      current_2v2: editable.current_2v2,
+      peak_3v3: pending.peak_3v3,
+      current_3v3: pending.current_3v3,
+      peak_2v2: pending.peak_2v2,
+      current_2v2: pending.current_2v2,
       tracker_url: editable.tracker_url,
       sub_willing: pending.sub_willing ?? false,
       tracker_confirmed_at: pending.tracker_confirmed_at ?? null,

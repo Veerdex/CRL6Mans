@@ -13,7 +13,7 @@ const SECTIONS: Section[] = [
     items: [
       {
         q: "How do I join the league?",
-        a: "Log in with Discord, then fill out the Register form: your Rocket League tracker link, your four MMR numbers (All-Time Peak and Season Peak for 2v2/3v3), and proof of current or past enrollment at a school west of the Mississippi River (a transcript, enrollment letter, school ID, or diploma all work — blur out anything sensitive like an ID number or birthdate first). Submitting puts your account into “pending” until staff reviews it.",
+        a: "Log in with Discord, then fill out the Register form: your Rocket League tracker link and proof of current or past enrollment at a school west of the Mississippi River (a transcript, enrollment letter, school ID, or diploma all work — blur out anything sensitive like an ID number or birthdate first). Submitting puts your account into “pending” until staff reviews it. Your MMR isn't part of registration — you enter it the first time you join an event, so it's current when it counts.",
       },
       {
         q: "Why is my account still pending?",

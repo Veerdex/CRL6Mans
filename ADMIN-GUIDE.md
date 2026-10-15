@@ -58,8 +58,6 @@ betting feature ("Wagers") players can use to bet on match outcomes.
   for good.
 - To actually participate, a user fills out the **Register** form:
   - A Rocket League tracker profile link.
-  - Six MMR numbers: All-Time Peak and Season Peak, each for 1v1, 2v2, and
-    3v3.
   - A file upload proving current college enrollment (a photo or PDF — a
     transcript, enrollment letter, school ID, or diploma all work). The form
     warns players to blur or cover sensitive details like a student ID
@@ -74,6 +72,12 @@ betting feature ("Wagers") players can use to bet on match outcomes.
   - Submitting puts the account into **pending** status, notifies staff of a
     new registration to review, and sends the player a Discord DM confirming
     it's in the queue.
+- **Registration doesn't ask for MMR.** A player enters their four MMR numbers
+  (All-Time Peak and Season Peak for 2v2 and 3v3) in the confirmation popup
+  that opens on every join, so they're read off a tracker at the moment they
+  matter rather than months earlier. Until a player has entered them once,
+  every join path — the draft, a tournament, creating a sign-up team, and
+  accepting an invite to one — refuses with a prompt to enter them.
 - If a player is a Discord server member but hasn't joined the actual server
   the league runs in, they see a "Join the Discord First" prompt instead of
   the form.
@@ -96,9 +100,9 @@ betting feature ("Wagers") players can use to bet on match outcomes.
   row is them. An admin has to verify each claim before it counts toward
   match-identity checks — see Settings, further down, and the Identity
   Discrepancies tool in the Admin Dashboard section.
-- A player can also request changes to their MMR numbers or tracker link at
-  any time after registering — those edits go through the same kind of admin
-  approval before they take effect on the live record (see Settings below).
+- A player can update their own MMR from Settings at any time, which takes
+  effect immediately. A **tracker link** change is the one that needs admin
+  approval before it lands on the live record (see Settings below).
 
 ## Dashboard Home
 
@@ -1155,8 +1159,9 @@ closed by default until you click to open it.
 
 - **Registrations & Platform Claims** — two related item types shown
   side by side.
-  - Registration cards show every field from a pending sign-up (username,
-    tracker link, all six MMR numbers), links to the player's college-
+  - Registration cards show every field from a pending sign-up (username and
+    tracker link — MMR isn't collected at registration), links to the
+    player's college-
     enrollment proof and tracker profile, a note field, a "Rejection
     Cooldown" dropdown (no cooldown / 5 minutes / 1 day / forever — how long
     a rejected applicant is blocked from re-registering), and Approve/Reject

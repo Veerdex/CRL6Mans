@@ -20,10 +20,6 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
   if (!session?.userId) redirect("/login");
 
   const trackerUrl  = formData.get("tracker_url")  as string;
-  const peak3v3     = formData.get("peak_3v3")     as string;
-  const current3v3  = formData.get("current_3v3")  as string;
-  const peak2v2     = formData.get("peak_2v2")     as string;
-  const current2v2  = formData.get("current_2v2")  as string;
   const subWilling  = formData.get("sub_willing") === "on";
   const file        = formData.get("college_image") as File;
 
@@ -37,7 +33,7 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     };
   }
 
-  if (!trackerUrl || !peak3v3 || !current3v3 || !peak2v2 || !current2v2) {
+  if (!trackerUrl) {
     return { error: "All fields are required." };
   }
 
@@ -46,22 +42,6 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     new URL(trackerUrl);
   } catch {
     return { error: "Please enter a valid tracker URL." };
-  }
-
-  // Validate MMR values are non-negative integers
-  for (const [label, val] of [
-    ["Peak 3v3", peak3v3],
-    ["Current 3v3", current3v3],
-    ["Peak 2v2", peak2v2],
-    ["Current 2v2", current2v2],
-  ] as [string, string][]) {
-    const n = Number(val);
-    if (!Number.isInteger(n) || n < 0) {
-      return { error: `${label} must be a non-negative whole number.` };
-    }
-    if (n > 3000) {
-      return { error: `${label} cannot exceed 3000.` };
-    }
   }
 
   // Look up the Tier 1 account so we can check status and fall back to any
@@ -127,13 +107,14 @@ export async function registerPlayer(_prevState: unknown, formData: FormData) {
     return { error: "College enrollment proof is required." };
   }
 
+  // No MMR here. A registration can sit in review for days and the numbers are
+  // collected again at the join confirmation anyway, so the form asks only for
+  // the tracker they're read off. The columns are `not null default '0'`, so a
+  // first registration lands on the default and a resubmission — which omits
+  // them from the update too — keeps whatever the player already had.
   const { error: dbError } = await supabaseAdmin.from("pending_players").upsert({
     account_id:        account.id,
     tracker_url:       trackerUrl,
-    peak_3v3:          peak3v3,
-    current_3v3:       current3v3,
-    peak_2v2:          peak2v2,
-    current_2v2:       current2v2,
     college_image_url: collegeImageUrl,
     sub_willing:       subWilling,
     tracker_confirmed_at: new Date().toISOString(),

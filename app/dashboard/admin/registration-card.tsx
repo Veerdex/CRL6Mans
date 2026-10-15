@@ -24,21 +24,13 @@ export function RegistrationCard({ player, proofUrl }: Props) {
 
   const [username, setUsername]     = useState(player.username);
   const [trackerUrl, setTrackerUrl] = useState(player.tracker_url);
-  const [peak3v3, setPeak3v3]       = useState(player.peak_3v3);
-  const [curr3v3, setCurr3v3]       = useState(player.current_3v3);
-  const [peak2v2, setPeak2v2]       = useState(player.peak_2v2);
-  const [curr2v2, setCurr2v2]       = useState(player.current_2v2);
   const [note, setNote]             = useState("");
   const [cooldown, setCooldown]     = useState<"none" | "5m" | "1d" | "forever">("none");
 
   function handleApprove() {
     setError(null);
     startTransition(async () => {
-      const res = await approvePlayerWithEdits(player.id, {
-        username, tracker_url: trackerUrl,
-        peak_3v3: peak3v3, current_3v3: curr3v3,
-        peak_2v2: peak2v2, current_2v2: curr2v2,
-      });
+      const res = await approvePlayerWithEdits(player.id, { username, tracker_url: trackerUrl });
       if (res?.error) setError(res.error);
     });
   }
@@ -64,14 +56,12 @@ export function RegistrationCard({ player, proofUrl }: Props) {
         </div>
       </div>
 
-      {/* Editable fields */}
+      {/* Editable fields. No MMR: registration doesn't collect it — the player
+          enters it at the join confirmation, and it's editable from the player
+          data editor afterwards. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Username" value={username} onChange={setUsername} />
         <Field label="Tracker URL" value={trackerUrl} onChange={setTrackerUrl} />
-        <Field label="All Time Peak 2v2" value={peak2v2} onChange={setPeak2v2} type="number" />
-        <Field label="Season Peak 2v2"   value={curr2v2} onChange={setCurr2v2} type="number" />
-        <Field label="All Time Peak 3v3" value={peak3v3} onChange={setPeak3v3} type="number" />
-        <Field label="Season Peak 3v3"   value={curr3v3} onChange={setCurr3v3} type="number" />
       </div>
 
       {/* Links */}
@@ -148,12 +138,11 @@ export function RegistrationCard({ player, proofUrl }: Props) {
 }
 
 function Field({
-  label, value, onChange, type = "text",
+  label, value, onChange,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  type?: string;
 }) {
   return (
     <div>
@@ -161,7 +150,6 @@ function Field({
         {label}
       </label>
       <input
-        type={type}
         value={value}
         onChange={e => onChange(e.target.value)}
         className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 [appearance:textfield]"

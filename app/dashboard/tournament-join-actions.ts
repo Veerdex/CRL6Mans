@@ -9,6 +9,7 @@ import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { isCurrentlyKicked, isModerator } from "@/app/lib/players";
 import { hasEarlySignupAccess, signupWindowOpen } from "@/app/lib/signup-window";
+import { hasMmrOnFile, MMR_REQUIRED_MESSAGE } from "@/app/lib/mmr-on-file";
 
 async function currentPlayer() {
   const cookieStore = await cookies();
@@ -46,6 +47,12 @@ export async function joinTournament(tournamentId: string, confirmedMmr = false)
   if ((await joinGateApplies((t as { stats_enabled?: boolean | null }).stats_enabled ?? true))
     && !(await hasActiveVerifiedPlatformAccount(player.id, new Date())))
     return { error: "You need a verified platform account before joining. Add one in Settings → Platform Accounts." };
+
+  // Ahead of the MMR gate below for a player who has never reported their
+  // ranks — see enterDraft.
+  const onFile = hasMmrOnFile(player as { peak_2v2?: string; peak_3v3?: string });
+  if (!confirmedMmr && !onFile) return { confirmMmr: true };
+  if (confirmedMmr && !onFile) return { error: MMR_REQUIRED_MESSAGE };
 
   const min2v2 = (t.min_mmr_2v2 as number | null) ?? null;
   const min3v3 = (t.min_mmr_3v3 as number | null) ?? null;
