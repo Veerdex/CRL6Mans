@@ -2,7 +2,6 @@
 
 import { useActionState, useTransition } from "react";
 import { requestProfileChange, cancelProfileRequest, dismissRejectedRequest } from "./actions";
-import { seasonPeakLabel, type EarlySeasonNotice } from "@/app/lib/rl-season";
 
 export type PlayerSettings = {
   tracker_url: string;
@@ -28,14 +27,10 @@ export function SettingsForm({
   current,
   pending,
   rejected,
-  earlySeason,
 }: {
   current: PlayerSettings;
   pending: PendingRequest | null;
   rejected: RejectedRequest | null;
-  // Resolved on the server so the day count can't differ between the render
-  // and the hydration that follows it.
-  earlySeason: EarlySeasonNotice | null;
 }) {
   const [state, action, submitting] = useActionState(requestProfileChange, {});
   const [cancelling, startCancel] = useTransition();
@@ -99,9 +94,9 @@ export function SettingsForm({
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <MMRInput name="current_2v2" label={seasonPeakLabel("2v2", earlySeason)} defaultValue={current.current_2v2} />
+          <MMRInput name="current_2v2" label="Season Peak 2v2"   defaultValue={current.current_2v2} />
           <MMRInput name="peak_2v2"    label="All Time Peak 2v2" defaultValue={current.peak_2v2} />
-          <MMRInput name="current_3v3" label={seasonPeakLabel("3v3", earlySeason)} defaultValue={current.current_3v3} />
+          <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={current.current_3v3} />
           <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={current.peak_3v3} />
         </div>
 

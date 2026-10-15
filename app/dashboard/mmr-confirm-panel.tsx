@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMounted } from "./use-mounted";
-import { earlySeasonNotice, seasonPeakLabel, seasonPeakTitle } from "@/app/lib/rl-season";
 
 /** Season Peak is `current_*`, All Time Peak is `peak_*` — see settings/actions.ts. */
 export type MmrValues = {
@@ -109,10 +108,6 @@ export function MmrConfirmPanel({
 }) {
   const [values, setValues] = useState<MmrValues>(initial);
   const [secondsLeft, setSecondsLeft] = useState(CONFIRM_COOLDOWN_SECONDS);
-  // Read at render rather than passed in: ModalShell renders nothing until it
-  // has mounted, so this panel never server-renders and the two clocks a
-  // hydrated date comparison would have to agree on don't both exist.
-  const early = earlySeasonNotice();
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -151,17 +146,15 @@ export function MmrConfirmPanel({
 
       <div className="grid grid-cols-[2.5rem_1fr_1fr] gap-x-2 gap-y-1.5 items-center">
         <span />
-        <p className="text-[10px] uppercase tracking-wider text-zinc-500 text-center">
-          {seasonPeakTitle(early)}
-        </p>
+        <p className="text-[10px] uppercase tracking-wider text-zinc-500 text-center">Season peak</p>
         <p className="text-[10px] uppercase tracking-wider text-zinc-500 text-center">All time peak</p>
 
         <span className="text-xs font-semibold text-zinc-400">2v2</span>
-        <MmrField label={seasonPeakLabel("2v2", early)} value={values.current_2v2} onChange={set("current_2v2")} disabled={busy} />
+        <MmrField label="Season Peak 2v2" value={values.current_2v2} onChange={set("current_2v2")} disabled={busy} />
         <MmrField label="All Time Peak 2v2" value={values.peak_2v2} onChange={set("peak_2v2")} disabled={busy} />
 
         <span className="text-xs font-semibold text-zinc-400">3v3</span>
-        <MmrField label={seasonPeakLabel("3v3", early)} value={values.current_3v3} onChange={set("current_3v3")} disabled={busy} />
+        <MmrField label="Season Peak 3v3" value={values.current_3v3} onChange={set("current_3v3")} disabled={busy} />
         <MmrField label="All Time Peak 3v3" value={values.peak_3v3} onChange={set("peak_3v3")} disabled={busy} />
       </div>
 

@@ -4,7 +4,6 @@ import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { SettingsForm, type PendingRequest, type RejectedRequest } from "./settings-form";
-import { earlySeasonNotice } from "@/app/lib/rl-season";
 import { ThemeToggle } from "./theme-toggle";
 import { NavLayoutToggle } from "./nav-layout-toggle";
 import { NotificationButton } from "@/app/dashboard/notification-button";
@@ -248,7 +247,6 @@ export default async function SettingsPage({
             }}
             pending={pending}
             rejected={rejected}
-            earlySeason={earlySeasonNotice()}
           />
         </>
       )}

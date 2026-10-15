@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { registerPlayer } from "./actions";
 import { SensitiveInfoModal } from "./sensitive-info-modal";
 import { checkUploadFile, DOCUMENT_TYPES, MAX_UPLOAD_LABEL } from "@/app/lib/upload-limits";
-import { seasonPeakLabel, type EarlySeasonNotice } from "@/app/lib/rl-season";
 
 export type ExistingPlayerData = {
   tracker_url: string;
@@ -20,12 +19,9 @@ export type ExistingPlayerData = {
 interface Props {
   isResubmit: boolean;
   existing: ExistingPlayerData | null;
-  // Resolved on the server so the day count can't differ between the render
-  // and the hydration that follows it.
-  earlySeason: EarlySeasonNotice | null;
 }
 
-export function RegisterForm({ isResubmit, existing, earlySeason }: Props) {
+export function RegisterForm({ isResubmit, existing }: Props) {
   const router = useRouter();
   const [state, action, pending] = useActionState(registerPlayer, { error: "" });
   const [fileError, setFileError] = useState<string>("");
@@ -90,9 +86,9 @@ export function RegisterForm({ isResubmit, existing, earlySeason }: Props) {
 
       <div className="grid grid-cols-2 gap-4">
         <MMRInput name="peak_2v2"    label="All Time Peak 2v2" defaultValue={existing?.peak_2v2} />
-        <MMRInput name="current_2v2" label={seasonPeakLabel("2v2", earlySeason)} defaultValue={existing?.current_2v2} />
+        <MMRInput name="current_2v2" label="Season Peak 2v2"   defaultValue={existing?.current_2v2} />
         <MMRInput name="peak_3v3"    label="All Time Peak 3v3" defaultValue={existing?.peak_3v3} />
-        <MMRInput name="current_3v3" label={seasonPeakLabel("3v3", earlySeason)} defaultValue={existing?.current_3v3} />
+        <MMRInput name="current_3v3" label="Season Peak 3v3"   defaultValue={existing?.current_3v3} />
       </div>
 
       <div className="space-y-1">
