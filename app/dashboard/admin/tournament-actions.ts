@@ -114,6 +114,17 @@ export async function toggleEventVisibility(
   await verifyAdmin();
 
   const table = kind === "season" ? "seasons" : "tournaments";
+
+  // A test tournament now carries a real summary, so unhiding one would put a
+  // scaffolded champion on the Podium for every player — the one click that
+  // undoes the containment completeTournament relies on. Refused here rather
+  // than only in the UI, because the button is all the UI gate would be.
+  if (kind === "tournament" && !hidden) {
+    const { data } = await supabaseAdmin
+      .from("tournaments").select("is_test").eq("id", id).maybeSingle();
+    if (data?.is_test) return { error: "A test tournament can't be shown on Home & Podium." };
+  }
+
   const { error } = await supabaseAdmin
     .from(table)
     .update({ hidden_from_home: hidden })

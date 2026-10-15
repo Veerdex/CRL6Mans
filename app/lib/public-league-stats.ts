@@ -161,8 +161,9 @@ async function computePublicLeagueStats(): Promise<PublicLeagueStats> {
   const newest = seasons[seasons.length - 1];
   const newestYear = newest ? yearOf(newest[1].endedAt) : null;
 
-  // A test tournament can never land here: completeTournament takes the isTest
-  // branch, which writes no archive and so never calls recordEventResults.
+  // A test tournament can never land here: completeTournament archives one for
+  // staff export but deliberately skips recordEventResults, and
+  // rebuildEventResults filters is_test so a backfill can't put it back.
   const tournaments = [...byEvent.values()].filter((e) => e.kind === "tournament").length;
 
   const perEvent = new Map<string, { games: number; demos: number }>();

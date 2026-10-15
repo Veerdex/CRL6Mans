@@ -1393,14 +1393,18 @@ export function TournamentManager({
                               className="flex items-center gap-1.5 shrink-0"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              <button
-                                onClick={() => run(() => toggleEventVisibility(item.kind, itemId, !hidden))}
-                                disabled={isPending}
-                                title={hidden ? "Show on Home & Podium" : "Hide from Home & Podium"}
-                                className={`px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium rounded transition-colors ${hidden ? "text-emerald-300" : "text-amber-300"}`}
-                              >
-                                {hidden ? "Show" : "Hide"}
-                              </button>
+                              {/* A test event is archived for staff export only — there is
+                                  nothing to show, and toggleEventVisibility refuses it. */}
+                              {!(!isSeason && item.t.is_test) && (
+                                <button
+                                  onClick={() => run(() => toggleEventVisibility(item.kind, itemId, !hidden))}
+                                  disabled={isPending}
+                                  title={hidden ? "Show on Home & Podium" : "Hide from Home & Podium"}
+                                  className={`px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium rounded transition-colors ${hidden ? "text-emerald-300" : "text-amber-300"}`}
+                                >
+                                  {hidden ? "Show" : "Hide"}
+                                </button>
+                              )}
                               <button
                                 onClick={() => {
                                   setDeleteConfirmKey(key);
