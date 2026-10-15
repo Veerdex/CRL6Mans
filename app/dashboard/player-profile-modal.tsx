@@ -13,6 +13,7 @@ import {
   type AccoladeSlot,
 } from "./accolade-actions";
 import { saveOwnMmr } from "./settings/actions";
+import { earlySeasonNotice, earlySeasonPrompt, seasonPeakLabel } from "@/app/lib/rl-season";
 import type { PlayerProfile } from "@/app/lib/player-profile";
 import type { EventHistoryEntry } from "@/app/lib/event-results";
 
@@ -269,6 +270,9 @@ function RankEditor({
   });
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // Read at render rather than passed in: this editor only mounts on a click,
+  // so it never server-renders and there is no second clock to agree with.
+  const early = earlySeasonNotice();
 
   const save = () =>
     startTransition(async () => {
@@ -280,12 +284,17 @@ function RankEditor({
 
   return (
     <div className="space-y-3">
+      {early && (
+        <p className="text-xs text-amber-300 bg-amber-950/40 border border-amber-700/50 rounded-lg px-3 py-2">
+          {earlySeasonPrompt(early)}
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-2">
         {(
           [
-            ["current_2v2", "Season Peak 2v2"],
+            ["current_2v2", seasonPeakLabel("2v2", !!early)],
             ["peak_2v2", "All Time Peak 2v2"],
-            ["current_3v3", "Season Peak 3v3"],
+            ["current_3v3", seasonPeakLabel("3v3", !!early)],
             ["peak_3v3", "All Time Peak 3v3"],
           ] as [keyof typeof draft, string][]
         ).map(([name, label]) => (

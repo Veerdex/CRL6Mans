@@ -59,7 +59,7 @@ app/
   layout.tsx              # Root layout — reads theme cookie, sets data-theme on <html>
 ```
 
-**Pure leaf modules** in `app/lib/` have no Supabase import so `node --test` can load them: `draft-order.ts`, `draft-embeds.ts`, `match-embeds.ts`, `clip-embeds.ts`, `series-report.ts`, `forfeit-vote.ts`, `rating.ts`, `team-size.ts`, `clip-schedule.ts`, `admin-notification-prefs.ts`. Tests: `npm run test:draft-order`, `test:draft-embeds`, `test:match-embeds`, `test:series-report`, `test:forfeit-vote`.
+**Pure leaf modules** in `app/lib/` have no Supabase import so `node --test` can load them: `draft-order.ts`, `draft-embeds.ts`, `match-embeds.ts`, `clip-embeds.ts`, `series-report.ts`, `forfeit-vote.ts`, `rating.ts`, `team-size.ts`, `clip-schedule.ts`, `admin-notification-prefs.ts`, `rl-season.ts`. Tests: `npm run test:draft-order`, `test:draft-embeds`, `test:match-embeds`, `test:series-report`, `test:forfeit-vote`, `test:rl-season`.
 
 ---
 
@@ -210,6 +210,11 @@ The crowning announcement is built in `app/lib/clip-embeds.ts` (see Discord mess
 RV is a player's rating under the `crl-final-rating-v1` model. **`app/lib/rating.ts` is the single source of truth** for the formula — do not restate it here; read that file. It is a pure module shared by the season updater (`app/lib/discord-bot.ts`) and the wager predictor (`app/dashboard/wagers/prediction.ts`), so both interpret ratings identically.
 
 Every call site should go through `playerRatingFromRow()`, `initialTeamRating()` (roster → team rating), and `resolveTeamRating()` (stored `season_rating` if present, else `initialTeamRating`) — never a hand-rolled field mapping or fallback. 1v1 MMR is **not** part of the model; only 2v2/3v3 peak and season MMR feed it. 1v1 fields still exist in the schema and the admin player editors (for legacy stored values) but are no longer collected and are ignored by the math.
+
+### Early in a Rocket League season
+`current_*` is a self-reported *season* peak, so a soft reset makes it meaningless for a few weeks — and the model takes a power mean of it with all-time peak, so a value entered on day 2 drags that playlist's term down by about a third. The fix is on the **collection** side, not in the model: for `EARLY_SEASON_DAYS` after a season starts, `earlySeasonNotice()` in `app/lib/rl-season.ts` is set and every MMR surface (register, Settings, the confirm-MMR modal) relabels the input *Last Season Peak* and asks for the previous season's number. The column still means "the season peak we rate you on" — for those weeks that is last season's.
+
+Psyonix publishes no season-calendar API and announces an end date only days ahead, but start dates are always announced, so `RL_SEASONS` stores starts only and a season's end is the next one's start. **Add a row when a season is announced**; a stale table reads as late in the season, which is the permissive answer. `MmrConfirmPanel` reads the notice at render rather than taking it as a prop because `ModalShell` renders nothing until mounted, so it never server-renders; the two forms take it as a prop from their server page so the day count can't differ across hydration.
 
 `teams.season_rating` is the live rating that moves with match results; `teams.initial_rating` is the fixed anchor a team started at, used by `applyFormRetention()` to pull `season_rating` back toward it before each match's update. Both are lazy-initialised together on a team's first rated match. `applySeasonRatingUpdate` in `discord-bot.ts` is the only place either is written from a match result — `applyPlayerRVChangeToTeamRating` (roster/MMR edits) shifts both by the same delta so an edit isn't mistaken for match-driven form.
 

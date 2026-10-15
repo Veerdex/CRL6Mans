@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { isGuildMember } from "@/app/lib/discord-api";
 import { collegeIdSignedUrl } from "@/app/lib/college-ids";
 import { RegisterForm, type ExistingPlayerData } from "./register-form";
+import { earlySeasonNotice } from "@/app/lib/rl-season";
 
 export default async function RegisterPage() {
   const cookieStore = await cookies();
@@ -105,7 +106,7 @@ export default async function RegisterPage() {
         </div>
       )}
 
-      <RegisterForm isResubmit={isResubmit} existing={existingData} />
+      <RegisterForm isResubmit={isResubmit} existing={existingData} earlySeason={earlySeasonNotice()} />
     </div>
   );
 }
