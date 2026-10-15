@@ -754,7 +754,7 @@ export function TournamentManager({
                 <p className="text-xs font-medium text-zinc-300">Test Tournament</p>
                 <p className="text-[11px] text-zinc-500 mt-0.5">
                   {form.isTest
-                    ? "ON — discarded on completion, no records saved, no Westside Wages"
+                    ? "ON — hidden from players, no stats kept, no Westside Wages; staff can still export the result"
                     : "OFF — real tournament, results archived and Westside Wages awarded"}
                 </p>
               </div>

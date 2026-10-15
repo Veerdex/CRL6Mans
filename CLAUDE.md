@@ -179,10 +179,17 @@ The two unflagged `pushToAllApproved` sites (`league-actions.ts` "Season Signups
 
 For the same reason `fetchAllTimeTotals` excludes the live rows during a test event — for staff too, since All Time is the permanent record and a test's numbers are real only under Current Event. The Stats page's Current Event toggle and the Players page's list and stat columns are staff-only while a test tournament runs; neither page is an event tab, so the nav hiding doesn't cover them.
 
+### Archiving a test tournament
+`completeTournament` writes `summary` + `full_archive` for a **test** tournament on the same terms as a real one, so staff can export it afterwards — there is no second chance, since the `resetSeason()` on the next line deletes the matches and rosters both are derived from. The branch differs in exactly two things:
+- The row keeps **`hidden_from_home: true`**. That — not `is_test` — is what Podium (`podium/page.tsx`), the Podium nav link (`layout-data.ts`) and the dashboard's past-events filter all read, so containment holds for staff too.
+- **`recordEventResults` is skipped**, so a fake placement never lands in `player_event_results` and never reaches a profile. `rebuildEventResults` carries the matching `.not("is_test", "is", true)` for that reason — it is the one path that would otherwise undo the skip. `not.is.true`, not `eq(false)`: the column is nullable and every legacy event predates it. `seasons` needs no filter, since `completeSeason`'s `is_test_season` branch writes no row at all.
+
 ### Discord side and known gaps
 The Discord side isn't gated by `is_test` and doesn't need to be: `createTextChannel` denies `@everyone` VIEW_CHANNEL and allows only the team roles passed to it, the draft channel is role-gated by `setDraftChannelVisibility`, and every match-channel ping resolves through `teamPing`. A test event's channels and pings reach only members holding its team roles — so **rostering a real player onto a test team is the one thing that puts a test event in front of them.**
 
-`is_test_season` on a manual season is a **separate flag with separate coverage.** The stats containment above honours it and `completeSeason` discards the season's archive, but nothing hides a test season's pages and no push helper infers it, so players still see one running.
+`is_test_season` on a manual season is a **separate flag with separate coverage.** The stats containment above honours it, but `completeSeason` still writes no archive for one — so unlike a test tournament there is nothing to export afterwards — and nothing hides a test season's pages, nor does any push helper infer it, so players still see one running.
+
+`cancelTournament` snapshots nothing for either kind, test or real, so a cancelled event can't be exported.
 
 ---
 

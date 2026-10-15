@@ -118,6 +118,13 @@ export async function recordEventResults(
  * Regenerate the whole table from the archives. The backfill path for a
  * placement fix or a schema change: the archives hold everything, so this table
  * can always be thrown away and rebuilt.
+ *
+ * A test tournament now keeps its archive so staff can export it, which makes
+ * this the one path that would undo completeTournament's deliberate skip and
+ * index a fake placement onto real profiles. `not.is.true` rather than
+ * `eq(false)`: is_test is nullable, and every legacy event predates the column.
+ * Seasons need no such filter — completeSeason's is_test_season branch never
+ * writes a seasons row at all.
  */
 export async function rebuildEventResults(): Promise<{ events: number; rows: number }> {
   const [tournaments, seasons] = await Promise.all([
@@ -126,6 +133,7 @@ export async function rebuildEventResults(): Promise<{ events: number; rows: num
         .from("tournaments")
         .select("id, full_archive")
         .not("full_archive", "is", null)
+        .not("is_test", "is", true)
         .order("id")
         .range(from, to),
     ),

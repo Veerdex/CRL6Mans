@@ -181,11 +181,14 @@ completed** (or it can be cancelled). Two things are decided when it's set up:
   captain choice).
 
 A tournament can also be flagged as a **Test Tournament/Season** — a real
-dry run of the whole system that gets fully discarded when it finishes (no
-permanent archive record, no payout), as opposed to a real event which gets
-permanently archived and does pay out. The Season Settings and League
-Controls sections of the Admin Dashboard (below) also cover the season-level
-version of this and every other setting described here.
+dry run of the whole system whose results never become part of the league's
+record (no stats kept, no payout, nothing on the Podium or on anyone's
+profile), as opposed to a real event which gets permanently archived and does
+pay out. A test *tournament* is still archived for staff when you complete it,
+so you can export its report and JSON the same way as a real one; a test
+*season* is not. The Season Settings and League Controls sections of the Admin
+Dashboard (below) also cover the season-level version of this and every other
+setting described here.
 
 A tournament also has a **Track Stats** toggle, on by default. Turned off,
 that tournament doesn't collect player stats at all: captains report the
@@ -1223,9 +1226,11 @@ Moderators too, it's noted.
   of a standalone season — the round exists but stays paused until you press
   it, giving you a last look before it goes live.
 - **Tournaments** — both a creation form and a history list.
-  - The creation form covers: a name; a "Test Tournament" toggle (test
-    events are fully discarded when completed — no archive, no season
-    currency payout — versus a real event, which is archived and paid out);
+  - The creation form covers: a name; a "Test Tournament" toggle (a test event
+    stays hidden from players and keeps nothing permanent — no stats, no
+    season currency payout, no Podium entry and nothing on a player's
+    profile — but it is still archived for staff to export when you complete
+    it, versus a real event, which is public, archived and paid out);
     whether players sign up individually or as pre-formed teams; for
     individual sign-ups, how teams get formed (**snake draft**, where
     captains take turns picking, or **auto-balance**, where the system sorts
@@ -1308,8 +1313,10 @@ Moderators too, it's noted.
   - **Force Tracker Update** — flags every player and sub in the active
     event to re-verify their tracker account; until they do, they're
     blocked from submitting replays for their next match.
-  - A **Test Season** toggle (locked while a season is active) — same
-    discard-on-completion behavior as the tournament-level test toggle.
+  - A **Test Season** toggle (locked while a season is active) — the
+    season-level test flag. It keeps nothing permanent, like a test
+    tournament, and goes one step further: completing it saves no archive at
+    all, so unlike a test tournament there is nothing left to export.
   - While a season is active, **End Season** archives the final standings to
     Past Events, then deletes matches, unassigns every player, and strips
     team roles — irreversible, with its own confirmation. The report and the

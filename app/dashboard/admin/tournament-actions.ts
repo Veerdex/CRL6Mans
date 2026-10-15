@@ -685,50 +685,48 @@ export async function completeTournament() {
     .eq("id", activeId).single();
   const isTest = tournament?.is_test ?? false;
 
-  if (isTest) {
-    // Test tournaments are discarded: no summary saved, hidden from all public views.
-    await supabaseAdmin
-      .from("tournaments")
-      .update({
-        status: "completed",
-        hidden_from_home: true,
-        ended_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", activeId);
-  } else {
-    // Snapshot the summary AND the full archive BEFORE resetSeason wipes the matches/teams.
-    const endedAt = new Date().toISOString();
-    const [summary, fullArchive] = await Promise.all([
-      computeSummary(tournament?.stats_enabled ?? true),
-      computeFullArchive({
-        kind: "tournament",
-        name: tournament!.name,
-        formatPreset: null,
-        seasonFormat: tournament!.season_format ?? null,
-        joinMode: (tournament!.join_mode as "teams" | "players" | null) ?? null,
-        teamAssignment: (tournament!.team_assignment as "snake_draft" | "auto_balance" | null) ?? null,
-        prize1st: (tournament!.prize_1st as number | null) ?? null,
-        prize2nd: (tournament!.prize_2nd as number | null) ?? null,
-        prize3rd4th: (tournament!.prize_3rd4th as number | null) ?? null,
-        startedAt: tournament!.started_at ?? null,
-        endedAt,
-      }),
-    ]);
-    await supabaseAdmin
-      .from("tournaments")
-      .update({
-        status: "completed",
-        summary,
-        full_archive: fullArchive,
-        ended_at: endedAt,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", activeId);
+  // Snapshot the summary AND the full archive BEFORE resetSeason wipes the matches/teams.
+  // A test event is archived on the same terms as a real one so that it can be
+  // exported after completion — there is no second chance, since resetSeason
+  // below deletes the matches and rosters both are derived from. What makes it a
+  // test is what happens to the archive afterwards, not whether one is taken:
+  // the row stays hidden_from_home (which is what Podium, the nav and the
+  // dashboard's past-events list filter on, for staff too) and it is never
+  // indexed into player_event_results, so a fake placement can't reach a real
+  // player's profile. rebuildEventResults() skips is_test for the same reason.
+  const endedAt = new Date().toISOString();
+  const [summary, fullArchive] = await Promise.all([
+    computeSummary(tournament?.stats_enabled ?? true),
+    computeFullArchive({
+      kind: "tournament",
+      name: tournament!.name,
+      formatPreset: null,
+      seasonFormat: tournament!.season_format ?? null,
+      joinMode: (tournament!.join_mode as "teams" | "players" | null) ?? null,
+      teamAssignment: (tournament!.team_assignment as "snake_draft" | "auto_balance" | null) ?? null,
+      prize1st: (tournament!.prize_1st as number | null) ?? null,
+      prize2nd: (tournament!.prize_2nd as number | null) ?? null,
+      prize3rd4th: (tournament!.prize_3rd4th as number | null) ?? null,
+      startedAt: tournament!.started_at ?? null,
+      endedAt,
+    }),
+  ]);
+  await supabaseAdmin
+    .from("tournaments")
+    .update({
+      status: "completed",
+      summary,
+      full_archive: fullArchive,
+      ...(isTest ? { hidden_from_home: true } : {}),
+      ended_at: endedAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", activeId);
 
-    // Index the archive into per-player rows for profiles. Derived data, so a
-    // failure here must not take the completion with it — the archive is
-    // already written and rebuildEventResults() can regenerate this later.
+  // Index the archive into per-player rows for profiles. Derived data, so a
+  // failure here must not take the completion with it — the archive is
+  // already written and rebuildEventResults() can regenerate this later.
+  if (!isTest) {
     try {
       await recordEventResults(activeId, fullArchive);
     } catch (e) {
@@ -748,7 +746,7 @@ export async function completeTournament() {
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
-  if (isTest) return { ok: true, message: "Test tournament discarded. No records saved." };
+  if (isTest) return { ok: true, message: "Test tournament completed. Hidden from players — export it from the list below." };
   return { ok: true, message: "Tournament completed." };
 }
 
