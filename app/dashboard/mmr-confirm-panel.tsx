@@ -133,7 +133,11 @@ export function MmrConfirmPanel({
       </h2>
       <p className="text-sm text-zinc-400">
         {firstTime
-          ? "Your MMR decides your rating and who you get drafted with. Read all four off your tracker to join."
+          ? // Neutral on purpose: a first-timer reaches this from the team
+            // sign-up surfaces too, where the default copy's "who you get
+            // drafted with" doesn't hold, and TEAM_MMR_DESCRIPTION's "correct
+            // anything that's changed" reads wrong against empty boxes.
+            "Your MMR decides your rating. Read all four off your tracker to join."
           : description ??
             "Your MMR decides your rating and who you get drafted with. Check these against your tracker and correct anything that's changed."}
       </p>
