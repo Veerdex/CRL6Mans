@@ -32,7 +32,10 @@ export default function SendIt({ seed }: { seed: number }) {
   }, []);
 
   return (
-    <div className="mx-auto w-full max-w-5xl">
+    // The marker the portrait guard in globals.css looks for. It sits on the game rather
+    // than on the route so the lock lifts for exactly as long as the game is mounted, and
+    // comes back on its own when the player navigates away — no effect, no cleanup.
+    <div className="mx-auto w-full max-w-5xl" data-landscape-ok>
       <iframe
         ref={frame}
         src={`${GAME_URL}?seed=${seed}`}
@@ -47,7 +50,9 @@ export default function SendIt({ seed }: { seed: number }) {
         // on this one, and Chrome reports the frame as fullscreen-capable either way.
         allowFullScreen
         // Tall enough to leave the hill some sky, and capped against the viewport so the
-        // whole game is reachable without scrolling the dashboard under it.
+        // whole game is reachable without scrolling the dashboard under it. These are the
+        // portrait numbers: held sideways on a phone the frame is pinned to the viewport
+        // instead, by the rule keyed on data-landscape-ok.
         className="block w-full h-[min(72vh,640px)] min-h-[420px] rounded-xl border border-white/10 bg-zinc-950"
       />
     </div>

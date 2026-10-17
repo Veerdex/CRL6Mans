@@ -739,6 +739,47 @@ aside.has-nav-bg .sidebar-flyout a.bg-zinc-800 { color: var(--color-white); }
   body { overflow: hidden; }
 }
 
+/*
+ * The one page that wants to be held sideways. Send It is built for a short wide
+ * viewport — its own stylesheet sizes the HUD in vh and lays the garage out for
+ * "the orientation this game is played in" — so it marks itself and the guard
+ * above steps aside for it. The marker rides on the game, not on the route, so
+ * the rest of the tab (and Flappy, which is portrait) keeps the lock.
+ *
+ * The frame is pinned to the viewport rather than fitted inside the chrome,
+ * because landscape is not one shape: past Tailwind's `md` a sideways phone gets
+ * the desktop sidebar, under it the 80px mobile nav, and the topbar layout a
+ * header and footer instead. All three leave less height than the frame asks for,
+ * and overflowing is not survivable here — the game's bottom edge is the pedal and
+ * it sets `touch-action: none`, so a frame hanging off the bottom can neither be
+ * driven nor scrolled into view.
+ *
+ * `isolation: auto` is the half that makes the pin work: `main` is `isolate`, so it
+ * paints as one stacking context sitting between the sidebar (z-20) and the mobile
+ * nav (z-40), and a fixed frame inside it stays under both whatever z-index it
+ * carries. Dropping that for this page lets the frame's own z-index decide.
+ *
+ * Height in dvh with `bottom` left auto: a fixed box's inset resolves against the
+ * layout viewport, which on iOS sits under the toolbars, and the pedal is the edge
+ * that would go under one. Rotating back to portrait restores the chrome — the
+ * gesture the overlay already teaches everywhere else.
+ */
+@media (orientation: landscape) and (max-height: 600px) and (pointer: coarse) {
+  body:has([data-landscape-ok]) .rotate-overlay { display: none; }
+  main:has([data-landscape-ok]) { isolation: auto; }
+  [data-landscape-ok] > iframe {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100dvh;
+    min-height: 0;
+    z-index: 50;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
 /* The app shell sizes itself to the viewport and scrolls in inner panes, so a
    downward swipe that runs past the top of one of those panes has nowhere useful
    to go — the browser turns it into pull-to-refresh and the player loses their
