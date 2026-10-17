@@ -6,6 +6,12 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
+import { FLAPPY_GAME, FLAPPY_SEED, accountsFor } from "@/app/lib/game-scores";
+
+// Everything in this file is Flappy Bird's. `game_scores` holds Send It's rows too, keyed
+// per daily seed, so every query here pins game and seed — without it the Flappy board
+// would list Send It distances, and `.maybeSingle()` on a player with rows in both games
+// would error rather than reading their score.
 
 export type LeaderboardRow = {
   discord_id: string;
@@ -19,34 +25,11 @@ export type Leaderboard = { top: LeaderboardRow[]; self: LeaderboardRow | null }
 
 const TOP_SCORES = 10;
 
-type AccountBits = { username: string; display_name: string | null; avatar: string | null };
-
-// Names and avatars both come from accounts (Tier 1), which exists for every Discord
-// login — reading them off `players` left anyone without a roster row (guests,
-// unapproved players) showing their raw username and no picture.
-//
-// The username comes from here too. game_scores.username is a snapshot from
-// whenever the score was set, so a player who has renamed on Discord since was
-// listed under a name the site no longer knows them by — and their profile,
-// which resolves by username, could not be opened at all. The snapshot only
-// stands in for a score whose account is gone.
-async function accountsFor(discordIds: string[]): Promise<Map<string, AccountBits>> {
-  const { data } = await supabaseAdmin
-    .from("accounts")
-    .select("discord_id, username, display_name, avatar")
-    .in("discord_id", discordIds);
-  return new Map(
-    (data ?? []).map((a: { discord_id: string } & AccountBits) => [
-      a.discord_id,
-      { username: a.username, display_name: a.display_name, avatar: a.avatar },
-    ]),
-  );
-}
-
 export async function getLeaderboard(viewerDiscordId?: string): Promise<Leaderboard> {
   const { data } = await supabaseAdmin
     .from("game_scores")
     .select("discord_id, username, score")
+    .eq("game", FLAPPY_GAME)
     .order("score", { ascending: false });
   if (!data?.length) return { top: [], self: null };
 
@@ -87,6 +70,8 @@ export async function submitScore(
     .from("game_scores")
     .select("score")
     .eq("discord_id", session.userId)
+    .eq("game", FLAPPY_GAME)
+    .eq("seed", FLAPPY_SEED)
     .maybeSingle();
 
   const isNewBest = !existing || score > (existing.score ?? 0);
@@ -96,10 +81,12 @@ export async function submitScore(
       {
         discord_id: session.userId,
         username: session.username ?? "Unknown",
+        game: FLAPPY_GAME,
+        seed: FLAPPY_SEED,
         score,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "discord_id" }
+      { onConflict: "discord_id,game,seed" }
     );
     if (error) return { error: error.message };
   }
@@ -121,6 +108,7 @@ export async function getAllGameScores(): Promise<GameScoreRow[]> {
   const { data } = await supabaseAdmin
     .from("game_scores")
     .select("discord_id, username, score, updated_at")
+    .eq("game", FLAPPY_GAME)
     .order("score", { ascending: false });
   if (!data?.length) return [];
   const accountById = await accountsFor(data.map((r: { discord_id: string }) => r.discord_id));
@@ -138,7 +126,13 @@ export async function deleteGameScore(discordId: string) {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId || !(await isDirectorVerified(session.userId))) redirect("/dashboard");
 
-  const { error } = await supabaseAdmin.from("game_scores").delete().eq("discord_id", discordId);
+  // Scoped to Flappy, since that is the board this clears a row from. Without it a Director
+  // wiping one Flappy score would take every Send It distance the player had ever posted.
+  const { error } = await supabaseAdmin
+    .from("game_scores")
+    .delete()
+    .eq("discord_id", discordId)
+    .eq("game", FLAPPY_GAME);
   if (error) return { error: error.message };
 
   revalidatePath("/dashboard/admin");

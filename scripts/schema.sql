@@ -523,16 +523,28 @@ create unique index if not exists match_identity_snapshots_match_id_idx
   on match_identity_snapshots(match_id);
 
 -- ─────────────────────────────────────────────
--- GAME SCORES  (Flappy Bird leaderboard)
+-- GAME SCORES  (the Game tab's leaderboards)
+-- One row per player per game per seed. Flappy Bird is scored all-time and has
+-- no seed, so its rows sit on seed 0 — outside the range getDailySeed draws
+-- from, so it cannot collide with one of Send It's days. Send It is scored per
+-- daily seed, because distances on different hills are not comparable.
+--
+-- car/hue are the livery the distance was driven in, for the board row's
+-- thumbnail. Nullable: Flappy has no car, and nor does a legacy Send It row.
 -- ─────────────────────────────────────────────
 create table if not exists game_scores (
-  discord_id   text        primary key,
+  discord_id   text        not null,
   username     text        not null,
+  game         text        not null default 'flappy',
+  seed         bigint      not null default 0,
   score        integer     not null default 0,
-  updated_at   timestamptz not null default now()
+  car          integer,
+  hue          integer,
+  updated_at   timestamptz not null default now(),
+  primary key (discord_id, game, seed)
 );
 
-create index if not exists game_scores_score_idx on game_scores(score desc);
+create index if not exists game_scores_board_idx on game_scores(game, seed, score desc);
 
 -- ─────────────────────────────────────────────
 -- GAME DAILY SEED  (Send It — the day's terrain, shared by every player)
