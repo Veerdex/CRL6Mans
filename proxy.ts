@@ -40,7 +40,10 @@ function buildCsp(nonce: string): string {
     `media-src 'self' blob: https://*.public.blob.vercel-storage.com`,
     `worker-src 'self'`,
     `manifest-src 'self'`,
-    `frame-src https://www.youtube.com https://medal.tv https://streamable.com https://clips.twitch.tv`,
+    // 'self' is for the game at /send-it/, which /dashboard/game frames; the four hosts
+    // are the clip platforms the Media tab embeds. frame-src governs what a page of ours
+    // may embed, so leaving 'self' out blocked our own document as flatly as a stranger's.
+    `frame-src 'self' https://www.youtube.com https://medal.tv https://streamable.com https://clips.twitch.tv`,
     `frame-ancestors 'none'`,
     `base-uri 'self'`,
     `form-action 'self'`,
@@ -125,14 +128,18 @@ export const config = {
     // requests so a throwaway nonce isn't generated for them.
     // replay-analyzer.html is a standalone static tool (public/) with its
     // own inline <script> and no server templating to carry a CSP nonce
-    // into, so it's excluded here the same way favicon.ico is.
+    // into, so it's excluded here the same way favicon.ico is. send-it/ is
+    // the same case and then some: a built game of its own, whose ~20 art and
+    // audio files would each pay for a JWT verify and a CSP build, and whose
+    // document would inherit a frame-ancestors 'none' that refuses the very
+    // page framing it. Its X-Frame-Options comes from next.config.ts instead.
     // Everything else in the list after it is the rest of public/ plus the
     // generated manifest: files under public/ are NOT covered by the
     // _next/static exclusions, so without naming them every emblem, avatar
     // border and logo request was paying for a JWT verify, a UUID and a CSP
     // build it has no use for. Keep this in sync with public/.
     {
-      source: "/((?!api|_next/static|_next/image|favicon.ico|replay-analyzer.html|sw.js|manifest.webmanifest|avatar-borders/|format-emblems/|crl-logo.png|crl-logo-tile.png|supporter-badge.png|file.svg|globe.svg|next.svg|vercel.svg|window.svg).*)",
+      source: "/((?!api|_next/static|_next/image|favicon.ico|replay-analyzer.html|send-it/|sw.js|manifest.webmanifest|avatar-borders/|format-emblems/|crl-logo.png|crl-logo-tile.png|supporter-badge.png|file.svg|globe.svg|next.svg|vercel.svg|window.svg).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

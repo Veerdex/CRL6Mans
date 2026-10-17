@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "game:build": "npm --prefix game-proto run build",
     "bench:supabase": "node scripts/bench-supabase.mjs",
     "bench:layout-modes": "node scripts/bench-layout-modes.mjs",
     "test:replay-parser": "tsc app/lib/replay-parser.ts scripts/test-replay-parser.ts --outDir .test-build --rootDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck && node --test .test-build/scripts/test-replay-parser.js",

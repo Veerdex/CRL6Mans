@@ -535,6 +535,30 @@ create table if not exists game_scores (
 create index if not exists game_scores_score_idx on game_scores(score desc);
 
 -- ─────────────────────────────────────────────
+-- GAME DAILY SEED  (Send It — the day's terrain, shared by every player)
+-- One row, ever: the `id` column is a boolean pinned true, so a second insert
+-- collides on the primary key instead of quietly giving half the league its own
+-- set of hills. bigint, not integer — seeds run to 9,999,999,999 and int4 stops
+-- at 2,147,483,647. app/lib/daily-seed.ts rotates it lazily on the first read of
+-- a new Pacific day, so the seeded row's `day` must be an old date and never
+-- null: `neq("day", today)` would not match a null and the rotation would never
+-- fire.
+-- ─────────────────────────────────────────────
+create table if not exists game_daily_seed (
+  id   boolean primary key default true check (id),
+  seed bigint  not null,
+  day  date    not null
+);
+
+insert into game_daily_seed (id, seed, day)
+values (true, 1000, '2000-01-01')
+on conflict (id) do nothing;
+
+-- PGRST205 ("not in the schema cache") is the one error daily-seed.ts treats as
+-- pre-migration, so make sure the cache is not the thing still saying it.
+notify pgrst, 'reload schema';
+
+-- ─────────────────────────────────────────────
 -- PUSH SUBSCRIPTIONS  (Web Push / PWA notifications)
 -- ─────────────────────────────────────────────
 create table if not exists push_subscriptions (
@@ -598,6 +622,7 @@ alter table matches                  enable row level security;
 alter table league_settings          enable row level security;
 alter table sub_requests             enable row level security;
 alter table game_scores              enable row level security;
+alter table game_daily_seed          enable row level security;
 alter table tournaments              enable row level security;
 alter table tournament_entries       enable row level security;
 alter table team_signups             enable row level security;

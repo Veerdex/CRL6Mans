@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>Send It</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; background: #10101c; overflow: hidden; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      /* Fixed and explicitly sized. As a flex item with an auto height the box
+         would be derived from the width and the canvas attributes' aspect ratio,
+         which is the ratio the resize handler had just written — so the box and
+         the backing store chased each other and the scene drifted off-screen. */
+      #game {
+        position: fixed; inset: 0; width: 100%; height: 100%; display: block;
+        touch-action: none; -webkit-user-select: none; user-select: none;
+      }
+      /* Sized in vh, not px, because height is the axis the world is fixed against
+         (see VIEW_H) — so the readout stays the same fraction of the play area on
+         every screen instead of eating a quarter of a landscape phone. The floor
+         keeps it legible on a short window, where 8.3vh alone would be tiny. */
+      #distance {
+        position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+        padding-top: max(12px, env(safe-area-inset-top));
+        font-size: clamp(48px, 8.3vh, 96px);
+        font-weight: 600; font-variant-numeric: tabular-nums;
+        color: #fff; text-shadow: 0 3px 10px rgba(0,0,0,0.6); pointer-events: none;
+      }
+      /* A third smaller on a touch screen. Every term of the clamp is scaled, not just
+         the preferred one, or the floor would keep the small end at its old size and the
+         reduction would quietly vanish on exactly the short landscape viewport it is
+         meant for. Same pointer-based test as the buttons. */
+      @media (pointer: coarse) {
+        #distance { font-size: clamp(32px, 5.56vh, 64px); }
+      }
+      /* Same vh reasoning as #distance above, a step smaller: the distance is what
+         the run is scored on and the clock is the constraint around it. The inset
+         keeps it off an iPhone's home indicator, and pointer-events are off so it
+         cannot swallow a pedal tap — the whole bottom edge is a touch target. */
+      #timer {
+        position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+        font-size: clamp(40px, 6.5vh, 76px);
+        font-weight: 600; font-variant-numeric: tabular-nums;
+        color: #fff; text-shadow: 0 3px 10px rgba(0,0,0,0.6); pointer-events: none;
+      }
+      /* Dev readout for the per-seed terrain shape. Sized in px, not vh: unlike the
+         distance and the clock this is text to read rather than a game element that
+         should scale with the play area, and 11px monospace is about as small as it can
+         be and stay legible on a phone. Lines are kept under ~26 characters because the
+         centered #distance spans 360-480px on a landscape phone and a wider block runs
+         underneath it.
+
+         The LEFT inset is the one that matters here. In landscape the notch is on the
+         side, and viewport-fit=cover means nothing else keeps this text out from under
+         it. Pointer-events off like every other overlay — the top-left corner is a
+         pedal, and a debug panel that swallowed a tap would be worse than no panel.
+
+         :empty collapses the backing along with the text, so the toggle can just write
+         an empty string rather than having to manage display. Same trick as #banner. */
+      #debug {
+        position: fixed;
+        top: max(10px, env(safe-area-inset-top));
+        left: max(10px, env(safe-area-inset-left));
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px; line-height: 1.5; white-space: pre;
+        color: #d8d8e8; background: rgba(8,8,16,0.55);
+        border-radius: 6px; padding: 6px 8px;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.8); pointer-events: none;
+      }
+      #debug:empty { display: none; }
+
+      /* The message and the big restart under it are one centred column rather than two
+         separately positioned boxes, so the button sits just below the message however
+         many lines the message happens to wrap to — at 2x the text that is two or three
+         on a landscape phone, and a hand-computed offset would have to guess.
+
+         Transparent to a pedal tap like every other overlay. The button inside turns
+         pointer events back on for itself, which is the whole reason this can cover the
+         viewport without eating input during a run. */
+      #over {
+        position: fixed; inset: 0;
+        display: grid; place-content: center; justify-items: center; gap: 18px;
+        pointer-events: none;
+      }
+
+      /* pre-line so the score and the line congratulating it can be one textContent with
+         a newline between them rather than two elements that have to be kept in step.
+         Long lines still wrap, and :empty still collapses the box, because a run that has
+         not finished writes an empty string rather than a bare newline. */
+      #banner {
+        color: #fff; background: rgba(16,16,28,0.82); border: 1px solid #e88a24;
+        border-radius: 10px; padding: 14px 20px; font-size: 15px; text-align: center;
+        max-width: 80vw; white-space: pre-line;
+      }
+      #banner:empty { display: none; }
+      /* Doubled at the end of a run, which is the only time this box carries the score
+         rather than a status line — "Loading…" and a boot error stay at 15px. Same box,
+         one number. */
+      body.finished #banner { font-size: 30px; }
+
+      /* The only elements on top of the canvas that are meant to be hit, so they are the
+         ones with pointer-events back on — everything else overlaying the play area is
+         explicitly transparent to a pedal tap. Sized in px rather than vh because a thumb
+         is the same size whatever the viewport is.
+
+         --btn is the only number: the radius, the glyph, the stacking offset and the size
+         are all fractions of it. The look lives on the class and the POSITION on the ids,
+         which is what lets the big restart in the middle of the end-of-run overlay be the
+         same button at twice the size rather than a second copy of this styling that
+         drifts the first time one of them is touched. */
+      .icon-btn {
+        --btn: 48px;
+        width: var(--btn); height: var(--btn);
+        border-radius: calc(var(--btn) * 0.25);
+        display: grid; place-items: center;
+        font-size: calc(var(--btn) * 0.46); line-height: 1; color: #fff;
+        background: rgba(16,16,28,0.72); border: 1px solid rgba(255,255,255,0.22);
+        pointer-events: auto; cursor: pointer; -webkit-tap-highlight-color: transparent;
+      }
+      .icon-btn:active { background: rgba(16,16,28,0.92); }
+      /* The corner buttons share a column at the top right, which is the one corner no
+         gameplay input uses. Inset on both axes against the notch and the rounded corner. */
+      #menu-btn, #board-btn, #restart-btn, #full-btn {
+        position: fixed;
+        right: max(10px, env(safe-area-inset-right));
+      }
+      #menu-btn { top: max(10px, env(safe-area-inset-top)); }
+      /* Stacked downward from the garage button, one sixth of a button clear of each other
+         so they read as a column without a stray tap landing on the wrong one. The offset
+         is (1 + 1/6) per step down, so a fourth button is 3.51 rather than a new rule. */
+      /* An emoji inks the whole em square where a line glyph inks a stroke, so at the
+         class's size the trophy measures half again as wide as the other two and reads as
+         the loud one. Sized down to put the same amount of ink in the box; the grid already
+         centres it, so this is the only correction it needs. */
+      #board-btn {
+        top: calc(max(10px, env(safe-area-inset-top)) + var(--btn) * 1.17);
+        font-size: calc(var(--btn) * 0.34);
+      }
+      #restart-btn {
+        top: calc(max(10px, env(safe-area-inset-top)) + var(--btn) * 2.34);
+      }
+      /* The fourth step the comment above predicted. Drawn as an SVG rather than a glyph
+         because the fullscreen characters are the ones fonts disagree about: U+26F6 is
+         missing on plenty of phones, and the two that are always present (U+26F7, U+1F5D6)
+         measured a full em here, which is the colour-emoji fallback the trophy already
+         needed correcting for. A path inherits the class's white through currentColor and
+         needs no size correction at all. */
+      #full-btn {
+        top: calc(max(10px, env(safe-area-inset-top)) + var(--btn) * 3.51);
+      }
+      #full-btn svg {
+        width: calc(var(--btn) * 0.44); height: calc(var(--btn) * 0.44);
+        fill: none; stroke: currentColor; stroke-width: 2.2;
+        stroke-linecap: round; stroke-linejoin: round;
+      }
+      /* Corners point out to go in and in to come out, swapped off a body class the way
+         the big restart is, so there is one button and one state rather than two buttons
+         taking turns being hidden. */
+      #full-btn .fs-exit { display: none; }
+      body.fullscreen #full-btn .fs-enter { display: none; }
+      body.fullscreen #full-btn .fs-exit { display: inline; }
+      /* Twice the corner button and nothing else different. display rather than opacity
+         or visibility, so it is not a 96px tap target sitting invisibly over the middle
+         of the hill for the whole run. */
+      #restart-big { --btn: 96px; display: none; }
+      body.finished #restart-big { display: grid; }
+
+      /* Covers the whole viewport rather than sitting in a corner, because while it is
+         open the run is paused and nothing behind it is meant to be touched — the
+         backdrop swallowing taps IS the pause, as far as input is concerned.
+
+         Shared with the leaderboard, which is the same sheet with different contents: the
+         look lives here and only the contents live on the ids, the same reasoning that
+         lets the big restart be .icon-btn at twice the size. Only one is ever open. */
+      #menu, #board {
+        position: fixed; inset: 0; z-index: 10;
+        display: none; place-items: center;
+        background: rgba(8,8,16,0.72); backdrop-filter: blur(3px);
+        padding: max(12px, env(safe-area-inset-top)) 12px;
+        overflow-y: auto;
+      }
+      #menu.open, #board.open { display: grid; }
+      #menu-panel, #board-panel {
+        background: #171726; border: 1px solid rgba(255,255,255,0.14);
+        border-radius: 14px; padding: 18px; width: min(520px, 100%);
+        color: #fff; font-size: 14px;
+        /* The panel scrolls itself rather than letting #menu do it. Taller than the
+           viewport, a centred grid item overflows equally in both directions and the
+           part above the container's top edge is not reachable by scrolling it — so the
+           overflow on #menu recovers the bottom of the panel and silently eats the top.
+           In landscape on a phone the content is taller than the 390px-ish height, which
+           is the orientation this game is played in. */
+        max-height: 100%; overflow-y: auto;
+      }
+      #menu-panel h2, #board-panel h2 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+      /* Auto-fit rather than a fixed four across: the four cards are unreadable side by
+         side on a phone in landscape, which is the orientation this game is played in. */
+      #car-grid {
+        display: grid; gap: 8px; margin-bottom: 18px;
+        grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      }
+      .car-card {
+        text-align: left; padding: 10px; border-radius: 10px; cursor: pointer;
+        background: #202034; border: 1px solid rgba(255,255,255,0.12); color: #fff;
+      }
+      .car-card[aria-pressed="true"] { border-color: #e88a24; background: #2b2435; }
+      .car-card .nm { font-weight: 600; display: block; margin-bottom: 4px; }
+      .car-card .ab { font-size: 11px; line-height: 1.45; color: #b9b9cc; }
+      .car-card .ab i { color: #7fd48a; font-style: normal; }
+      .car-card .ab b { color: #e8907f; font-weight: 400; }
+
+      #hue-row, #music-row { display: flex; align-items: center; gap: 12px; }
+      #music-row { margin-bottom: 18px; }
+      /* Shared by both sliders: a range input left unstyled would render as the browser
+         default, which on this panel is a light Windows track on a near-black card. Only
+         the track's fill differs between them, so only that is set per slider below. */
+      .slider { flex: 1; -webkit-appearance: none; appearance: none; height: 18px;
+             border-radius: 9px; }
+      .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px;
+             border-radius: 50%; background: #fff; border: 2px solid #171726; cursor: pointer; }
+      .slider::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%;
+             background: #fff; border: 2px solid #171726; cursor: pointer; }
+      #hue { background: linear-gradient(to right,
+               hsl(0 80% 50%), hsl(60 80% 50%), hsl(120 80% 50%), hsl(180 80% 50%),
+               hsl(240 80% 50%), hsl(300 80% 50%), hsl(360 80% 50%)); }
+      #music { background: linear-gradient(to right, #3a3a52, #e88a24); }
+      /* Tabular so the digits do not shuffle the slider sideways as the number changes,
+         and wide enough for "100%" since that is the longest it gets. */
+      #music-value { width: 42px; text-align: right; color: #b9b9cc;
+             font-variant-numeric: tabular-nums; }
+      /* The live repainted sprite, not a colour chip: the paint is a selective rotation
+         that leaves glass, chrome and taillights alone, so a flat swatch of the slider's
+         hue is not what the car will look like. */
+      #hue-preview { width: 104px; height: 40px; object-fit: contain; }
+      #menu-note, #board-note { margin-top: 14px; font-size: 11px; color: #8a8aa0; line-height: 1.5; }
+      #menu-close, #board-close {
+        margin-top: 16px; width: 100%; padding: 11px; border-radius: 10px;
+        background: #e88a24; border: 0; color: #fff; font-size: 14px; font-weight: 600;
+        cursor: pointer;
+      }
+
+      /* Rows are built in main.ts, so the columns are fixed here rather than sized to the
+         contents: the rank and the distance are tabular, and a board whose middle column
+         shifted as the player's own row moved up it would read as the number changing.
+         Same card tones as .car-card, including the orange highlight for the player's own
+         row — the panel is a different sheet, not a different theme. */
+      #board-list { list-style: none; display: grid; gap: 6px; }
+      .board-row {
+        /* The rank column fits three digits: the one row allowed past tenth is the
+           player's own, and that is exactly the row whose number can be large. */
+        display: grid; grid-template-columns: 2.4em 1fr auto; gap: 10px; align-items: baseline;
+        padding: 9px 10px; border-radius: 10px;
+        background: #202034; border: 1px solid rgba(255,255,255,0.12);
+      }
+      .board-row.you { border-color: #e88a24; background: #2b2435; }
+      /* The player's row when it did not make the ten — held off the bottom of the list so
+         the gap in the numbers above it reads as a cut rather than as a missing row. */
+      .board-row.cut { margin-top: 14px; position: relative; }
+      .board-row.cut::before {
+        content: ""; position: absolute; left: 0; right: 0; top: -8px;
+        border-top: 1px dashed rgba(255,255,255,0.18);
+      }
+      .board-row .rk { color: #8a8aa0; font-variant-numeric: tabular-nums; }
+      .board-row .ds { font-weight: 600; font-variant-numeric: tabular-nums; }
+      /* A run that has not finished has no distance to post, and an em dash is the one
+         thing that cannot be mistaken for a score of zero. */
+      .board-row.unposted .ds { color: #8a8aa0; font-weight: 400; }
+      #board-seed {
+        font-size: 11px; color: #8a8aa0; margin: -4px 0 10px;
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+    <script type="module" crossorigin src="./_app/index-C6X_EaYM.js"></script>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="distance"></div>
+    <div id="timer"></div>
+    <div id="debug"></div>
+    <div id="over">
+      <div id="banner">Loading…</div>
+      <button id="restart-big" class="icon-btn" type="button" aria-label="Restart run">&#8635;</button>
+    </div>
+    <button id="menu-btn" class="icon-btn" type="button" aria-label="Garage">&#9776;</button>
+    <!-- The one colour glyph in the column — an emoji paints its own colours and ignores
+         the class's `color`. #board-btn carries the size that balances it against the two
+         line glyphs. -->
+    <button id="board-btn" class="icon-btn" type="button" aria-label="Leaderboard">&#127942;</button>
+    <button id="restart-btn" class="icon-btn" type="button" aria-label="Restart run">&#8635;</button>
+    <!-- Removed outright by main.ts where fullscreen is unavailable, which is also how an
+         iframe without allow="fullscreen" reports itself — better no button than one that
+         does nothing when pressed. -->
+    <button id="full-btn" class="icon-btn" type="button" aria-label="Full screen">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <g class="fs-enter"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5" /></g>
+        <g class="fs-exit"><path d="M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5" /></g>
+      </svg>
+    </button>
+    <div id="menu" role="dialog" aria-modal="true" aria-label="Garage">
+      <div id="menu-panel">
+        <h2>Music</h2>
+        <div id="music-row">
+          <input id="music" class="slider" type="range" min="0" max="100" step="1"
+                 aria-label="Music volume" />
+          <span id="music-value"></span>
+        </div>
+        <h2>Car</h2>
+        <div id="car-grid"></div>
+        <h2>Paint</h2>
+        <div id="hue-row">
+          <input id="hue" class="slider" type="range" min="0" max="359" step="1" aria-label="Body hue" />
+          <canvas id="hue-preview" width="208" height="80"></canvas>
+        </div>
+        <p id="menu-note">Changing car restarts the run — the abilities change the score. Paint and music do not.</p>
+        <button id="menu-close" type="button">Close</button>
+      </div>
+    </div>
+    <div id="board" role="dialog" aria-modal="true" aria-label="Leaderboard">
+      <div id="board-panel">
+        <h2>Today&rsquo;s Standings</h2>
+        <p id="board-seed"></p>
+        <ol id="board-list"></ol>
+        <p id="board-note"></p>
+        <button id="board-close" type="button">Close</button>
+      </div>
+    </div>
+  </body>
+</html>

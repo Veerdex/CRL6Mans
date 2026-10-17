@@ -24,7 +24,18 @@ const nextConfig: NextConfig = {
     },
   },
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // The game under public/send-it/ is a standalone document that /dashboard/game
+      // frames. X-Frame-Options has no same-origin middle ground applied globally —
+      // DENY refuses our own page too — so the framed document, and only it, is
+      // relaxed to SAMEORIGIN. A later rule wins on a repeated key, so this overrides
+      // the entry above rather than sitting beside it. Everything else stays DENY.
+      {
+        source: "/send-it/:path*",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
+    ];
   },
 };
 

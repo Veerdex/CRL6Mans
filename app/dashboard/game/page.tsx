@@ -1,16 +1,31 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
+import { getDailySeed } from "@/app/lib/daily-seed";
 import { getLeaderboard } from "./actions";
 import FlappyBird from "./flappy-bird";
+import SendIt from "./send-it";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
+
+// Which game the tab serves. Flappy Bird is not deleted, only switched off: its component,
+// its server actions and its leaderboard rows all stay where they are, so putting it back
+// is this one word. The two games keep separate leaderboards, so neither one being live
+// costs the other its scores.
+const ACTIVE_GAME: "send_it" | "flappy" = "send_it";
 
 export default async function GamePage() {
   const cookieStore = await cookies();
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const leaderboard = await getLeaderboard(session.userId);
+  // Only read the board the live game actually draws. Fetching Flappy's while Send It is
+  // up is a query per page load that nothing on the page can show.
+  const leaderboard =
+    ACTIVE_GAME === "flappy" ? await getLeaderboard(session.userId) : null;
+
+  // Reading the seed is also what rotates it: the first visit of a new Pacific day draws
+  // the new one. No cron, and the page that needs it is the page that asks.
+  const seed = leaderboard ? 0 : await getDailySeed();
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -21,10 +36,14 @@ export default async function GamePage() {
       <p className="text-sm text-zinc-400 mb-8 mt-1 text-center">
         A little something for the waiting room. Beat the leaderboard.
       </p>
-      <FlappyBird
-        viewerDiscordId={session.userId}
-        initialLeaderboard={leaderboard}
-      />
+      {leaderboard ? (
+        <FlappyBird
+          viewerDiscordId={session.userId}
+          initialLeaderboard={leaderboard}
+        />
+      ) : (
+        <SendIt seed={seed} />
+      )}
     </div>
   );
 }
