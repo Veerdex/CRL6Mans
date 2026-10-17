@@ -249,8 +249,13 @@
       #board-list { list-style: none; display: grid; gap: 6px; }
       .board-row {
         /* The rank column fits three digits: the one row allowed past tenth is the
-           player's own, and that is exactly the row whose number can be large. */
-        display: grid; grid-template-columns: 2.4em 1fr auto; gap: 10px; align-items: baseline;
+           player's own, and that is exactly the row whose number can be large.
+           The car column is a fixed 40px and sits in every row, including the rows with
+           no car to show — sized to its contents it would collapse on those and shift
+           every name beside it as rows posted. CAR_CELL in main.ts sizes the canvas to
+           match it, because the sheet is built while this panel is still display: none
+           and there is no box to measure. */
+        display: grid; grid-template-columns: 2.4em 40px 1fr auto; gap: 10px; align-items: baseline;
         padding: 9px 10px; border-radius: 10px;
         background: #202034; border: 1px solid rgba(255,255,255,0.12);
       }
@@ -263,6 +268,10 @@
         border-top: 1px dashed rgba(255,255,255,0.18);
       }
       .board-row .rk { color: #8a8aa0; font-variant-numeric: tabular-nums; }
+      /* Centred rather than sharing the row's baseline: the cell holds a picture, and a
+         sprite hung off a text baseline sits visibly low against the name next to it. */
+      .board-row .cr { align-self: center; height: 20px; }
+      .board-row .cr canvas { display: block; width: 100%; height: 100%; }
       .board-row .ds { font-weight: 600; font-variant-numeric: tabular-nums; }
       /* A run that has not finished has no distance to post, and an em dash is the one
          thing that cannot be mistaken for a score of zero. */
@@ -272,7 +281,7 @@
         font-variant-numeric: tabular-nums;
       }
     </style>
-    <script type="module" crossorigin src="./_app/index-C6X_EaYM.js"></script>
+    <script type="module" crossorigin src="./_app/index-B1-UahNp.js"></script>
   </head>
   <body>
     <canvas id="game"></canvas>
