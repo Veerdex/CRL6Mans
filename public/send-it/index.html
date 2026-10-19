@@ -161,6 +161,14 @@
       #full-btn .fs-exit { display: none; }
       body.fullscreen #full-btn .fs-enter { display: none; }
       body.fullscreen #full-btn .fs-exit { display: inline; }
+      /* Where full screen means asking the host page for its viewport (the body class
+         main.ts sets for that), a sideways phone has already been given one: the dashboard
+         pins the frame there on its own. The media query reads the frame, which in that
+         case is the phone. Hidden rather than removed because it comes back on rotating
+         upright, where the button has something to do again. */
+      @media (orientation: landscape) and (max-height: 600px) and (pointer: coarse) {
+        body.host-fs #full-btn { display: none; }
+      }
       /* Twice the corner button and nothing else different. display rather than opacity
          or visibility, so it is not a 96px tap target sitting invisibly over the middle
          of the hill for the whole run. */
@@ -281,7 +289,7 @@
         font-variant-numeric: tabular-nums;
       }
     </style>
-    <script type="module" crossorigin src="./_app/index-BQ-0Cd5d.js"></script>
+    <script type="module" crossorigin src="./_app/index-DkKjx-vO.js"></script>
   </head>
   <body>
     <canvas id="game"></canvas>
@@ -298,9 +306,9 @@
          line glyphs. -->
     <button id="board-btn" class="icon-btn" type="button" aria-label="Leaderboard">&#127942;</button>
     <button id="restart-btn" class="icon-btn" type="button" aria-label="Restart run">&#8635;</button>
-    <!-- Removed outright by main.ts where fullscreen is unavailable, which is also how an
-         iframe without allow="fullscreen" reports itself — better no button than one that
-         does nothing when pressed. -->
+    <!-- Removed outright by main.ts where there is no element fullscreen AND nothing to ask
+         for one — better no button than one that does nothing when pressed. Framed, the
+         host page can expand the frame instead, so the button stays and asks it to. -->
     <button id="full-btn" class="icon-btn" type="button" aria-label="Full screen">
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <g class="fs-enter"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5" /></g>

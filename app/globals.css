@@ -780,6 +780,41 @@ aside.has-nav-bg .sidebar-flyout a.bg-zinc-800 { color: var(--color-white); }
   }
 }
 
+/*
+ * The same pin, asked for rather than inferred — the pair below is the one above with the
+ * media query swapped for a press. The game's full-screen button sets the attribute (see
+ * send-it.tsx) where the browser has no element fullscreen to offer it, which is every
+ * iPhone: the API is on <video> there and nowhere else, so `allow="fullscreen"` on the
+ * frame has nothing to grant and the only full screen available is this one. Inside the
+ * frame the two are indistinguishable, because the frame is the game's viewport either way.
+ *
+ * `isolation: auto` is what makes it work, and it is needed here in its own right rather
+ * than copied: upright, `main` is still `isolate`, so the frame paints under the mobile nav
+ * (z-40) whatever z-index it carries. The body lock is the same one the landscape rule sets,
+ * for the same reason — the page under a frame that now covers it has no business moving.
+ *
+ * Both edges flush, like the landscape pin, and that is the one guess in here. `env()` inside
+ * the frame measures the frame and comes back zero, so the insets can only be read out here —
+ * where this page asks for no `viewport-fit` and they come back zero too. The assumption is
+ * that they are honest: that iOS keeps the app itself clear of the status bar and the home
+ * indicator, which the app relying on it everywhere else is the evidence for. If it does not,
+ * the game's top-right buttons sit under the clock once expanded, and the fix is
+ * `viewportFit: "cover"` on the route plus `env(safe-area-inset-*)` on the edges below.
+ */
+main:has([data-landscape-ok][data-expanded]) { isolation: auto; }
+body:has([data-landscape-ok][data-expanded]) { overflow: hidden; }
+[data-landscape-ok][data-expanded] > iframe {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100dvh;
+  min-height: 0;
+  z-index: 50;
+  border: 0;
+  border-radius: 0;
+}
+
 /* The app shell sizes itself to the viewport and scrolls in inner panes, so a
    downward swipe that runs past the top of one of those panes has nowhere useful
    to go — the browser turns it into pull-to-refresh and the player loses their
