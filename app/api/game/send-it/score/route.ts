@@ -31,8 +31,12 @@ function seedOf(raw: string | null): number | null {
  * The board for a seed.
  *
  * Takes the seed the caller is on rather than today's, so a tab left open across midnight
- * still shows the field for the hills it is actually driving. Read-only, so serving an old
- * seed costs nothing — unlike POST, which pins the current one.
+ * still shows the field for the hills it is actually driving. Serving an old seed costs
+ * nothing — unlike POST, which pins the current one.
+ *
+ * Answers with today's seed alongside the rows, which is how a tab finds out it has sat
+ * through midnight. Without it the only thing that ever noticed was a POST being refused,
+ * and by then the run that discovered it is already gone.
  */
 export async function GET(request: NextRequest) {
   const cookieStore = await cookies();
@@ -44,7 +48,7 @@ export async function GET(request: NextRequest) {
 
   const rows = await fetchSendItBoard(seed, session.userId);
   if (rows === null) return NextResponse.json({ error: "No board" }, { status: 503 });
-  return NextResponse.json({ rows });
+  return NextResponse.json({ rows, currentSeed: await getDailySeed() });
 }
 
 /**
@@ -87,8 +91,12 @@ export async function POST(request: NextRequest) {
       ? { car, hue }
       : { car: null, hue: null };
 
-  if (seed !== (await getDailySeed())) {
-    return NextResponse.json({ saved: false, reason: "stale-seed" });
+  // Carries today's seed with the refusal, so the game can take the tab to the hills it
+  // names rather than leave the player to work out that a reload is what was being asked
+  // of them.
+  const today = await getDailySeed();
+  if (seed !== today) {
+    return NextResponse.json({ saved: false, reason: "stale-seed", currentSeed: today });
   }
 
   const saved = await saveSendItScore({
