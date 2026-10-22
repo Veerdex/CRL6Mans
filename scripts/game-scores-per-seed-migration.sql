@@ -2,7 +2,8 @@
 -- GAME SCORES → one row per player per game per daily seed
 --
 -- game_scores was built for Flappy Bird, which has one all-time best per player,
--- so discord_id alone was the primary key. Send It is scored per daily seed —
+-- so discord_id carried a unique constraint of its own alongside an `id uuid`
+-- primary key nothing ever read. Send It is scored per daily seed —
 -- distances on different hills are not comparable, so an all-time board would
 -- rank whoever drew the easiest terrain — which needs a row per seed.
 --
@@ -26,6 +27,11 @@ alter table game_scores add column if not exists hue  integer;
 -- drops nothing the constraint was named by hand — check it in Supabase before
 -- the add below fails on the old one still being there.
 alter table game_scores drop constraint if exists game_scores_pkey;
+-- The Flappy-only table carried `discord_id text unique` as a second constraint,
+-- which dropping the primary key leaves standing — and it enforces one row per
+-- player however wide the new key is. Added after the fact; see
+-- game-scores-drop-discord-unique-migration.sql for what it cost.
+alter table game_scores drop constraint if exists game_scores_discord_id_key;
 alter table game_scores add primary key (discord_id, game, seed);
 
 -- The board's only query: one game, one seed, best first.
