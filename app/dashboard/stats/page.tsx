@@ -4,6 +4,7 @@ import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { fetchAllTimeTotals } from "@/app/lib/career-stats";
+import { fetchAllCareerPoints } from "@/app/lib/career-points-all";
 import { hidesActiveTestTournament } from "@/app/lib/test-tournament";
 import { aggregatePlayerGameStats, type StatAggregationInput } from "@/app/lib/player-stat-aggregation";
 import type { PlayerStatRow } from "./stats-table";
@@ -35,7 +36,7 @@ export default async function StatsPage() {
   const session = await decrypt(cookieStore.get("session")?.value);
   if (!session?.userId) redirect("/login");
 
-  const [statsRaw, playersRaw, teamsRaw, allTimeTotals, showToggle] = await Promise.all([
+  const [statsRaw, playersRaw, teamsRaw, allTimeTotals, showToggle, careerPointsById] = await Promise.all([
     fetchAllRows<{
       player_id: string; goals: number; assists: number; saves: number; shots: number;
       score: number; demos: number; demoed: number;
@@ -61,6 +62,7 @@ export default async function StatsPage() {
     ),
     fetchAllTimeTotals(),
     showEventToggle(session.userId),
+    fetchAllCareerPoints(),
   ]);
 
   const teamNames = Object.fromEntries(teamsRaw.map((t) => [t.id, t.name]));
@@ -103,6 +105,7 @@ export default async function StatsPage() {
         totalScore: t.score,
         totalDemos: t.demos,
         totalDemoed: t.demoed,
+        careerPoints: (player.discord_id && careerPointsById.get(player.discord_id)) || 0,
       };
     });
 

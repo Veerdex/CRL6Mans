@@ -19,16 +19,20 @@ export type PlayerStatRow = {
   totalScore: number;
   totalDemos: number;
   totalDemoed: number;
+  /** All Time only — career points span every event, not the one in progress. */
+  careerPoints?: number;
 };
 
-type SortKey = "mvp" | "goals" | "assists" | "saves" | "score" | "shots" | "shootingPct" | "demos" | "demoed"
+type SortKey = "careerPoints" | "games" | "mvp" | "goals" | "assists" | "saves" | "score" | "shots" | "shootingPct" | "demos" | "demoed"
              | "totalGoals" | "totalAssists" | "totalSaves" | "totalScore" | "totalShots" | "totalDemos" | "totalDemoed";
 type SortDir = "desc" | "asc";
 
 function sortValue(row: PlayerStatRow, key: SortKey): number {
   const g = row.games;
   switch (key) {
-    case "mvp":          return mvpScore(row);
+    case "careerPoints": return row.careerPoints ?? 0;
+    case "games":        return g;
+    case "mvp":         return mvpScore(row);
     case "goals":        return g > 0 ? row.totalGoals / g : 0;
     case "assists":      return g > 0 ? row.totalAssists / g : 0;
     case "saves":        return g > 0 ? row.totalSaves / g : 0;
@@ -47,8 +51,14 @@ function sortValue(row: PlayerStatRow, key: SortKey): number {
   }
 }
 
-const COLS: { key: SortKey; label: string; title: string; decimals: number; suffix?: string; group?: string }[] = [
-  { key: "mvp",          label: "MVP",   title: "MVP score — composite performance metric",    decimals: 3,                group: "avg" },
+type Col = { key: SortKey; label: string; title: string; decimals: number; suffix?: string; group?: string };
+
+const CAREER_POINTS_COL: Col =
+  { key: "careerPoints", label: "CP",    title: "Career points — 6mans, event placements and accolades", decimals: 1, group: "career" };
+
+const COLS: Col[] = [
+  { key: "games",        label: "GP",    title: "Games played",                               decimals: 0,                group: "avg" },
+  { key: "mvp",         label: "MVP",   title: "MVP score — composite performance metric",    decimals: 3,                group: "avg" },
   { key: "goals",        label: "G/G",   title: "Goals per game",                             decimals: 2,                group: "avg" },
   { key: "assists",      label: "A/G",   title: "Assists per game",                           decimals: 2,                group: "avg" },
   { key: "saves",        label: "Sv/G",  title: "Saves per game",                             decimals: 2,                group: "avg" },
@@ -69,9 +79,21 @@ const COLS: { key: SortKey; label: string; title: string; decimals: number; suff
 // teamName is whichever roster the player sits on right now, which only lines up
 // with the numbers for a single event. Across all time it would label career
 // totals with a team most of them weren't earned on.
-export function StatsTable({ rows, showTeam = true }: { rows: PlayerStatRow[]; showTeam?: boolean }) {
-  const [sortKey, setSortKey] = useState<SortKey>("mvp");
+export function StatsTable({
+  rows,
+  showTeam = true,
+  showCareerPoints = false,
+}: {
+  rows: PlayerStatRow[];
+  showTeam?: boolean;
+  showCareerPoints?: boolean;
+}) {
+  const cols = showCareerPoints ? [CAREER_POINTS_COL, ...COLS] : COLS;
+  const [chosenKey, setSortKey] = useState<SortKey>("mvp");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  // The table survives the Current Event / All Time toggle, so a sort on CP
+  // would otherwise carry over to a scope that has no CP column.
+  const sortKey = cols.some((c) => c.key === chosenKey) ? chosenKey : "mvp";
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -105,9 +127,8 @@ export function StatsTable({ rows, showTeam = true }: { rows: PlayerStatRow[]; s
             {showTeam && (
               <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-400 whitespace-nowrap">Team</th>
             )}
-            <th className="px-4 py-3 text-right text-xs font-semibold text-zinc-400 whitespace-nowrap">GP</th>
-            {COLS.map((col, i) => {
-              const prevGroup = i > 0 ? COLS[i - 1].group : col.group;
+            {cols.map((col, i) => {
+              const prevGroup = i > 0 ? cols[i - 1].group : col.group;
               const groupBorder = col.group !== prevGroup ? "border-l border-zinc-700" : "";
               return (
                 <th
@@ -139,11 +160,10 @@ export function StatsTable({ rows, showTeam = true }: { rows: PlayerStatRow[]; s
               {showTeam && (
                 <td className="px-4 py-3 text-zinc-400 text-xs whitespace-nowrap">{row.teamName ?? "—"}</td>
               )}
-              <td className="px-4 py-3 text-right text-zinc-400 tabular-nums">{row.games}</td>
-              {COLS.map((col, i) => {
+              {cols.map((col, i) => {
                 const v = sortValue(row, col.key);
                 const display = v.toFixed(col.decimals) + (col.suffix ?? "");
-                const prevGroup = i > 0 ? COLS[i - 1].group : col.group;
+                const prevGroup = i > 0 ? cols[i - 1].group : col.group;
                 const groupBorder = col.group !== prevGroup ? "border-l border-zinc-800" : "";
                 return (
                   <td
