@@ -54,7 +54,7 @@ function sortValue(row: PlayerStatRow, key: SortKey): number {
 type Col = { key: SortKey; label: string; title: string; decimals: number; suffix?: string; group?: string };
 
 const CAREER_POINTS_COL: Col =
-  { key: "careerPoints", label: "CP",    title: "Career points — 6mans, event placements and accolades", decimals: 0, group: "career" };
+  { key: "careerPoints", label: "Career Pts", title: "Career points — 6mans, event placements and accolades", decimals: 0, group: "career" };
 
 const COLS: Col[] = [
   { key: "games",        label: "GP",    title: "Games played",                               decimals: 0,                group: "avg" },
