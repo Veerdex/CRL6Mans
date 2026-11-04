@@ -1,4 +1,4 @@
-// Career points model `crl-career-points-v1`.
+// Career points model `crl-career-points-v2`.
 //
 // Pure and side-effect-free — no supabase, no Discord, no "server-only" — so the
 // season archiver, the profile loader, and any client-side preview all interpret
@@ -9,7 +9,7 @@
 // because the constants below are hand-tuned and will be retuned; a points value
 // frozen into a row at event-completion time could never be corrected.
 
-export const CAREER_POINTS_MODEL = "crl-career-points-v1";
+export const CAREER_POINTS_MODEL = "crl-career-points-v2";
 
 // Points lost stepping from 1st to 2nd in a 20-team event. The 38 normalises the
 // curve at N=20 (38 / (2*20-2) === 1), so K0 is literally dp/dr at r=1 there.
@@ -85,10 +85,22 @@ export function placementScore(placement: number, teamCount: number): number {
   return Math.pow(100, 1 - b / (a + (1 - a) * b));
 }
 
-/** Field-size multiplier: winning a big event is worth more than winning a small one. */
+/**
+ * Field-size multiplier: winning a big event is worth more than winning a small one.
+ *
+ * sqrt(N + 1/4) - 1/2 is the k solving k(k+1) = N. Square-root growth means each
+ * doubling of the field keeps paying ~x1.45 rather than fading the way a log
+ * does. Scaled so a 32-team event scores exactly what it did under v1's
+ * log2(2N), which keeps events in balance with the 6mans and accolade terms.
+ */
+const SCALE_ANCHOR_TEAMS = 32;
+const SCALE_ANCHOR_VALUE = 6;
+
+const rootScale = (n: number) => Math.sqrt(n + 0.25) - 0.5;
+
 export function scaleMultiplier(teamCount: number): number {
   if (teamCount < 2) return 0;
-  return Math.log2(2 * teamCount);
+  return (SCALE_ANCHOR_VALUE * rootScale(teamCount)) / rootScale(SCALE_ANCHOR_TEAMS);
 }
 
 /** Prize-pool multiplier, in CRL coins. */
