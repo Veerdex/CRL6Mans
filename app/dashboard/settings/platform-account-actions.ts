@@ -8,6 +8,9 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { isCurrentlyKicked } from "@/app/lib/players";
 import { parseReplay, type ReplayPlatform } from "@/app/lib/replay-parser";
 import { MAX_REPLAY_BYTES, MAX_REPLAY_LABEL } from "@/app/lib/upload-limits";
+import { isClaimApprovalRequired } from "@/app/lib/platform-account-gate";
+import { AUTO_APPROVAL_VERIFIER, defaultVerificationMethod } from "@/app/lib/platform-verification-method";
+import { createHash } from "node:crypto";
 
 const CLAIMABLE_PLATFORMS = ["steam", "epic", "playstation", "xbox", "switch"] as const;
 type ClaimablePlatform = typeof CLAIMABLE_PLATFORMS[number];
@@ -242,16 +245,30 @@ export async function claimPlatformAccount(
     }
   }
 
+  // With admin approval off a clean claim is verified on the spot, so it lands in
+  // Verified Platform Accounts rather than a review queue nobody needs to clear.
+  // Any warning note holds it back for a human: a missing ID can't be verified
+  // at all, and a ban-evasion hit or unreadable date is exactly what review is
+  // for. Such a claim still satisfies the join gate while it waits, as before.
+  const autoApprove = claimNotes.length === 0 && !!platformAccountId && !(await isClaimApprovalRequired());
+
+  const now = new Date().toISOString();
   const row = {
     player_id: playerId,
     platform,
     platform_account_id: platformAccountId,
     claimed_display_name: claimedDisplayName,
     claimed_tracker_url: trackerUrl,
-    claimed_verification_replay_path: replayPath,
     admin_note: claimNotes.length > 0 ? claimNotes.join(" | ") : null,
-    verification_status: "claimed",
-    updated_at: new Date().toISOString(),
+    updated_at: now,
+    verification_status: autoApprove ? "verified" : "claimed",
+    claimed_verification_replay_path: autoApprove ? null : replayPath,
+    verification_method: autoApprove ? defaultVerificationMethod(platform) : null,
+    verification_replay_sha256: autoApprove ? createHash("sha256").update(bytes).digest("hex") : null,
+    verified_display_name: autoApprove ? claimedDisplayName : null,
+    verified_by: autoApprove ? AUTO_APPROVAL_VERIFIER : null,
+    verified_at: autoApprove ? now : null,
+    valid_from: autoApprove ? now : null,
   };
 
   let accountId: string;
@@ -294,7 +311,20 @@ export async function claimPlatformAccount(
     });
   }
 
+  if (autoApprove) {
+    // Same as verifyPlatformAccount: the hash on the row is the permanent proof,
+    // so the raw replay is freed rather than kept.
+    await supabaseAdmin.storage.from("platform-verification-replays").remove([replayPath]);
+    await supabaseAdmin.from("player_platform_account_events").insert({
+      account_id: accountId,
+      event_type: "verified",
+      actor: AUTO_APPROVAL_VERIFIER,
+      detail_json: { platform, platform_account_id: platformAccountId, method: defaultVerificationMethod(platform), auto_approved: true },
+    });
+  }
+
   revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/admin");
   return { ok: true };
 }
 

@@ -15,7 +15,7 @@ export function ClaimApprovalToggle({ initialRequired }: { initialRequired: bool
         <p className="text-xs text-zinc-500 mt-0.5">
           {required
             ? "ON — a platform account claim does nothing until an admin verifies it below. Claims cannot satisfy the join gate or resolve replay stats while they wait."
-            : "OFF — a submitted claim counts immediately, both for joining and for resolving replay stats, with no admin review. Claims still cannot take a platform ID another player already holds."}
+            : "OFF — a submitted claim is verified immediately and goes straight to Verified Platform Accounts, with no admin review. Claims flagged with a warning (missing ID, unreadable date, ban evasion) still wait below, and count for joining while they do. Claims still cannot take a platform ID another player already holds."}
         </p>
         {!required && (
           <p className="text-xs text-amber-400/90 mt-1">

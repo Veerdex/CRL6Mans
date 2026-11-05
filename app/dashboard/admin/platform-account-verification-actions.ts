@@ -8,18 +8,8 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { recordStaffAction } from "@/app/lib/staff-contributions";
+import { defaultVerificationMethod } from "@/app/lib/platform-verification-method";
 import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
-
-// The verification-method label is audit metadata only — no code path branches
-// on it — so it's derived from the account's platform rather than collected
-// from the admin. See DEFAULT_METHOD_BY_PLATFORM in platform-account-claim-card.
-const DEFAULT_METHOD_BY_PLATFORM: Record<string, string> = {
-  steam: "legacy_manual",
-  epic: "official_account_page",
-  playstation: "console_replay_network",
-  xbox: "console_replay_network",
-  switch: "console_replay_network",
-};
 
 async function requireAdmin(): Promise<string> {
   const cookieStore = await cookies();
@@ -64,7 +54,7 @@ export async function verifyPlatformAccount(
     replaySha256 = createHash("sha256").update(bytes).digest("hex");
   }
 
-  const verificationMethod = DEFAULT_METHOD_BY_PLATFORM[account.platform] ?? "legacy_manual";
+  const verificationMethod = defaultVerificationMethod(account.platform);
   const now = new Date().toISOString();
   const { error } = await supabaseAdmin
     .from("player_platform_accounts")
