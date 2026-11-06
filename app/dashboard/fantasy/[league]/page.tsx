@@ -11,7 +11,6 @@ import {
   DeclineInviteButton,
   InvitePanel,
   JoinLeagueButton,
-  LeagueSwitcher,
   LeaveLeagueButton,
   RemoveManagerButton,
 } from "../fantasy-client";
@@ -27,7 +26,7 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
   const { league: leagueId } = await params;
   const view = await getLeagueView(leagueId, viewer);
   if (!view || view.league.status === "disbanded") notFound();
-  const { league, members, invites, cap, isMember, isCommissioner, isInvited, isRemoved, myLeagues } = view;
+  const { league, members, invites, cap, isMember, isCommissioner, isInvited, isRemoved } = view;
   const preDraft = league.status === "pre_draft";
 
   return (
@@ -46,9 +45,7 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
             {view.season ? ` · ${view.season.name}` : ""}
           </p>
         </div>
-        <div className="flex flex-wrap items-start justify-center gap-3">
-          {myLeagues.length > 1 && <LeagueSwitcher current={league.id} leagues={myLeagues} />}
-          {!isMember && preDraft && (
+        <div className="flex flex-wrap items-start justify-center gap-3">          {!isMember && preDraft && (
             <div className="flex items-start gap-2">
               <JoinLeagueButton
                 leagueId={league.id}

@@ -197,14 +197,13 @@ export type LeagueView = {
   isCommissioner: boolean;
   isInvited: boolean;
   isRemoved: boolean;
-  myLeagues: { id: string; name: string }[];
 };
 
 export async function getLeagueView(leagueId: string, viewer: FantasyViewer): Promise<LeagueView | null> {
   const league = await getLeague(leagueId);
   if (!league) return null;
 
-  const [{ data: season }, cap, { data: memberRows }, { data: inviteRows }, { data: removalRows }, { data: myRows }] =
+  const [{ data: season }, cap, { data: memberRows }, { data: inviteRows }, { data: removalRows }] =
     await Promise.all([
       supabaseAdmin.from("fantasy_seasons").select("id, name, status").eq("id", league.fantasy_season_id).maybeSingle(),
       getManagerCap(),
@@ -212,9 +211,6 @@ export async function getLeagueView(leagueId: string, viewer: FantasyViewer): Pr
       supabaseAdmin.from("fantasy_league_invites").select("account_id, created_at").eq("league_id", league.id).order("created_at"),
       viewer.accountId
         ? supabaseAdmin.from("fantasy_league_removals").select("account_id").eq("league_id", league.id).eq("account_id", viewer.accountId)
-        : Promise.resolve({ data: [] }),
-      viewer.accountId
-        ? supabaseAdmin.from("fantasy_league_members").select("league_id").eq("account_id", viewer.accountId)
         : Promise.resolve({ data: [] }),
     ]);
 
@@ -233,17 +229,6 @@ export async function getLeagueView(leagueId: string, viewer: FantasyViewer): Pr
     };
   };
 
-  const myLeagueIds = ((myRows ?? []) as { league_id: string }[]).map((r) => r.league_id);
-  const { data: myLeagueRows } = myLeagueIds.length
-    ? await supabaseAdmin
-        .from("fantasy_leagues")
-        .select("id, name")
-        .in("id", myLeagueIds)
-        .eq("fantasy_season_id", league.fantasy_season_id)
-        .neq("status", "disbanded")
-        .order("created_at")
-    : { data: [] };
-
   return {
     league,
     season: (season as FantasySeason | null) ?? null,
@@ -254,6 +239,5 @@ export async function getLeagueView(leagueId: string, viewer: FantasyViewer): Pr
     isCommissioner: !!viewer.accountId && viewer.accountId === league.commissioner_id,
     isInvited: !!viewer.accountId && inviteIds.includes(viewer.accountId),
     isRemoved: ((removalRows ?? []) as unknown[]).length > 0,
-    myLeagues: (myLeagueRows ?? []) as { id: string; name: string }[],
   };
 }

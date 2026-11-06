@@ -360,22 +360,3 @@ export function CommissionerSettings({ leagueId, name, visibility }: { leagueId:
     </div>
   );
 }
-
-export function LeagueSwitcher({ current, leagues }: { current: string; leagues: { id: string; name: string }[] }) {
-  const router = useRouter();
-  return (
-    <select
-      value={current}
-      onChange={(e) => router.push(e.target.value === "__all" ? "/dashboard/fantasy?tab=all" : `/dashboard/fantasy/${e.target.value}`)}
-      className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-    >
-      {!leagues.some((l) => l.id === current) && <option value={current}>Viewing this league</option>}
-      {leagues.map((l) => (
-        <option key={l.id} value={l.id}>
-          {l.name}
-        </option>
-      ))}
-      <option value="__all">All Leagues…</option>
-    </select>
-  );
-}
