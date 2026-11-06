@@ -3,7 +3,7 @@
 // import, so node --test can load it.
 
 export const FANTASY_MIN_MANAGERS = 4;
-export const FANTASY_LEAGUE_NAME_MAX = 40;
+export const FANTASY_LEAGUE_NAME_MAX = 30;
 
 // docs/fantasy-rl.md §2: 4–6 managers, but at most 4 when the real season has 21
 // or fewer teams. num_teams is the admin's configured count, which can still

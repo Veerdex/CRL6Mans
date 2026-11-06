@@ -28,7 +28,7 @@ create table if not exists fantasy_seasons (
 create table if not exists fantasy_leagues (
   id                uuid        primary key default gen_random_uuid(),
   fantasy_season_id uuid        not null references fantasy_seasons(id) on delete cascade,
-  name              text        not null check (char_length(name) between 1 and 40),
+  name              text        not null check (char_length(name) between 1 and 30),
   visibility        text        not null default 'public' check (visibility in ('public', 'private')),
   status            text        not null default 'pre_draft'
                     check (status in ('pre_draft', 'drafting', 'active', 'complete', 'disbanded')),
