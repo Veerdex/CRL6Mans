@@ -104,21 +104,24 @@ Each manager has **one lineup** — there are no per-week lineups. 6 starters + 
 
 ### Per-player series points
 ```
-points = 20 × MVP(own-team games, N) + bonus × (games played ÷ N)    [bonus only if his team won]
+points = 20 × FP(own-team games, N) + bonus × (games played ÷ N)    [bonus only if his team won]
 
-MVP(games, N) = ((G + A + Sv + Sh÷10) ÷ (N × 4)) + Sc ÷ N ÷ 1000
+FP(games, N)  = Σ (Sc + 250·G + 85·A + 60·Sv + 10·Sh) ÷ (660 × N)
 bonus         = wins needed − games his team lost
 ```
 - `N` = **number of games in the series**, not games the player played. A player who played
   1 game of a 5-game series has his 1 game's stats divided by 5.
-- Same MVP formula as the Stats page (`app/lib/stats-math.ts`), so a 3-game and 5-game series
-  compare fairly.
+- Dividing by `N` makes `FP` a per-game average, so a 3-game and 5-game series compare fairly.
+- `FP` replaced the Stats page's MVP formula (`app/lib/stats-math.ts`) here; the Stats page
+  still uses MVP. The 660 puts the league's median player at `FP ≈ 1`, so a median player's
+  stat points are ≈ 20 per series. How the weights were chosen, and how points are predicted
+  ahead of a series, is in [fantasy-projections.md](fantasy-projections.md).
 - **Win bonus** — best-of-5: 3-0 = +3, 3-1 = +2, 3-2 = +1. Best-of-3: +2 / +1. Best-of-7:
   +4 / +3 / +2 / +1. Prorated by games played.
 - **Subbing for another team earns nothing** — only games played for his own team count.
 
 **Example:** Player A plays game 1 of a 3-2 win, a sub plays games 2–5.
-A scores `20 × MVP(game 1 stats, N=5) + 1 × (1 ÷ 5)`.
+A scores `20 × FP(game 1 stats, N=5) + 1 × (1 ÷ 5)`.
 
 ### Weekly matchup
 A manager's weekly total = the sum of his 6 starting slots' scores for that week (see
