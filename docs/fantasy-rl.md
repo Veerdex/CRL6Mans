@@ -29,7 +29,8 @@ season is a round robin; the top 4 enter a two-week playoff.
 | Joining | A person can be in **multiple** leagues |
 | Size | **4–6 managers.** If the real season has **21 or fewer teams**, max is **4** |
 | Visibility | Commissioner sets **public** (listed, anyone can join) or **private** (invite only) |
-| Viewing | Anyone can view other leagues (read-only) |
+| Viewing | Anyone can view any other league, **public or private** (read-only) |
+| Undersized | A league with **fewer than 4 managers** when the admin starts the drafts is **disbanded** |
 | End of season | League is archived read-only |
 
 ### Commissioner (league creator) powers
@@ -183,7 +184,9 @@ still in the playoffs (by trade or by dropping them onto waivers).
 ## 8. Draft
 
 - **Admin starts every league's draft at once**, manually, after the real draft and before
-  Round 1.
+  Round 1. Leagues with fewer than 4 managers are disbanded at that moment.
+- **Round 1 cannot be played until every fantasy draft has finished.** This is enforced, not
+  a guideline: the real season's Round 1 is blocked while any fantasy draft is in progress.
 - **Snake draft, order randomized** when the draft starts.
 - **10 minutes per pick.**
 - **Autopick** when the clock runs out: the manager's queue first, otherwise the best
@@ -295,14 +298,10 @@ Modelled on fantasy football so it's familiar:
 
 ## Open questions
 
-1. **Waiver run time** — what time does the daily run happen?
-2. **Undersized leagues at draft time** — what happens to a league with fewer than 4 managers
-   when the admin starts the drafts? Excluded, or merged?
-3. **Private league viewing** — "viewing other leagues is allowed": private leagues too, or
-   only public ones?
-4. **Pending trades** — can the proposer cancel? What happens to pending trades at the
+1. **Waiver run time** — the single moment each day when claims are processed.
+2. **Pending trades** — can the proposer cancel? What happens to pending trades at the
    deadline? *(assumed: proposer can cancel; pending trades expire at the deadline)*
-5. **Mid-season team changes** — a player moved to another real team keeps his tier
+3. **Mid-season team changes** — a player moved to another real team keeps his tier
    *(assumed)*. Does anything else change?
-6. **Draft running late** — what happens if a Round 1 series is played before a league's
-   draft finishes?
+4. **How Round 1 is blocked** — which real-season action is gated while a fantasy draft runs
+   (starting the season, opening Round 1, or reporting a Round 1 series)?
