@@ -188,9 +188,7 @@ function LeagueRowCard({ league, action, invited }: { league: LeagueCard; action
       >
         <div className="flex items-center gap-2">
           <span className="text-yellow-400 font-medium truncate">{league.name}</span>
-          <StatusBadge status={league.status} />
-          {league.visibility === "private" && <span className="text-[10px] uppercase tracking-wide text-zinc-500">Private</span>}
-        </div>
+          <StatusBadge status={league.status} />        </div>
         <p className="text-xs text-zinc-400 mt-0.5">
           <span className={fillColor(league.memberCount, league.cap)}>
             {league.memberCount >= league.cap ? "Full" : `${league.memberCount}/${league.cap}`}
