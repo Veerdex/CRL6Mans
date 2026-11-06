@@ -375,7 +375,7 @@ export function LeagueSwitcher({ current, leagues }: { current: string; leagues:
           {l.name}
         </option>
       ))}
-      <option value="__all">All leagues…</option>
+      <option value="__all">All Leagues…</option>
     </select>
   );
 }

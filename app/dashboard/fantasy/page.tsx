@@ -114,8 +114,8 @@ function TabSwitch({ active }: { active: Tab }) {
   return (
     <div className="flex justify-center">
       <div className="inline-flex gap-1 p-1 bg-zinc-800 border border-zinc-700 rounded-full">
-        {pill("mine", "My leagues")}
-        {pill("all", "All leagues")}
+        {pill("mine", "My Leagues")}
+        {pill("all", "All Leagues")}
       </div>
     </div>
   );
