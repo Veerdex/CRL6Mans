@@ -199,17 +199,17 @@ before the report to keep the slot open. Teams scheduling their matches closes t
 ### Playoffs
 - Top 4: **1 v 4, 2 v 3** in the semifinals, winners meet in the final.
 - A tied playoff matchup → **higher seed advances**.
-- **Trade deadline:** trading closes at the start of the semifinal week.
+- **No trade deadline** (see [Open questions](#open-questions)).
 - **Eliminated managers are frozen:** no adds, drops, waiver claims or trades.
 
 | | Regular season | Playoffs, still alive | Eliminated |
 |---|---|---|---|
 | Set lineups | ✅ | ✅ | — |
 | Waivers / free agents | ✅ | ✅ | ❌ |
-| Trades | ✅ | ❌ (past deadline) | ❌ |
+| Trades | ✅ | ✅ | ❌ |
 
-The deadline and the freeze stop an eliminated manager from feeding his players to a manager
-still in the playoffs (by trade or by dropping them onto waivers).
+The freeze stops an eliminated manager from feeding his players to a manager still in the
+playoffs (by trade or by dropping them onto waivers).
 
 ---
 
@@ -274,8 +274,8 @@ Free agent (instant add)
   reported and he unlocks. It stays pending until then.
 - Traded players arrive in their new manager's lineup carrying nothing — scores their old slots
   banked stay with the old manager.
-- **Trade deadline:** start of the semifinal week. Pending trades expire at the deadline
-  *(assumed)*.
+- **No trade deadline.** A pending trade is cancelled automatically if either manager is
+  eliminated, since eliminated managers are frozen *(assumed)*.
 
 ---
 
@@ -350,6 +350,20 @@ Modelled on fantasy football so it's familiar:
 
 ## Open questions
 
-None outstanding. Items marked *(assumed)* above are worth confirming before build:
+1. **Trade deadline or trade review?** There is currently no deadline; the elimination freeze
+   covers dumping once a manager is out. What it doesn't cover is the classic fantasy problem
+   of a manager who is out of contention late in the regular season, but not yet eliminated,
+   dumping his best players on a friend. Options if that becomes a problem:
+   - A deadline partway through the regular season (e.g. after Week 4 of 6). A deadline at the
+     semifinals adds little, since the freeze already covers it, and is hard to define when
+     rounds are played out of order.
+   - A short review window (a day or two) in which the league's other managers can veto an
+     accepted trade.
+2. **Waivers before elimination is known.** Managers aren't eliminated until Week 6 closes,
+   but a Round 7 series can be played before then. In that window a soon-to-be-eliminated
+   manager can still drop players onto waivers for a playoff manager. Option: freeze waivers
+   and free agency from the first Round 7 lock until Week 6 closes.
+
+Items marked *(assumed)* above are worth confirming before build:
 - A forfeited series doesn't fill its slot; a player whose sub covered every game does (with 0).
-- Pending trades expire at the trade deadline.
+- A pending trade is cancelled when either manager is eliminated.
