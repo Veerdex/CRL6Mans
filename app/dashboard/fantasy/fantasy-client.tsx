@@ -186,16 +186,17 @@ export function DeclineInviteButton({ leagueId }: { leagueId: string }) {
   );
 }
 
-export function LeaveLeagueButton({ leagueId, isCommissioner, alone }: { leagueId: string; isCommissioner: boolean; alone: boolean }) {
+export function LeaveLeagueButton({ leagueId, isCreator, managerCount }: { leagueId: string; isCreator: boolean; managerCount: number }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const warning = alone
-    ? "You're the only manager, so leaving deletes the league."
-    : isCommissioner
-      ? "The commissioner role passes to the manager who joined earliest."
-      : null;
+  const others = managerCount - 1;
+  const warning = isCreator
+    ? `You created this league, so leaving disbands it. The league is deleted${
+        others > 0 ? ` and ${others === 1 ? "the other manager is" : `all ${others} other managers are`} removed` : ""
+      }. This can't be undone.`
+    : null;
 
   if (!confirming) {
     return (
@@ -206,7 +207,9 @@ export function LeaveLeagueButton({ leagueId, isCommissioner, alone }: { leagueI
   }
   return (
     <div className="space-y-2">
-      {warning && <p className="text-xs text-amber-400">{warning}</p>}
+      {warning && (
+        <p className="text-xs text-red-200 bg-red-900/30 border border-red-800/60 rounded-lg px-3 py-2 max-w-md">{warning}</p>
+      )}
       <div className="flex gap-2">
         <button
           className={DANGER}
@@ -220,7 +223,7 @@ export function LeaveLeagueButton({ leagueId, isCommissioner, alone }: { leagueI
             });
           }}
         >
-          {pending ? "Leaving…" : "Confirm leave"}
+          {pending ? (isCreator ? "Disbanding…" : "Leaving…") : isCreator ? "Leave and disband" : "Confirm leave"}
         </button>
         <button className={SECONDARY} disabled={pending} onClick={() => setConfirming(false)}>
           Cancel

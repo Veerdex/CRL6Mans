@@ -126,26 +126,36 @@ export async function leaveLeague(leagueId: string): Promise<Result & { deleted?
   if ("error" in league) return league;
   if (!(await isMember(leagueId, me.accountId))) return { error: "You're not in this league." };
 
-  await supabaseAdmin.from("fantasy_league_members").delete().eq("league_id", leagueId).eq("account_id", me.accountId);
+  if (league.created_by === me.accountId) {
+    // The creator leaving disbands the league: it's deleted outright (members and
+    // invites cascade), which also frees the creator to create another.
+    const [{ data: others }, { data: creator }] = await Promise.all([
+      supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId).neq("account_id", me.accountId),
+      supabaseAdmin.from("accounts").select("username, display_name").eq("id", me.accountId).maybeSingle(),
+    ]);
+    const { error } = await supabaseAdmin.from("fantasy_leagues").delete().eq("id", leagueId);
+    if (error) return { error: "Couldn't disband the league." };
 
-  if (league.commissioner_id === me.accountId) {
-    // The seat passes to whoever has been in the league longest; an empty league
-    // is deleted, which also frees its creator to create another.
-    const { data: next } = await supabaseAdmin
-      .from("fantasy_league_members")
-      .select("account_id")
-      .eq("league_id", leagueId)
-      .order("joined_at")
-      .limit(1)
-      .maybeSingle();
-    if (!next) {
-      await supabaseAdmin.from("fantasy_leagues").delete().eq("id", leagueId);
-      refresh();
-      return { deleted: true };
+    const otherIds = ((others ?? []) as { account_id: string }[]).map((m) => m.account_id);
+    if (otherIds.length) {
+      const { data: rows } = await supabaseAdmin.from("accounts").select("discord_id").in("id", otherIds);
+      const discordIds = ((rows ?? []) as { discord_id: string }[]).map((r) => r.discord_id);
+      if (discordIds.length) {
+        await recordNotification(
+          { kind: "users", discordIds },
+          {
+            title: "Fantasy league disbanded",
+            body: `${accountName(creator)} left ${league.name}, so the league was disbanded.`,
+            url: "/dashboard/fantasy",
+          },
+        );
+      }
     }
-    await supabaseAdmin.from("fantasy_leagues").update({ commissioner_id: next.account_id }).eq("id", leagueId);
+    refresh();
+    return { deleted: true };
   }
 
+  await supabaseAdmin.from("fantasy_league_members").delete().eq("league_id", leagueId).eq("account_id", me.accountId);
   refresh(leagueId);
   return {};
 }

@@ -131,7 +131,11 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
       )}
 
       {isMember && preDraft && (
-        <LeaveLeagueButton leagueId={league.id} isCommissioner={isCommissioner} alone={members.length === 1} />
+        <LeaveLeagueButton
+          leagueId={league.id}
+          isCreator={viewer.accountId === league.created_by}
+          managerCount={members.length}
+        />
       )}
     </div>
   );

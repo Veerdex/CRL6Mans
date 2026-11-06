@@ -40,8 +40,9 @@ season is a round robin; the top 4 enter a two-week playoff.
 - Remove managers **before the draft** (a removed manager can't rejoin unless re-invited)
 - Invite players by name, and cancel pending invites, **before the draft**
 
-If the commissioner leaves before the draft, the seat passes to the manager who joined
-earliest; a league its last manager leaves is deleted.
+If the creator leaves before the draft, the league is **disbanded**: it's deleted, every
+other manager gets a feed notification, and the creator is free to create another. The
+leave confirmation warns them first.
 
 Commissioners cannot force-close weeks or override results — that is staff only.
 

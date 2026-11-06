@@ -32,8 +32,8 @@ create table if not exists fantasy_leagues (
   visibility        text        not null default 'public' check (visibility in ('public', 'private')),
   status            text        not null default 'pre_draft'
                     check (status in ('pre_draft', 'drafting', 'active', 'complete', 'disbanded')),
-  -- created_by never changes, so "one league per creator per season" survives the
-  -- commissioner seat passing to someone else when the creator leaves.
+  -- created_by is the one-league-per-season key. The creator leaving before the
+  -- draft deletes the league, which frees it.
   created_by        uuid        not null references accounts(id) on delete cascade,
   commissioner_id   uuid        not null references accounts(id) on delete cascade,
   created_at        timestamptz not null default now(),
