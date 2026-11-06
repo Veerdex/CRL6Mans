@@ -122,7 +122,7 @@ function JoinFor({ league, canManage }: { league: LeagueCard; canManage: boolean
 
 function fillColor(count: number, cap: number) {
   if (count >= cap) return "text-red-400";
-  if (count * 2 >= cap) return "text-amber-400";
+  if (count * 2 > cap) return "text-amber-400";
   return "text-emerald-400";
 }
 
