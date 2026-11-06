@@ -108,6 +108,8 @@ html[data-theme="light"] {
   --c-bg: #ffffff;
   --c-fg: #18181b;
   --c-white: #18181b; /* "text-white" → ink on light surfaces (on-accent uses .text-on-accent) */
+  --brand-orange: #e88a24;
+  --brand-blue: #3736ac;
 
   /* zinc surfaces/text: light surfaces, dark text */
   --c-zinc-50:  #09090b;
@@ -217,6 +219,9 @@ html[data-theme="dark"] {
   --c-bg: #09090b;
   --c-fg: #ededed;
   --c-white: #ffffff;
+  /* #3736ac is near-invisible on this near-black page, so the dark theme's blue is lifted. */
+  --brand-orange: #e88a24;
+  --brand-blue: #6f6ee0;
 
   --c-zinc-50:  #fafafa;
   --c-zinc-100: #f4f4f5;
@@ -315,6 +320,8 @@ html[data-theme="dark"] {
   --c-bg: #d5dbf2;        /* clearly blue page */
   --c-fg: #1e1d44;        /* blue-ink text */
   --c-white: #1e1d44;     /* primary text → blue-ink on light surfaces */
+  --brand-orange: #e88a24;
+  --brand-blue: #3736ac;
 
   /* surfaces: blue page, lighter blue cards, blue-gray lines */
   --c-zinc-50:  #14132a;
@@ -471,6 +478,8 @@ html[data-theme="sponsor"] {
   --c-bg: var(--sponsor-bg, #d5dbf2);
   --c-fg: var(--sponsor-text, #1e1d44);
   --c-white: var(--sponsor-text, #1e1d44);
+  --brand-orange: var(--sponsor-accent, #e88a24);
+  --brand-blue: var(--sponsor-shell, #3736ac);
 
   --c-zinc-50:  #14132a;
   --c-zinc-100: #1f1f3d;
@@ -704,6 +713,8 @@ aside.has-nav-bg .sidebar-flyout a.bg-zinc-800 { color: var(--color-white); }
 /* White that must stay white regardless of theme (text/badges on colored accents). */
 @utility text-on-accent { color: #ffffff; }
 @utility bg-pure-white { background-color: #ffffff; }
+@utility text-brand-orange { color: var(--brand-orange); }
+@utility text-brand-blue { color: var(--brand-blue); }
 
 /*
  * Keep text white when it sits ON a saturated accent background (same element:
