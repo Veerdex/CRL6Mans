@@ -26,6 +26,11 @@ const SECONDARY =
   "px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors";
 const DANGER =
   "px-3 py-1.5 bg-red-900/60 hover:bg-red-800 disabled:opacity-50 text-red-100 text-xs font-medium rounded-lg transition-colors";
+// The leave flow's buttons run 1.5× the small DANGER/SECONDARY size.
+const LEAVE_DANGER =
+  "px-4.5 py-2.25 bg-red-900/60 hover:bg-red-800 disabled:opacity-50 text-red-100 text-lg font-medium rounded-lg transition-colors";
+const LEAVE_SECONDARY =
+  "px-4.5 py-2.25 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white text-lg font-medium rounded-lg transition-colors";
 
 function ErrorLine({ error }: { error: string | null }) {
   return error ? <p className="text-xs text-red-400 mt-1">{error}</p> : null;
@@ -200,7 +205,7 @@ export function LeaveLeagueButton({ leagueId, isCreator, managerCount }: { leagu
 
   if (!confirming) {
     return (
-      <button className={DANGER} onClick={() => setConfirming(true)}>
+      <button className={LEAVE_DANGER} onClick={() => setConfirming(true)}>
         Leave league
       </button>
     );
@@ -212,7 +217,7 @@ export function LeaveLeagueButton({ leagueId, isCreator, managerCount }: { leagu
       )}
       <div className="flex gap-2">
         <button
-          className={DANGER}
+          className={LEAVE_DANGER}
           disabled={pending}
           onClick={() => {
             setError(null);
@@ -225,7 +230,7 @@ export function LeaveLeagueButton({ leagueId, isCreator, managerCount }: { leagu
         >
           {pending ? (isCreator ? "Disbanding…" : "Leaving…") : isCreator ? "Leave and disband" : "Confirm leave"}
         </button>
-        <button className={SECONDARY} disabled={pending} onClick={() => setConfirming(false)}>
+        <button className={LEAVE_SECONDARY} disabled={pending} onClick={() => setConfirming(false)}>
           Cancel
         </button>
       </div>
