@@ -177,13 +177,13 @@ function fillColor(count: number, cap: number) {
 function LeagueRowCard({ league, action, invited }: { league: LeagueCard; action?: React.ReactNode; invited?: boolean }) {
   return (
     <div
-      className={`bg-zinc-800 border rounded-xl px-4 py-3 flex items-center gap-4 ${
+      className={`bg-zinc-800 border rounded-xl px-4 py-3 flex items-center gap-4 transition duration-200 ease-out motion-safe:hover:-translate-y-1 motion-safe:hover:scale-[1.02] hover:shadow-lg hover:shadow-black/30 ${
         invited ? "border-emerald-500" : "border-zinc-700"
       }`}
     >
-      <Link href={`/dashboard/fantasy/${league.id}`} className="flex-1 min-w-0 group">
+      <Link href={`/dashboard/fantasy/${league.id}`} className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-yellow-400 font-medium truncate group-hover:underline">{league.name}</span>
+          <span className="text-yellow-400 font-medium truncate">{league.name}</span>
           <StatusBadge status={league.status} />
           {league.visibility === "private" && <span className="text-[10px] uppercase tracking-wide text-zinc-500">Private</span>}
         </div>
