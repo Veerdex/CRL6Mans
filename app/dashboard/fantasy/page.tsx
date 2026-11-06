@@ -178,7 +178,7 @@ function LeagueRowCard({ league, action, invited }: { league: LeagueCard; action
   return (
     <div
       className={`bg-zinc-800 border rounded-xl px-4 py-3 flex items-center gap-4 transition duration-200 ease-out motion-safe:hover:-translate-y-1 motion-safe:hover:scale-[1.02] hover:shadow-lg hover:shadow-black/30 ${
-        invited ? "border-emerald-500" : "border-zinc-700"
+        invited ? "border-emerald-500" : league.isOwner ? "border-white" : "border-zinc-700"
       }`}
     >
       <Link href={`/dashboard/fantasy/${league.id}`} className="flex-1 min-w-0">
