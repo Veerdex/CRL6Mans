@@ -29,7 +29,7 @@ season is a round robin; the top 4 enter a two-week playoff.
 | Joining | A person can be in **multiple** leagues |
 | Size | **4–6 managers.** If the real season has **21 or fewer teams**, max is **4** |
 | Visibility | Commissioner sets **public** (anyone can join) or **private** (invite only). Both are listed in the directory |
-| Invites | The commissioner invites by name from the league page; the invitee gets a feed notification. A private league's Join button carries small "Invite Only" text above it and is **grey** unless the viewer is invited, **green** when they are |
+| Invites | **Private leagues only** — a public league has nothing to invite to. The commissioner invites by name from the league page; the invitee gets a feed notification. A private league's Join button carries small "Invite Only" text above it and is **grey** unless the viewer is invited, **green** when they are |
 | Viewing | Anyone logged in can view any league, **public or private** (read-only) — including unregistered and pending players. Guests can't |
 | Undersized | A league with **fewer than 4 managers** when the admin starts the drafts is **disbanded** |
 | End of season | League is archived read-only |
@@ -37,8 +37,8 @@ season is a round robin; the top 4 enter a two-week playoff.
 ### Commissioner (league creator) powers
 - Rename the league
 - Set public / private
-- Remove managers **before the draft** (a removed manager can't rejoin unless re-invited)
-- Invite players by name, and cancel pending invites, **before the draft**
+- Remove managers **before the draft** (a removed manager can't rejoin unless re-invited, which means switching the league to private first)
+- Invite players by name, and cancel pending invites, **before the draft** (private leagues only)
 
 If the creator leaves before the draft, the league is **disbanded**: it's deleted, every
 other manager gets a feed notification, and the creator is free to create another. The

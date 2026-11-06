@@ -205,6 +205,7 @@ export async function removeManager(leagueId: string, accountId: string): Promis
 export async function invitePlayer(leagueId: string, accountId: string): Promise<Result> {
   const ctx = await requireCommissioner(leagueId, true);
   if ("error" in ctx) return ctx;
+  if (ctx.league.visibility !== "private") return { error: "Public leagues don't take invites. Anyone can join." };
 
   const { data: target } = await supabaseAdmin
     .from("accounts")
@@ -265,6 +266,7 @@ export type InviteCandidate = { accountId: string; name: string; username: strin
 export async function searchInvitablePlayers(leagueId: string, query: string): Promise<{ results: InviteCandidate[]; error?: string }> {
   const ctx = await requireCommissioner(leagueId, true);
   if ("error" in ctx) return { results: [], error: ctx.error };
+  if (ctx.league.visibility !== "private") return { results: [], error: "Public leagues don't take invites. Anyone can join." };
 
   // Stripped to characters a name can hold: the term is spliced into a
   // PostgREST or() filter, where a comma or parenthesis would change its meaning.

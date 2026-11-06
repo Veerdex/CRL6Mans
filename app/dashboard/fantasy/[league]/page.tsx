@@ -113,7 +113,7 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
         </section>
       )}
 
-      {isCommissioner && preDraft && (
+      {isCommissioner && preDraft && league.visibility === "private" && (
         <section className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
           <h2 className="text-sm font-semibold text-white">Invite players</h2>
           <InvitePanel leagueId={league.id} />
