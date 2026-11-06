@@ -219,9 +219,8 @@ html[data-theme="dark"] {
   --c-bg: #09090b;
   --c-fg: #ededed;
   --c-white: #ffffff;
-  /* #3736ac is near-invisible on this near-black page, so the dark theme's blue is lifted. */
   --brand-orange: #e88a24;
-  --brand-blue: #6f6ee0;
+  --brand-blue: #3736ac;
 
   --c-zinc-50:  #fafafa;
   --c-zinc-100: #f4f4f5;
