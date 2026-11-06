@@ -76,7 +76,10 @@ export async function getFantasyViewer(discordId: string): Promise<FantasyViewer
 // this is what keeps a half-built feature from being usable in production by
 // anyone who guesses the URL. Staff always get in, so it can be reviewed first.
 export async function fantasyAccessOpen(viewer: FantasyViewer): Promise<boolean> {
-  if (viewer.isStaff) return true;
+  return viewer.isStaff || (await fantasyOpenToAll());
+}
+
+export async function fantasyOpenToAll(): Promise<boolean> {
   const { data } = await supabaseAdmin.from("league_settings").select("nav_tab_overrides").maybeSingle();
   const overrides = (data?.nav_tab_overrides as Record<string, string> | null) ?? {};
   return overrides.fantasy === "shown";

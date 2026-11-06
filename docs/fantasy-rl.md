@@ -29,7 +29,7 @@ season is a round robin; the top 4 enter a two-week playoff.
 | Joining | A person can be in **multiple** leagues |
 | Size | **4–6 managers.** If the real season has **21 or fewer teams**, max is **4** |
 | Visibility | Commissioner sets **public** (anyone can join) or **private** (invite only). Both are listed in the directory |
-| Invites | The commissioner invites by name from the league page; the invitee gets a feed notification. A private league's Join button carries small "Invite Only" text above it and is **grey** unless the viewer is invited, **green** when he is |
+| Invites | The commissioner invites by name from the league page; the invitee gets a feed notification. A private league's Join button carries small "Invite Only" text above it and is **grey** unless the viewer is invited, **green** when they are |
 | Viewing | Anyone logged in can view any league, **public or private** (read-only) — including unregistered and pending players. Guests can't |
 | Undersized | A league with **fewer than 4 managers** when the admin starts the drafts is **disbanded** |
 | End of season | League is archived read-only |

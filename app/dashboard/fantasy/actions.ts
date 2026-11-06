@@ -8,6 +8,7 @@ import { recordNotification } from "@/app/lib/notifications";
 import {
   accountName,
   fantasyAccessOpen,
+  fantasyOpenToAll,
   getCurrentFantasySeason,
   getFantasyViewer,
   getLeague,
@@ -15,6 +16,7 @@ import {
   type LeagueRow,
 } from "@/app/lib/fantasy-leagues";
 import { normalizeLeagueName } from "@/app/lib/fantasy-rules";
+import { getStaffRole } from "@/app/lib/players";
 
 type Result = { error?: string };
 
@@ -200,13 +202,18 @@ export async function invitePlayer(leagueId: string, accountId: string): Promise
     .eq("id", accountId)
     .maybeSingle();
   if (!target || target.status !== "approved") return { error: "Only approved players can be invited." };
+  // While the feature is staff-only, an invite would land in a player's feed and
+  // link to a page they can't open.
+  if (!(await fantasyOpenToAll()) && (await getStaffRole(target.discord_id as string)) === null) {
+    return { error: "Until fantasy opens to everyone, only staff can be invited." };
+  }
   if (await isMember(leagueId, accountId)) return { error: "That player is already in this league." };
 
   const { error } = await supabaseAdmin
     .from("fantasy_league_invites")
     .upsert({ league_id: leagueId, account_id: accountId, invited_by: ctx.me.accountId });
   if (error) return { error: "Couldn't send the invite." };
-  // An invite is the commissioner taking him back, so it lifts a removal.
+  // An invite is the commissioner taking them back, so it lifts a removal.
   await supabaseAdmin.from("fantasy_league_removals").delete().eq("league_id", leagueId).eq("account_id", accountId);
 
   const { data: inviter } = await supabaseAdmin
@@ -265,10 +272,15 @@ export async function searchInvitablePlayers(leagueId: string, query: string): P
     supabaseAdmin.from("fantasy_league_invites").select("account_id").eq("league_id", leagueId),
   ]);
   const taken = new Set([...(members ?? []), ...(invites ?? [])].map((r) => r.account_id as string));
+  let rows = ((accounts ?? []) as { id: string; discord_id: string; username: string | null; display_name: string | null; avatar: string | null }[])
+    .filter((a) => !taken.has(a.id));
+  if (!(await fantasyOpenToAll())) {
+    const roles = await Promise.all(rows.map((a) => getStaffRole(a.discord_id)));
+    rows = rows.filter((_, i) => roles[i] !== null);
+  }
 
   return {
-    results: ((accounts ?? []) as { id: string; discord_id: string; username: string | null; display_name: string | null; avatar: string | null }[])
-      .filter((a) => !taken.has(a.id))
+    results: rows
       .slice(0, 8)
       .map((a) => ({ accountId: a.id, name: accountName(a), username: a.username, discordId: a.discord_id, avatar: a.avatar })),
   };

@@ -56,7 +56,7 @@ create table if not exists fantasy_league_invites (
 );
 
 -- A manager the commissioner removed can't walk straight back into a public
--- league. Re-inviting him clears the row.
+-- league. Re-inviting them clears the row.
 create table if not exists fantasy_league_removals (
   league_id  uuid        not null references fantasy_leagues(id) on delete cascade,
   account_id uuid        not null references accounts(id) on delete cascade,

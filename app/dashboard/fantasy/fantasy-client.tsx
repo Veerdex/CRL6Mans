@@ -127,7 +127,7 @@ function VisibilityPicker({ value, onChange }: { value: "public" | "private"; on
 }
 
 // docs/fantasy-rl.md §2: a private league's button carries "Invite Only" above
-// it and is grey unless the viewer has been invited, green when he has.
+// it and is grey unless the viewer has been invited, green when they have.
 export function JoinLeagueButton({
   leagueId,
   visibility,
