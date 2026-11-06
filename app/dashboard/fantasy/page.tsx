@@ -139,7 +139,8 @@ function LeagueRowCard({ league, action }: { league: LeagueCard; action?: React.
           <span className={fillColor(league.memberCount, league.cap)}>
             {league.memberCount >= league.cap ? "Full" : `${league.memberCount}/${league.cap}`}
           </span>{" "}
-          {league.memberCount < league.cap && "managers "}· Owner: {league.commissionerName}
+          {league.memberCount < league.cap && "managers "}· <span className="text-zinc-500">Owner:</span>{" "}
+          <span className="text-zinc-100">{league.commissionerName}</span>
         </p>
       </Link>
       {action}
