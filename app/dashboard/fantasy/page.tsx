@@ -49,7 +49,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
         </div>
       )}
 
-      <TabSwitch active={tab} myCount={hub.myLeagues.length} inviteCount={hub.invitedLeagues.length} />
+      <TabSwitch active={tab} inviteCount={hub.invitedLeagues.length} />
 
       {tab === "mine" ? (
         <>
@@ -62,7 +62,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
           )}
 
           {hub.myLeagues.length > 0 ? (
-            <Section title="Joined">
+            <Section title={`Joined (${hub.myLeagues.length})`}>
               {hub.myLeagues.map((l) => (
                 <LeagueRowCard key={l.id} league={l} />
               ))}
@@ -99,7 +99,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
 
 type Tab = "mine" | "all";
 
-function TabSwitch({ active, myCount, inviteCount }: { active: Tab; myCount: number; inviteCount: number }) {
+function TabSwitch({ active, inviteCount }: { active: Tab; inviteCount: number }) {
   const pill = (tab: Tab, children: React.ReactNode) => (
     <Link
       href={`/dashboard/fantasy?tab=${tab}`}
@@ -117,7 +117,7 @@ function TabSwitch({ active, myCount, inviteCount }: { active: Tab; myCount: num
         {pill(
           "mine",
           <>
-            My leagues{myCount > 0 && ` (${myCount})`}
+            My leagues
             {inviteCount > 0 && (
               <span className={active === "mine" ? "" : "text-emerald-400"}>
                 {" "}· {inviteCount} invite{inviteCount === 1 ? "" : "s"}
