@@ -177,11 +177,15 @@ function fillColor(count: number, cap: number) {
 function LeagueRowCard({ league, action, invited }: { league: LeagueCard; action?: React.ReactNode; invited?: boolean }) {
   return (
     <div
-      className={`bg-zinc-800 border rounded-xl px-4 py-3 flex items-center gap-4 transition duration-200 ease-out motion-safe:hover:-translate-y-1 motion-safe:hover:scale-[1.02] hover:shadow-lg hover:shadow-black/30 ${
+      className={`group relative bg-zinc-800 hover:bg-zinc-700/70 border rounded-xl px-4 py-3 flex items-center gap-4 shadow-md shadow-black/20 transition duration-200 ease-out motion-safe:hover:-translate-y-1 motion-safe:hover:scale-[1.02] hover:shadow-lg hover:shadow-black/30 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-indigo-500 ${
         invited ? "border-emerald-500" : league.isOwner ? "border-white" : "border-zinc-700"
       }`}
     >
-      <Link href={`/dashboard/fantasy/${league.id}`} className="flex-1 min-w-0">
+      {/* The link's ::after covers the whole card so anywhere on it opens the league. */}
+      <Link
+        href={`/dashboard/fantasy/${league.id}`}
+        className="flex-1 min-w-0 focus-visible:outline-none after:absolute after:inset-0 after:rounded-xl"
+      >
         <div className="flex items-center gap-2">
           <span className="text-yellow-400 font-medium truncate">{league.name}</span>
           <StatusBadge status={league.status} />
@@ -195,7 +199,19 @@ function LeagueRowCard({ league, action, invited }: { league: LeagueCard; action
           <span className="text-zinc-100">{league.commissionerName}</span>
         </p>
       </Link>
-      {action}
+      {action && <div className="relative z-10">{action}</div>}
+      <svg
+        aria-hidden
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        className="w-5 h-5 shrink-0 text-zinc-500 transition duration-200 group-hover:text-zinc-200 motion-safe:group-hover:translate-x-1"
+      >
+        <path
+          fillRule="evenodd"
+          d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.17 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z"
+          clipRule="evenodd"
+        />
+      </svg>
     </div>
   );
 }
