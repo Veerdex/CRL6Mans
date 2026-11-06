@@ -63,8 +63,8 @@ options.
 | Tier 3 — 2nd round | Real 2nd-round picks | Bottom ⅓ by rating |
 
 - Rating = RV (`app/lib/rating.ts`), compared against all players in the season.
-- A player's tier is **fixed for the season** once assigned *(assumed — matches captain
-  stability)*.
+- A player's tier is **fixed for the season** once assigned, no matter what — including a
+  move to another real team.
 - **Prerequisite:** the site doesn't currently record which round a player was drafted in.
   Needs a column written at pick time.
 
@@ -77,8 +77,8 @@ options.
   - A Tier 1 can only be swapped for a Tier 1, Tier 2 for Tier 2, Tier 3 for Tier 3.
   - This applies to free-agent adds, waiver claims and trades.
 
-### Weekly lineup
-6 starters + 2 bench:
+### Lineup
+Each manager has **one lineup** — there are no per-week lineups. 6 starters + 2 bench:
 
 | Slot | Eligible |
 |---|---|
@@ -89,7 +89,8 @@ options.
 | Bench ×2 | The remaining two |
 
 - UI: the position button shows **Cap / 1st / 2nd / Flex**; pictures are Discord avatars.
-- **Each week's lineup copies the previous week's by default.**
+- The lineup can be changed at any time, except for players who are locked (see
+  [Locking and slot scores](#6-fantasy-weeks-locking-and-slot-scores)).
 
 ---
 
@@ -114,16 +115,18 @@ bonus         = wins needed − games his team lost
 A scores `20 × MVP(game 1 stats, N=5) + 1 × (1 ÷ 5)`.
 
 ### Weekly matchup
-A manager's weekly total = sum of his 6 starters' points for that week. Higher total wins.
+A manager's weekly total = the sum of his 6 starting slots' scores for that week (see
+[slot scores](#slot-scores-first-score-counts)). Higher total wins.
 
 ### Special cases
-| Case | Score | Locks? |
+| Case | Score | Fills the slot for that week? |
 |---|---|---|
-| Normal series | Formula above | Locks when reported |
-| Forfeited series | 0 | **No** — slot stays swappable |
-| Real team on bye | 0, shown with a **BYE** tag | **Never** — swappable all week |
-| Player kicked / banned / left the league | 0, obvious **ineligible** indicator | Replace with an unlocked same-tier player |
-| Didn't play (sub covered all games) | 0 | Locks when reported |
+| Normal series | Formula above | **Yes** |
+| Forfeited series | 0 | **No** — another player can still fill it *(assumed)* |
+| Real team on bye | 0, shown with a **BYE** tag | **No** |
+| Didn't play (sub covered all games) | 0 | **Yes** — his team played *(assumed)* |
+| Player kicked / banned / left the league | 0, obvious **ineligible** indicator | **No** — replace with an unlocked same-tier player |
+| Slot never filled by the time the week closes | 0 | — |
 
 ### Late changes
 Points are **computed on read** from current stats, the way career points are — never
@@ -132,22 +135,51 @@ points automatically.
 
 ---
 
-## 6. Fantasy weeks and locking
+## 6. Fantasy weeks, locking and slot scores
 
+The guiding rule: **whatever lineup a manager has when a game is played is what he gets.**
+This replaces per-week lineups, which broke down because real rounds are often played out of
+order.
+
+### Weeks
 - **Fantasy week N = real group-stage Round N.** A series always counts toward the round it
-  belongs to, regardless of when it's played — so out-of-order rounds (Round 2 played before
-  Round 1) are handled.
-- Several fantasy weeks can be open at once. Lineups are **per week**.
-- **A player locks for a given week when his series for that round is reported.** Locked
-  starters and locked bench players stay where they are for that week.
-- **A swap requires both players to be unlocked** for that week.
-- A player whose series for a week is already reported **cannot be put into** that week's
-  lineup. He can still be added to a roster, but only for later weeks.
-- **Exception:** a forfeited series doesn't lock its players, so a forfeited starter can be
-  swapped for any unlocked player (bench or free agent).
-- Dropping a player keeps any points he scored in weeks that had already locked.
+  belongs to, regardless of when it's played.
+- Several fantasy weeks can be open at once.
 - **A week closes when every series in that round is final** (reported, forfeited or
   cancelled). Staff can force-close a week whose series is never played.
+
+### Locking
+- **A player is locked from his match's scheduled start time until the series is reported**,
+  then unlocked again. This is true whichever week the match belongs to — a player playing
+  his Week 2 series early is locked during it even while Week 1 is still running.
+- A locked player can't be moved between slots, benched, dropped or traded.
+- A match with **no scheduled time** has no lock window.
+
+### Slot scores: first score counts
+- **Each starting slot holds one score per week.** The first player to play his series for
+  that week **while sitting in that slot** sets it, and it is final.
+- "While sitting in that slot" means the slot he is in when his series is reported. For a
+  scheduled match that's the slot he was locked into at the start; for an unscheduled match
+  it's wherever he is at report time.
+- A score is assigned only at the moment a series is played. Moving a player afterwards
+  carries nothing with him — his already-played series can't fill a different slot.
+- A player who plays while **on the bench**, or in a slot already filled for that week,
+  earns the manager nothing for that series.
+- Dropping or trading a player never removes a score his slot has already banked.
+
+**Example:** Gio (Tier 1) is in the Cap slot and plays his **Week 2** series early, scoring 12.
+The Cap slot's Week 2 score is now 12, final. Week 1 is still open and Gio's Week 1 series
+hasn't been played. Once Gio is unlocked, his manager can swap in another captain who hasn't
+played Week 1 yet; that captain's Week 1 series fills Cap for Week 1. His later Week 2 series
+does nothing for Cap, because Cap's Week 2 is already filled.
+
+**Why not let a later score override an earlier one?** Series in a normal week are played on
+different days. With an override, a manager whose starter scored badly on Monday could bench
+him for a player who plays Thursday and take the better score — a free re-roll every week.
+
+### Known gap
+An unscheduled match has no lock window, so a manager watching it live could bench a player
+before the report to keep the slot open. Teams scheduling their matches closes this.
 
 ---
 
@@ -236,10 +268,14 @@ Free agent (instant add)
 - **Any size**, as long as each side gives up the same tiers it receives (keeps both rosters
   at 2/3/3).
 - One manager proposes; the other **accepts or rejects**.
-- **Every player in the trade must be unlocked** for the current week.
-- If a player in a pending trade **locks**, the trade can't be accepted, only rejected. It
-  becomes **acceptable again when the next week opens**.
-- **Trade deadline:** start of the semifinal week.
+- **Either manager can cancel** a pending trade — the proposer or the receiver.
+- **Every player in the trade must be unlocked** (not mid-match) when it's accepted.
+- If a player in a pending trade **locks**, the trade can't be accepted until his series is
+  reported and he unlocks. It stays pending until then.
+- Traded players arrive in their new manager's lineup carrying nothing — scores their old slots
+  banked stay with the old manager.
+- **Trade deadline:** start of the semifinal week. Pending trades expire at the deadline
+  *(assumed)*.
 
 ---
 
@@ -272,8 +308,10 @@ league's. Proposed list:
 ## 13. UI pages
 
 Modelled on fantasy football so it's familiar:
-- **My Roster** — lineup by week with slot buttons (Cap / 1st / 2nd / Flex / Bench), lock
-  icons, BYE and ineligible tags, Discord avatars. No projections or next-game stats.
+- **My Roster** — the one lineup with slot buttons (Cap / 1st / 2nd / Flex / Bench), lock
+  icons while a player is mid-match, BYE and ineligible tags, Discord avatars. Each slot shows
+  which open weeks it has already filled, so a manager can see where a swap still earns
+  points. No projections or next-game stats.
 - **Matchup** — the two lineups side by side with points per player (like Kotala's mockup).
 - **Players / Waiver wire** — free agents and waiver players, with tier, status
   ("Free agent — Add" / "Waivers — clears in 14h — Claim") and trending.
@@ -291,10 +329,18 @@ Modelled on fantasy football so it's familiar:
 - **Points are derived, not stored** — from `player_game_stats` (per player, per game) plus
   `matches` (round, score, series length). The same discipline as `app/lib/career-points.ts`.
   The scoring formula should live in a pure leaf module with tests.
+- **Slot credits are stored; points are not.** Who filled which slot depends on the lineup at
+  the moment a series was played, which can't be reconstructed later. So when a series is
+  reported, write a `(league, manager, week, slot) → (player, match)` credit for every
+  rostered player in an unfilled starting slot, with a unique key on
+  `(league, manager, week, slot)` so the first credit wins under a race. Points are still
+  computed on read from that credit's match stats.
+- Locks are derived on read (`scheduled_at <= now` and the series not yet reported), so no
+  cron is needed to start or end them. Every roster move checks them server-side.
 - Likely tables: `fantasy_leagues`, `fantasy_league_members`, `fantasy_player_tiers`,
-  `fantasy_roster_slots`, `fantasy_lineups` (league, manager, week, slot, player),
-  `fantasy_matchups`, `fantasy_waiver_claims`, `fantasy_trades` + `fantasy_trade_items`,
-  `fantasy_draft_picks`.
+  `fantasy_lineup_slots` (league, manager, slot, player — the one current lineup),
+  `fantasy_slot_credits`, `fantasy_matchups`, `fantasy_waiver_claims`, `fantasy_trades` +
+  `fantasy_trade_items`, `fantasy_draft_picks`.
 - The waiver run should be checked on every tick of the existing per-minute external pinger
   (like `clip-reset`), running once when 4 AM Pacific has passed and today's run hasn't happened.
   A fixed UTC Vercel cron would drift an hour across daylight saving. Fantasy shouldn't need
@@ -304,7 +350,6 @@ Modelled on fantasy football so it's familiar:
 
 ## Open questions
 
-1. **Pending trades** — can the proposer cancel? What happens to pending trades at the
-   deadline? *(assumed: proposer can cancel; pending trades expire at the deadline)*
-2. **Mid-season team changes** — a player moved to another real team keeps his tier
-   *(assumed)*. Does anything else change?
+None outstanding. Items marked *(assumed)* above are worth confirming before build:
+- A forfeited series doesn't fill its slot; a player whose sub covered every game does (with 0).
+- Pending trades expire at the trade deadline.
