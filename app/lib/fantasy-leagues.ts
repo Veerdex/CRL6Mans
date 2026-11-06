@@ -36,6 +36,8 @@ export type LeagueCard = {
   memberCount: number;
   cap: number;
   commissionerName: string;
+  commissionerUsername: string;
+  commissionerDiscordId: string | null;
   isMember: boolean;
   isOwner: boolean;
   isInvited: boolean;
@@ -170,6 +172,8 @@ export async function getHubData(viewer: FantasyViewer): Promise<HubData> {
       memberCount: roster.length,
       cap,
       commissionerName: accountName(accounts.get(l.commissioner_id)),
+      commissionerUsername: accounts.get(l.commissioner_id)?.username ?? accountName(accounts.get(l.commissioner_id)),
+      commissionerDiscordId: accounts.get(l.commissioner_id)?.discord_id ?? null,
       isMember: !!viewer.accountId && roster.some((m) => m.account_id === viewer.accountId),
       isOwner: !!viewer.accountId && l.created_by === viewer.accountId,
       isInvited: invited.has(l.id),

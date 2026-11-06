@@ -5,6 +5,7 @@ import { decrypt } from "@/app/lib/session";
 import { fantasyAccessOpen, getFantasyViewer, getHubData, type LeagueCard } from "@/app/lib/fantasy-leagues";
 import { CreateLeagueForm, JoinLeagueButton } from "./fantasy-client";
 import { StatusBadge } from "./status-badge";
+import { PlayerName } from "@/app/dashboard/player-name";
 
 export default async function FantasyHubPage({ searchParams }: { searchParams: Promise<{ all?: string; tab?: string }> }) {
   const session = await decrypt((await cookies()).get("session")?.value);
@@ -194,7 +195,12 @@ function LeagueRowCard({ league, action, invited }: { league: LeagueCard; action
             {league.memberCount >= league.cap ? "Full" : `${league.memberCount}/${league.cap}`}
           </span>{" "}
           {league.memberCount < league.cap && "managers "}· <span className="text-zinc-500">Owner:</span>{" "}
-          <span className="text-zinc-100">{league.commissionerName}</span>
+          <PlayerName
+            displayName={league.commissionerName}
+            username={league.commissionerUsername}
+            discordId={league.commissionerDiscordId}
+            className="z-10 text-zinc-100"
+          />
         </p>
       </Link>
       {action && <div className="relative z-10">{action}</div>}

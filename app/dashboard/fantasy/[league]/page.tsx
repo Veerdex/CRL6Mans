@@ -5,6 +5,7 @@ import { decrypt } from "@/app/lib/session";
 import { fantasyAccessOpen, getFantasyViewer, getLeagueView, type MemberView } from "@/app/lib/fantasy-leagues";
 import { FANTASY_MIN_MANAGERS } from "@/app/lib/fantasy-rules";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
+import { PlayerName } from "@/app/dashboard/player-name";
 import {
   CancelInviteButton,
   CommissionerSettings,
@@ -145,7 +146,14 @@ function PersonRow({ person, tag, action }: { person: MemberView; tag?: string; 
   return (
     <li className="flex items-center gap-3 px-4 py-2.5">
       <PlayerAvatar discordId={person.discordId} avatar={person.avatar} username={person.username} className="w-8 h-8" cdnSize={64} />
-      <span className="flex-1 min-w-0 text-sm text-white truncate">{person.name}</span>
+      <div className="flex-1 min-w-0 flex whitespace-nowrap">
+        <PlayerName
+          displayName={person.name}
+          username={person.username ?? person.name}
+          discordId={person.discordId || null}
+          className="text-sm text-white"
+        />
+      </div>
       {tag && <span className="text-[10px] uppercase tracking-wide text-indigo-300">{tag}</span>}
       {action}
     </li>
