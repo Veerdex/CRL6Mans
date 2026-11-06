@@ -28,15 +28,20 @@ season is a round robin; the top 4 enter a two-week playoff.
 | Creating | Each person can **create one** league per season |
 | Joining | A person can be in **multiple** leagues |
 | Size | **4–6 managers.** If the real season has **21 or fewer teams**, max is **4** |
-| Visibility | Commissioner sets **public** (listed, anyone can join) or **private** (invite only) |
-| Viewing | Anyone can view any other league, **public or private** (read-only) |
+| Visibility | Commissioner sets **public** (anyone can join) or **private** (invite only). Both are listed in the directory |
+| Invites | The commissioner invites by name from the league page; the invitee gets a feed notification. A private league's Join button carries small "Invite Only" text above it and is **grey** unless the viewer is invited, **green** when he is |
+| Viewing | Anyone logged in can view any league, **public or private** (read-only) — including unregistered and pending players. Guests can't |
 | Undersized | A league with **fewer than 4 managers** when the admin starts the drafts is **disbanded** |
 | End of season | League is archived read-only |
 
 ### Commissioner (league creator) powers
 - Rename the league
 - Set public / private
-- Remove managers **before the draft**
+- Remove managers **before the draft** (a removed manager can't rejoin unless re-invited)
+- Invite players by name, and cancel pending invites, **before the draft**
+
+If the commissioner leaves before the draft, the seat passes to the manager who joined
+earliest; a league its last manager leaves is deleted.
 
 Commissioners cannot force-close weeks or override results — that is staff only.
 
@@ -318,7 +323,19 @@ Modelled on fantasy football so it's familiar:
 - **Standings** — W-L, total points, waiver priority.
 - **Trades** — proposals sent and received.
 - **Draft room** — live board, queue, pick timer.
-- **League directory** — public leagues to join or view; create a league.
+- **League directory** — every league to join or view; create a league.
+
+### Navigation
+- One **Fantasy** tab, in the Community nav group.
+- `/dashboard/fantasy` is the hub: My leagues, Invites, Create a league, All leagues. A
+  manager in **exactly one** league skips it and lands in that league;
+  `/dashboard/fantasy?all=1` is the way back (the league page's "All leagues" link).
+- `/dashboard/fantasy/[league]` is a league. Before the draft it shows managers, pending
+  invites, and the commissioner's invite/rename/visibility/remove controls. A manager in
+  several leagues gets a league switcher in the header. Later slices hang the pages above
+  off it as tabs.
+- Until fantasy launches, the tab and pages are open only to staff, or to everyone when an
+  admin sets Fantasy to **shown** in the nav tab overrides.
 
 ---
 
@@ -337,7 +354,13 @@ Modelled on fantasy football so it's familiar:
   computed on read from that credit's match stats.
 - Locks are derived on read (`scheduled_at <= now` and the series not yet reported), so no
   cron is needed to start or end them. Every roster move checks them server-side.
-- Likely tables: `fantasy_leagues`, `fantasy_league_members`, `fantasy_player_tiers`,
+- A fantasy season is its own `fantasy_seasons` row, not a `seasons` id: a running manual
+  season has no `seasons` row until it's archived, and leagues have to exist before then.
+- Built so far (`scripts/fantasy-leagues-migration.sql`): `fantasy_seasons`,
+  `fantasy_leagues`, `fantasy_league_members`, `fantasy_league_invites`,
+  `fantasy_league_removals`, and the locking `fantasy_join_league` function that enforces
+  the manager cap.
+- Likely tables still to come: `fantasy_player_tiers`,
   `fantasy_lineup_slots` (league, manager, slot, player — the one current lineup),
   `fantasy_slot_credits`, `fantasy_matchups`, `fantasy_waiver_claims`, `fantasy_trades` +
   `fantasy_trade_items`, `fantasy_draft_picks`.

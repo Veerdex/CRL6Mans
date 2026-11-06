@@ -1,0 +1,275 @@
+"use server";
+
+import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
+import { decrypt } from "@/app/lib/session";
+import { supabaseAdmin } from "@/app/lib/supabase";
+import { recordNotification } from "@/app/lib/notifications";
+import {
+  accountName,
+  fantasyAccessOpen,
+  getCurrentFantasySeason,
+  getFantasyViewer,
+  getLeague,
+  getManagerCap,
+  type LeagueRow,
+} from "@/app/lib/fantasy-leagues";
+import { normalizeLeagueName } from "@/app/lib/fantasy-rules";
+
+type Result = { error?: string };
+
+// Every export here is a callable endpoint, so each one re-derives who is
+// calling and what they may do rather than trusting what the page drew.
+
+async function requireManager(): Promise<{ accountId: string; discordId: string } | { error: string }> {
+  const session = await decrypt((await cookies()).get("session")?.value);
+  if (!session?.userId) return { error: "You need to be signed in." };
+  const viewer = await getFantasyViewer(session.userId);
+  if (!(await fantasyAccessOpen(viewer))) return { error: "Fantasy isn't open yet." };
+  if (!viewer.approved || !viewer.accountId) return { error: "Only approved players can manage a fantasy team." };
+  return { accountId: viewer.accountId, discordId: viewer.discordId };
+}
+
+async function requirePreDraftLeague(leagueId: string): Promise<LeagueRow | { error: string }> {
+  const league = await getLeague(leagueId);
+  if (!league) return { error: "That league doesn't exist." };
+  if (league.status !== "pre_draft") return { error: "The draft has started, so this can't be changed any more." };
+  return league;
+}
+
+async function isMember(leagueId: string, accountId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from("fantasy_league_members")
+    .select("account_id")
+    .eq("league_id", leagueId)
+    .eq("account_id", accountId)
+    .maybeSingle();
+  return !!data;
+}
+
+function refresh(leagueId?: string) {
+  revalidatePath("/dashboard/fantasy");
+  if (leagueId) revalidatePath(`/dashboard/fantasy/${leagueId}`);
+}
+
+export async function createLeague(rawName: string, visibility: "public" | "private"): Promise<Result & { leagueId?: string }> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const name = normalizeLeagueName(rawName);
+  if (typeof name !== "string") return name;
+  if (visibility !== "public" && visibility !== "private") return { error: "Pick public or private." };
+
+  const season = await getCurrentFantasySeason();
+  if (!season || season.status !== "open") return { error: "Leagues can't be created right now." };
+
+  const { data: league, error } = await supabaseAdmin
+    .from("fantasy_leagues")
+    .insert({
+      fantasy_season_id: season.id,
+      name,
+      visibility,
+      created_by: me.accountId,
+      commissioner_id: me.accountId,
+    })
+    .select("id")
+    .single();
+  if (error || !league) {
+    // 23505 is the (season, created_by) unique key: the one-league rule.
+    if (error?.code === "23505") return { error: "You've already created a league this season." };
+    return { error: "Couldn't create the league." };
+  }
+
+  const { error: memberError } = await supabaseAdmin
+    .from("fantasy_league_members")
+    .insert({ league_id: league.id, account_id: me.accountId });
+  if (memberError) {
+    await supabaseAdmin.from("fantasy_leagues").delete().eq("id", league.id);
+    return { error: "Couldn't create the league." };
+  }
+
+  refresh();
+  return { leagueId: league.id as string };
+}
+
+export async function joinLeague(leagueId: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const league = await requirePreDraftLeague(leagueId);
+  if ("error" in league) return league;
+
+  const [{ data: invite }, { data: removal }] = await Promise.all([
+    supabaseAdmin.from("fantasy_league_invites").select("account_id").eq("league_id", leagueId).eq("account_id", me.accountId).maybeSingle(),
+    supabaseAdmin.from("fantasy_league_removals").select("account_id").eq("league_id", leagueId).eq("account_id", me.accountId).maybeSingle(),
+  ]);
+  if (league.visibility === "private" && !invite) return { error: "This league is invite only." };
+  if (removal && !invite) return { error: "The commissioner removed you from this league." };
+
+  const { data: outcome, error } = await supabaseAdmin.rpc("fantasy_join_league", {
+    p_league: leagueId,
+    p_account: me.accountId,
+    p_cap: await getManagerCap(),
+  });
+  if (error) return { error: "Couldn't join the league." };
+  if (outcome === "full") return { error: "This league is full." };
+  if (outcome === "closed") return { error: "This league is no longer taking managers." };
+
+  refresh(leagueId);
+  return {};
+}
+
+export async function leaveLeague(leagueId: string): Promise<Result & { deleted?: boolean }> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const league = await requirePreDraftLeague(leagueId);
+  if ("error" in league) return league;
+  if (!(await isMember(leagueId, me.accountId))) return { error: "You're not in this league." };
+
+  await supabaseAdmin.from("fantasy_league_members").delete().eq("league_id", leagueId).eq("account_id", me.accountId);
+
+  if (league.commissioner_id === me.accountId) {
+    // The seat passes to whoever has been in the league longest; an empty league
+    // is deleted, which also frees its creator to create another.
+    const { data: next } = await supabaseAdmin
+      .from("fantasy_league_members")
+      .select("account_id")
+      .eq("league_id", leagueId)
+      .order("joined_at")
+      .limit(1)
+      .maybeSingle();
+    if (!next) {
+      await supabaseAdmin.from("fantasy_leagues").delete().eq("id", leagueId);
+      refresh();
+      return { deleted: true };
+    }
+    await supabaseAdmin.from("fantasy_leagues").update({ commissioner_id: next.account_id }).eq("id", leagueId);
+  }
+
+  refresh(leagueId);
+  return {};
+}
+
+async function requireCommissioner(leagueId: string, preDraft: boolean) {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const league = preDraft ? await requirePreDraftLeague(leagueId) : await getLeague(leagueId);
+  if (!league) return { error: "That league doesn't exist." };
+  if ("error" in league) return league;
+  if (league.commissioner_id !== me.accountId) return { error: "Only the commissioner can do that." };
+  return { me, league };
+}
+
+export async function renameLeague(leagueId: string, rawName: string): Promise<Result> {
+  const ctx = await requireCommissioner(leagueId, false);
+  if ("error" in ctx) return ctx;
+  if (ctx.league.status === "complete" || ctx.league.status === "disbanded") return { error: "This league is closed." };
+  const name = normalizeLeagueName(rawName);
+  if (typeof name !== "string") return name;
+  await supabaseAdmin.from("fantasy_leagues").update({ name }).eq("id", leagueId);
+  refresh(leagueId);
+  return {};
+}
+
+export async function setLeagueVisibility(leagueId: string, visibility: "public" | "private"): Promise<Result> {
+  const ctx = await requireCommissioner(leagueId, false);
+  if ("error" in ctx) return ctx;
+  if (ctx.league.status === "complete" || ctx.league.status === "disbanded") return { error: "This league is closed." };
+  if (visibility !== "public" && visibility !== "private") return { error: "Pick public or private." };
+  await supabaseAdmin.from("fantasy_leagues").update({ visibility }).eq("id", leagueId);
+  refresh(leagueId);
+  return {};
+}
+
+export async function removeManager(leagueId: string, accountId: string): Promise<Result> {
+  const ctx = await requireCommissioner(leagueId, true);
+  if ("error" in ctx) return ctx;
+  if (accountId === ctx.me.accountId) return { error: "Use Leave league to leave your own league." };
+  if (!(await isMember(leagueId, accountId))) return { error: "That player isn't in this league." };
+  await supabaseAdmin.from("fantasy_league_members").delete().eq("league_id", leagueId).eq("account_id", accountId);
+  await supabaseAdmin.from("fantasy_league_removals").upsert({ league_id: leagueId, account_id: accountId });
+  refresh(leagueId);
+  return {};
+}
+
+export async function invitePlayer(leagueId: string, accountId: string): Promise<Result> {
+  const ctx = await requireCommissioner(leagueId, true);
+  if ("error" in ctx) return ctx;
+
+  const { data: target } = await supabaseAdmin
+    .from("accounts")
+    .select("id, discord_id, status")
+    .eq("id", accountId)
+    .maybeSingle();
+  if (!target || target.status !== "approved") return { error: "Only approved players can be invited." };
+  if (await isMember(leagueId, accountId)) return { error: "That player is already in this league." };
+
+  const { error } = await supabaseAdmin
+    .from("fantasy_league_invites")
+    .upsert({ league_id: leagueId, account_id: accountId, invited_by: ctx.me.accountId });
+  if (error) return { error: "Couldn't send the invite." };
+  // An invite is the commissioner taking him back, so it lifts a removal.
+  await supabaseAdmin.from("fantasy_league_removals").delete().eq("league_id", leagueId).eq("account_id", accountId);
+
+  const { data: inviter } = await supabaseAdmin
+    .from("accounts")
+    .select("username, display_name")
+    .eq("id", ctx.me.accountId)
+    .maybeSingle();
+  await recordNotification(
+    { kind: "users", discordIds: [target.discord_id as string] },
+    {
+      title: "Fantasy league invite",
+      body: `${accountName(inviter)} invited you to join ${ctx.league.name}.`,
+      url: `/dashboard/fantasy/${leagueId}`,
+    },
+  );
+
+  refresh(leagueId);
+  return {};
+}
+
+export async function cancelInvite(leagueId: string, accountId: string): Promise<Result> {
+  const ctx = await requireCommissioner(leagueId, true);
+  if ("error" in ctx) return ctx;
+  await supabaseAdmin.from("fantasy_league_invites").delete().eq("league_id", leagueId).eq("account_id", accountId);
+  refresh(leagueId);
+  return {};
+}
+
+export async function declineInvite(leagueId: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  await supabaseAdmin.from("fantasy_league_invites").delete().eq("league_id", leagueId).eq("account_id", me.accountId);
+  refresh(leagueId);
+  return {};
+}
+
+export type InviteCandidate = { accountId: string; name: string; username: string | null; discordId: string; avatar: string | null };
+
+export async function searchInvitablePlayers(leagueId: string, query: string): Promise<{ results: InviteCandidate[]; error?: string }> {
+  const ctx = await requireCommissioner(leagueId, true);
+  if ("error" in ctx) return { results: [], error: ctx.error };
+
+  // Stripped to characters a name can hold: the term is spliced into a
+  // PostgREST or() filter, where a comma or parenthesis would change its meaning.
+  const term = query.replace(/[^\p{L}\p{N} ._-]/gu, "").trim();
+  if (term.length < 2) return { results: [] };
+
+  const [{ data: accounts }, { data: members }, { data: invites }] = await Promise.all([
+    supabaseAdmin
+      .from("accounts")
+      .select("id, discord_id, username, display_name, avatar")
+      .eq("status", "approved")
+      .or(`username.ilike.%${term}%,display_name.ilike.%${term}%`)
+      .limit(20),
+    supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId),
+    supabaseAdmin.from("fantasy_league_invites").select("account_id").eq("league_id", leagueId),
+  ]);
+  const taken = new Set([...(members ?? []), ...(invites ?? [])].map((r) => r.account_id as string));
+
+  return {
+    results: ((accounts ?? []) as { id: string; discord_id: string; username: string | null; display_name: string | null; avatar: string | null }[])
+      .filter((a) => !taken.has(a.id))
+      .slice(0, 8)
+      .map((a) => ({ accountId: a.id, name: accountName(a), username: a.username, discordId: a.discord_id, avatar: a.avatar })),
+  };
+}

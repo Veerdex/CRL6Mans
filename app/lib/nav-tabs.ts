@@ -19,6 +19,7 @@ export const NAV_TAB_OPTIONS = [
   { key: "game", label: "Game" },
   { key: "sponsors", label: "Sponsors" },
   { key: "media", label: "Media" },
+  { key: "fantasy", label: "Fantasy" },
   { key: "patreon", label: "Support Us" },
 ] as const;
 

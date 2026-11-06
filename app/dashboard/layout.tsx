@@ -129,6 +129,11 @@ const ALL_NAV: Record<string, NavItem> = {
     label: "Game",
     icon: <svg key="game-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 11h4M8 9v4M15 12h.01M17 10h.01M5 7h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/></svg>,
   },
+  fantasy: {
+    href: "/dashboard/fantasy",
+    label: "Fantasy",
+    icon: <svg key="fantasy-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>,
+  },
   admin: {
     href: "/dashboard/admin",
     label: "Admin",
@@ -184,7 +189,7 @@ function getNavGroups(hasActiveContent: boolean): { label: string; icon: React.R
       ? [{
           label: "Community",
           icon: <svg key="community-group-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v3.5M12 10.5L6.3 17M12 10.5l5.7 6.5"/></svg>,
-          keys: ["media", "wagers", "game"],
+          keys: ["media", "wagers", "game", "fantasy"],
         }]
       : []),
   ];
@@ -317,7 +322,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   } else {
     navKeys = ["home", "register", ...commonExtras];
   }
+  // Fantasy is still being built: it reaches players only through an admin's
+  // force-show override, which the pages and actions check too. Staff see it
+  // so they can review it first.
+  if (!isGuest && staffRole !== null) navKeys.push("fantasy");
   navKeys = applyNavTabOverrides(navKeys, settings.navTabOverrides);
+  if (isGuest) navKeys = navKeys.filter((k) => k !== "fantasy");
   // After the overrides, so an admin's force-show can't reopen them.
   if (hideTestEvent) navKeys = navKeys.filter((k) => !EVENT_NAV_KEYS.has(k));
 
