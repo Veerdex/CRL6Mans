@@ -120,6 +120,12 @@ function JoinFor({ league, canManage }: { league: LeagueCard; canManage: boolean
   );
 }
 
+function fillColor(count: number, cap: number) {
+  if (count >= cap) return "text-red-400";
+  if (count * 2 >= cap) return "text-amber-400";
+  return "text-emerald-400";
+}
+
 function LeagueRowCard({ league, action }: { league: LeagueCard; action?: React.ReactNode }) {
   return (
     <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 flex items-center gap-4">
@@ -130,8 +136,10 @@ function LeagueRowCard({ league, action }: { league: LeagueCard; action?: React.
           {league.visibility === "private" && <span className="text-[10px] uppercase tracking-wide text-zinc-500">Private</span>}
         </div>
         <p className="text-xs text-zinc-400 mt-0.5">
-          {league.memberCount >= league.cap ? "Full" : `${league.memberCount}/${league.cap} managers`} · Owner{" "}
-          {league.commissionerName}
+          <span className={fillColor(league.memberCount, league.cap)}>
+            {league.memberCount >= league.cap ? "Full" : `${league.memberCount}/${league.cap}`}
+          </span>{" "}
+          {league.memberCount < league.cap && "managers "}· Owner: {league.commissionerName}
         </p>
       </Link>
       {action}
