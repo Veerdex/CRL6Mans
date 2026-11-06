@@ -87,7 +87,7 @@ function Shell({ children, subtitle }: { children: React.ReactNode; subtitle?: s
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
       <div className="text-center">
-        <h1 className="text-2xl font-bold">
+        <h1 className="text-5xl font-bold">
           <span className="text-brand-orange">Fantasy</span> <span className="text-brand-blue">RL</span>
         </h1>
         {subtitle && <p className="text-sm text-zinc-400 mt-1">{subtitle}</p>}
@@ -125,12 +125,13 @@ function LeagueRowCard({ league, action }: { league: LeagueCard; action?: React.
     <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 flex items-center gap-4">
       <Link href={`/dashboard/fantasy/${league.id}`} className="flex-1 min-w-0 group">
         <div className="flex items-center gap-2">
-          <span className="text-white font-medium truncate group-hover:underline">{league.name}</span>
+          <span className="text-yellow-400 font-medium truncate group-hover:underline">{league.name}</span>
           <StatusBadge status={league.status} />
           {league.visibility === "private" && <span className="text-[10px] uppercase tracking-wide text-zinc-500">Private</span>}
         </div>
         <p className="text-xs text-zinc-400 mt-0.5">
-          {league.memberCount}/{league.cap} managers · Commissioner {league.commissionerName}
+          {league.memberCount >= league.cap ? "Full" : `${league.memberCount}/${league.cap} managers`} · Owner{" "}
+          {league.commissionerName}
         </p>
       </Link>
       {action}
