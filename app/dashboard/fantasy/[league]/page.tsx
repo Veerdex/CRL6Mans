@@ -32,8 +32,14 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
-      <Link href="/dashboard/fantasy?tab=all" className="text-xs text-zinc-400 hover:text-white">
-        ← All Leagues
+      <Link
+        href="/dashboard/fantasy?tab=all"
+        className="inline-flex items-center gap-1.5 min-h-10 rounded-full bg-zinc-800 border border-zinc-700 pl-3 pr-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+      >
+        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className="w-4 h-4">
+          <path fillRule="evenodd" d="M12.79 5.23a.75.75 0 0 1-.02 1.06L8.83 10l3.94 3.71a.75.75 0 1 1-1.04 1.08l-4.5-4.25a.75.75 0 0 1 0-1.08l4.5-4.25a.75.75 0 0 1 1.06.02Z" clipRule="evenodd" />
+        </svg>
+        All Leagues
       </Link>
       <div className="flex flex-col items-center gap-3 text-center">
         <div className="min-w-0 max-w-full">
