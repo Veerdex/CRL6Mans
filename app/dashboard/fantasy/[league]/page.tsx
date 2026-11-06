@@ -36,19 +36,17 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
       </Link>
       <div className="flex flex-col items-center gap-3 text-center">
         <div className="min-w-0 max-w-full">
-          {/* The badge hangs off the title's right edge so the name itself stays centered. */}
-          <div className="relative inline-block max-w-full">
-            <h1 className="text-2xl font-bold text-white break-words">{league.name}</h1>
-            <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 whitespace-nowrap">
-              <StatusBadge status={league.status} />
-            </span>
-          </div>
+          <h1 className="text-2xl font-bold text-white break-words">{league.name}</h1>
           <p className="text-sm text-zinc-400 mt-1">
             {league.visibility === "private" ? "Private" : "Public"} league
             {view.season ? ` · ${view.season.name}` : ""}
           </p>
+          <div className="mt-2">
+            <StatusBadge status={league.status} />
+          </div>
         </div>
-        <div className="flex flex-wrap items-start justify-center gap-3">          {!isMember && preDraft && (
+        <div className="flex flex-wrap items-start justify-center gap-3">
+          {!isMember && preDraft && (
             <div className="flex items-start gap-2">
               <JoinLeagueButton
                 leagueId={league.id}
