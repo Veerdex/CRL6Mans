@@ -34,7 +34,7 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
     <div className="p-4 sm:p-6 lg:p-8 max-w-3xl space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link href="/dashboard/fantasy?all=1" className="text-xs text-zinc-400 hover:text-white">
+          <Link href="/dashboard/fantasy?tab=all"className="text-xs text-zinc-400 hover:text-white">
             ← All leagues
           </Link>
           <div className="flex items-center gap-2 mt-1">

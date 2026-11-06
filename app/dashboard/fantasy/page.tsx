@@ -6,7 +6,7 @@ import { fantasyAccessOpen, getFantasyViewer, getHubData, type LeagueCard } from
 import { CreateLeagueForm, JoinLeagueButton } from "./fantasy-client";
 import { StatusBadge } from "./status-badge";
 
-export default async function FantasyHubPage({ searchParams }: { searchParams: Promise<{ all?: string }> }) {
+export default async function FantasyHubPage({ searchParams }: { searchParams: Promise<{ all?: string; tab?: string }> }) {
   const session = await decrypt((await cookies()).get("session")?.value);
   if (!session?.userId) redirect("/login");
   const viewer = await getFantasyViewer(session.userId);
@@ -29,10 +29,13 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
     );
   }
 
-  // A manager in exactly one league lands straight in it; ?all=1 is the way back.
-  const { all } = await searchParams;
-  if (hub.myLeagues.length === 1 && all !== "1") redirect(`/dashboard/fantasy/${hub.myLeagues[0].id}`);
+  // A manager in exactly one league lands straight in it; ?all=1 or an explicit
+  // tab is the way back.
+  const { all, tab: tabParam } = await searchParams;
+  if (hub.myLeagues.length === 1 && all !== "1" && !tabParam) redirect(`/dashboard/fantasy/${hub.myLeagues[0].id}`);
 
+  const hasOwn = hub.myLeagues.length + hub.invitedLeagues.length > 0;
+  const tab: Tab = tabParam === "all" || tabParam === "mine" ? tabParam : hasOwn ? "mine" : "all";
   const canCreate = viewer.approved && !hub.hasCreated && hub.season.status === "open";
 
   return (
@@ -46,40 +49,85 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
         </div>
       )}
 
-      {hub.myLeagues.length > 0 && (
-        <Section title="My leagues">
-          {hub.myLeagues.map((l) => (
-            <LeagueRowCard key={l.id} league={l} />
-          ))}
-        </Section>
-      )}
+      <TabSwitch active={tab} myCount={hub.myLeagues.length} inviteCount={hub.invitedLeagues.length} />
 
-      {hub.invitedLeagues.length > 0 && (
-        <Section title="Invites">
-          {hub.invitedLeagues.map((l) => (
-            <LeagueRowCard key={l.id} league={l} action={<JoinFor league={l} canManage={viewer.approved} />} />
-          ))}
-        </Section>
-      )}
+      {tab === "mine" ? (
+        <>
+          {hub.invitedLeagues.length > 0 && (
+            <Section title="Invites">
+              {hub.invitedLeagues.map((l) => (
+                <LeagueRowCard key={l.id} league={l} action={<JoinFor league={l} canManage={viewer.approved} />} />
+              ))}
+            </Section>
+          )}
 
-      {canCreate && (
-        <div className="flex justify-center">
-          <CreateLeagueForm />
-        </div>
-      )}
+          {hub.myLeagues.length > 0 ? (
+            <Section title="Joined">
+              {hub.myLeagues.map((l) => (
+                <LeagueRowCard key={l.id} league={l} />
+              ))}
+            </Section>
+          ) : (
+            <p className="text-sm text-zinc-500 text-center">
+              You&apos;re not in a league yet.{" "}
+              <Link href="/dashboard/fantasy?tab=all" className="text-indigo-400 hover:underline">
+                Browse all leagues
+              </Link>
+            </p>
+          )}
 
-      <Section title="All leagues">
-        {hub.otherLeagues.length === 0 ? (
-          <p className="text-sm text-zinc-500 text-center">
-            {hub.myLeagues.length + hub.invitedLeagues.length > 0 ? "No other leagues yet." : "No leagues yet."}
-          </p>
-        ) : (
-          hub.otherLeagues.map((l) => (
-            <LeagueRowCard key={l.id} league={l} action={<JoinFor league={l} canManage={viewer.approved} />} />
-          ))
-        )}
-      </Section>
+          {canCreate && (
+            <div className="flex justify-center">
+              <CreateLeagueForm />
+            </div>
+          )}
+        </>
+      ) : (
+        <section className="space-y-2">
+          {hub.otherLeagues.length === 0 ? (
+            <p className="text-sm text-zinc-500 text-center">{hasOwn ? "No other leagues yet." : "No leagues yet."}</p>
+          ) : (
+            hub.otherLeagues.map((l) => (
+              <LeagueRowCard key={l.id} league={l} action={<JoinFor league={l} canManage={viewer.approved} />} />
+            ))
+          )}
+        </section>
+      )}
     </Shell>
+  );
+}
+
+type Tab = "mine" | "all";
+
+function TabSwitch({ active, myCount, inviteCount }: { active: Tab; myCount: number; inviteCount: number }) {
+  const pill = (tab: Tab, children: React.ReactNode) => (
+    <Link
+      href={`/dashboard/fantasy?tab=${tab}`}
+      aria-current={active === tab ? "page" : undefined}
+      className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+        active === tab ? "bg-indigo-600 text-on-accent" : "text-zinc-300 hover:bg-zinc-700"
+      }`}
+    >
+      {children}
+    </Link>
+  );
+  return (
+    <div className="flex justify-center">
+      <div className="inline-flex gap-1 p-1 bg-zinc-800 border border-zinc-700 rounded-full">
+        {pill(
+          "mine",
+          <>
+            My leagues{myCount > 0 && ` (${myCount})`}
+            {inviteCount > 0 && (
+              <span className={active === "mine" ? "" : "text-emerald-400"}>
+                {" "}· {inviteCount} invite{inviteCount === 1 ? "" : "s"}
+              </span>
+            )}
+          </>
+        )}
+        {pill("all", "All leagues")}
+      </div>
+    </div>
   );
 }
 

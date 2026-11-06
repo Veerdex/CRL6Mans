@@ -366,7 +366,7 @@ export function LeagueSwitcher({ current, leagues }: { current: string; leagues:
   return (
     <select
       value={current}
-      onChange={(e) => router.push(e.target.value === "__all" ? "/dashboard/fantasy?all=1" : `/dashboard/fantasy/${e.target.value}`)}
+      onChange={(e) => router.push(e.target.value === "__all" ? "/dashboard/fantasy?tab=all" : `/dashboard/fantasy/${e.target.value}`)}
       className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500"
     >
       {!leagues.some((l) => l.id === current) && <option value={current}>Viewing this league</option>}
