@@ -104,7 +104,7 @@ export async function joinLeague(leagueId: string): Promise<Result> {
     supabaseAdmin.from("fantasy_league_removals").select("account_id").eq("league_id", leagueId).eq("account_id", me.accountId).maybeSingle(),
   ]);
   if (league.visibility === "private" && !invite) return { error: "This league is invite only." };
-  if (removal && !invite) return { error: "The commissioner removed you from this league." };
+  if (removal && !invite) return { error: "The owner removed you from this league." };
 
   const { data: outcome, error } = await supabaseAdmin.rpc("fantasy_join_league", {
     p_league: leagueId,
@@ -166,7 +166,7 @@ async function requireCommissioner(leagueId: string, preDraft: boolean) {
   const league = preDraft ? await requirePreDraftLeague(leagueId) : await getLeague(leagueId);
   if (!league) return { error: "That league doesn't exist." };
   if ("error" in league) return league;
-  if (league.commissioner_id !== me.accountId) return { error: "Only the commissioner can do that." };
+  if (league.commissioner_id !== me.accountId) return { error: "Only the league owner can do that." };
   return { me, league };
 }
 

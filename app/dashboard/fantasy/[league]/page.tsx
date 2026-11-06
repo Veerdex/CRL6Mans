@@ -85,7 +85,7 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
             <PersonRow
               key={m.accountId}
               person={m}
-              tag={m.isCommissioner ? "Commissioner" : m.accountId === viewer.accountId ? "You" : undefined}
+              tag={m.isCommissioner ? "Owner" : m.accountId === viewer.accountId ? "You" : undefined}
               action={
                 isCommissioner && preDraft && !m.isCommissioner ? (
                   <RemoveManagerButton leagueId={league.id} accountId={m.accountId} name={m.name} />
