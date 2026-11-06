@@ -49,16 +49,16 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
         </div>
       )}
 
-      <TabSwitch active={tab} inviteCount={hub.invitedLeagues.length} />
+      <TabSwitch active={tab} />
 
       {tab === "mine" ? (
         <>
           {hub.invitedLeagues.length > 0 && (
-            <Section title="Invites">
+            <section className="space-y-2">
               {hub.invitedLeagues.map((l) => (
-                <LeagueRowCard key={l.id} league={l} action={<JoinFor league={l} canManage={viewer.approved} />} />
+                <LeagueRowCard key={l.id} league={l} invited action={<JoinFor league={l} canManage={viewer.approved} />} />
               ))}
-            </Section>
+            </section>
           )}
 
           {hub.myLeagues.length > 0 ? (
@@ -99,7 +99,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
 
 type Tab = "mine" | "all";
 
-function TabSwitch({ active, inviteCount }: { active: Tab; inviteCount: number }) {
+function TabSwitch({ active }: { active: Tab }) {
   const pill = (tab: Tab, children: React.ReactNode) => (
     <Link
       href={`/dashboard/fantasy?tab=${tab}`}
@@ -114,17 +114,7 @@ function TabSwitch({ active, inviteCount }: { active: Tab; inviteCount: number }
   return (
     <div className="flex justify-center">
       <div className="inline-flex gap-1 p-1 bg-zinc-800 border border-zinc-700 rounded-full">
-        {pill(
-          "mine",
-          <>
-            My leagues
-            {inviteCount > 0 && (
-              <span className={active === "mine" ? "" : "text-emerald-400"}>
-                {" "}· {inviteCount} invite{inviteCount === 1 ? "" : "s"}
-              </span>
-            )}
-          </>
-        )}
+        {pill("mine", "My leagues")}
         {pill("all", "All leagues")}
       </div>
     </div>
@@ -174,9 +164,13 @@ function fillColor(count: number, cap: number) {
   return "text-emerald-400";
 }
 
-function LeagueRowCard({ league, action }: { league: LeagueCard; action?: React.ReactNode }) {
+function LeagueRowCard({ league, action, invited }: { league: LeagueCard; action?: React.ReactNode; invited?: boolean }) {
   return (
-    <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 flex items-center gap-4">
+    <div
+      className={`bg-zinc-800 border rounded-xl px-4 py-3 flex items-center gap-4 ${
+        invited ? "border-emerald-500" : "border-zinc-700"
+      }`}
+    >
       <Link href={`/dashboard/fantasy/${league.id}`} className="flex-1 min-w-0 group">
         <div className="flex items-center gap-2">
           <span className="text-yellow-400 font-medium truncate group-hover:underline">{league.name}</span>
