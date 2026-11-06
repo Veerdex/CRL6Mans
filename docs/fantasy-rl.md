@@ -185,8 +185,9 @@ still in the playoffs (by trade or by dropping them onto waivers).
 
 - **Admin starts every league's draft at once**, manually, after the real draft and before
   Round 1. Leagues with fewer than 4 managers are disbanded at that moment.
-- **Round 1 cannot be played until every fantasy draft has finished.** This is enforced, not
-  a guideline: the real season's Round 1 is blocked while any fantasy draft is in progress.
+- **Order: season draft → fantasy draft → season starts.** The admin can't start the real
+  season while any fantasy draft is in progress, so no Round 1 series can be played before
+  every fantasy draft has finished.
 - **Snake draft, order randomized** when the draft starts.
 - **10 minutes per pick.**
 - **Autopick** when the clock runs out: the manager's queue first, otherwise the best
@@ -214,7 +215,10 @@ Free agent (instant add)
 - A player goes on waivers when **his series is reported** (playing again restarts the 24h),
   when he's **dropped**, or when his manager **leaves the league**.
 - A **forfeit does not** put a player on waivers.
-- **Claims resolve in one fixed daily run**, for every player whose 24h has passed.
+- **Claims resolve in one fixed daily run at 4:00 AM Pacific**, for every player whose 24h has
+  passed. Pinned to `America/Los_Angeles` like the clip-of-the-week crowning, so it stays at
+  4 AM through daylight saving changes (11:00 UTC in PDT, 12:00 UTC in PST). The UI shows the
+  time in each viewer's own timezone.
 - **Free agents** can be added instantly, first come, first served.
 - Every add, claim or pickup must **drop a same-tier player** (rosters are always 8).
 - **No cap** on adds per week.
@@ -291,17 +295,16 @@ Modelled on fantasy football so it's familiar:
   `fantasy_roster_slots`, `fantasy_lineups` (league, manager, week, slot, player),
   `fantasy_matchups`, `fantasy_waiver_claims`, `fantasy_trades` + `fantasy_trade_items`,
   `fantasy_draft_picks`.
-- The daily waiver run fits the existing daily cron, so fantasy shouldn't need Vercel Pro
-  outside draft week.
+- The waiver run should be checked on every tick of the existing per-minute external pinger
+  (like `clip-reset`), running once when 4 AM Pacific has passed and today's run hasn't happened.
+  A fixed UTC Vercel cron would drift an hour across daylight saving. Fantasy shouldn't need
+  Vercel Pro outside draft week.
 
 ---
 
 ## Open questions
 
-1. **Waiver run time** — the single moment each day when claims are processed.
-2. **Pending trades** — can the proposer cancel? What happens to pending trades at the
+1. **Pending trades** — can the proposer cancel? What happens to pending trades at the
    deadline? *(assumed: proposer can cancel; pending trades expire at the deadline)*
-3. **Mid-season team changes** — a player moved to another real team keeps his tier
+2. **Mid-season team changes** — a player moved to another real team keeps his tier
    *(assumed)*. Does anything else change?
-4. **How Round 1 is blocked** — which real-season action is gated while a fantasy draft runs
-   (starting the season, opening Round 1, or reporting a Round 1 series)?
