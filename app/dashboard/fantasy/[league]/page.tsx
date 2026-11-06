@@ -31,13 +31,13 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
   const preDraft = league.status === "pre_draft";
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <Link href="/dashboard/fantasy?tab=all"className="text-xs text-zinc-400 hover:text-white">
-            ← All Leagues
-          </Link>
-          <div className="flex items-center gap-2 mt-1">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
+      <Link href="/dashboard/fantasy?tab=all" className="text-xs text-zinc-400 hover:text-white">
+        ← All Leagues
+      </Link>
+      <div className="flex flex-col items-center gap-3 text-center">
+        <div className="min-w-0 max-w-full">
+          <div className="flex items-center justify-center gap-2">
             <h1 className="text-2xl font-bold text-white truncate">{league.name}</h1>
             <StatusBadge status={league.status} />
           </div>
@@ -46,7 +46,7 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
             {view.season ? ` · ${view.season.name}` : ""}
           </p>
         </div>
-        <div className="flex items-start gap-3">
+        <div className="flex flex-wrap items-start justify-center gap-3">
           {myLeagues.length > 1 && <LeagueSwitcher current={league.id} leagues={myLeagues} />}
           {!isMember && preDraft && (
             <div className="flex items-start gap-2">
@@ -65,13 +65,13 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
       </div>
 
       {isInvited && !isMember && preDraft && (
-        <div className="bg-emerald-500/10 border border-emerald-500/40 rounded-xl p-4 text-sm text-emerald-200">
+        <div className="bg-emerald-500/10 border border-emerald-500/40 rounded-xl p-4 text-sm text-emerald-200 text-center">
           You&apos;ve been invited to this league.
         </div>
       )}
 
       {preDraft && (
-        <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-sm text-zinc-300">
+        <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-sm text-zinc-300 text-center">
           Waiting for an admin to start the fantasy draft. Leagues need at least {FANTASY_MIN_MANAGERS} managers to draft.
         </div>
       )}
@@ -131,11 +131,13 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
       )}
 
       {isMember && preDraft && (
-        <LeaveLeagueButton
-          leagueId={league.id}
-          isCreator={viewer.accountId === league.created_by}
-          managerCount={members.length}
-        />
+        <div className="flex justify-center">
+          <LeaveLeagueButton
+            leagueId={league.id}
+            isCreator={viewer.accountId === league.created_by}
+            managerCount={members.length}
+          />
+        </div>
       )}
     </div>
   );
