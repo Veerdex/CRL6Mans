@@ -15,7 +15,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
   if (!(await fantasyAccessOpen(viewer))) {
     return (
       <Shell>
-        <p className="text-sm text-zinc-400">Fantasy isn&apos;t open yet.</p>
+        <p className="text-sm text-zinc-400 text-center">Fantasy isn&apos;t open yet.</p>
       </Shell>
     );
   }
@@ -24,7 +24,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
   if (!hub.season) {
     return (
       <Shell>
-        <p className="text-sm text-zinc-400">There&apos;s no fantasy season running right now.</p>
+        <p className="text-sm text-zinc-400 text-center">There&apos;s no fantasy season running right now.</p>
       </Shell>
     );
   }
@@ -38,7 +38,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
   return (
     <Shell subtitle={hub.season.name}>
       {!viewer.approved && (
-        <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-sm text-zinc-300">
+        <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-sm text-zinc-300 text-center">
           You can look around, but only approved players can create or join a league.{" "}
           <Link href="/dashboard/register" className="text-indigo-400 hover:underline">
             Register
@@ -62,11 +62,15 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
         </Section>
       )}
 
-      {canCreate && <CreateLeagueForm />}
+      {canCreate && (
+        <div className="flex justify-center">
+          <CreateLeagueForm />
+        </div>
+      )}
 
       <Section title="All leagues">
         {hub.otherLeagues.length === 0 ? (
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-zinc-500 text-center">
             {hub.myLeagues.length + hub.invitedLeagues.length > 0 ? "No other leagues yet." : "No leagues yet."}
           </p>
         ) : (
@@ -81,9 +85,9 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
 
 function Shell({ children, subtitle }: { children: React.ReactNode; subtitle?: string }) {
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Fantasy</h1>
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
+      <div className="text-center">
+        <h1 className="text-2xl font-bold text-white">Fantasy RL</h1>
         {subtitle && <p className="text-sm text-zinc-400 mt-1">{subtitle}</p>}
       </div>
       {children}
@@ -94,7 +98,7 @@ function Shell({ children, subtitle }: { children: React.ReactNode; subtitle?: s
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="space-y-2">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">{title}</h2>
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400 text-center">{title}</h2>
       <div className="space-y-2">{children}</div>
     </section>
   );
