@@ -37,6 +37,8 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
   const hasOwn = hub.myLeagues.length + hub.invitedLeagues.length > 0;
   const tab: Tab = tabParam === "all" || tabParam === "mine" ? tabParam : hasOwn ? "mine" : "all";
   const canCreate = viewer.approved && !hub.hasCreated && hub.season.status === "open";
+  const ownLeague = hub.myLeagues.find((l) => l.isOwner);
+  const joinedLeagues = hub.myLeagues.filter((l) => !l.isOwner);
 
   return (
     <Shell subtitle={hub.season.name}>
@@ -53,6 +55,12 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
 
       {tab === "mine" ? (
         <>
+          {ownLeague && (
+            <Section title="My League">
+              <LeagueRowCard league={ownLeague} />
+            </Section>
+          )}
+
           {hub.invitedLeagues.length > 0 && (
             <section className="space-y-2">
               {hub.invitedLeagues.map((l) => (
@@ -61,13 +69,15 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
             </section>
           )}
 
-          {hub.myLeagues.length > 0 ? (
-            <Section title={`Joined (${hub.myLeagues.length})`}>
-              {hub.myLeagues.map((l) => (
+          {joinedLeagues.length > 0 && (
+            <Section title={`Joined (${joinedLeagues.length})`}>
+              {joinedLeagues.map((l) => (
                 <LeagueRowCard key={l.id} league={l} />
               ))}
             </Section>
-          ) : (
+          )}
+
+          {hub.myLeagues.length === 0 && (
             <p className="text-sm text-zinc-500 text-center">
               You&apos;re not in a league yet.{" "}
               <Link href="/dashboard/fantasy?tab=all" className="text-indigo-400 hover:underline">
