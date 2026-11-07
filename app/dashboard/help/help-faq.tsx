@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { CoinIcon } from "@/app/dashboard/coin-icon";
+import { MVP_EXPLANATION } from "@/app/lib/stats-math";
 
 type QA = { q: string; a: React.ReactNode };
 type Section = { title: string; items: QA[] };
@@ -88,7 +89,7 @@ const SECTIONS: Section[] = [
       },
       {
         q: "How is MVP rating calculated?",
-        a: "It's built from goals, assists, saves, and shots per game, plus a small bonus based on in-game score. The exact formula isn't published, but that's the general shape of it.",
+        a: MVP_EXPLANATION,
       },
       {
         q: "Where's the bracket / standings?",

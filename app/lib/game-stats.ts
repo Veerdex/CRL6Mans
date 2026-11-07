@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { isCurrentlyKicked } from "@/app/lib/players";
 import { fetchAllRows } from "@/app/lib/paginate";
+import { mvpScore } from "@/app/lib/stats-math";
 
 export type TopStatAccolade = { label: string; playerName: string; value: string; isMvp: boolean };
 // mvpPlayerId is what consumers should join on; mvpUsername is kept because
@@ -19,9 +20,15 @@ type Agg = {
   demoed: number;
 };
 
-function mvpScore(a: Agg): number {
-  if (a.games === 0) return 0;
-  return (a.goals + a.assists + a.saves + a.shots / 10) / (a.games * 4) + a.score / a.games / 1000;
+function aggMvp(a: Agg): number {
+  return mvpScore({
+    games: a.games,
+    totalGoals: a.goals,
+    totalAssists: a.assists,
+    totalSaves: a.saves,
+    totalShots: a.shots,
+    totalScore: a.score,
+  });
 }
 
 /**
@@ -93,7 +100,7 @@ export async function computeTopStats(): Promise<TopStats> {
 
   if (entries.length === 0) return { accolades: [], mvpUsername: null, mvpPlayerId: null };
 
-  const mvp = leader(mvpScore);
+  const mvp = leader(aggMvp);
   const points = leader((a) => (a.games > 0 ? a.score / a.games : 0));
   const goals = leader((a) => (a.games > 0 ? a.goals / a.games : 0));
   const assists = leader((a) => (a.games > 0 ? a.assists / a.games : 0));

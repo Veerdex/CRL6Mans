@@ -10,6 +10,7 @@ import { aggregatePlayerGameStats, type StatAggregationInput } from "@/app/lib/p
 import type { PlayerStatRow } from "./stats-table";
 import { StatsView } from "./stats-view";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
+import { MVP_EQUATION } from "@/app/lib/stats-math";
 
 type PlayerRow = { id: string; discord_id: string | null; username: string; display_name: string | null; team_id: string | null };
 
@@ -119,7 +120,7 @@ export default async function StatsPage() {
           to all-time only. */}
       <StatsView currentRows={currentRows} allTimeRows={allTimeRows} showToggle={showToggle} />
       <p className="mt-3 text-xs text-zinc-700">
-        MVP = ((G+A+Sv+Sh÷10)÷(GP×4)) + Sc÷1000
+        {MVP_EQUATION}
       </p>
     </div>
   );

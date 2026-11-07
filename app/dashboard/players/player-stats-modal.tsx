@@ -2,6 +2,7 @@
 
 import type { Player } from "@/app/lib/players";
 import { playerRatingFromRow } from "@/app/lib/rating";
+import { mvpScore } from "@/app/lib/stats-math";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
@@ -107,10 +108,7 @@ export function PlayerStatsModal({
             const shootingPct = stats.totalShots > 0
               ? ((stats.totalGoals / stats.totalShots) * 100).toFixed(1) + "%"
               : "—";
-            const mvp = (
-              (stats.totalGoals + stats.totalAssists + stats.totalSaves + stats.totalShots / 10) / (g * 4) +
-              stats.totalScore / 1000
-            ).toFixed(3);
+            const mvp = mvpScore(stats).toFixed(3);
             const statRows = [
               { label: "Goals / Game",   value: perGame(stats.totalGoals) },
               { label: "Assists / Game", value: perGame(stats.totalAssists) },

@@ -54,10 +54,10 @@ const field = (e: { fields?: Array<{ name: string; value: string }> }, name: str
   e.fields?.find((f) => f.name === name);
 
 test("mvpScore matches the formula the stats table publishes", () => {
-  // ((20+10+15+40÷10)÷(10×4)) + 4000÷10÷1000 = 1.225 + 0.4
+  // (4000 + 500×20 + 250×10 + 125×16 + 25×40) ÷ (1000×10) = 19500 ÷ 10000
   assert.equal(mvpScore({
-    games: 10, totalGoals: 20, totalAssists: 10, totalSaves: 15, totalShots: 40, totalScore: 4000,
-  }), 1.625);
+    games: 10, totalGoals: 20, totalAssists: 10, totalSaves: 16, totalShots: 40, totalScore: 4000,
+  }), 1.95);
   assert.equal(shootingPct({ totalGoals: 20, totalShots: 40 }), 50);
 });
 
