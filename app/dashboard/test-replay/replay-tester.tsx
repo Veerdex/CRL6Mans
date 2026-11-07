@@ -315,7 +315,14 @@ function TeamTable({
           ) : (
             players.map((p, i) => (
               <tr key={i} className="hover:bg-zinc-800/30 transition-colors">
-                <td className="px-4 py-2.5 font-medium text-white">{p.replayName}</td>
+                <td className="px-4 py-2.5 font-medium text-white">
+                  {p.replayName}
+                  {p.leftEarly && (
+                    <span className="ml-1.5 text-[9px] font-semibold px-1 py-px rounded bg-amber-900/40 text-amber-300 border border-amber-700/40 uppercase">
+                      Left early
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-2.5">
                   {p.discordUsername ? (
                     <div className="flex flex-col gap-0.5">

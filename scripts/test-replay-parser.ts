@@ -22,11 +22,14 @@ import { test } from "node:test";
 import {
   normalisePlatform,
   mergeNetworkIdentities,
+  leaversFromNetwork,
+  lobbyCheck,
   parseReplay,
   ReplayParseError,
   type PlayerStat,
   type ReplayData,
 } from "../app/lib/replay-parser";
+import type { NetworkPlayer } from "../app/lib/replay-network-parser";
 
 test("normalisePlatform recognizes each platform's enum/string forms", () => {
   assert.equal(normalisePlatform("OnlinePlatform_Steam"), "steam");
@@ -137,6 +140,71 @@ test("mergeNetworkIdentities never overwrites a conflicting header identity", ()
   assert.equal(merged.players[0].identityKey, "steam:76561198220214291");
   assert.equal(merged.players[0].identitySource, "header");
   assert.ok(merged.warnings.some(w => w.includes("conflict")));
+});
+
+function netPlayer(overrides: Partial<NetworkPlayer> = {}): NetworkPlayer {
+  return {
+    name: "Leaver", team: 1, bot: false, score: 105, goals: 0, assists: 0, saves: 1, shots: 1,
+    platformKind: "Steam", onlineId: "76561198199134390", ...overrides,
+  };
+}
+
+test("leaversFromNetwork recovers a player missing from the header", () => {
+  const [leaver] = leaversFromNetwork([basePlayer({ name: "Stayed", score: 200 })], [netPlayer()]);
+  assert.equal(leaver.name, "Leaver");
+  assert.equal(leaver.team, 1);
+  assert.equal(leaver.score, 105);
+  assert.equal(leaver.saves, 1);
+  assert.equal(leaver.leftEarly, true);
+  assert.equal(leaver.identityKey, "steam:76561198199134390");
+  assert.equal(leaver.identitySource, "network");
+});
+
+test("leaversFromNetwork skips header players, bots, casters and teamless PRIs", () => {
+  const leavers = leaversFromNetwork([basePlayer({ name: "Stayed", score: 200 })], [
+    netPlayer({ name: "Stayed" }),
+    netPlayer({ name: "Bot", bot: true }),
+    netPlayer({ name: "Caster", score: 0 }),
+    netPlayer({ name: "Spectator", team: null }),
+  ]);
+  assert.deepEqual(leavers, []);
+});
+
+test("leaversFromNetwork keeps the highest-scoring PRI of a repeated leaver", () => {
+  const leavers = leaversFromNetwork([], [netPlayer({ score: 40 }), netPlayer({ score: 150 })]);
+  assert.equal(leavers.length, 1);
+  assert.equal(leavers[0].score, 150);
+});
+
+test("leaversFromNetwork maps the network platform kinds", () => {
+  const [ps] = leaversFromNetwork([], [netPlayer({ platformKind: "PlayStation", onlineId: "209535737892745380" })]);
+  assert.equal(ps.identityKey, "playstation:209535737892745380");
+  const [none] = leaversFromNetwork([], [netPlayer({ platformKind: null, onlineId: null })]);
+  assert.equal(none.identityKey, null);
+  assert.equal(none.identitySource, null);
+});
+
+const side = (team: 0 | 1, finishers: number, leavers = 0) => [
+  ...Array.from({ length: finishers }, (_, i) => basePlayer({ name: `t${team}f${i}`, team, score: 100 })),
+  ...Array.from({ length: leavers }, (_, i) => basePlayer({ name: `t${team}l${i}`, team, score: 100, leftEarly: true })),
+];
+
+test("lobbyCheck accepts a full lobby and a side short only by a leaver", () => {
+  assert.equal(lobbyCheck([...side(0, 3), ...side(1, 3)], 3).valid, true);
+  assert.equal(lobbyCheck([...side(0, 3), ...side(1, 2, 1)], 3).valid, true);
+  assert.equal(lobbyCheck([...side(0, 1), ...side(1, 0, 1)], 1).valid, true);
+});
+
+test("lobbyCheck accepts a leaver replaced mid-game", () => {
+  assert.equal(lobbyCheck([...side(0, 3), ...side(1, 3, 1)], 3).valid, true);
+});
+
+test("lobbyCheck rejects a short lobby and an oversized side", () => {
+  const short = lobbyCheck([...side(0, 2), ...side(1, 2)], 3);
+  assert.equal(short.valid, false);
+  assert.equal(short.blueFinishers, 2);
+  assert.equal(lobbyCheck([...side(0, 3), ...side(1, 1, 1)], 3).valid, false);
+  assert.equal(lobbyCheck([...side(0, 4), ...side(1, 3)], 3).valid, false);
 });
 
 test("parseReplay rejects buffers too small to contain a header", () => {

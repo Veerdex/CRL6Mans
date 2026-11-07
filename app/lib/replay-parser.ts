@@ -7,7 +7,7 @@
 // MMR trailer records. A full network-parser result can still be attached with
 // mergeNetworkIdentities() when neither header source is available.
 
-import { parseDemoCounts } from "./replay-network-parser";
+import { parseDemoCounts, type NetworkPlayer } from "./replay-network-parser";
 
 export type ReplayPlatform =
   | "steam"
@@ -37,6 +37,10 @@ export type PlayerStat = {
   onlineId: string | null;
   identityKey: string | null; // e.g. "steam:76561198220214291"
   identitySource: IdentitySource | null;
+
+  // Absent from the header's PlayerStats, which lists only who was in the lobby
+  // at the end; recovered from the network stream instead.
+  leftEarly?: boolean;
 };
 
 export type ReplayData = {
@@ -577,7 +581,7 @@ function parseReplayWithBoolWidth(buf: Buffer, debug: boolean, boolWidth: 1 | 4)
   }
 
   try {
-    const { counts: demoCounts, frameCoverage } = parseDemoCounts({
+    const { counts: demoCounts, players: networkPlayers, frameCoverage } = parseDemoCounts({
       buf,
       headerEnd,
       majorVersion,
@@ -591,6 +595,7 @@ function parseReplayWithBoolWidth(buf: Buffer, debug: boolean, boolWidth: 1 | 4)
     if (frameCoverage < 0.99) {
       throw new Error(`Network stream ended early (frameCoverage=${frameCoverage.toFixed(3)})`);
     }
+    players.push(...leaversFromNetwork(players, networkPlayers));
     for (const player of players) {
       const counts = demoCounts.get(player.name);
       if (counts) {
@@ -599,7 +604,7 @@ function parseReplayWithBoolWidth(buf: Buffer, debug: boolean, boolWidth: 1 | 4)
       }
     }
   } catch (error) {
-    warnings.push(`Demo counts unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    warnings.push(`Demo counts and early leavers unavailable: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   return {
@@ -616,6 +621,63 @@ function parseReplayWithBoolWidth(buf: Buffer, debug: boolean, boolWidth: 1 | 4)
     warnings,
     _rawProps: debug ? sanitiseForJson(props) as Record<string, unknown> : undefined,
   };
+}
+
+// A player who left before the end is missing from the header but still has a
+// PRI actor in the network stream. One who disconnected and came back has two
+// PRIs under the same name and is already in the header, so names the header
+// holds are skipped, and of a leaver's own repeated PRIs the highest score wins.
+// Score > 0 matches the caster filter downstream, and also drops a player who
+// joined and left without touching the ball.
+export function leaversFromNetwork(
+  headerPlayers: readonly PlayerStat[],
+  networkPlayers: readonly NetworkPlayer[],
+): PlayerStat[] {
+  const inHeader = new Set(headerPlayers.map(p => p.name));
+  const best = new Map<string, NetworkPlayer & { team: 0 | 1 }>();
+  for (const n of networkPlayers) {
+    if (n.bot || n.team === null || n.score <= 0 || inHeader.has(n.name)) continue;
+    const prev = best.get(n.name);
+    if (!prev || n.score > prev.score) best.set(n.name, { ...n, team: n.team });
+  }
+  return [...best.values()].map(n => {
+    const platform = n.platformKind ? normalisePlatform(n.platformKind) : null;
+    const onlineId = asIdentifier(n.onlineId);
+    const key = identityKey(platform, onlineId);
+    return {
+      name: n.name,
+      team: n.team,
+      score: n.score,
+      goals: n.goals,
+      assists: n.assists,
+      saves: n.saves,
+      shots: n.shots,
+      demos: 0,
+      demoed: 0,
+      platform,
+      onlineId,
+      identityKey: key,
+      identitySource: key ? "network" : null,
+      leftEarly: true,
+    };
+  });
+}
+
+// Whether a lobby (casters already filtered out) is a full game at this size.
+// A 2v2 uploaded to a 3v3 is the wrong file, but a side that finished short
+// because someone left still counts: a side is valid when its finishers fit the
+// size and finishers plus leavers fill it. That bound also covers a leaver who
+// was replaced mid-game, where the side finishes full with the leaver as an
+// extra row.
+export function lobbyCheck(players: readonly PlayerStat[], playersPerTeam: number) {
+  const side = (team: 0 | 1) => {
+    const onSide = players.filter(p => p.team === team);
+    const finishers = onSide.filter(p => !p.leftEarly).length;
+    return { finishers, valid: finishers <= playersPerTeam && onSide.length >= playersPerTeam };
+  };
+  const blue = side(0);
+  const orange = side(1);
+  return { valid: blue.valid && orange.valid, blueFinishers: blue.finishers, orangeFinishers: orange.finishers };
 }
 
 // Attach identities produced by a maintained full network parser. Matching is

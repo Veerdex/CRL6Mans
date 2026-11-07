@@ -39,8 +39,25 @@ export type PlayerDemoCounts = {
   demoed: number;
 };
 
+// One PlayerReplicationInfo actor's scoreboard as the network stream last
+// replicated it. The header's PlayerStats lists only who was still in the lobby
+// at the end, so this is the one place a player who left early survives.
+export type NetworkPlayer = {
+  name: string;
+  team: 0 | 1 | null;
+  bot: boolean;
+  score: number;
+  goals: number;
+  assists: number;
+  saves: number;
+  shots: number;
+  platformKind: string | null; // UniqueId remote_id.kind, e.g. "Steam", "Epic"
+  onlineId: string | null;
+};
+
 export type DemoParseResult = {
   counts: Map<string, PlayerDemoCounts>;
+  players: NetworkPlayer[];
   frameCoverage: number;
 };
 
@@ -955,6 +972,17 @@ export function parseDemoCounts(input: DemoParseInput): DemoParseResult {
   const actors = new Map<number, { objectId: number; cacheInfo: CacheInfo }>();
   const priNameByActor = new Map<number, string>();
   const carToPri = new Map<number, number>();
+  const teamIndexByActor = new Map<number, 0 | 1>();
+  type PriRecord = Omit<NetworkPlayer, "name" | "team"> & { teamActor: number | null };
+  const priRecords = new Map<number, PriRecord>();
+  const priRecord = (actorId: number) => {
+    let rec = priRecords.get(actorId);
+    if (!rec) {
+      rec = { teamActor: null, bot: false, score: 0, goals: 0, assists: 0, saves: 0, shots: 0, platformKind: null, onlineId: null };
+      priRecords.set(actorId, rec);
+    }
+    return rec;
+  };
   type DemolishRaw = { carActor: number; attackerCar: number | null; victimCar: number | null; attackerPriDirect: number | null; selfDemolish: boolean | null };
   const demolishRaw: DemolishRaw[] = [];
   let frameCount = 0;
@@ -981,6 +1009,8 @@ export function parseDemoCounts(input: DemoParseInput): DemoParseResult {
           const cacheInfo = cacheInfoByObjId[actor.objectId];
           if (!cacheInfo) throw new Error("Missing net-cache info for spawned object " + objects[actor.objectId]);
           actors.set(actorId, { objectId: actor.objectId, cacheInfo });
+          const teamMatch = /\.Team([01])$/.exec(objects[actor.objectId]);
+          if (teamMatch) teamIndexByActor.set(actorId, teamMatch[1] === "0" ? 0 : 1);
         } else {
           const entry = actors.get(actorId);
           if (!entry) throw new Error("Update referenced an unknown actor id " + actorId);
@@ -997,6 +1027,21 @@ export function parseDemoCounts(input: DemoParseInput): DemoParseResult {
             switch (attr.propName) {
               case "Engine.PlayerReplicationInfo:PlayerName": priNameByActor.set(actorId, value); break;
               case "Engine.Pawn:PlayerReplicationInfo": if (value.active) carToPri.set(actorId, value.actor); break;
+              case "Engine.PlayerReplicationInfo:Team": priRecord(actorId).teamActor = value.active ? value.actor : null; break;
+              case "Engine.PlayerReplicationInfo:bBot": priRecord(actorId).bot = value; break;
+              case "Engine.PlayerReplicationInfo:UniqueId": {
+                const remote = value.remote_id;
+                const id = remote.value ?? remote.online_id;
+                const rec = priRecord(actorId);
+                rec.platformKind = remote.kind;
+                rec.onlineId = id == null ? null : String(id);
+                break;
+              }
+              case "TAGame.PRI_TA:MatchScore": priRecord(actorId).score = value; break;
+              case "TAGame.PRI_TA:MatchGoals": priRecord(actorId).goals = value; break;
+              case "TAGame.PRI_TA:MatchAssists": priRecord(actorId).assists = value; break;
+              case "TAGame.PRI_TA:MatchSaves": priRecord(actorId).saves = value; break;
+              case "TAGame.PRI_TA:MatchShots": priRecord(actorId).shots = value; break;
             }
             if (attr.attribute === "Demolish" || attr.attribute === "DemolishFx") {
               demolishRaw.push({ carActor: actorId, attackerCar: value.attacker, victimCar: value.victim, attackerPriDirect: null, selfDemolish: null });
@@ -1038,5 +1083,12 @@ export function parseDemoCounts(input: DemoParseInput): DemoParseResult {
   for (const name of names) {
     counts.set(name, { demos: demoCountByName.get(name) || 0, demoed: demoedCountByName.get(name) || 0 });
   }
-  return { counts, frameCoverage: targetFrames > 0 ? frameCount / targetFrames : 0 };
+  const players: NetworkPlayer[] = [];
+  for (const [actorId, rec] of priRecords) {
+    const name = priNameByActor.get(actorId);
+    if (!name) continue;
+    const { teamActor, ...stats } = rec;
+    players.push({ name, team: teamActor != null ? teamIndexByActor.get(teamActor) ?? null : null, ...stats });
+  }
+  return { counts, players, frameCoverage: targetFrames > 0 ? frameCount / targetFrames : 0 };
 }

@@ -24,6 +24,7 @@ export type PlayerMatchInfo = {
   shots: number;
   demos: number;
   demoed: number;
+  leftEarly: boolean;
   discordUsername: string | null;
   teamId: string | null;
   teamName: string | null;
@@ -145,6 +146,7 @@ export async function analyzeReplayFile(
       shots: p.shots,
       demos: p.demos,
       demoed: p.demoed,
+      leftEarly: !!p.leftEarly,
       discordUsername: match?.username ?? null,
       teamId: match?.teamId ?? null,
       teamName: match?.teamId ? (teamNameById[match.teamId] ?? null) : null,

@@ -19,7 +19,7 @@
 // clean submission to admin review.
 
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { parseReplay } from "@/app/lib/replay-parser";
+import { parseReplay, lobbyCheck } from "@/app/lib/replay-parser";
 import { resolveTrackerName, normalizeName } from "@/app/lib/tracker-name";
 import { ensureMatchIdentitySnapshot } from "@/app/lib/match-identity-snapshot";
 import { resolveTeamSize, teamSizeLabel } from "@/app/lib/team-size";
@@ -77,24 +77,24 @@ export async function analyzeGameReplay(args: {
   // Casters appear in the replay with 0 score — exclude them before any validation.
   const activePlayers = replayData.players.filter((p) => p.score > 0);
 
-  // A league game is a full lobby at the event's own size. Reject replays that
-  // aren't that many per side — someone left, or a 2v2 was uploaded to a 3v3.
-  // Admin-side uploads bypass this entirely.
+  // A league game is a full lobby at the event's own size (see lobbyCheck for
+  // how early leavers count). Admin-side uploads bypass this entirely.
   //
   // The size comes from league_settings via resolveTeamSize, never a local `?? 3`:
   // seasons are 3v3, but a tournament authors its own team_size and
   // activateTournamentRuntime mirrors it in, so a hardcoded 3 rejected every
   // replay of a 1v1 or 2v2 event outright.
   const playersPerTeam = await resolveTeamSize();
-  const team0Count = activePlayers.filter((p) => p.team === 0).length;
-  const team1Count = activePlayers.filter((p) => p.team === 1).length;
-  if (team0Count !== playersPerTeam || team1Count !== playersPerTeam)
+  const lobby = lobbyCheck(activePlayers, playersPerTeam);
+  if (!lobby.valid) {
+    const total = lobby.blueFinishers + lobby.orangeFinishers;
     return {
       // Both counts are of the same filtered lobby. Using the raw player count
       // for the total would contradict the sides it just named whenever a caster
       // was present — and at 1v1 a single caster is a third of the lobby.
-      error: `This replay is ${team0Count}v${team1Count} (${activePlayers.length} player${activePlayers.length === 1 ? "" : "s"}) — a valid game must be ${teamSizeLabel(playersPerTeam)} with ${playersPerTeam * 2} players.`,
+      error: `This replay is ${lobby.blueFinishers}v${lobby.orangeFinishers} (${total} player${total === 1 ? "" : "s"}) — a valid game must be ${teamSizeLabel(playersPerTeam)} with ${playersPerTeam * 2} players.`,
     };
+  }
 
   // Reject duplicates already committed to the DB (another match, or a prior
   // submission of this series). Same-session dupes are caught by the caller:
