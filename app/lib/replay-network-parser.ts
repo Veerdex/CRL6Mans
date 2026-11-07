@@ -593,6 +593,18 @@ const ATTRIBUTES: Record<string, string> = {
   "TAGame.Vehicle_TA:ReplicatedSteer": "Byte", "TAGame.Vehicle_TA:ReplicatedThrottle": "Byte", "TAGame.VehiclePickup_TA:bNoPickup": "Boolean",
   "TAGame.VehiclePickup_TA:NewReplicatedPickupData": "PickupNew", "TAGame.VehiclePickup_TA:ReplicatedPickupData": "Pickup",
   "TAGame.ViralItemActor_TA:ClientFXInfectedType": "Byte", "TAGame.ViralItemActor_TA:InfectedStatus": "Byte",
+  // RL 2026-09 update (build 260918+); types from boxcars src/data.rs.
+  "TAGame.Ball_TA:ReplicatedExplosionDataReactive": "FlaggedByte",
+  "TAGame.CameraSettingsActor_TA:FreeLookAnchorPitch": "Byte", "TAGame.CameraSettingsActor_TA:FreeLookAnchorYaw": "Byte",
+  "TAGame.GameEvent_Soccar_TA:AcceptedHonorDuel": "HonorDuelChallenge",
+  "TAGame.PRI_TA:BallTouches": "Int", "TAGame.PRI_TA:BoostPickups": "Int", "TAGame.PRI_TA:CarTouches": "Int",
+  "TAGame.PRI_TA:Dodges": "Int", "TAGame.PRI_TA:EquippedTitleStatValue": "Int", "TAGame.PRI_TA:MatchAerialHits": "Int",
+  "TAGame.PRI_TA:MatchBicycleHits": "Int", "TAGame.PRI_TA:MatchCenters": "Int", "TAGame.PRI_TA:MatchClears": "Int",
+  "TAGame.PRI_TA:MatchCrossbarHits": "Int", "TAGame.PRI_TA:MatchEpicSaves": "Int", "TAGame.PRI_TA:MatchFirstTouches": "Int",
+  "TAGame.PRI_TA:MatchFlipResets": "Int", "TAGame.PRI_TA:MatchHighFives": "Int", "TAGame.PRI_TA:MatchJuggleHits": "Int",
+  "TAGame.PRI_TA:MatchLowFives": "Int", "TAGame.PRI_TA:MatchPoolShots": "Int", "TAGame.PRI_TA:MatchTimesDemolished": "Int",
+  "TAGame.PRI_TA:PlayerStatus": "Byte", "TAGame.PRI_TA:PowerUpsUsed": "Int", "TAGame.PRI_TA:bEligibleForHonorDuels": "Boolean",
+  "TAGame.VehiclePickup_TA:RespawnDelayScale": "Float",
 };
 
 function normalizeObject(name: string): string {
@@ -879,6 +891,7 @@ export function parseDemoCounts(input: DemoParseInput): DemoParseResult {
       }
       case "Location": return decodeVector3f(bits, netVer);
       case "UniqueId": return decodeUniqueId(bits);
+      case "HonorDuelChallenge": return { challenger: decodeUniqueId(bits), defender: decodeUniqueId(bits) };
       case "Reservation": {
         const number = bits.readBitsN(3);
         const unique = decodeUniqueId(bits);
@@ -912,7 +925,10 @@ export function parseDemoCounts(input: DemoParseInput): DemoParseResult {
         const fov = bits.readF32(), height = bits.readF32(), angle = bits.readF32(), distance = bits.readF32(),
           stiffness = bits.readF32(), swivel = bits.readF32();
         const transition = versionGte(majorVersion, minorVersion, netVersion, 868, 20, 0) ? bits.readF32() : null;
-        return { fov, height, angle, distance, stiffness, swivel, transition };
+        if (!versionGte(majorVersion, minorVersion, netVersion, 868, 34, 12)) return { fov, height, angle, distance, stiffness, swivel, transition };
+        const camera_accel_rate = bits.readF32(), camera_decel_rate = bits.readF32(), free_look_speed = bits.readF32();
+        const unconstrain_rotation = bits.readBit(), free_look_smoothing = bits.readBit();
+        return { fov, height, angle, distance, stiffness, swivel, transition, camera_accel_rate, camera_decel_rate, free_look_speed, unconstrain_rotation, free_look_smoothing };
       }
       case "ClubColors": {
         const blue_flag = bits.readBit(), blue_color = bits.readU8(), orange_flag = bits.readBit(), orange_color = bits.readU8();
