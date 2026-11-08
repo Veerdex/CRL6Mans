@@ -71,6 +71,13 @@ export function PoolTable({
     });
   }, [players, query, tier, availableOnly, sort]);
 
+  // Against the whole pool, not the filtered rows, so a player's colour doesn't
+  // change with the search box.
+  const seasonPointsColor = useMemo(() => {
+    const t = rankShare(players.filter((p) => p.seriesPlayed > 0).map((p) => p.seasonPoints));
+    return (p: PoolPlayer) => (p.seriesPlayed > 0 ? spectrum(t(p.seasonPoints), 0, 1) : undefined);
+  }, [players]);
+
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, asc: !s.asc } : { key, asc: ASCENDING_FIRST.includes(key) }));
 
@@ -138,7 +145,7 @@ export function PoolTable({
                 <td className="px-3 py-2"><Availability manager={p.manager} /></td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={ratingColor(p.rating)}>{formatRating(p.rating)}</td>
                 <td className="px-3 py-2 text-right"><Projection player={p} /></td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={pointsColor(p.seasonPoints)}>{fmt(p.seasonPoints)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={seasonPointsColor(p)}>{fmt(p.seasonPoints)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={pointsColor(average(p))}>
                   {average(p) === null ? "—" : fmt(average(p)!)}
                 </td>
@@ -189,7 +196,7 @@ export function PoolTable({
                       <Detail label="Team"><TeamCell team={p.team} /></Detail>
                       <Detail label="Fantasy"><Availability manager={p.manager} /></Detail>
                       <Detail label="RV"><span style={ratingColor(p.rating)}>{formatRating(p.rating)}</span></Detail>
-                      <Detail label="Season points"><span style={pointsColor(p.seasonPoints)}>{fmt(p.seasonPoints)}</span></Detail>
+                      <Detail label="Season points"><span style={seasonPointsColor(p)}>{fmt(p.seasonPoints)}</span></Detail>
                       <Detail label="Per series">
                         <span style={pointsColor(average(p))}>{average(p) === null ? "—" : fmt(average(p)!)}</span>
                       </Detail>
@@ -297,6 +304,26 @@ function spectrum(value: number | null, low: number, high: number): React.CSSPro
   const [from, to, share] =
     t < 0.5 ? ["--c-red-400", "--c-yellow-400", t * 2] : ["--c-yellow-400", "--c-emerald-400", (t - 0.5) * 2];
   return { color: `color-mix(in oklab, var(${from}), var(${to}) ${Math.round(share * 100)}%)` };
+}
+
+// Where a value sits in `values`: 0 below everyone, 1 above everyone, so the
+// whole pool spans red to green and ties share a colour. Null with nothing to
+// separate (an empty pool, or everyone level).
+function rankShare(values: number[]): (v: number) => number | null {
+  const sorted = [...values].sort((a, b) => a - b);
+  const countWhere = (inLowerPart: (x: number) => boolean) => {
+    let lo = 0, hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (inLowerPart(sorted[mid])) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  };
+  return (v) => {
+    const below = countWhere((x) => x < v);
+    const above = sorted.length - countWhere((x) => x <= v);
+    return below + above ? below / (below + above) : null;
+  };
 }
 
 const pointsColor = (v: number | null) => spectrum(v, 10, 40);
