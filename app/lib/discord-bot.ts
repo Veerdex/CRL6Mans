@@ -25,7 +25,7 @@ import { matchHasBegun } from "./match-state";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize, resolveTeamSize } from "./team-size";
 import { APP_NAME } from "./constants";
 import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder, draftRoundForPick, CAPTAIN_DRAFT_ROUND } from "./draft-order";
-import { draftLabel, draftStartEmbed, onTheClockEmbed, pickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
+import { draftLabel, draftStartPost, onTheClockPost, pickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "./solo-team";
 import { notifyMatchChannel, moderatorPing } from "./match-notifications";
 import {
@@ -1006,13 +1006,12 @@ async function getTeamByPosition(position: number, fields = "id"): Promise<Recor
   return ((data as unknown as Record<string, unknown>[]) ?? [])[position - 1] ?? null;
 }
 
-async function getCaptainPing(teamNum: number): Promise<string> {
+async function getCaptain(teamNum: number): Promise<{ discordId: string | null; name: string } | null> {
   const team = await getTeamByPosition(teamNum, "id");
-  if (!team) return `**Team ${teamNum}**`;
+  if (!team) return null;
   const { data: cap } = await supabaseAdmin.from("players")
     .select("discord_id, username").eq("team_id", team.id).eq("is_captain", true).single();
-  if (!cap) return `**Team ${teamNum}**`;
-  return cap.discord_id ? `<@${cap.discord_id}>` : `**${cap.username}**`;
+  return cap ? { discordId: cap.discord_id ?? null, name: cap.username } : null;
 }
 
 // ─── Exported core execution functions (no admin check, used from web admin too) ─
@@ -1273,17 +1272,20 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
 
   const draftName = draftLabel(teamSize);
   const firstTeamNum = getTeamNumberForPick(0, numTeams);
-  const firstCaptainPing = await getCaptainPing(firstTeamNum);
+  const firstCaptain = await getCaptain(firstTeamNum);
 
   // Before the messages, not after: Discord drops the notification for a mention
   // in a channel the member can't see yet, and the second of these carries the
   // first captain's on-the-clock ping.
   const opened = await setDraftChannelVisibility(true);
 
-  await sendChannelMessage(settings.draft_channel_id, "", [
-    draftStartEmbed({ teamSize, numTeams, entered: sorted.length, undrafted, captains: captainSeats }),
-  ]);
-  const firstMessage = await sendChannelMessage(settings.draft_channel_id, firstCaptainPing, [onTheClockEmbed(firstTeamNum)]);
+  const startPost = draftStartPost(
+    { teamSize, numTeams, entered: sorted.length, undrafted, captains: captainSeats },
+    tournamentRole?.id ?? null,
+  );
+  await sendChannelMessage(settings.draft_channel_id, startPost.content, startPost.embeds, startPost.allowed_mentions);
+  const clock = onTheClockPost(firstTeamNum, firstCaptain);
+  const firstMessage = await sendChannelMessage(settings.draft_channel_id, clock.content, clock.embeds, clock.allowed_mentions);
   await rememberPickMessage(firstMessage);
 
   return {
@@ -1759,8 +1761,8 @@ async function completePick(s: PickSettings, teamId: string, playerId: string, v
       await setDraftChannelVisibility(false);
     } else {
       const nextTeamNum = getTeamNumberForPick(newPick, s.num_teams);
-      const nextPing = await getCaptainPing(nextTeamNum);
-      const posted = await sendChannelMessage(s.draft_channel_id, nextPing, [onTheClockEmbed(nextTeamNum)]);
+      const clock = onTheClockPost(nextTeamNum, await getCaptain(nextTeamNum));
+      const posted = await sendChannelMessage(s.draft_channel_id, clock.content, clock.embeds, clock.allowed_mentions);
       await rememberPickMessage(posted);
     }
   }

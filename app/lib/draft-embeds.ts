@@ -6,6 +6,7 @@
 // text, never a <@id>.
 
 import type { DiscordEmbed } from "./discord-api";
+import type { ChannelPost } from "./match-embeds";
 import { getTeamNumberForPick } from "./draft-order";
 
 const BRAND_ORANGE = 0xe88a24;
@@ -88,11 +89,12 @@ export function draftStartEmbed(opts: {
   };
 }
 
-export function onTheClockEmbed(teamNum: number): DiscordEmbed {
+export function onTheClockEmbed(teamNum: number, captainName?: string): DiscordEmbed {
   return {
     color: BRAND_ORANGE,
     title: `⏭️ Team ${teamNum} is on the clock`,
-    description: "Use `/pick <player>` to take someone from the pool.",
+    description: (captainName ? `Captain: **${captainName}**\n` : "")
+      + "Use `/pick <player>` to take someone from the pool.",
     footer: { text: "45 seconds, then the highest Rank Value left is picked for you" },
   };
 }
@@ -135,5 +137,35 @@ export function draftCompleteEmbed(opts: {
     title: `🏁 ${draftLabel(opts.teamSize)} complete!`,
     description: "Rosters are locked. Check your team on the website.",
     footer: { text: `${opts.numTeams} teams · ${opts.totalPicks} picks` },
+  };
+}
+
+// A test account's ID is "test_…", which Discord would print as raw <@test_…>
+// text, so only a real snowflake becomes a ping.
+const SNOWFLAKE = /^\d{17,20}$/;
+
+/** The start announcement, pinging the event role so everyone entered hears it. */
+export function draftStartPost(
+  opts: Parameters<typeof draftStartEmbed>[0],
+  roleId: string | null,
+): ChannelPost {
+  const role = roleId && SNOWFLAKE.test(roleId) ? roleId : null;
+  return {
+    content: role ? `<@&${role}>` : "",
+    embeds: [draftStartEmbed(opts)],
+    allowed_mentions: { parse: [], roles: role ? [role] : [] },
+  };
+}
+
+/** The on-the-clock message: the captain is pinged in content, where it notifies. */
+export function onTheClockPost(
+  teamNum: number,
+  captain: { discordId: string | null; name: string } | null,
+): ChannelPost {
+  const userId = captain?.discordId && SNOWFLAKE.test(captain.discordId) ? captain.discordId : null;
+  return {
+    content: userId ? `<@${userId}>` : "",
+    embeds: [onTheClockEmbed(teamNum, captain?.name)],
+    allowed_mentions: { parse: [], users: userId ? [userId] : [] },
   };
 }

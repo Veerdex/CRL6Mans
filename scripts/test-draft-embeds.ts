@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { getTeamNumberForPick } from "../app/lib/draft-order";
 import {
   draftLabel, draftStartEmbed, onTheClockEmbed,
-  pickEmbed, draftCompleteEmbed,
+  pickEmbed, draftCompleteEmbed, draftStartPost, onTheClockPost,
   type CaptainSeat,
 } from "../app/lib/draft-embeds";
 
@@ -122,4 +122,30 @@ test("the start embed reports the undrafted overflow only when there is some", (
   assert.match(withOverflow.description!, /2 not drafted/);
   const exact = draftStartEmbed({ teamSize: 3, numTeams: 4, entered: 12, undrafted: 0, captains: seats(4) });
   assert.doesNotMatch(exact.description!, /not drafted/);
+});
+
+const opts = { teamSize: 3, numTeams: 4, entered: 12, undrafted: 0, captains: seats(4) };
+
+test("the start post pings the event role in content and whitelists exactly it", () => {
+  const post = draftStartPost(opts, "1549640098105004172");
+  assert.equal(post.content, "<@&1549640098105004172>");
+  assert.deepEqual(post.allowed_mentions, { parse: [], roles: ["1549640098105004172"] });
+  const none = draftStartPost(opts, null);
+  assert.equal(none.content, "");
+  assert.deepEqual(none.allowed_mentions.roles, []);
+});
+
+test("the on-the-clock post pings a real captain in content, never in the embed", () => {
+  const post = onTheClockPost(3, { discordId: "123456789012345678", name: "Cap" });
+  assert.equal(post.content, "<@123456789012345678>");
+  assert.deepEqual(post.allowed_mentions, { parse: [], users: ["123456789012345678"] });
+  assert.doesNotMatch(post.embeds[0].description!, /<@/);
+  assert.match(post.embeds[0].description!, /Cap/);
+});
+
+test("a test account captain gets their name shown, not a raw <@test_…>", () => {
+  const post = onTheClockPost(3, { discordId: "test_1794172999047_0_d195", name: "GhostViper_d195" });
+  assert.equal(post.content, "");
+  assert.deepEqual(post.allowed_mentions.users, []);
+  assert.match(post.embeds[0].description!, /GhostViper_d195/);
 });
