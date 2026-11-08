@@ -9,6 +9,8 @@ import { TeamLink } from "@/app/dashboard/team-link";
 import { leagueFromParams, type LeagueAccess } from "../league-access";
 import { TabSkeleton } from "../tab-skeleton";
 import { TierBadge } from "../players/pool-table";
+import { managerLineup } from "@/app/lib/fantasy-lineup-server";
+import { LineupEditor } from "./lineup-editor";
 
 export default function FantasyRosterPage({
   params,
@@ -62,13 +64,19 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
     (requested && view.members.some((m) => m.accountId === requested) && requested) ||
     (view.isMember ? viewer.accountId : view.members[0]?.accountId) ||
     null;
-  const [pool, slots] = await Promise.all([getPoolView(leagueId, viewer.isStaff), rosterSlots(leagueId)]);
+  const editable = view.league.status === "active" && view.isMember && shownId === viewer.accountId && !!viewer.accountId;
+  const [pool, slots, lineup] = await Promise.all([
+    getPoolView(leagueId, viewer.isStaff),
+    rosterSlots(leagueId),
+    editable ? managerLineup(leagueId, view.league.fantasy_season_id, viewer.accountId!) : null,
+  ]);
   const playerById = new Map(pool.players.map((p) => [p.id, p]));
   const filled = new Map<LineupSlot, PoolPlayer | undefined>(
     slots.filter((s) => s.manager_id === shownId).map((s) => [s.slot, playerById.get(s.player_id)]),
   );
   const shown = view.members.find((m) => m.accountId === shownId);
   const base = `/dashboard/fantasy/${leagueId}/roster`;
+  const title = shown ? (shown.accountId === viewer.accountId ? "Your roster" : `${shown.name}'s roster`) : "Roster";
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -100,12 +108,22 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
         </p>
       )}
 
-      <RosterTable
-        title={shown ? (shown.accountId === viewer.accountId ? "Your roster" : `${shown.name}'s roster`) : "Roster"}
-        filled={filled}
-      />
+      {lineup ? (
+        <LineupEditor
+          leagueId={leagueId}
+          title={title}
+          lineup={lineup}
+          cells={Object.fromEntries(LINEUP_SLOTS.map((slot) => [slot, slotCell(slot, filled)])) as Record<LineupSlot, React.ReactNode>}
+        />
+      ) : (
+        <RosterTable title={title} filled={filled} />
+      )}
     </div>
   );
+}
+
+function slotCell(slot: LineupSlot, filled: Map<LineupSlot, PoolPlayer | undefined>) {
+  return <SlotPlayer player={filled.get(slot)} empty={!filled.has(slot)} hint={slotHint(slot)} />;
 }
 
 function slotHint(slot: LineupSlot): string {
@@ -135,7 +153,7 @@ function RosterTable({ title, filled }: { title: string; filled: Map<LineupSlot,
             >
               {SLOT_LABEL[slot]}
             </span>
-            <SlotPlayer player={filled.get(slot)} empty={!filled.has(slot)} hint={slotHint(slot)} />
+            {slotCell(slot, filled)}
           </li>
         ))}
       </ul>

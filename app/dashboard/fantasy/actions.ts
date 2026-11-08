@@ -18,6 +18,7 @@ import {
 import { normalizeLeagueName } from "@/app/lib/fantasy-rules";
 import { getStaffRole, isDirectorVerified } from "@/app/lib/players";
 import { autopickIfDue, startFantasyDrafts, submitPick } from "@/app/lib/fantasy-draft-server";
+import { moveLineupPlayer } from "@/app/lib/fantasy-lineup-server";
 
 type Result = { error?: string };
 
@@ -317,6 +318,16 @@ export async function makeFantasyPick(leagueId: string, playerId: string): Promi
   const res = await submitPick({ leagueId, managerId: me.accountId, playerId, auto: false });
   if (res.error) return { error: res.error };
   refreshDraft(leagueId);
+  return {};
+}
+
+export async function moveLineupSlot(leagueId: string, from: string, to: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  if (!(await isMember(leagueId, me.accountId))) return { error: "You aren't a manager in this league." };
+  const res = await moveLineupPlayer(leagueId, me.accountId, from, to);
+  if (res.error) return res;
+  revalidatePath(`/dashboard/fantasy/${leagueId}/roster`);
   return {};
 }
 

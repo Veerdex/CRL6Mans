@@ -98,6 +98,11 @@ Each manager has **one lineup** — there are no per-week lineups. 6 starters + 
 - UI: the position button shows **Cap / 1st / 2nd / Flex**; pictures are Discord avatars.
 - The lineup can be changed at any time, except for players who are locked (see
   [Locking and slot scores](#6-fantasy-weeks-locking-and-slot-scores)).
+- Changes open once the league's draft has finished: a draft pick lands in a slot chosen
+  before the pick is locked in, so a move mid-draft could take that slot from under it.
+- A move is a **swap**: tap a position, then tap where that player goes. Both players have to
+  fit where they land, and neither may be locked. Rules are in `app/lib/fantasy-lineup.ts`; the
+  swap is `fantasy_swap_slots` (`scripts/fantasy-lineup-migration.sql`).
 
 ---
 
