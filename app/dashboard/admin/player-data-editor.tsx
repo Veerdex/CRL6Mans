@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { updatePlayerData } from "./player-actions";
 import type { Player } from "@/app/lib/players";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
-import { displayRatingFromRow } from "@/app/lib/rating";
+import { formatRating, shownCalculatedRatingFromRow, shownRatingFromRow } from "@/app/lib/rating";
 
 interface Props {
   players: Player[];
@@ -50,6 +50,13 @@ function PlayerRow({ player }: { player: Player }) {
   const [curr3v3, setCurr3v3]       = useState(player.current_3v3);
   const [peak2v2, setPeak2v2]       = useState(player.peak_2v2);
   const [curr2v2, setCurr2v2]       = useState(player.current_2v2);
+  const ratingRow = {
+    peak_2v2: peak2v2, current_2v2: curr2v2,
+    peak_3v3: peak3v3, current_3v3: curr3v3,
+    rv_adjustment: player.rv_adjustment,
+  };
+  const rv = shownRatingFromRow(ratingRow);
+  const calculatedRv = shownCalculatedRatingFromRow(ratingRow);
 
   function handleSave() {
     setError(null);
@@ -88,11 +95,10 @@ function PlayerRow({ player }: { player: Player }) {
         <PlayerAvatar discordId={player.discord_id} avatar={player.avatar} username={username} className="w-7 h-7" />
         <span className="flex-1 text-sm font-medium text-zinc-200 truncate">{username}</span>
         <span className="text-xs text-zinc-500 shrink-0 tabular-nums hidden sm:block">
-          {Math.round(displayRatingFromRow({
-            peak_2v2: peak2v2, current_2v2: curr2v2,
-            peak_3v3: peak3v3, current_3v3: curr3v3,
-            rv_adjustment: player.rv_adjustment,
-          })).toLocaleString()} RV
+          {formatRating(rv)} RV
+          {calculatedRv !== null && calculatedRv !== rv && (
+            <span className="text-zinc-600" title="Calculated rating: ranks plus the stats adjustment. Predictions and wager odds use it."> · {formatRating(calculatedRv)} calc</span>
+          )}
         </span>
         {saved && <span className="text-xs text-emerald-400 shrink-0">Saved</span>}
         <button

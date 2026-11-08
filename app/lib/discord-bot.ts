@@ -19,7 +19,7 @@ import {
   TERMINAL_STAGES,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
-import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, decisionRatingFromRow, displayRatingFromRow, rulesRatingFromRow, calculatedRatingFromRow, calculatePlayerRating } from "./rating";
+import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, decisionRatingFromRow, displayRatingFromRow, rulesRatingFromRow, calculatedRatingFromRow, shownRatingFromRow, formatRating, calculatePlayerRating } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { matchHasBegun } from "./match-state";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize, resolveTeamSize } from "./team-size";
@@ -2259,12 +2259,12 @@ async function playerInfo(username: string) {
     .ilike("username", username).single();
 
   if (!data) return reply(`❌ No player found: "${username}"`);
-  const rv = displayRatingFromRow(data);
+  const rv = formatRating(shownRatingFromRow(data));
   return reply(
     `**${data.username}**\nStatus: ${data.status}\n` +
     `Peak 3v3: ${data.peak_3v3} | Current: ${data.current_3v3}\n` +
     `Peak 2v2: ${data.peak_2v2} | Current: ${data.current_2v2}\n` +
-    `Rank Value: ${rv.toFixed(0)}\nTracker: ${data.tracker_url}`
+    `Rank Value: ${rv}\nTracker: ${data.tracker_url}`
   );
 }
 

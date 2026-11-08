@@ -10,7 +10,7 @@ import { adminUpdatePlatformAccountId, adminDeletePlatformAccount } from "./plat
 import type { StaffRole } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
-import { displayRatingFromRow } from "@/app/lib/rating";
+import { formatRating, shownCalculatedRatingFromRow, shownRatingFromRow } from "@/app/lib/rating";
 
 export type PlatformAccountSummary = {
   id: string;
@@ -203,11 +203,13 @@ function PlayerRow({
   const isBanned = player.status === "banned";
   // Reads the local edit state, not player.*, so the figure tracks the MMR
   // fields while they are being typed rather than only after a save.
-  const rv = displayRatingFromRow({
+  const ratingRow = {
     peak_2v2: peak2v2, current_2v2: curr2v2,
     peak_3v3: peak3v3, current_3v3: curr3v3,
     rv_adjustment: player.rv_adjustment,
-  });
+  };
+  const rv = shownRatingFromRow(ratingRow);
+  const calculatedRv = shownCalculatedRatingFromRow(ratingRow);
   const canModerate = canActOn(actorRole, player.staffRole);
 
   function handleSave() {
@@ -299,7 +301,10 @@ function PlayerRow({
           ) : null}
 
           <span className="text-xs text-zinc-500 tabular-nums hidden sm:block">
-            {Math.round(rv).toLocaleString()} RV
+            {formatRating(rv)} RV
+            {calculatedRv !== null && calculatedRv !== rv && (
+              <span className="text-zinc-600" title="Calculated rating: ranks plus the stats adjustment. Predictions and wager odds use it."> · {formatRating(calculatedRv)} calc</span>
+            )}
           </span>
 
           {saved && <span className="text-xs text-emerald-400">Saved</span>}

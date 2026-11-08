@@ -7,7 +7,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { matchHasBegun } from "@/app/lib/match-state";
 import { collegeIdSignedUrl } from "@/app/lib/college-ids";
-import { displayRatingFromRow } from "@/app/lib/rating";
+import { displayRatingFromRow, shownRatingFromRow } from "@/app/lib/rating";
 import { SEASON_ACCOLADES } from "@/app/lib/accolades";
 import { LeagueControls } from "./league-controls";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
@@ -817,7 +817,7 @@ export default async function AdminPage() {
     const subCandidates = candidateIds
       .map(id => subInMap[id])
       .filter(Boolean)
-      .map(p => ({ discordId: p.discord_id ?? null, username: p.username, displayName: p.display_name ?? null, mmr: subPeakMmr(p) }));
+      .map(p => ({ discordId: p.discord_id ?? null, username: p.username, displayName: p.display_name ?? null, mmr: shownRatingFromRow(p) }));
     const requester = subRequesterMap[req.requested_by_discord_id];
     return {
       id:                   req.id,

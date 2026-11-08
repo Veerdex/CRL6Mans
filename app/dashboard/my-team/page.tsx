@@ -5,7 +5,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { displayRatingFromRow, initialTeamRating } from "@/app/lib/rating";
+import { displayRatingFromRow, initialTeamRating, shownRatingFromRow } from "@/app/lib/rating";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { forfeitVotesRequired } from "@/app/lib/forfeit-vote";
 import {
@@ -697,7 +697,7 @@ export default async function MyTeamPage() {
     const subCandidates = candidateIds
       .map((id) => subPlayerMap[id])
       .filter(Boolean)
-      .map((p) => ({ discordId: p.discord_id ?? null, username: p.username, displayName: p.display_name ?? null, mmr: peakMmrSub(p) }));
+      .map((p) => ({ discordId: p.discord_id ?? null, username: p.username, displayName: p.display_name ?? null, mmr: shownRatingFromRow(p) }));
     const match = myMatches.find((m) => m.id === req.match_id);
     let matchLabel: string | null = null;
     let opponentName: string | null = null;
@@ -738,7 +738,7 @@ export default async function MyTeamPage() {
       subName: sub?.username ?? null,
       subDisplay: sub?.display_name ?? null,
       subDiscordId: sub?.discord_id ?? null,
-      subMmr: sub ? peakMmrSub(sub) : null,
+      subMmr: sub ? shownRatingFromRow(sub) : null,
       reason: r.reason,
       createdAt: r.created_at,
     };

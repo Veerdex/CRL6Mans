@@ -7,6 +7,8 @@
 // Ports CRL_Rating_Prediction_Algorithm_Pseudocode.txt exactly. 1v1 MMR is
 // not part of the model — only 2v2 and 3v3 peak/season MMR feed the rating.
 
+import { hasMmrOnFile } from "./mmr-on-file";
+
 const G = 0.7010212656429836;
 const PLAYER_POWER_2V2 = 1.998633623123169;
 const PLAYER_POWER_3V3 = 1.817444086074829;
@@ -100,6 +102,24 @@ export const rulesRatingFromRow = mmrRatingFromRow;
 // Decision: the league's internal judgements — predictions and wager odds,
 // seeding, auto-balance, team rating updates.
 export const decisionRatingFromRow = calculatedRatingFromRow;
+
+/**
+ * The display rating rounded for print, or null for a player who has never
+ * entered ranks — their all-zero default rates as 0, which reads as the
+ * league's weakest player rather than as unknown.
+ */
+export function shownRatingFromRow(p: PlayerRatingRow): number | null {
+  return hasMmrOnFile(p) ? Math.round(displayRatingFromRow(p)) : null;
+}
+
+/** Staff-only: the calculated rating, whatever the switches point at. */
+export function shownCalculatedRatingFromRow(p: PlayerRatingRow): number | null {
+  return hasMmrOnFile(p) ? Math.round(calculatedRatingFromRow(p)) : null;
+}
+
+export function formatRating(rating: number | null): string {
+  return rating === null ? "—" : rating.toLocaleString();
+}
 
 // A CRL team is exactly three players. When a roster is short or long
 // (mid-draft, subs, historical data gaps) we degrade gracefully instead of

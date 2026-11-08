@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { adminApproveSubRequest, cancelSubRequest } from "@/app/dashboard/subs/actions";
 import { PlayerName } from "@/app/dashboard/player-name";
+import { formatRating } from "@/app/lib/rating";
 
 export type SubRequestCardData = {
   id: string;
@@ -12,7 +13,7 @@ export type SubRequestCardData = {
   playerOutDisplay: string | null;
   playerOutDiscordId: string | null;
   playerOutMmr: number;
-  subCandidates: { discordId: string | null; username: string; displayName: string | null; mmr: number }[];
+  subCandidates: { discordId: string | null; username: string; displayName: string | null; mmr: number | null }[];
   reason: string | null;
   adminNote: string | null;
   requestedByUsername: string | null;
@@ -27,7 +28,7 @@ export function SubRequestCard({ request }: { request: SubRequestCardData }) {
   const [error, setError]             = useState<string | null>(null);
   const [isPending, startTransition]  = useTransition();
 
-  const overMmr = request.subCandidates.some(c => c.mmr > request.playerOutMmr);
+  const overMmr = request.subCandidates.some(c => (c.mmr ?? 0) > request.playerOutMmr);
 
   function handleApprove() {
     setError(null);
@@ -80,14 +81,14 @@ export function SubRequestCard({ request }: { request: SubRequestCardData }) {
             {request.subCandidates.length > 0 ? (
               <div className="space-y-0.5">
                 {request.subCandidates.map((c, i) => {
-                  const mmrOk = c.mmr <= request.playerOutMmr;
+                  const mmrOk = (c.mmr ?? 0) <= request.playerOutMmr;
                   return (
                     <div key={i} className="flex items-center gap-2">
                       <p className={`text-sm font-medium ${mmrOk ? "text-zinc-200" : "text-red-400"}`}>
                         <PlayerName displayName={c.displayName} username={c.username} discordId={c.discordId} />
                       </p>
                       <p className={`text-xs ${mmrOk ? "text-zinc-500" : "text-red-400 font-semibold"}`}>
-                        {c.mmr.toLocaleString()} RV{!mmrOk && " — OVER LIMIT"}
+                        {formatRating(c.mmr)} RV{!mmrOk && " — OVER LIMIT"}
                       </p>
                     </div>
                   );

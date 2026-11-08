@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { submitSubRequest, cancelSubRequest, escalateSubRequest } from "@/app/dashboard/subs/actions";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { rulesRatingFromRow, displayRatingFromRow } from "@/app/lib/rating";
+import { rulesRatingFromRow, shownRatingFromRow, formatRating } from "@/app/lib/rating";
 
 export type SubRosterPlayer = {
   id: string;
@@ -38,7 +38,7 @@ export type SubRequestRow = {
   playerOutDisplay: string | null;
   playerOutDiscordId: string | null;
   playerOutMmr: number;
-  subCandidates: { discordId: string | null; username: string; displayName: string | null; mmr: number }[];
+  subCandidates: { discordId: string | null; username: string; displayName: string | null; mmr: number | null }[];
   reason: string | null;
   status: "pending" | "approved" | "rejected" | "escalated";
   adminNote: string | null;
@@ -53,11 +53,11 @@ interface Props {
   subsEnabled: boolean;
 }
 
-// The limit is enforced on the calculated rating (sub-requests.ts does the
-// same), but only the shown one is printed — so the hint states the rule, not
-// a number the labels beside it couldn't explain.
+// The limit is enforced on the rules rating (sub-requests.ts does the same),
+// and the labels print the display rating — so the hint states the rule, not a
+// number the labels beside it couldn't explain if the two switches diverge.
 const peakMmr = rulesRatingFromRow;
-const shownRv = (p: Parameters<typeof displayRatingFromRow>[0]) => Math.round(displayRatingFromRow(p)).toLocaleString();
+const shownRv = (p: Parameters<typeof shownRatingFromRow>[0]) => formatRating(shownRatingFromRow(p));
 
 const STATUS_META: Record<SubRequestRow["status"], { label: string; cls: string }> = {
   pending:   { label: "Awaiting opponent", cls: "text-yellow-400 bg-yellow-400/10" },
@@ -290,7 +290,7 @@ export function SubRequestPanel({ teamId, roster, availableSubs, existingRequest
 
                 <div className="flex items-center gap-3 text-[10px] text-zinc-600">
                   {req.playerOutMmr > 0 && <span>Out: {req.playerOutMmr.toLocaleString()} RV</span>}
-                  {sub && <span>{sub.displayName ?? sub.username}: {sub.mmr.toLocaleString()} RV</span>}
+                  {sub && <span>{sub.displayName ?? sub.username}: {formatRating(sub.mmr)} RV</span>}
                   <span>{new Date(req.createdAt).toLocaleDateString()}</span>
                 </div>
               </div>
