@@ -1006,12 +1006,27 @@ async function getTeamByPosition(position: number, fields = "id"): Promise<Recor
   return ((data as unknown as Record<string, unknown>[]) ?? [])[position - 1] ?? null;
 }
 
+// The nickname a player set on the site, read off Tier 1 — the players mirror
+// can lag it. Falls back to the Discord username.
+async function draftDisplayNames(players: Array<{ id: string; username: string }>): Promise<Map<string, string>> {
+  const names = new Map(players.map(p => [p.id, p.username]));
+  if (!players.length) return names;
+  const { data } = await supabaseAdmin.from("accounts")
+    .select("id, display_name").in("id", players.map(p => p.id));
+  for (const a of data ?? []) if (a.display_name) names.set(a.id, a.display_name);
+  return names;
+}
+
+async function draftDisplayName(p: { id: string; username: string }): Promise<string> {
+  return (await draftDisplayNames([p])).get(p.id)!;
+}
+
 async function getCaptain(teamNum: number): Promise<{ discordId: string | null; name: string } | null> {
   const team = await getTeamByPosition(teamNum, "id");
   if (!team) return null;
   const { data: cap } = await supabaseAdmin.from("players")
-    .select("discord_id, username").eq("team_id", team.id).eq("is_captain", true).single();
-  return cap ? { discordId: cap.discord_id ?? null, name: cap.username } : null;
+    .select("id, discord_id, username").eq("team_id", team.id).eq("is_captain", true).single();
+  return cap ? { discordId: cap.discord_id ?? null, name: await draftDisplayName(cap) } : null;
 }
 
 // ─── Exported core execution functions (no admin check, used from web admin too) ─
@@ -1189,10 +1204,11 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   const captainTeams = captainSeatOrder(teamsToUse, pickRounds);
 
   // Build captain assignments before any awaits
+  const captainNames = await draftDisplayNames(sorted.slice(0, numTeams));
   const captainSeats: CaptainSeat[] = [];
   const captains: Array<{ discordId: string | null; teamRoleId?: string }> = [];
   for (let i = 0; i < numTeams; i++) {
-    captainSeats.push({ teamNum: captainTeams[i].num, name: sorted[i].username, rv: displayRatingFromRow(sorted[i]) });
+    captainSeats.push({ teamNum: captainTeams[i].num, name: captainNames.get(sorted[i].id)!, rv: displayRatingFromRow(sorted[i]) });
     captains.push({ discordId: sorted[i].discord_id ?? null, teamRoleId: captainTeams[i].discord_role_id ?? undefined });
   }
 
@@ -1705,9 +1721,11 @@ async function completePick(s: PickSettings, teamId: string, playerId: string, v
   const [{ data: player }, { data: team }, { data: captain }] = await Promise.all([
     supabaseAdmin.from("players").select("id, username, discord_id").eq("id", playerId).single(),
     supabaseAdmin.from("teams").select("id, name, discord_role_id").eq("id", teamId).single(),
-    supabaseAdmin.from("players").select("username").eq("team_id", teamId).eq("is_captain", true).maybeSingle(),
+    supabaseAdmin.from("players").select("id, username").eq("team_id", teamId).eq("is_captain", true).maybeSingle(),
   ]);
   if (!player || !team) return { ok: false, message: "❌ Could not find player or team." };
+  const names = await draftDisplayNames(captain ? [player, captain] : [player]);
+  const playerName = names.get(player.id)!;
 
   await supabaseAdmin.from("players").update({ team_id: team.id, updated_at: new Date().toISOString() }).eq("id", player.id);
   await recordDraftRound(player.id, draftRoundForPick(s.current_pick, s.num_teams));
@@ -1744,7 +1762,7 @@ async function completePick(s: PickSettings, teamId: string, playerId: string, v
 
   if (s.draft_channel_id) {
     const result = pickEmbed({
-      teamName: team.name, captainName: captain?.username, playerName: player.username,
+      teamName: team.name, captainName: captain ? names.get(captain.id) : null, playerName,
       pickNumber: newPick, totalPicks, auto: viaAutoPick,
     });
 
@@ -1769,7 +1787,7 @@ async function completePick(s: PickSettings, teamId: string, playerId: string, v
     }
   }
 
-  return { ok: true, message: isDone ? "🏁 Draft complete!" : `✅ **${player.username}** → **${team.name}**` };
+  return { ok: true, message: isDone ? "🏁 Draft complete!" : `✅ **${playerName}** → **${team.name}**` };
 }
 
 export async function execAutoPick(): Promise<{ done: boolean }> {

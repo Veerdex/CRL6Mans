@@ -18,6 +18,7 @@ const DONE_GREEN = 0x22c55e;
 // list clears on its own. Continuation fields use a zero-width space for their
 // name so the list reads as one block.
 const FIELD_LIMIT = 1024;
+const DESCRIPTION_LIMIT = 4096;
 
 function lineFields(lines: string[], name: string): Array<{ name: string; value: string }> {
   const fields: Array<{ name: string; value: string }> = [];
@@ -49,7 +50,7 @@ function formatRound(order: number[]): string {
   return isRun ? `${order[0]} → ${order[order.length - 1]}` : order.join(", ");
 }
 
-export type CaptainSeat ={ teamNum: number; name: string; rv: number };
+export type CaptainSeat = { teamNum: number; name: string; rv: number };
 
 export function draftStartEmbed(opts: {
   teamSize: number;
@@ -79,17 +80,23 @@ export function draftStartEmbed(opts: {
         value: rounds[0],
       };
 
+  const summary = `**${numTeams}** teams · **${entered}** entered · ${teamSize} per team`
+    + (undrafted > 0 ? ` · ${undrafted} not drafted` : "");
+  const captainHeading = "Captains (auto-assigned by Rank Value)";
+  const captainLines = captains.map(c => `**Team ${c.teamNum}** — ${c.name} · RV ${c.rv.toFixed(0)}`);
+
+  // Discord spaces consecutive fields apart, so a captain list split across
+  // fields reads with a gap in it. The description holds four times as much, so
+  // the list lives there unless even that would overflow.
+  const inDescription = `${summary}\n\n**${captainHeading}**\n${captainLines.join("\n")}`;
+  const fitsDescription = inDescription.length <= DESCRIPTION_LIMIT;
+
   return {
     color: BRAND_ORANGE,
     title: `🚀 ${draftLabel(teamSize)} has started!`,
-    description:
-      `**${numTeams}** teams · **${entered}** entered · ${teamSize} per team`
-      + (undrafted > 0 ? ` · ${undrafted} not drafted` : ""),
+    description: fitsDescription ? inDescription : summary,
     fields: [
-      ...lineFields(
-        captains.map(c => `**Team ${c.teamNum}** — ${c.name} · RV ${c.rv.toFixed(0)}`),
-        "Captains (auto-assigned by Rank Value)",
-      ),
+      ...(fitsDescription ? [] : lineFields(captainLines, captainHeading)),
       orderField,
     ],
     footer: { text: "Captains pick with /pick <player> · 45 seconds on the clock" },

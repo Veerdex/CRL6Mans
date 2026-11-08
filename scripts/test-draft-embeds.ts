@@ -17,6 +17,7 @@ import {
 } from "../app/lib/draft-embeds";
 
 const FIELD_LIMIT = 1024;
+const DESCRIPTION_LIMIT = 4096;
 const TITLE_LIMIT = 256;
 const EMBED_LIMIT = 6000;
 
@@ -40,30 +41,36 @@ test("draftLabel only calls it a snake draft when there are rounds to snake betw
   assert.equal(draftLabel(2), "2v2 Draft");
 });
 
-test("a 32-team captain list splits across fields instead of blowing the 1024 limit", () => {
+const listedTeams = (text: string) =>
+  [...text.matchAll(/\*\*Team (\d+)\*\*/g)].map(m => Number(m[1])).sort((a, b) => a - b);
+const oneTo = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+
+test("a 32-team captain list sits unbroken in the description, past the field limit", () => {
   const embed = draftStartEmbed({
     teamSize: 3, numTeams: 32, entered: 96, undrafted: 0, captains: seats(32),
   });
-  const fields = embed.fields ?? [];
+  const description = embed.description ?? "";
 
-  for (const f of fields) assert.ok(f.value.length <= FIELD_LIMIT, `field "${f.name}" is ${f.value.length} chars`);
-  assert.ok(fields.length > 2, "32 captains should need more than one captain field");
-  assert.ok(fields.length <= 25, "Discord allows at most 25 fields");
+  assert.ok(description.length > FIELD_LIMIT, "the list should be too long for one field");
+  assert.ok(description.length <= DESCRIPTION_LIMIT);
+  assert.ok(!(embed.fields ?? []).some(f => f.name.startsWith("Captains") || f.name === "​"),
+    "split captain fields render with a gap between them");
+  assert.deepEqual(listedTeams(description), oneTo(32));
   assert.ok(embedSize(embed) <= EMBED_LIMIT);
   assert.ok((embed.title ?? "").length <= TITLE_LIMIT);
-
-  // Splitting must not drop anyone: every team number still appears exactly once.
-  const listed = fields.flatMap(f => [...f.value.matchAll(/\*\*Team (\d+)\*\*/g)].map(m => Number(m[1])));
-  assert.deepEqual([...listed].sort((a, b) => a - b), Array.from({ length: 32 }, (_, i) => i + 1));
 });
 
-test("a small draft keeps the captain list in a single named field", () => {
-  const fields = draftStartEmbed({
-    teamSize: 3, numTeams: 4, entered: 12, undrafted: 0, captains: seats(4),
-  }).fields ?? [];
-  const captainFields = fields.filter(f => f.name !== "​" && f.name.startsWith("Captains"));
-  assert.equal(captainFields.length, 1);
-  assert.equal(captainFields[0].value.split("\n").length, 4);
+test("a captain list too long for the description falls back to fields under the limit", () => {
+  const embed = draftStartEmbed({
+    teamSize: 3, numTeams: 64, entered: 192, undrafted: 0, captains: seats(64, 50),
+  });
+  const fields = embed.fields ?? [];
+
+  assert.ok((embed.description ?? "").length <= DESCRIPTION_LIMIT);
+  for (const f of fields) assert.ok(f.value.length <= FIELD_LIMIT, `field "${f.name}" is ${f.value.length} chars`);
+  assert.ok(fields.length <= 25, "Discord allows at most 25 fields");
+  // Splitting must not drop anyone: every team number still appears exactly once.
+  assert.deepEqual(listedTeams(fields.map(f => f.value).join("\n")), oneTo(64));
 });
 
 test("the pick order shown is the pick order getTeamNumberForPick enforces", () => {
