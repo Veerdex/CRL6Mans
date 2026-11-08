@@ -19,7 +19,7 @@ import {
   TERMINAL_STAGES,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
-import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, decisionRatingFromRow, displayRatingFromRow, calculatedRatingFromRow, calculatePlayerRating } from "./rating";
+import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, decisionRatingFromRow, displayRatingFromRow, rulesRatingFromRow, calculatedRatingFromRow, calculatePlayerRating } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { matchHasBegun } from "./match-state";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize, resolveTeamSize } from "./team-size";
@@ -1175,7 +1175,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   if (missingRoleIds.length > 0)
     return { ok: false, message: `Missing Discord role IDs for: ${missingRoleIds.join(", ")}. Set them in the Team Slots section of the admin panel.` };
 
-  const sorted = [...entered].sort((a, b) => playerRating(b) - playerRating(a));
+  const sorted = [...entered].sort((a, b) => rulesRatingFromRow(b) - rulesRatingFromRow(a));
   const drafted = numTeams * teamSize;
   const undrafted = sorted.length - drafted;
   const pickRounds = teamSize - 1;
@@ -1411,9 +1411,10 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
 
   // Captain = highest-RV player per team (recomputed after swaps may have
   // changed the ordering within each team's list).
+  const captainRvById = new Map<string, number>(entered.map(p => [p.id, rulesRatingFromRow(p)]));
   const captainIds = teamPlayerIds
     .filter(ids => ids.length >= teamSize)
-    .map(ids => ids.reduce((best, id) => (rvById.get(id) ?? 0) > (rvById.get(best) ?? 0) ? id : best))
+    .map(ids => ids.reduce((best, id) => (captainRvById.get(id) ?? 0) > (captainRvById.get(best) ?? 0) ? id : best))
     .filter(Boolean);
 
   // ── Phase 1: DB writes ───────────────────────────────────────────────────
@@ -1802,7 +1803,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
   // No separate "ran out of time" post any more — completePick folds the reason
   // into the result it writes over the on-the-clock message. A pick that then
   // fails therefore leaves that message reading as still on the clock.
-  const best = [...available].sort((a, b) => playerRating(b) - playerRating(a))[0];
+  const best = [...available].sort((a, b) => rulesRatingFromRow(b) - rulesRatingFromRow(a))[0];
   const result = await completePick(
     {
       num_teams: numTeams, team_size: teamSize, current_pick: currentPick,
@@ -2258,7 +2259,7 @@ async function playerInfo(username: string) {
     .ilike("username", username).single();
 
   if (!data) return reply(`❌ No player found: "${username}"`);
-  const rv = playerRating(data);
+  const rv = displayRatingFromRow(data);
   return reply(
     `**${data.username}**\nStatus: ${data.status}\n` +
     `Peak 3v3: ${data.peak_3v3} | Current: ${data.current_3v3}\n` +

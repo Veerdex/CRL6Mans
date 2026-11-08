@@ -217,9 +217,10 @@ The crowning announcement is built in `app/lib/clip-embeds.ts` (see Discord mess
 
 RV is a player's rating under the `crl-final-rating-v1` model. **`app/lib/rating.ts` is the single source of truth** for the formula — do not restate it here; read that file. It is a pure module shared by the season updater (`app/lib/discord-bot.ts`) and the wager predictor (`app/dashboard/wagers/prediction.ts`), so both interpret ratings identically.
 
-A player has two ratings: **raw** (`mmrRatingFromRow`, from ranks alone) and **calculated** (`calculatedRatingFromRow`, raw + `rv_adjustment`). Call sites never use either directly. They go through one of two role switches defined at the bottom of `rating.ts`, so changing a switch's one line changes that role everywhere:
+A player has two ratings: **raw** (`mmrRatingFromRow`, from ranks alone) and **calculated** (`calculatedRatingFromRow`, raw + `rv_adjustment`). Call sites never use either directly. They go through one of three role switches defined at the bottom of `rating.ts`, so changing a switch's one line changes that role everywhere:
 - **`displayRatingFromRow`** (currently raw) covers every number anyone is shown (site, bot embeds, archives), plus the sort order and team totals of any list that shows them.
-- **`decisionRatingFromRow`** (currently calculated) covers predictions and wager odds, seeding, draft order and autopick, auto-balance, captains, sub limits, and team rating updates.
+- **`rulesRatingFromRow`** (currently raw) covers the decisions players act on directly: captains (on every path: draft start, auto-balance, a team filling up, a sign-up captain leaving), which also sets draft pick order, plus autopick and sub limits. These stay on a rating players can see that doesn't drift every series, and autopick on raw rewards a captain who knows a player's real level.
+- **`decisionRatingFromRow`** (currently calculated) covers the league's internal judgements: predictions and wager odds, seeding, auto-balance's team balancing, and team rating updates.
 
 A message that would print a decision-derived number (a sub limit, say) states the rule instead, so it never contradicts the displayed ratings beside it. The fantasy projection in `applyStatsRvUpdate` is pinned to `calculatedRatingFromRow` rather than a switch, since the adjustment only converges against the rating it produced.
 

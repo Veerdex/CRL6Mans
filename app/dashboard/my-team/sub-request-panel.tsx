@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { submitSubRequest, cancelSubRequest, escalateSubRequest } from "@/app/dashboard/subs/actions";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { decisionRatingFromRow, displayRatingFromRow } from "@/app/lib/rating";
+import { rulesRatingFromRow, displayRatingFromRow } from "@/app/lib/rating";
 
 export type SubRosterPlayer = {
   id: string;
@@ -56,7 +56,7 @@ interface Props {
 // The limit is enforced on the calculated rating (sub-requests.ts does the
 // same), but only the shown one is printed — so the hint states the rule, not
 // a number the labels beside it couldn't explain.
-const peakMmr = decisionRatingFromRow;
+const peakMmr = rulesRatingFromRow;
 const shownRv = (p: Parameters<typeof displayRatingFromRow>[0]) => Math.round(displayRatingFromRow(p)).toLocaleString();
 
 const STATUS_META: Record<SubRequestRow["status"], { label: string; cls: string }> = {

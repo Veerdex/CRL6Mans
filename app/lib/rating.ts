@@ -85,15 +85,20 @@ export function calculatedRatingFromRow(p: PlayerRatingRow): number {
 }
 
 // ── Which rating each role uses ───────────────────────────────────────────────
-// Every call site goes through one of these two, never through the functions
-// above, so pointing either at mmrRatingFromRow or calculatedRatingFromRow
+// Every call site goes through one of these three, never through the functions
+// above, so pointing any of them at mmrRatingFromRow or calculatedRatingFromRow
 // changes that role everywhere at once.
 //
 // Display: every rating anyone is shown — site, bot embeds, archives — and the
 // order and team totals of any list that shows them.
 export const displayRatingFromRow = mmrRatingFromRow;
-// Decision: predictions and wager odds, seeding, draft order and autopick,
-// auto-balance, captains, sub limits, team rating updates.
+// Rules: the decisions players act on directly — captains (and so draft pick
+// order), autopick, sub limits. Kept on a rating players can see and that
+// doesn't drift with every series, and autopick on it rewards a captain who
+// knows a player's real level over one who reads the adjusted number.
+export const rulesRatingFromRow = mmrRatingFromRow;
+// Decision: the league's internal judgements — predictions and wager odds,
+// seeding, auto-balance, team rating updates.
 export const decisionRatingFromRow = calculatedRatingFromRow;
 
 // A CRL team is exactly three players. When a roster is short or long

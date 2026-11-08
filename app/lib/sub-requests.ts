@@ -25,11 +25,11 @@ import {
   type ChannelPost,
 } from "./match-embeds";
 import { pushToAdmins, pushToTeam } from "./push";
-import { decisionRatingFromRow } from "./rating";
+import { rulesRatingFromRow } from "./rating";
 
 export type SubRequestResult = { ok?: boolean; error?: string };
 
-const peakMmr = decisionRatingFromRow;
+const peakMmr = rulesRatingFromRow;
 
 // A sub notification always goes to a match channel the caller already resolved,
 // so these post through sendChannelMessage rather than notifyMatchChannel.
