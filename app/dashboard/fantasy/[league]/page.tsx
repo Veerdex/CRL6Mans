@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import { type MemberView } from "@/app/lib/fantasy-leagues";
-import { loadLeague } from "./league-access";
+import { leagueFromParams, type LeagueAccess } from "./league-access";
+import { TabSkeleton } from "./tab-skeleton";
 import { FANTASY_MIN_MANAGERS } from "@/app/lib/fantasy-rules";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
@@ -14,8 +16,16 @@ import {
 } from "../fantasy-client";
 import { StatusBadge } from "../status-badge";
 
-export default async function FantasyLeaguePage({ params }: { params: Promise<{ league: string }> }) {
-  const { viewer, view } = await loadLeague((await params).league);
+export default function FantasyLeaguePage({ params }: { params: Promise<{ league: string }> }) {
+  return (
+    <Suspense fallback={<TabSkeleton />}>
+      <LeagueOverview league={leagueFromParams(params)} />
+    </Suspense>
+  );
+}
+
+async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess> }) {
+  const { viewer, view } = await access;
   const { league, members, invites, cap, isMember, isCommissioner, isInvited, isRemoved } = view;
   const preDraft = league.status === "pre_draft";
 

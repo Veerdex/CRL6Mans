@@ -18,3 +18,9 @@ export const loadLeague = cache(async (leagueId: string) => {
   if (!view || view.league.status === "disbanded") notFound();
   return { viewer, view };
 });
+
+export type LeagueAccess = Awaited<ReturnType<typeof loadLeague>>;
+
+// Started without awaiting, so a tab can send its frame first and stream the league in.
+// Only await it on the server: its redirect/notFound must throw there, not in a client use().
+export const leagueFromParams = (params: Promise<{ league: string }>) => params.then((p) => loadLeague(p.league));

@@ -1,8 +1,18 @@
-import { loadLeague } from "../league-access";
+import { Suspense } from "react";
+import { leagueFromParams, type LeagueAccess } from "../league-access";
 import { ComingSoon } from "../coming-soon";
+import { TabSkeleton } from "../tab-skeleton";
 
-export default async function FantasyRosterPage({ params }: { params: Promise<{ league: string }> }) {
-  const { view } = await loadLeague((await params).league);
+export default function FantasyRosterPage({ params }: { params: Promise<{ league: string }> }) {
+  return (
+    <Suspense fallback={<TabSkeleton />}>
+      <Roster league={leagueFromParams(params)} />
+    </Suspense>
+  );
+}
+
+async function Roster({ league }: { league: Promise<LeagueAccess> }) {
+  const { view } = await league;
   return (
     <ComingSoon title="Roster">
       {view.isMember
