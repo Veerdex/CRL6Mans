@@ -13,7 +13,7 @@ export type Player = {
   avatar: string | null;
   status: PlayerStatus;
   peak_3v3: string;
-  current_3v3: string;
+  current_3v3: string; rv_adjustment?: number | null;
   peak_2v2: string;
   current_2v2: string;
   peak_1v1: string | null;
@@ -67,6 +67,7 @@ type TierThreePlayerRow = {
   account_id: string;
   team_id: string | null;
   draft_entered: boolean;
+  rv_adjustment: number | null;
 };
 
 function toPlayer(
@@ -92,6 +93,7 @@ function toPlayer(
     draft_entered: tier3?.draft_entered ?? false,
     created_at: pending?.created_at ?? account.created_at,
     team_id: tier3?.team_id ?? null,
+    rv_adjustment: tier3?.rv_adjustment ?? 0,
   };
 }
 
@@ -153,7 +155,7 @@ export async function getApprovedPlayers(): Promise<Player[]> {
       // which feeds the admin card's link, still needs it.
       .select("account_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, created_at")
       .in("account_id", accountIds),
-    supabaseAdmin.from("players").select("account_id, team_id, draft_entered").in("account_id", accountIds),
+    supabaseAdmin.from("players").select("account_id, team_id, draft_entered, rv_adjustment").in("account_id", accountIds),
   ]);
 
   const pendingByAccount = new Map((pendingRows ?? []).map((r) => [r.account_id, r as PendingPlayerRow]));

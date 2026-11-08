@@ -9,6 +9,8 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { deleteCollegeIdImage } from "@/app/lib/college-ids";
 import { recordStaffAction } from "@/app/lib/staff-contributions";
 import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
+import { applyPlayerRVChangeToTeamRating } from "@/app/lib/discord-bot";
+import { adjustmentAfterMmrEdit } from "@/app/lib/rv-adjustment";
 
 /**
  * What an admin can change while deciding a registration. Narrower than
@@ -253,12 +255,24 @@ export async function updatePlayerData(
     .eq("account_id", id);
   if (pendingError) return { error: pendingError.message };
 
+  const { data: before } = await supabaseAdmin
+    .from("players")
+    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
+    .eq("id", id)
+    .maybeSingle();
+  const rvAdjustment = before ? adjustmentAfterMmrEdit(before, editable) : 0;
+
   // Mirrored onto `players` too — see approvePlayerWithEdits for why.
   const { error } = await supabaseAdmin
     .from("players")
-    .update({ ...editable, updated_at: now })
+    .update({ ...editable, ...(before ? { rv_adjustment: rvAdjustment } : {}), updated_at: now })
     .eq("id", id);
   if (error) return { error: error.message };
+
+  if (before?.team_id) {
+    await applyPlayerRVChangeToTeamRating(id, before.team_id, before, { ...before, ...editable, rv_adjustment: rvAdjustment })
+      .catch(() => {});
+  }
 
   const { error: accountError } = await supabaseAdmin
     .from("accounts")

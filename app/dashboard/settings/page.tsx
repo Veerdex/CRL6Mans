@@ -34,7 +34,7 @@ export default async function SettingsPage({
   const [{ data: player }, sponsorTheme, { data: account }] = await Promise.all([
     supabaseAdmin
       .from("players")
-      .select("id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2, sub_willing, notification_prefs")
+      .select("id, tracker_url, peak_3v3, current_3v3, rv_adjustment, peak_2v2, current_2v2, sub_willing, notification_prefs")
       .eq("discord_id", session.userId)
       .single(),
     getSettingsTabTheme(),

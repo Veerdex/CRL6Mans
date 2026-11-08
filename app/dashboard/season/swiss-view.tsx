@@ -28,7 +28,7 @@ export async function SwissBracketView() {
   if (swissTeamIds.length) {
     const { data: swissPlayers } = await supabaseAdmin
       .from("players")
-      .select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+      .select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
       .in("team_id", swissTeamIds);
     teamTitles = buildTeamTitles(swissPlayers ?? []);
   }

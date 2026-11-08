@@ -134,7 +134,7 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
     fetchAllRows((from, to) =>
       supabaseAdmin
         .from("players")
-        .select("id, discord_id, username, display_name, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+        .select("id, discord_id, username, display_name, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
         .order("id")
         .range(from, to)
     ),

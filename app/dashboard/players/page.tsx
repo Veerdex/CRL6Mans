@@ -24,7 +24,7 @@ export default async function PlayersPage() {
     supabaseAdmin
       .from("players")
       .select(
-        "id, discord_id, username, display_name, avatar, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, tracker_url, team_id, created_at, status, draft_entered"
+        "id, discord_id, username, display_name, avatar, peak_3v3, current_3v3, rv_adjustment, peak_2v2, current_2v2, peak_1v1, current_1v1, tracker_url, team_id, created_at, status, draft_entered"
       )
       .eq("status", "approved")
       .eq("draft_entered", true),

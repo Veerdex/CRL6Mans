@@ -55,7 +55,7 @@ type RosterRow = {
   peak_2v2: string | null;
   current_2v2: string | null;
   peak_3v3: string | null;
-  current_3v3: string | null;
+  current_3v3: string | null; rv_adjustment?: number | null;
 };
 
 type IdentityRow = {
@@ -100,7 +100,7 @@ export async function loadTeamProfile(teamId: string): Promise<TeamProfile | nul
 async function loadRoster(teamId: string): Promise<TeamRosterEntry[]> {
   const { data: rows, error } = await supabaseAdmin
     .from("players")
-    .select("id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment")
     .eq("team_id", teamId)
     .eq("status", "approved");
   if (error) throw new Error(error.message);

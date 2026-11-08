@@ -91,6 +91,7 @@ function PlayerRow({ player }: { player: Player }) {
           {Math.round(playerRatingFromRow({
             peak_2v2: peak2v2, current_2v2: curr2v2,
             peak_3v3: peak3v3, current_3v3: curr3v3,
+            rv_adjustment: player.rv_adjustment,
           })).toLocaleString()} RV
         </span>
         {saved && <span className="text-xs text-emerald-400 shrink-0">Saved</span>}

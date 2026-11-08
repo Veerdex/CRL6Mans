@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
-import { execReportMatchResult, getBestOfForMatch, validateSeriesScore } from "@/app/lib/discord-bot";
+import { applyStatsRvUpdate, execReportMatchResult, getBestOfForMatch, validateSeriesScore } from "@/app/lib/discord-bot";
 import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { parseReplay } from "@/app/lib/replay-parser";
@@ -392,7 +392,7 @@ export async function reportMatchResult(
     }
   }
 
-  const result = await execReportMatchResult(matchId, homeScore, awayScore, goalDiff);
+  const result = await execReportMatchResult(matchId, homeScore, awayScore, goalDiff, false, false, undefined, /*deferStatsRvUpdate*/ true);
   if (!result.ok) return result;
 
   // Persist replay stats now that the match is submitted (replace any prior set).
@@ -416,6 +416,7 @@ export async function reportMatchResult(
     );
     if (rows.length) await supabaseAdmin.from("player_game_stats").insert(rows);
   } catch { /* best-effort */ }
+  await applyStatsRvUpdate(matchId).catch(() => {});
 
   // An admin reporting the result settles any pending replay review, so the
   // flag would otherwise sit set on a match that's already scored.

@@ -17,7 +17,7 @@ export type DraftPoolEntry = {
   peak_2v2: string;
   current_2v2: string;
   peak_3v3: string;
-  current_3v3: string;
+  current_3v3: string; rv_adjustment?: number | null;
   draft_entered_at: string | null;
 };
 

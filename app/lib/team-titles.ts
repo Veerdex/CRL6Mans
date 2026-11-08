@@ -10,7 +10,7 @@ export type TeamTitlePlayer = {
   peak_2v2: string | null;
   current_2v2: string | null;
   peak_3v3: string | null;
-  current_3v3: string | null;
+  current_3v3: string | null; rv_adjustment?: number | null;
   peak_1v1?: string | null;
   current_1v1?: string | null;
 };

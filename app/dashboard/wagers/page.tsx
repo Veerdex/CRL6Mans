@@ -5,6 +5,7 @@ import { hidesActiveTestTournament } from "@/app/lib/test-tournament";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
+import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { computeMatchPredictionFromRating, type MatchPrediction } from "./prediction";
 import { WagersClient } from "./wagers-client";
@@ -316,7 +317,7 @@ export default async function WagersPage() {
           supabaseAdmin.from("teams").select("id, name, logo_url, season_rating").in("id", teamIds),
           supabaseAdmin
             .from("players")
-            .select("id, username, display_name, team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+            .select("id, username, display_name, team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
             .in("team_id", teamIds)
             .eq("status", "approved"),
         ])
@@ -350,10 +351,13 @@ export default async function WagersPage() {
   }
 
   const teams: Record<string, { id: string; name: string; logo_url: string | null }> = {};
+  // With stats tracking on, a roster's RVs carry each player's measured form, so
+  // they predict better than a team rating nudged by series results alone.
+  const statsOn = await isStatsTrackingEnabled();
   const seasonRatings: Record<string, number | null> = {};
   for (const t of teamsData ?? []) {
     teams[t.id] = { id: t.id, name: t.name, logo_url: t.logo_url };
-    seasonRatings[t.id] = t.season_rating != null ? Number(t.season_rating) : null;
+    seasonRatings[t.id] = !statsOn && t.season_rating != null ? Number(t.season_rating) : null;
   }
 
   // Group player ratings by team (fallback when season_rating not yet set)
@@ -416,7 +420,7 @@ export default async function WagersPage() {
     subInIds.length
       ? supabaseAdmin
           .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
           .in("id", subInIds)
       : Promise.resolve({
           data: [] as { id: string; username: string; display_name: string | null; peak_2v2: string | null; current_2v2: string | null; peak_3v3: string | null; current_3v3: string | null; peak_1v1: string | null; current_1v1: string | null }[],

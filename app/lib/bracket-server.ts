@@ -615,7 +615,7 @@ export async function buildAndSaveSwissFromSEQualifier(): Promise<{ error?: stri
   const qualifiedIds = qualified.map(t => t.id);
   const { data: rvPlayers } = await supabaseAdmin
     .from("players")
-    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
     .in("team_id", qualifiedIds);
   const rvByTeam = computeTeamRatings(qualifiedIds, rvPlayers ?? []);
   const seeded = [...qualified].sort((a, b) => (rvByTeam[b.id] ?? 0) - (rvByTeam[a.id] ?? 0));
@@ -678,7 +678,7 @@ export async function buildAndSaveSwissFromDEQualifier(): Promise<{ error?: stri
   const allIds = [...wbSurvivors, ...lbSurvivors].map(t => t.id);
   const { data: rvPlayers } = await supabaseAdmin
     .from("players")
-    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
     .in("team_id", allIds);
   const rvByTeam = computeTeamRatings(allIds, rvPlayers ?? []);
   const seeded = [
@@ -914,7 +914,7 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
   // Only include teams that have at least one player assigned — this prevents
   // empty slot rows (configured for future seasons) from being seeded into the bracket.
   const { data: players } = await supabaseAdmin
-    .from("players").select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").not("team_id", "is", null);
+    .from("players").select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1").not("team_id", "is", null);
 
   const activeTeamIds = [...new Set((players ?? []).map((p) => p.team_id as string).filter(Boolean))];
   if (!activeTeamIds.length) return { error: "No teams found." };

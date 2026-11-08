@@ -27,7 +27,7 @@ export default async function TeamsPage({
       .select("id, name, logo_url, logo_offset_x, logo_offset_y, is_locked, is_disqualified, disqualified_at"),
     supabaseAdmin
       .from("players")
-      .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, tracker_url, is_captain, team_id")
+      .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1, tracker_url, is_captain, team_id")
       .eq("status", "approved")
       .not("team_id", "is", null),
     supabaseAdmin.from("league_settings").select("active_tournament_id, season_active, team_size, draft_open, draft_active").single(),
@@ -51,7 +51,7 @@ export default async function TeamsPage({
   // bench swap pool, regardless of whether they entered the active tournament/draft.
   // inEvent splits them: swapping in someone who never signed up is allowed, but the
   // admin has to be able to see which is which among two dozen names.
-  type AvailablePlayer = { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; peak_1v1: string | null; current_1v1: string | null; team_id: string | null; draft_entered?: boolean | null; sub_willing?: boolean | null; inEvent?: boolean };
+  type AvailablePlayer = { id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; rv_adjustment?: number | null; peak_1v1: string | null; current_1v1: string | null; team_id: string | null; draft_entered?: boolean | null; sub_willing?: boolean | null; inEvent?: boolean };
 
   const [{ data: tourney }, { data: entries }, { data: participants }] = await Promise.all([
     activeTournamentId
@@ -63,7 +63,7 @@ export default async function TeamsPage({
     userIsAdmin
       ? supabaseAdmin
           .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, team_id, draft_entered, sub_willing")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1, team_id, draft_entered, sub_willing")
           .eq("status", "approved")
           .is("team_id", null)
       : Promise.resolve({ data: [] as AvailablePlayer[] }),
@@ -159,7 +159,7 @@ export default async function TeamsPage({
             teams={teams}
             byTeam={byTeam as Record<string, {
               id: string; username: string; display_name: string | null; discord_id: string | null; avatar: string | null;
-              peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+              peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; rv_adjustment?: number | null;
               peak_1v1: string | null; current_1v1: string | null; tracker_url: string;
               is_captain: boolean | null; team_id: string | null;
             }[]>}
@@ -178,7 +178,7 @@ export default async function TeamsPage({
             teams={teams}
             byTeam={byTeam as Record<string, {
               id: string; username: string; display_name: string | null; discord_id: string | null; avatar: string | null;
-              peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+              peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; rv_adjustment?: number | null;
               peak_1v1: string | null; current_1v1: string | null; tracker_url: string;
               is_captain: boolean | null; team_id: string | null;
             }[]>}

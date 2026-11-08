@@ -2,6 +2,7 @@ import { supabaseAdmin } from "./supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 import { computeMatchPredictionFromRating } from "@/app/dashboard/wagers/prediction";
 import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
+import { isStatsTrackingEnabled } from "./career-stats";
 
 // Freezes the win% shown in the wagers "all matches" grid the moment both teams
 // are known for a match, and locks in the match's betting mode the moment its
@@ -73,14 +74,16 @@ export async function freezeUnfrozenMatchPredictions(): Promise<void> {
     supabaseAdmin.from("teams").select("id, season_rating").in("id", teamIds),
     supabaseAdmin
       .from("players")
-      .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+      .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
       .in("team_id", teamIds)
       .eq("status", "approved"),
   ]);
 
+  // See the wagers page: stats-tracked RVs replace the drifting team rating.
+  const statsOn = await isStatsTrackingEnabled();
   const seasonRatings: Record<string, number | null> = {};
   for (const t of teamsData ?? []) {
-    seasonRatings[t.id] = t.season_rating != null ? Number(t.season_rating) : null;
+    seasonRatings[t.id] = !statsOn && t.season_rating != null ? Number(t.season_rating) : null;
   }
 
   const ratingsByTeam: Record<string, number[]> = {};

@@ -28,7 +28,7 @@ export type CombinedPlayer = {
   status: "approved" | "banned";
   tracker_url: string;
   peak_3v3: string;
-  current_3v3: string;
+  current_3v3: string; rv_adjustment?: number | null;
   peak_2v2: string;
   current_2v2: string;
   banReason: string | null;
@@ -206,6 +206,7 @@ function PlayerRow({
   const rv = playerRatingFromRow({
     peak_2v2: peak2v2, current_2v2: curr2v2,
     peak_3v3: peak3v3, current_3v3: curr3v3,
+    rv_adjustment: player.rv_adjustment,
   });
   const canModerate = canActOn(actorRole, player.staffRole);
 

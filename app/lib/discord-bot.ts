@@ -4,7 +4,8 @@ import { getTierPrices, getTierRoleIds, numberedPaidTiers } from "./patreon-enti
 import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfaEnabled, type StaffRole } from "./players";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
-import { isActiveTournamentTest, isTestTournament } from "./test-tournament";
+import { isActiveTournamentTest, isTestTournament, isTestEventActive } from "./test-tournament";
+import { applySeriesResult, fantasyPoints, projectedFantasyPoints, type StatTotals } from "./rv-adjustment";
 import { ptDate, ptWallToUtc } from "./pt-time";
 import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, ensureRolesWithList, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView, type DiscordEmbed } from "./discord-api";
 import {
@@ -894,7 +895,7 @@ export async function deleteMatchChannels(): Promise<number> {
 
 type RatingFields = {
   peak_2v2: string; current_2v2: string;
-  peak_3v3: string; current_3v3: string;
+  peak_3v3: string; current_3v3: string; rv_adjustment?: number | null;
   peak_1v1: string | null; current_1v1: string | null;
 };
 
@@ -907,7 +908,7 @@ function playerRating(p: RatingFields): number {
 async function initTeamSeasonRating(teamId: string): Promise<number> {
   const { data: players } = await supabaseAdmin
     .from("players")
-    .select("peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+    .select("peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
     .eq("team_id", teamId)
     .eq("status", "approved");
   const ratings = (players ?? []).map((p) => playerRating(p as RatingFields));
@@ -931,7 +932,7 @@ export async function applyPlayerRVChangeToTeamRating(
 
   const { data: roster } = await supabaseAdmin
     .from("players")
-    .select("id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+    .select("id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
     .eq("team_id", teamId)
     .eq("status", "approved");
 
@@ -1123,7 +1124,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   const enteredAll = await fetchAllRows((from, to) =>
     supabaseAdmin
       .from("players")
-      .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at")
+      .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1, draft_entered_at")
       .eq("status", "approved")
       .eq("draft_entered", true)
       .order("draft_entered_at", { ascending: true, nullsFirst: false })
@@ -1307,7 +1308,7 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
   const enteredAll = await fetchAllRows((from, to) =>
     supabaseAdmin
       .from("players")
-      .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, draft_entered_at")
+      .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1, draft_entered_at")
       .eq("status", "approved")
       .eq("draft_entered", true)
       .order("draft_entered_at", { ascending: true, nullsFirst: false })
@@ -1786,7 +1787,7 @@ export async function execAutoPick(): Promise<{ done: boolean }> {
   }
 
   const { data: available, error: avErr } = await supabaseAdmin.from("players")
-    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+    .select("id, username, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
     .eq("status", "approved").eq("in_active_draft", true).is("team_id", null);
   if (avErr) { console.error("[execAutoPick] available players query failed:", avErr.message); return { done: true }; }
 
@@ -2253,7 +2254,7 @@ async function totalUsers() {
 async function playerInfo(username: string) {
   const { data } = await supabaseAdmin
     .from("players")
-    .select("username, status, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1, tracker_url, team_id")
+    .select("username, status, peak_3v3, current_3v3, rv_adjustment, peak_2v2, current_2v2, peak_1v1, current_1v1, tracker_url, team_id")
     .ilike("username", username).single();
 
   if (!data) return reply(`❌ No player found: "${username}"`);
@@ -2914,7 +2915,7 @@ async function pickPlayer(userId: string, playerUsername: string) {
   if (!currentTeam) return reply(`❌ Team lookup failed for position ${currentTeamNum}.`);
 
   const { data: target } = await supabaseAdmin.from("players")
-    .select("id, username, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("id, username, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment")
     .ilike("username", playerUsername).eq("status", "approved").eq("in_active_draft", true).is("team_id", null).single();
   if (!target) return reply(`❌ "${playerUsername}" is not in the draft pool.`);
 
@@ -5193,6 +5194,107 @@ async function advanceBracketWinner(
   await maybeCreateChannelForMatch(stage, nr, nm);
 }
 
+/**
+ * Moves each player's rv_adjustment by how their fantasy points in this match
+ * compared with what their RV projected. Reads the match's player_game_stats, so
+ * it must run after those rows are final — the admin reporter writes them after
+ * execReportMatchResult and therefore calls this itself. player_rv_updates is
+ * the dedupe: a player already ledgered for the match is never moved twice.
+ */
+export async function applyStatsRvUpdate(matchId: string): Promise<void> {
+  if (!(await isStatsTrackingEnabled()) || (await isTestEventActive())) return;
+
+  const { data: statRows } = await supabaseAdmin
+    .from("player_game_stats")
+    .select("player_id, game_number, score, goals, assists, saves, shots")
+    .eq("match_id", matchId)
+    .not("player_id", "is", null);
+  if (!statRows?.length) return;
+
+  const thisMatch = new Map<string, StatTotals & { gameNumbers: Set<number> }>();
+  for (const r of statRows) {
+    let t = thisMatch.get(r.player_id);
+    if (!t) thisMatch.set(r.player_id, (t = { games: 0, score: 0, goals: 0, assists: 0, saves: 0, shots: 0, gameNumbers: new Set() }));
+    t.gameNumbers.add(r.game_number);
+    t.score += r.score ?? 0;
+    t.goals += r.goals ?? 0;
+    t.assists += r.assists ?? 0;
+    t.saves += r.saves ?? 0;
+    t.shots += r.shots ?? 0;
+  }
+  for (const t of thisMatch.values()) t.games = t.gameNumbers.size;
+
+  const ids = [...thisMatch.keys()];
+  const [{ data: players }, allTime] = await Promise.all([
+    supabaseAdmin
+      .from("players")
+      .select("id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, rv_series_played")
+      .in("id", ids),
+    fetchAllTimeTotals(),
+  ]);
+
+  const updates = [];
+  for (const p of players ?? []) {
+    const match = thisMatch.get(p.id)!;
+    // fetchAllTimeTotals already holds this match's rows; the projection has to
+    // be what the player was expected to do before playing it.
+    const total = allTime.get(p.id);
+    const history: StatTotals | null = total
+      ? {
+          games: Math.max(0, total.games - match.games),
+          score: total.score - match.score,
+          goals: total.goals - match.goals,
+          assists: total.assists - match.assists,
+          saves: total.saves - match.saves,
+          shots: total.shots - match.shots,
+        }
+      : null;
+    const predicted = projectedFantasyPoints(playerRatingFromRow(p), history?.games ? history : null);
+    const actual = fantasyPoints({
+      score: match.score / match.games,
+      goals: match.goals / match.games,
+      assists: match.assists / match.games,
+      saves: match.saves / match.games,
+      shots: match.shots / match.games,
+    });
+    const before = Number(p.rv_adjustment ?? 0);
+    const next = applySeriesResult(
+      { adjustment: before, seriesPlayed: Number(p.rv_series_played ?? 0) },
+      predicted, actual, match.games,
+    );
+    updates.push({
+      ledger: {
+        match_id: matchId, player_id: p.id, games: match.games,
+        predicted_fp: predicted, actual_fp: actual, delta: next.delta,
+        adjustment_before: before, adjustment_after: next.adjustment,
+      },
+      adjustment: next.adjustment,
+      seriesPlayed: next.seriesPlayed,
+    });
+  }
+  if (!updates.length) return;
+
+  const { data: inserted, error } = await supabaseAdmin
+    .from("player_rv_updates")
+    .upsert(updates.map((u) => u.ledger), { onConflict: "match_id,player_id", ignoreDuplicates: true })
+    .select("player_id");
+  if (error) {
+    console.error(`[match ${matchId}] player_rv_updates insert failed: ${error.message}`);
+    return;
+  }
+  const claimed = new Set((inserted ?? []).map((r) => r.player_id as string));
+  await Promise.all(
+    updates
+      .filter((u) => claimed.has(u.ledger.player_id))
+      .map((u) =>
+        supabaseAdmin
+          .from("players")
+          .update({ rv_adjustment: u.adjustment, rv_series_played: u.seriesPlayed })
+          .eq("id", u.ledger.player_id),
+      ),
+  );
+}
+
 export async function execReportMatchResult(
   matchId: string,
   homeScore: number,
@@ -5204,6 +5306,9 @@ export async function execReportMatchResult(
   // result post below doesn't fetch them per match. openReadyMatchChannels' own list
   // still wins when it has one, being the fresher of the two.
   prefetchedRoles?: GuildRole[] | null,
+  // The admin reporter replaces player_game_stats after this returns, so it runs
+  // applyStatsRvUpdate itself once the rows it keeps are in place.
+  deferStatsRvUpdate = false,
 ): Promise<{ ok: boolean; message: string }> {
   const { data: match } = await supabaseAdmin
     .from("matches")
@@ -5288,6 +5393,10 @@ export async function execReportMatchResult(
         homeScore, awayScore,
         bestOf,
       ).catch(() => {});
+      if (!deferStatsRvUpdate) {
+        await applyStatsRvUpdate(matchId).catch((e) =>
+          console.error(`[match ${matchId}] stats RV update failed: ${e instanceof Error ? e.message : e}`));
+      }
     }
 
     if (match.stage) {

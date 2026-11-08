@@ -9,6 +9,7 @@ import { pushToAdmins } from "@/app/lib/push";
 import { isCurrentlyKicked } from "@/app/lib/players";
 import { applyPlayerRVChangeToTeamRating } from "@/app/lib/discord-bot";
 import { hasMmrOnFile } from "@/app/lib/mmr-on-file";
+import { adjustmentAfterMmrEdit } from "@/app/lib/rv-adjustment";
 
 function validateMmr(label: string, val: string): string | null {
   const n = Number(val);
@@ -26,7 +27,7 @@ type MmrInput = {
 };
 
 const MMR_PLAYER_COLUMNS =
-  "id, team_id, peak_3v3, current_3v3, peak_2v2, current_2v2, peak_1v1, current_1v1";
+  "id, team_id, peak_3v3, current_3v3, rv_adjustment, peak_2v2, current_2v2, peak_1v1, current_1v1";
 
 /** Typed to match RatingFields, which is what applyPlayerRVChangeToTeamRating takes. */
 type MmrPlayerRow = {
@@ -35,6 +36,7 @@ type MmrPlayerRow = {
   peak_3v3: string; current_3v3: string;
   peak_2v2: string; current_2v2: string;
   peak_1v1: string | null; current_1v1: string | null;
+  rv_adjustment: number | null;
 };
 
 function validateMmrInput(v: MmrInput): string | null {
@@ -88,14 +90,17 @@ async function applyMmrChange(
     })
     .eq("account_id", player.id);
 
+  const rvAdjustment = adjustmentAfterMmrEdit(player, next);
+
   const { error } = await supabaseAdmin
     .from("players")
     .update({
-      peak_3v3:    next.peak_3v3,
-      current_3v3: next.current_3v3,
-      peak_2v2:    next.peak_2v2,
-      current_2v2: next.current_2v2,
-      updated_at:  now,
+      peak_3v3:      next.peak_3v3,
+      current_3v3:   next.current_3v3,
+      peak_2v2:      next.peak_2v2,
+      current_2v2:   next.current_2v2,
+      rv_adjustment: rvAdjustment,
+      updated_at:    now,
     })
     .eq("id", player.id);
 
@@ -105,22 +110,8 @@ async function applyMmrChange(
     await applyPlayerRVChangeToTeamRating(
       player.id,
       player.team_id,
-      {
-        peak_2v2:    player.peak_2v2,
-        current_2v2: player.current_2v2,
-        peak_3v3:    player.peak_3v3,
-        current_3v3: player.current_3v3,
-        peak_1v1:    player.peak_1v1,
-        current_1v1: player.current_1v1,
-      },
-      {
-        peak_2v2:    next.peak_2v2,
-        current_2v2: next.current_2v2,
-        peak_3v3:    next.peak_3v3,
-        current_3v3: next.current_3v3,
-        peak_1v1:    player.peak_1v1,
-        current_1v1: player.current_1v1,
-      },
+      player,
+      { ...player, ...next, rv_adjustment: rvAdjustment },
     ).catch(() => {});
   }
 
@@ -200,7 +191,7 @@ export async function getOwnMmrForJoin(): Promise<{
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2")
+    .select("tracker_url, peak_3v3, current_3v3, rv_adjustment, peak_2v2, current_2v2")
     .eq("discord_id", session.userId)
     .single<{
       tracker_url: string | null;

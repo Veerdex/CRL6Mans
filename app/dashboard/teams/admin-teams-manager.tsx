@@ -44,12 +44,12 @@ type Team = {
 };
 type Player = {
   id: string; username: string; display_name: string | null; discord_id: string | null; avatar: string | null;
-  peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+  peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; rv_adjustment?: number | null;
   peak_1v1: string | null; current_1v1: string | null; tracker_url: string;
   is_captain: boolean | null; team_id: string | null;
 };
 type AvailablePlayer = {
-  id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+  id: string; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; rv_adjustment?: number | null;
   peak_1v1: string | null; current_1v1: string | null;
   team_id: string | null;
   sub_willing?: boolean | null;

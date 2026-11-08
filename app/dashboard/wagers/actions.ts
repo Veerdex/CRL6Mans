@@ -9,6 +9,7 @@ import { creditCoins, debitCoins } from "@/app/lib/coins";
 import { hidesActiveTestTournament } from "@/app/lib/test-tournament";
 import { getBestOfForMatch } from "@/app/lib/discord-bot";
 import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
+import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import {
   computeMatchPredictionFromRating,
   payoutMultiplier,
@@ -64,13 +65,15 @@ async function computeServerOdds(
   const away = teams?.find((t) => t.id === awayTeamId);
   if (!home || !away) return null;
 
-  let homeRating = home.season_rating != null ? Number(home.season_rating) : null;
-  let awayRating = away.season_rating != null ? Number(away.season_rating) : null;
+  // See the wagers page: stats-tracked RVs replace the drifting team rating.
+  const statsOn = await isStatsTrackingEnabled();
+  let homeRating = !statsOn && home.season_rating != null ? Number(home.season_rating) : null;
+  let awayRating = !statsOn && away.season_rating != null ? Number(away.season_rating) : null;
 
   if (homeRating == null || awayRating == null) {
     const { data: players } = await supabaseAdmin
       .from("players")
-      .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+      .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
       .in("team_id", [homeTeamId, awayTeamId])
       .eq("status", "approved");
 

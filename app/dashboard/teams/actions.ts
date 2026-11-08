@@ -227,7 +227,7 @@ export async function updateTeamInfo(formData: FormData) {
 async function assignCaptainIfMissing(teamId: string): Promise<void> {
   const { data: members } = await supabaseAdmin
     .from("players")
-    .select("id, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, is_captain")
+    .select("id, discord_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1, is_captain")
     .eq("team_id", teamId);
 
   // A roster below full size isn't a team yet, so it has no captain.
@@ -249,12 +249,12 @@ type PlayerRow = {
   peak_2v2: string;
   current_2v2: string;
   peak_3v3: string;
-  current_3v3: string;
+  current_3v3: string; rv_adjustment?: number | null;
   peak_1v1: string | null;
   current_1v1: string | null;
 };
 
-const PLAYER_RV_SELECT = "id, discord_id, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1";
+const PLAYER_RV_SELECT = "id, discord_id, team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1";
 
 export async function swapPlayersBetweenTeams(playerAId: string, playerBId: string) {
   const session = await getSession();
@@ -273,7 +273,7 @@ export async function swapPlayersBetweenTeams(playerAId: string, playerBId: stri
   const teamAId = a.team_id as string;
   const teamBId = b.team_id as string;
   const rvFields = (p: PlayerRow) => ({
-    peak_2v2: p.peak_2v2, current_2v2: p.current_2v2, peak_3v3: p.peak_3v3, current_3v3: p.current_3v3,
+    peak_2v2: p.peak_2v2, current_2v2: p.current_2v2, peak_3v3: p.peak_3v3, current_3v3: p.current_3v3, rv_adjustment: p.rv_adjustment,
     peak_1v1: p.peak_1v1, current_1v1: p.current_1v1,
   });
 
@@ -336,7 +336,7 @@ export async function swapRosterPlayerWithBenchPlayer(rosterPlayerId: string, be
   const roster = rosterPlayer as PlayerRow;
   const bench = benchPlayer as PlayerRow;
   const rvFields = (p: PlayerRow) => ({
-    peak_2v2: p.peak_2v2, current_2v2: p.current_2v2, peak_3v3: p.peak_3v3, current_3v3: p.current_3v3,
+    peak_2v2: p.peak_2v2, current_2v2: p.current_2v2, peak_3v3: p.peak_3v3, current_3v3: p.current_3v3, rv_adjustment: p.rv_adjustment,
     peak_1v1: p.peak_1v1, current_1v1: p.current_1v1,
   });
 

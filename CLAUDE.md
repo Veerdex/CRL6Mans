@@ -219,6 +219,11 @@ RV is a player's rating under the `crl-final-rating-v1` model. **`app/lib/rating
 
 Every call site should go through `playerRatingFromRow()`, `initialTeamRating()` (roster → team rating), and `resolveTeamRating()` (stored `season_rating` if present, else `initialTeamRating`) — never a hand-rolled field mapping or fallback. 1v1 MMR is **not** part of the model; only 2v2/3v3 peak and season MMR feed it. 1v1 fields still exist in the schema and the admin player editors (for legacy stored values) but are no longer collected and are ignored by the math.
 
+### Stats-driven adjustment
+A player's RV is `mmrRatingFromRow` **plus `players.rv_adjustment`** (Tier 3 only), and `playerRatingFromRow` already includes it, so every select feeding it must carry `rv_adjustment`. After each stats-tracked, non-forfeit series `applyStatsRvUpdate(matchId)` moves the offset by how the player's fantasy points compared with their projection; the formula and constants live in `app/lib/rv-adjustment.ts` (pure leaf). `player_rv_updates` (PK `match_id, player_id`) is both the audit trail and the dedupe. It reads the match's `player_game_stats`, so it runs from `execReportMatchResult` except on the admin reporter, which replaces those rows afterwards and calls it itself. Test events are skipped.
+- **Every MMR writer goes through `adjustmentAfterMmrEdit`**: a ranked change in the offset's direction uses the offset up, the other direction leaves it alone.
+- With stats tracking on, predictions (wagers page/actions, `match-predictions.ts`) ignore `teams.season_rating` and use `initialTeamRating` of roster RVs.
+
 `teams.season_rating` is the live rating that moves with match results; `teams.initial_rating` is the fixed anchor a team started at, used by `applyFormRetention()` to pull `season_rating` back toward it before each match's update. Both are lazy-initialised together on a team's first rated match. `applySeasonRatingUpdate` in `discord-bot.ts` is the only place either is written from a match result — `applyPlayerRVChangeToTeamRating` (roster/MMR edits) shifts both by the same delta so an edit isn't mistaken for match-driven form.
 
 ---

@@ -116,7 +116,7 @@ export async function loadPlayerProfile(
     isCaptain: tierThree?.is_captain ?? false,
     sixMans,
     ranks,
-    rankValue: rankValueOf(ranks),
+    rankValue: rankValueOf(ranks, tierThree?.rv_adjustment ?? 0),
     events,
     careerPoints: careerPoints(
       sixMans.points,
@@ -163,7 +163,7 @@ async function resolveAccount(
 async function fetchTierThree(accountId: string) {
   const { data, error } = await supabaseAdmin
     .from("players")
-    .select("team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("team_id, is_captain, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment")
     .eq("id", accountId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -175,6 +175,7 @@ async function fetchTierThree(accountId: string) {
         current_2v2: string | null;
         peak_3v3: string | null;
         current_3v3: string | null;
+        rv_adjustment: number | null;
       }
     | null;
 }
@@ -315,7 +316,7 @@ function displayMmr(raw: number | null): number | null {
  * set: playerRatingFromRow reads a missing column as 0, which would show an
  * unregistered player a confident rating rather than nothing to rate.
  */
-function rankValueOf(ranks: RankStats): number | null {
+function rankValueOf(ranks: RankStats, rvAdjustment: number): number | null {
   const registered = [
     ranks.allTimePeak2v2,
     ranks.seasonPeak2v2,
@@ -328,6 +329,7 @@ function rankValueOf(ranks: RankStats): number | null {
     current_2v2: ranks.seasonPeak2v2,
     peak_3v3: ranks.allTimePeak3v3,
     current_3v3: ranks.seasonPeak3v3,
+    rv_adjustment: rvAdjustment,
   });
 }
 

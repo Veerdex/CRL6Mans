@@ -91,7 +91,7 @@ export async function submitSubRequestCore(args: {
 
   const { data: playerOut } = await supabaseAdmin
     .from("players")
-    .select("id, username, team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+    .select("id, username, team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
     .eq("id", playerOutId)
     .single();
 
@@ -134,7 +134,7 @@ export async function submitSubRequestCore(args: {
   // Validate the single sub candidate.
   const { data: sub } = await supabaseAdmin
     .from("players")
-    .select("id, username, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, team_id, status, sub_willing, draft_entered")
+    .select("id, username, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1, team_id, status, sub_willing, draft_entered")
     .eq("id", subPlayerId)
     .single();
 

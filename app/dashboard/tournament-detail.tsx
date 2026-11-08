@@ -618,13 +618,13 @@ async function PlayersRegistration({
 
 type RawEntryRow = {
   player_id: string;
-  players: { id: string; discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string } | null;
+  players: { id: string; discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; rv_adjustment?: number | null } | null;
 };
 
 async function PlayersDraftPool({ tournamentId }: { tournamentId: string }) {
   const { data: entryRows } = await supabaseAdmin
     .from("tournament_entries")
-    .select("player_id, players(id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3)")
+    .select("player_id, players(id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment)")
     .eq("tournament_id", tournamentId);
   const ratedPlayers = ((entryRows ?? []) as unknown as RawEntryRow[])
     .filter((e) => e.players)
@@ -716,14 +716,14 @@ type RawSignupRowWithPlayers = {
   team_signup_members: {
     player_id: string;
     status: "invited" | "accepted";
-    players: { discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string } | null;
+    players: { discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; rv_adjustment?: number | null } | null;
   }[];
 };
 
 async function TeamsDraftPool({ tournamentId }: { tournamentId: string }) {
   const { data: signupsRaw } = await supabaseAdmin
     .from("team_signups")
-    .select("id, name, team_signup_members(player_id, status, players(discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3))")
+    .select("id, name, team_signup_members(player_id, status, players(discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment))")
     .eq("tournament_id", tournamentId);
   const signups = (signupsRaw ?? []) as unknown as RawSignupRowWithPlayers[];
 

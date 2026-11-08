@@ -24,7 +24,7 @@ type Player = {
   peak_2v2: string;
   current_2v2: string;
   peak_3v3: string;
-  current_3v3: string;
+  current_3v3: string; rv_adjustment?: number | null;
   peak_1v1: string | null;
   current_1v1: string | null;
   tracker_url: string;

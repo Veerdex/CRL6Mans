@@ -30,7 +30,7 @@ export async function HybridBracketView({ variant = "12" }: { variant?: "12" | "
   if (teamIds.length) {
     const [{ data: teamsData }, { data: playersData }] = await Promise.all([
       supabaseAdmin.from("teams").select("id, name, logo_url").in("id", teamIds),
-      supabaseAdmin.from("players").select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1").in("team_id", teamIds),
+      supabaseAdmin.from("players").select("team_id, display_name, username, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1").in("team_id", teamIds),
     ]);
     (teamsData ?? []).forEach(t => { teams[t.id] = { name: t.name, logo_url: (t as { logo_url?: string | null }).logo_url ?? null }; });
     teamTitles = buildTeamTitles(playersData ?? []);

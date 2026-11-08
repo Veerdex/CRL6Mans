@@ -206,7 +206,7 @@ export default async function AdminPage() {
   const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors, publicDesigns] = await Promise.all([
     getAllPendingPlayers(),
     supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, team_size, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, accolade_prize_mvp, accolade_prize_offensive, accolade_prize_defensive, accolade_prize_rookie, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, season_design_id, replay_analysis_mode, stats_enabled, join_gate_enabled").maybeSingle(),
-    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
+    supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
     supabaseAdmin.from("teams").select("id, name, discord_role_id, slot_number").order("slot_number", { nullsFirst: false }).order("name"),
     supabaseAdmin.from("matches").select("id, home_team_id, away_team_id, stage, round, match_number, scheduled_at, schedule_accepted, schedule_admin_required, schedule_proposed_by_team_id, pending_home_score, pending_away_score, score_confirmed").eq("status", "scheduled").not("home_team_id", "is", null).not("away_team_id", "is", null).order("stage").order("round").order("match_number"),
     supabaseAdmin.from("sub_requests").select("id, team_id, player_out_id, sub_player_id, sub_player_ids, reason, admin_note, requested_by_discord_id, created_at").eq("status", "escalated").order("created_at", { ascending: true }),
@@ -215,7 +215,7 @@ export default async function AdminPage() {
     supabaseAdmin.from("seasons").select("*").order("ended_at", { ascending: false }),
     supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar, status, ban_reason, kick_reason, kicked_until, created_at, is_guest").order("username"),
     supabaseAdmin.from("matches").select("stage, round, discord_channel_id, home_checked_in, away_checked_in, status"),
-    supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, peak_2v2, current_2v2"),
+    supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, rv_adjustment, peak_2v2, current_2v2"),
     getPublicSponsors(),
     getPublicDesigns(),
   ]);
@@ -239,7 +239,7 @@ export default async function AdminPage() {
   const firstWeekStart = new Date(currentWeekStart);
   firstWeekStart.setDate(currentWeekStart.getDate() - 7 * 51);
 
-  type RawPlayerRow = { account_id: string; team_id: string | null; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; peak_2v2: string | null; current_2v2: string | null };
+  type RawPlayerRow = { account_id: string; team_id: string | null; tracker_url: string | null; peak_3v3: string | null; current_3v3: string | null; rv_adjustment?: number | null; peak_2v2: string | null; current_2v2: string | null };
   const playersByAccountId = new Map(((playerRows ?? []) as RawPlayerRow[]).map(p => [p.account_id, p]));
 
   // Who someone *is* belongs to Tier 1. The copies on `players` are a legacy
@@ -779,7 +779,7 @@ export default async function AdminPage() {
 
   type RawEditRequest = {
     id: string; player_id: string; username: string;
-    tracker_url: string; peak_3v3: string; current_3v3: string; peak_2v2: string; current_2v2: string;
+    tracker_url: string; peak_3v3: string; current_3v3: string; rv_adjustment?: number | null; peak_2v2: string; current_2v2: string;
    
     created_at: string;
   };
@@ -794,8 +794,8 @@ export default async function AdminPage() {
     { data: editPlayers },
   ] = await Promise.all([
     subTeamIds.length      ? supabaseAdmin.from("teams").select("id, name").in("id", subTeamIds) : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-    subOutIds.length       ? supabaseAdmin.from("players").select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3").in("id", subOutIds) : Promise.resolve({ data: [] as { id: string; discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] }),
-    subInIds.length        ? supabaseAdmin.from("players").select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3").in("id", subInIds) : Promise.resolve({ data: [] as { id: string; discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] }),
+    subOutIds.length       ? supabaseAdmin.from("players").select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment").in("id", subOutIds) : Promise.resolve({ data: [] as { id: string; discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] }),
+    subInIds.length        ? supabaseAdmin.from("players").select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment").in("id", subInIds) : Promise.resolve({ data: [] as { id: string; discord_id: string | null; username: string; display_name: string | null; peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string }[] }),
     subRequesterIds.length ? supabaseAdmin.from("players").select("discord_id, username, display_name").in("discord_id", subRequesterIds) : Promise.resolve({ data: [] as { discord_id: string; username: string; display_name: string | null }[] }),
     editPlayerIds.length   ? supabaseAdmin.from("players").select("id, tracker_url").in("id", editPlayerIds) : Promise.resolve({ data: [] as { id: string; tracker_url: string | null }[] }),
   ]);
@@ -1045,6 +1045,7 @@ export default async function AdminPage() {
         tracker_url: pr.tracker_url ?? "",
         peak_3v3: pr.peak_3v3 ?? "0",
         current_3v3: pr.current_3v3 ?? "0",
+        rv_adjustment: pr.rv_adjustment ?? 0,
         peak_2v2: pr.peak_2v2 ?? "0",
         current_2v2: pr.current_2v2 ?? "0",
         banReason: a.ban_reason ?? null,

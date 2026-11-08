@@ -59,18 +59,28 @@ export function calculatePlayerRating(row: PlayerRatingInputs): number {
 // caller across the app should go through this instead of hand-mapping
 // peak_*/current_* columns into PlayerRatingInputs itself, so the rating
 // formula only has one place to change.
+//
+// rv_adjustment is the stats-driven offset from app/lib/rv-adjustment.ts. It
+// lives on Tier 3 `players` only, so a row selected without it — or from
+// `pending_players` — rates as MMR alone.
 export type PlayerRatingRow = {
   peak_2v2: string | number | null; current_2v2: string | number | null;
   peak_3v3: string | number | null; current_3v3: string | number | null;
+  rv_adjustment?: string | number | null;
 };
 
-export function playerRatingFromRow(p: PlayerRatingRow): number {
+/** The MMR-only rating, before the stats adjustment. */
+export function mmrRatingFromRow(p: PlayerRatingRow): number {
   return calculatePlayerRating({
     at_2v2: Number(p.peak_2v2 ?? 0),
     season_2v2: Number(p.current_2v2 ?? 0),
     at_3v3: Number(p.peak_3v3 ?? 0),
     season_3v3: Number(p.current_3v3 ?? 0),
   });
+}
+
+export function playerRatingFromRow(p: PlayerRatingRow): number {
+  return mmrRatingFromRow(p) + Number(p.rv_adjustment ?? 0);
 }
 
 // A CRL team is exactly three players. When a roster is short or long

@@ -48,7 +48,7 @@ import {
 
 type RosterPlayer = {
   id: string; username: string; display_name: string | null; discord_id: string; avatar: string | null;
-  peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+  peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; rv_adjustment?: number | null;
   peak_1v1: string | null; current_1v1: string | null;
   tracker_url: string; is_captain: boolean;
 };
@@ -194,7 +194,7 @@ function sortDescending(a: BracketMatch, b: BracketMatch) {
 
 type SubPlayerRow = {
   id: string; discord_id: string | null; username: string; display_name: string | null;
-  peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string;
+  peak_2v2: string; current_2v2: string; peak_3v3: string; current_3v3: string; rv_adjustment?: number | null;
   peak_1v1: string | null; current_1v1: string | null;
 };
 type ScheduleRow = { id: string; schedule_proposed_by_team_id: string | null; schedule_accepted: boolean; schedule_admin_required: boolean; admin_scheduled: boolean; home_checked_in: boolean; away_checked_in: boolean; checkin_deadline: string | null };
@@ -237,7 +237,7 @@ export default async function MyTeamPage() {
     supabaseAdmin.from("teams")
       .select("id, name, logo_url, logo_offset_x, logo_offset_y, is_locked").eq("id", teamId).single(),
     supabaseAdmin.from("players")
-      .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, tracker_url, is_captain")
+      .select("id, username, display_name, discord_id, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1, tracker_url, is_captain")
       .eq("team_id", teamId).eq("status", "approved"),
     supabaseAdmin.from("teams").select("id, name, logo_url, logo_offset_x, logo_offset_y"),
     supabaseAdmin.from("league_settings")
@@ -321,7 +321,7 @@ export default async function MyTeamPage() {
     allSubCandidateIds.length > 0
       ? supabaseAdmin
           .from("players")
-          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
           .in("id", allSubCandidateIds)
       : Promise.resolve({ data: [] as SubPlayerRow[] }),
     // Admin-set round schedules define the allowed scheduling window per round.
@@ -448,12 +448,12 @@ export default async function MyTeamPage() {
     mySubIds.length > 0
       ? supabaseAdmin
           .from("players")
-          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
           .in("id", mySubIds)
       : Promise.resolve({ data: [] as SubPlayerRow[] }),
     (seasonActive && nextMatch && oppId)
       ? supabaseAdmin
-          .from("players").select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .from("players").select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
           .eq("team_id", oppId).eq("status", "approved")
       : Promise.resolve({ data: [] as SubPlayerRow[] }),
     (seasonActive && nextMatch && oppId)
@@ -474,7 +474,7 @@ export default async function MyTeamPage() {
     subsAllowedForFormat
       ? supabaseAdmin
           .from("players")
-          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1, team_id, draft_entered")
+          .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1, team_id, draft_entered")
           .eq("status", "approved")
           .eq("sub_willing", true)
       : Promise.resolve({ data: [] as (SubPlayerRow & { team_id: string | null; draft_entered: boolean })[] }),
@@ -538,13 +538,13 @@ export default async function MyTeamPage() {
     oppSubIds.length > 0
       ? supabaseAdmin
           .from("players")
-          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
           .in("id", oppSubIds)
       : Promise.resolve({ data: [] as SubPlayerRow[] }),
     incomingIds.length > 0
       ? supabaseAdmin
           .from("players")
-          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1")
+          .select("id, discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
           .in("id", incomingIds)
       : Promise.resolve({ data: [] as SubPlayerRow[] }),
   ]);
@@ -757,12 +757,12 @@ export default async function MyTeamPage() {
       if (nextMatchOpponentId && p.team_id === nextMatchOpponentId) return false;
       return p.draft_entered || p.team_id !== null;
     })
-    .map(({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1 }) => ({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, peak_1v1, current_1v1 }));
+    .map(({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1 }) => ({ id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1 }));
 
   const subRoster: SubRosterPlayer[] = ((roster ?? []) as RosterPlayer[]).map((p) => ({
     id: p.id, username: p.username, display_name: p.display_name ?? null,
     peak_2v2: p.peak_2v2, current_2v2: p.current_2v2, peak_3v3: p.peak_3v3, current_3v3: p.current_3v3,
-    peak_1v1: p.peak_1v1, current_1v1: p.current_1v1,
+    rv_adjustment: p.rv_adjustment, peak_1v1: p.peak_1v1, current_1v1: p.current_1v1,
   }));
 
   // ── Recent results for carousel ──────────────────────────────────────────

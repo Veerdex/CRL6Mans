@@ -1,0 +1,81 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  absorbMmrChange,
+  adjustmentAfterMmrEdit,
+  applySeriesResult,
+  fantasyPoints,
+  projectedFantasyPoints,
+  FP_BASELINE_RV,
+  SERIES_PLAYED_CAP,
+} from "../app/lib/rv-adjustment";
+import { mmrRatingFromRow, playerRatingFromRow } from "../app/lib/rating";
+
+const close = (actual: number, expected: number, tol = 0.5) =>
+  assert.ok(Math.abs(actual - expected) <= tol, `${actual} not within ${tol} of ${expected}`);
+
+// The 2026-11-07 test series the constants were tuned on: M3L0DY, 74 seeded games.
+const M3L0DY_ROW = { peak_2v2: "1831", current_2v2: "1765", peak_3v3: "1835", current_3v3: "1651" };
+const M3L0DY_HISTORY = { games: 74, goals: 59, assists: 38, saves: 99, shots: 196, score: 27859 };
+const M3L0DY_SERIES = { score: 1819, goals: 6, assists: 4, saves: 6, shots: 8 };
+const perGame = (s: typeof M3L0DY_SERIES, games: number) => ({
+  score: s.score / games, goals: s.goals / games, assists: s.assists / games, saves: s.saves / games, shots: s.shots / games,
+});
+
+test("the projection line passes through the league mean at the baseline RV", () => {
+  close(projectedFantasyPoints(FP_BASELINE_RV, null), 0.9477, 0.0005);
+});
+
+test("M3L0DY's pre-series projection matches the one quoted to the user", () => {
+  close(projectedFantasyPoints(mmrRatingFromRow(M3L0DY_ROW), M3L0DY_HISTORY), 1.093, 0.001);
+  close(fantasyPoints(perGame(M3L0DY_SERIES, 3)), 2.070, 0.001);
+});
+
+test("a first series 0.977 FP over prediction across 3 games moves RV by about +100", () => {
+  const r = applySeriesResult({ adjustment: 0, seriesPlayed: 0 }, 1.093, 2.070, 3);
+  close(r.delta, 100.7);
+  assert.equal(r.seriesPlayed, 1);
+});
+
+test("an established player's series carries 1/7 weight and the counter stays capped", () => {
+  const r = applySeriesResult({ adjustment: 0, seriesPlayed: SERIES_PLAYED_CAP }, 1.093, 2.070, 3);
+  close(r.delta, 28.8);
+  assert.equal(r.seriesPlayed, SERIES_PLAYED_CAP);
+});
+
+test("a series the player sat out changes nothing", () => {
+  const r = applySeriesResult({ adjustment: 12, seriesPlayed: 2 }, 1, 2, 0);
+  assert.deepEqual(r, { adjustment: 12, seriesPlayed: 2, delta: 0 });
+});
+
+test("an MMR rise in the adjustment's direction uses it up first", () => {
+  assert.equal(absorbMmrChange(70, 1753, 1790), 33);
+  assert.equal(absorbMmrChange(70, 1753, 1850), 0);
+});
+
+test("an MMR move against the adjustment leaves it alone", () => {
+  assert.equal(absorbMmrChange(70, 1753, 1720), 70);
+  assert.equal(absorbMmrChange(-40, 1753, 1800), -40);
+});
+
+test("re-saving the same MMR cannot wipe a negative adjustment", () => {
+  assert.equal(absorbMmrChange(-40, 1753, 1753), -40);
+  assert.equal(absorbMmrChange(-40, 1753, 1700), 0);
+});
+
+test("the displayed rating is MMR rating plus the adjustment", () => {
+  const base = mmrRatingFromRow(M3L0DY_ROW);
+  close(playerRatingFromRow({ ...M3L0DY_ROW, rv_adjustment: 100 }), base + 100, 1e-9);
+  close(playerRatingFromRow({ ...M3L0DY_ROW, rv_adjustment: null }), base, 1e-9);
+  close(playerRatingFromRow(M3L0DY_ROW), base, 1e-9);
+});
+
+test("an MMR edit is measured on the MMR rating, not the adjusted one", () => {
+  const before = { ...M3L0DY_ROW, rv_adjustment: 100 };
+  const raised = { ...M3L0DY_ROW, peak_3v3: "1935", current_3v3: "1751" };
+  const rise = mmrRatingFromRow(raised) - mmrRatingFromRow(M3L0DY_ROW);
+  assert.ok(rise > 0 && rise < 100);
+  close(adjustmentAfterMmrEdit(before, raised), 100 - rise, 1e-9);
+  assert.equal(adjustmentAfterMmrEdit(before, M3L0DY_ROW), 100);
+});

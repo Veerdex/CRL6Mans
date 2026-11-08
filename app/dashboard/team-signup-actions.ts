@@ -136,7 +136,7 @@ async function heirToCaptaincy(signupId: string) {
 
   const { data: rows } = await supabaseAdmin
     .from("players")
-    .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3")
+    .select("id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment")
     .in(
       "id",
       members.map((m) => m.player_id)
