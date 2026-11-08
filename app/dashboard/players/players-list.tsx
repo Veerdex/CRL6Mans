@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import type { Player } from "@/app/lib/players";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { displayRatingFromRow } from "@/app/lib/rating";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { PlayerStatsModal, type StatAgg } from "./player-stats-modal";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
@@ -67,7 +67,7 @@ export default function PlayersList({
             ) : (
               filtered.map((player) => {
                 const rank = rankMap.get(player.id) ?? 0;
-                const rv = Math.round(playerRatingFromRow(player));
+                const rv = Math.round(displayRatingFromRow(player));
                 return (
                   <tr
                     key={player.id}

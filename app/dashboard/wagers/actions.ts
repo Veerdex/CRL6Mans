@@ -8,7 +8,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { creditCoins, debitCoins } from "@/app/lib/coins";
 import { hidesActiveTestTournament } from "@/app/lib/test-tournament";
 import { getBestOfForMatch } from "@/app/lib/discord-bot";
-import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
+import { decisionRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
 import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import {
   computeMatchPredictionFromRating,
@@ -78,7 +78,7 @@ async function computeServerOdds(
       .eq("status", "approved");
 
     const playerRatings = (teamId: string) =>
-      (players ?? []).filter((p) => p.team_id === teamId).map((p) => playerRatingFromRow(p));
+      (players ?? []).filter((p) => p.team_id === teamId).map((p) => decisionRatingFromRow(p));
 
     homeRating = resolveTeamRating(homeRating, playerRatings(homeTeamId));
     awayRating = resolveTeamRating(awayRating, playerRatings(awayTeamId));

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { displayRatingFromRow } from "@/app/lib/rating";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { DefaultLogo } from "@/app/lib/team-logo";
 
@@ -119,7 +119,7 @@ export function TeamsGrid({ teams, byTeam, teamRv, myTeamId, initialQuery = "" }
                     <p className="px-5 py-3 text-sm text-zinc-600 italic">No players yet.</p>
                   ) : (
                     roster.map((player) => {
-                      const peak = Math.round(playerRatingFromRow(player));
+                      const peak = Math.round(displayRatingFromRow(player));
                       return (
                         <a
                           key={player.id}

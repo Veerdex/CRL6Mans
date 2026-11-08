@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { decrypt } from "@/app/lib/session";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { type Player } from "@/app/lib/players";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { displayRatingFromRow } from "@/app/lib/rating";
 import { hidesActiveTestTournament } from "@/app/lib/test-tournament";
 import PlayersList from "./players-list";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
@@ -35,7 +35,7 @@ export default async function PlayersPage() {
       .not("player_id", "is", null),
   ]);
 
-  const ratingOf = (p: Player) => playerRatingFromRow(p);
+  const ratingOf = (p: Player) => displayRatingFromRow(p);
   const players = hidden ? [] : ((playersRaw ?? []) as Player[]).sort((a, b) => ratingOf(b) - ratingOf(a));
 
   const teamNames: Record<string, string> = {};

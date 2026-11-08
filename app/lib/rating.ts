@@ -79,9 +79,22 @@ export function mmrRatingFromRow(p: PlayerRatingRow): number {
   });
 }
 
-export function playerRatingFromRow(p: PlayerRatingRow): number {
+/** The MMR rating plus the stats adjustment. */
+export function calculatedRatingFromRow(p: PlayerRatingRow): number {
   return mmrRatingFromRow(p) + Number(p.rv_adjustment ?? 0);
 }
+
+// ── Which rating each role uses ───────────────────────────────────────────────
+// Every call site goes through one of these two, never through the functions
+// above, so pointing either at mmrRatingFromRow or calculatedRatingFromRow
+// changes that role everywhere at once.
+//
+// Display: every rating anyone is shown — site, bot embeds, archives — and the
+// order and team totals of any list that shows them.
+export const displayRatingFromRow = mmrRatingFromRow;
+// Decision: predictions and wager odds, seeding, draft order and autopick,
+// auto-balance, captains, sub limits, team rating updates.
+export const decisionRatingFromRow = calculatedRatingFromRow;
 
 // A CRL team is exactly three players. When a roster is short or long
 // (mid-draft, subs, historical data gaps) we degrade gracefully instead of

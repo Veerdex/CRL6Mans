@@ -1,7 +1,7 @@
 "use client";
 
 import type { Player } from "@/app/lib/players";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { displayRatingFromRow } from "@/app/lib/rating";
 import { mvpScore } from "@/app/lib/stats-math";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
@@ -39,7 +39,7 @@ export function PlayerStatsModal({
   stats?: StatAgg | null;
   onClose: () => void;
 }) {
-  const rv = Math.round(playerRatingFromRow(player));
+  const rv = Math.round(displayRatingFromRow(player));
 
   const mmr = [
     { label: "All Time Peak 2v2", value: Number(player.peak_2v2) },

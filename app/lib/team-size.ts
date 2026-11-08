@@ -5,7 +5,7 @@ export const DEFAULT_TEAM_SIZE = 3;
 // Seasons never author a team size, and neither did any tournament created
 // before the column existed, so anything missing or out of range is the classic
 // 3v3 league. Every call site goes through here rather than spelling `?? 3`
-// locally — the same discipline playerRatingFromRow enforces for ratings.
+// locally — the same discipline rating.ts's two rating switches enforce.
 export function normalizeTeamSize(value: unknown): number {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isInteger(n) && n >= 1 && n <= 3 ? n : DEFAULT_TEAM_SIZE;

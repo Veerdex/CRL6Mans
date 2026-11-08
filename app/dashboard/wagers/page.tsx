@@ -4,7 +4,7 @@ import { decrypt } from "@/app/lib/session";
 import { hidesActiveTestTournament } from "@/app/lib/test-tournament";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
-import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
+import { decisionRatingFromRow, displayRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
 import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { computeMatchPredictionFromRating, type MatchPrediction } from "./prediction";
@@ -33,7 +33,7 @@ function formatStageName(stage: string): string {
   return map[stage] ?? stage.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-const playerRatingOf = playerRatingFromRow;
+const playerRatingOf = decisionRatingFromRow;
 
 export default async function WagersPage() {
   const cookieStore = await cookies();
@@ -435,10 +435,10 @@ export default async function WagersPage() {
   // display string here would silently drop every supporter colour and badge.
   const playersById: Record<string, { username: string; displayName: string | null; rating: number }> = {};
   for (const p of rosterPlayers ?? []) {
-    playersById[p.id] = { username: p.username, displayName: p.display_name, rating: playerRatingOf(p) };
+    playersById[p.id] = { username: p.username, displayName: p.display_name, rating: displayRatingFromRow(p) };
   }
   for (const p of subInPlayersRaw ?? []) {
-    playersById[p.id] = { username: p.username, displayName: p.display_name, rating: playerRatingOf(p) };
+    playersById[p.id] = { username: p.username, displayName: p.display_name, rating: displayRatingFromRow(p) };
   }
 
   const matchRosters: Record<string, Record<string, { username: string; displayName: string | null; rating: number; isSub: boolean }[]>> = {};

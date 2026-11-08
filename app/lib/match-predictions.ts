@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "./supabase";
 import { resolveBestOf, type RoundBestOfConfig, type BestOf } from "@/app/dashboard/season/format-constants";
 import { computeMatchPredictionFromRating } from "@/app/dashboard/wagers/prediction";
-import { playerRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
+import { decisionRatingFromRow, resolveTeamRating } from "@/app/lib/rating";
 import { isStatsTrackingEnabled } from "./career-stats";
 
 // Freezes the win% shown in the wagers "all matches" grid the moment both teams
@@ -89,7 +89,7 @@ export async function freezeUnfrozenMatchPredictions(): Promise<void> {
   const ratingsByTeam: Record<string, number[]> = {};
   for (const p of rosterPlayers ?? []) {
     if (!p.team_id) continue;
-    (ratingsByTeam[p.team_id] ??= []).push(playerRatingFromRow(p));
+    (ratingsByTeam[p.team_id] ??= []).push(decisionRatingFromRow(p));
   }
 
   await Promise.all(

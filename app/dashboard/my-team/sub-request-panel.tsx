@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { submitSubRequest, cancelSubRequest, escalateSubRequest } from "@/app/dashboard/subs/actions";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { decisionRatingFromRow, displayRatingFromRow } from "@/app/lib/rating";
 
 export type SubRosterPlayer = {
   id: string;
@@ -53,7 +53,11 @@ interface Props {
   subsEnabled: boolean;
 }
 
-const peakMmr = playerRatingFromRow;
+// The limit is enforced on the calculated rating (sub-requests.ts does the
+// same), but only the shown one is printed — so the hint states the rule, not
+// a number the labels beside it couldn't explain.
+const peakMmr = decisionRatingFromRow;
+const shownRv = (p: Parameters<typeof displayRatingFromRow>[0]) => Math.round(displayRatingFromRow(p)).toLocaleString();
 
 const STATUS_META: Record<SubRequestRow["status"], { label: string; cls: string }> = {
   pending:   { label: "Awaiting opponent", cls: "text-yellow-400 bg-yellow-400/10" },
@@ -152,7 +156,7 @@ export function SubRequestPanel({ teamId, roster, availableSubs, existingRequest
               <option value="">Select player…</option>
               {roster.map(p => (
                 <option key={p.id} value={p.id}>
-                  {p.display_name ?? p.username} ({Math.round(peakMmr(p)).toLocaleString()} RV)
+                  {p.display_name ?? p.username} ({shownRv(p)} RV)
                 </option>
               ))}
             </select>
@@ -164,8 +168,8 @@ export function SubRequestPanel({ teamId, roster, availableSubs, existingRequest
               {selectedOut && (
                 <span className="ml-1 text-zinc-600 normal-case font-normal">
                   {outMmr < 1400
-                    ? `— max ${Math.round(mmrLimit).toLocaleString()} RV (${Math.round(outMmr).toLocaleString()} + 100)`
-                    : `— must be ≤ ${Math.round(mmrLimit).toLocaleString()} RV`}
+                    ? "— up to 100 RV above the replaced player"
+                    : "— rated no higher than the replaced player"}
                 </span>
               )}
             </label>
@@ -182,7 +186,7 @@ export function SubRequestPanel({ teamId, roster, availableSubs, existingRequest
                 <option value="">Select substitute…</option>
                 {eligibleSubs.map(s => (
                   <option key={s.id} value={s.id}>
-                    {s.display_name ?? s.username} ({Math.round(peakMmr(s)).toLocaleString()} RV)
+                    {s.display_name ?? s.username} ({shownRv(s)} RV)
                   </option>
                 ))}
               </select>

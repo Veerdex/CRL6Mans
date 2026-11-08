@@ -10,7 +10,7 @@ import {
   FP_BASELINE_RV,
   SERIES_PLAYED_CAP,
 } from "../app/lib/rv-adjustment";
-import { mmrRatingFromRow, playerRatingFromRow } from "../app/lib/rating";
+import { mmrRatingFromRow, calculatedRatingFromRow } from "../app/lib/rating";
 
 const close = (actual: number, expected: number, tol = 0.5) =>
   assert.ok(Math.abs(actual - expected) <= tol, `${actual} not within ${tol} of ${expected}`);
@@ -82,11 +82,11 @@ test("re-saving the same MMR changes nothing", () => {
   assert.equal(absorbMmrChange(-40, 1753, 1753), -40);
 });
 
-test("the displayed rating is MMR rating plus the adjustment", () => {
+test("the calculated rating is MMR rating plus the adjustment", () => {
   const base = mmrRatingFromRow(M3L0DY_ROW);
-  close(playerRatingFromRow({ ...M3L0DY_ROW, rv_adjustment: 100 }), base + 100, 1e-9);
-  close(playerRatingFromRow({ ...M3L0DY_ROW, rv_adjustment: null }), base, 1e-9);
-  close(playerRatingFromRow(M3L0DY_ROW), base, 1e-9);
+  close(calculatedRatingFromRow({ ...M3L0DY_ROW, rv_adjustment: 100 }), base + 100, 1e-9);
+  close(calculatedRatingFromRow({ ...M3L0DY_ROW, rv_adjustment: null }), base, 1e-9);
+  close(calculatedRatingFromRow(M3L0DY_ROW), base, 1e-9);
 });
 
 test("an MMR edit is measured on the MMR rating, not the adjusted one", () => {

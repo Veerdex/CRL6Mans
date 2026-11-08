@@ -3,7 +3,7 @@ import { redirectIfTestTournamentHidden } from "@/app/lib/test-tournament";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { playerRatingFromRow, initialTeamRating } from "@/app/lib/rating";
+import { displayRatingFromRow, initialTeamRating } from "@/app/lib/rating";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { AdminTeamsManager } from "./admin-teams-manager";
 import { TeamsGrid } from "./teams-grid";
@@ -108,7 +108,7 @@ export default async function TeamsPage({
     return byTeam[t.id].length > 0;
   });
 
-  const ratingOf = playerRatingFromRow;
+  const ratingOf = displayRatingFromRow;
 
   // Sort rosters: captain first, then by rating
   Object.values(byTeam).forEach((roster) => {

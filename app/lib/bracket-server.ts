@@ -1,6 +1,6 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
-import { playerRatingFromRow, initialTeamRating } from "./rating";
+import { decisionRatingFromRow, initialTeamRating } from "./rating";
 import { attachForfeits } from "./forfeits";
 import {
   generateSEMatchInserts, generateDEMatchInserts, generateSEPlaceholderInserts,
@@ -170,7 +170,7 @@ function computeTeamRatings(
   const rv: Record<string, number> = {};
   for (const id of teamIds) {
     const roster = players.filter(p => p.team_id === id);
-    rv[id] = initialTeamRating(roster.map(playerRatingFromRow));
+    rv[id] = initialTeamRating(roster.map(decisionRatingFromRow));
   }
   return rv;
 }
@@ -926,7 +926,7 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
   const teamRv: Record<string, number> = {};
   (teamsRaw ?? []).forEach((t) => {
     const roster = players?.filter((p) => p.team_id === t.id) ?? [];
-    teamRv[t.id] = initialTeamRating(roster.map(playerRatingFromRow));
+    teamRv[t.id] = initialTeamRating(roster.map(decisionRatingFromRow));
   });
 
   // A season's playoff bracket seeds off the standings it just played, so wins

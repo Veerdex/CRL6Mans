@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { removePlayerFromDraft } from "./league-actions";
 import { removeTournamentEntry, removeTeamSignup } from "./tournament-actions";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { displayRatingFromRow } from "@/app/lib/rating";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 
 export type DraftPoolEntry = {
@@ -43,7 +43,7 @@ export type DraftPoolTournamentGroup = {
   teamSignups: TournamentSignupTeam[];
 };
 
-const rankValue = playerRatingFromRow;
+const rankValue = displayRatingFromRow;
 
 function Avatar({ discordId, avatar, username }: { discordId: string; avatar: string | null; username: string }) {
   return <PlayerAvatar discordId={discordId} avatar={avatar} username={username} className="w-7 h-7" />;

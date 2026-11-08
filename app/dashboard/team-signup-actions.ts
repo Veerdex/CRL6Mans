@@ -7,7 +7,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { isModerator } from "@/app/lib/players";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { normalizeTeamSize } from "@/app/lib/team-size";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { decisionRatingFromRow } from "@/app/lib/rating";
 import { hasMmrOnFile, MMR_REQUIRED_MESSAGE } from "@/app/lib/mmr-on-file";
 import { pushToUser } from "@/app/lib/push";
 import {
@@ -149,7 +149,7 @@ async function heirToCaptaincy(signupId: string) {
       return {
         playerId: m.player_id as string,
         name: (p?.display_name as string | null) ?? (p?.username as string | undefined) ?? "a teammate",
-        rating: p ? playerRatingFromRow(p) : 0,
+        rating: p ? decisionRatingFromRow(p) : 0,
         respondedAt: (m.responded_at as string | null) ?? "",
       };
     })

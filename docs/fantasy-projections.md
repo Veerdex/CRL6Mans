@@ -61,7 +61,7 @@ Each stat is projected separately. **Stats:** score, goals, assists, saves, shot
 ```
 ratingEstimate(s) = max(0, leagueMean(s) + slope(s) × (RV − 1722.4))
 ```
-RV comes from `playerRatingFromRow()` in `app/lib/rating.ts`.
+RV comes from `calculatedRatingFromRow()` in `app/lib/rating.ts`.
 
 Fitted on the 30 registered players with ≥ 10 games and MMR on file:
 

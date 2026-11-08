@@ -17,7 +17,7 @@ import { SponsorCard } from "@/app/lib/sponsor-display";
 import { cropStyle, type MediaCrop } from "@/app/lib/media-crop";
 import { buildTimeline, buildStageStarts } from "@/app/lib/tournament-timeline";
 import { stageEmblem } from "@/app/lib/format-emblems";
-import { playerRatingFromRow, initialTeamRating } from "@/app/lib/rating";
+import { displayRatingFromRow, initialTeamRating } from "@/app/lib/rating";
 import { normalizeTeamSize, teamSizeLabel } from "@/app/lib/team-size";
 import { isDirectorVerified, isModerator } from "@/app/lib/players";
 import { TeamRatingList, type TeamRatingRow } from "./team-rating-list";
@@ -633,7 +633,7 @@ async function PlayersDraftPool({ tournamentId }: { tournamentId: string }) {
       discordId: e.players!.discord_id,
       username: e.players!.username,
       displayName: e.players!.display_name,
-      rating: playerRatingFromRow(e.players!),
+      rating: displayRatingFromRow(e.players!),
     }))
     .sort((a, b) => b.rating - a.rating);
 
@@ -734,7 +734,7 @@ async function TeamsDraftPool({ tournamentId }: { tournamentId: string }) {
         discordId: m.players?.discord_id ?? null,
         username: m.players?.username ?? "Unknown",
         displayName: m.players?.display_name ?? null,
-        rating: m.players ? playerRatingFromRow(m.players) : 0,
+        rating: m.players ? displayRatingFromRow(m.players) : 0,
         status: m.status,
       }));
       const acceptedRatings = members.filter((m) => m.status === "accepted").map((m) => m.rating);

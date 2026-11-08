@@ -1,7 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
 import { addRole, removeRole, addRoleById, removeRoleById } from "./discord-api";
-import { playerRatingFromRow } from "./rating";
+import { displayRatingFromRow } from "./rating";
 
 export type PlayerStatus = "unregistered" | "pending" | "approved" | "rejected" | "banned";
 
@@ -165,7 +165,7 @@ export async function getApprovedPlayers(): Promise<Player[]> {
     toPlayer(a as AccountRow, pendingByAccount.get(a.id) ?? null, tier3ByAccount.get(a.id) ?? null)
   );
 
-  const ratingOf = (p: Player) => playerRatingFromRow(p);
+  const ratingOf = (p: Player) => displayRatingFromRow(p);
 
   return players.sort((a, b) => ratingOf(b) - ratingOf(a));
 }

@@ -5,7 +5,7 @@ import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { playerRatingFromRow, initialTeamRating } from "@/app/lib/rating";
+import { displayRatingFromRow, initialTeamRating } from "@/app/lib/rating";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { forfeitVotesRequired } from "@/app/lib/forfeit-vote";
 import {
@@ -80,7 +80,7 @@ type MatchInfo = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function peakMmr(p: RosterPlayer) {
-  return playerRatingFromRow(p);
+  return displayRatingFromRow(p);
 }
 
 // Swaps any subbed-out roster player for their approved substitute, so the "who's
@@ -208,8 +208,8 @@ type IncomingRawRow = {
   id: string; team_id: string; match_id: string | null; player_out_id: string; sub_player_id: string | null; reason: string | null; created_at: string;
 };
 
-function peakMmrSub(p: Parameters<typeof playerRatingFromRow>[0]) {
-  return Math.round(playerRatingFromRow(p));
+function peakMmrSub(p: Parameters<typeof displayRatingFromRow>[0]) {
+  return Math.round(displayRatingFromRow(p));
 }
 
 export default async function MyTeamPage() {

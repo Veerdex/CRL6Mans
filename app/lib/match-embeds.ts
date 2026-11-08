@@ -12,7 +12,7 @@
 // "@everyone" is inert text instead of a server-wide ping.
 
 import type { AllowedMentions, DiscordEmbed } from "./discord-api";
-import { playerRatingFromRow } from "./rating";
+import { displayRatingFromRow } from "./rating";
 
 const BRAND_ORANGE = 0xe88a24;
 const BRAND_BLUE = 0x3736ac;
@@ -479,7 +479,7 @@ function rankField(label: string, p: SubPlayerRow): { name: string; value: strin
       `• Season Peak 2v2: ${Number(p.current_2v2).toLocaleString()}\n` +
       `• All Time Peak 3v3: ${Number(p.peak_3v3).toLocaleString()}\n` +
       `• Season Peak 3v3: ${Number(p.current_3v3).toLocaleString()}\n` +
-      `• Rank Value: ${Math.round(playerRatingFromRow(p)).toLocaleString()}`,
+      `• Rank Value: ${Math.round(displayRatingFromRow(p)).toLocaleString()}`,
     inline: true,
   };
 }

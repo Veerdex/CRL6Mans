@@ -19,7 +19,7 @@ import {
   TERMINAL_STAGES,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
-import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, playerRatingFromRow, calculatePlayerRating } from "./rating";
+import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, decisionRatingFromRow, displayRatingFromRow, calculatedRatingFromRow, calculatePlayerRating } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { matchHasBegun } from "./match-state";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize, resolveTeamSize } from "./team-size";
@@ -900,7 +900,7 @@ type RatingFields = {
 };
 
 function playerRating(p: RatingFields): number {
-  return playerRatingFromRow(p);
+  return decisionRatingFromRow(p);
 }
 
 // Lazy-initialises a team's season_rating from its current roster ratings.
@@ -1192,7 +1192,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   const captainSeats: CaptainSeat[] = [];
   const captains: Array<{ discordId: string | null; teamRoleId?: string }> = [];
   for (let i = 0; i < numTeams; i++) {
-    captainSeats.push({ teamNum: captainTeams[i].num, name: sorted[i].username, rv: playerRating(sorted[i]) });
+    captainSeats.push({ teamNum: captainTeams[i].num, name: sorted[i].username, rv: displayRatingFromRow(sorted[i]) });
     captains.push({ discordId: sorted[i].discord_id ?? null, teamRoleId: captainTeams[i].discord_role_id ?? undefined });
   }
 
@@ -5250,7 +5250,9 @@ export async function applyStatsRvUpdate(matchId: string): Promise<void> {
           scoreGames: Math.max(0, total.games - match.games - (total.scorelessGames ?? 0)),
         }
       : null;
-    const predicted = projectedFantasyPoints(playerRatingFromRow(p), history?.games ? history : null);
+    // Fixed to the calculated rating rather than either switch: the adjustment
+    // converges only if each series is judged against the rating it produced.
+    const predicted = projectedFantasyPoints(calculatedRatingFromRow(p), history?.games ? history : null);
     const actual = fantasyPoints({
       score: match.score / match.games,
       goals: match.goals / match.games,

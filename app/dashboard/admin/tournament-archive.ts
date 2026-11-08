@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { displayRatingFromRow } from "@/app/lib/rating";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { attachForfeits } from "@/app/lib/forfeits";
 import { computePlacementTiers, placementsFromTiers } from "@/app/lib/placement";
@@ -168,7 +168,7 @@ export async function computeFullArchive(meta: ArchiveMeta): Promise<TournamentA
     ? (allTeams ?? []).filter((t) => participatingIds.has(t.id))
     : (allTeams ?? []);
 
-  const ratingOf = (p: Parameters<typeof playerRatingFromRow>[0]) => Math.round(playerRatingFromRow(p));
+  const ratingOf = (p: Parameters<typeof displayRatingFromRow>[0]) => Math.round(displayRatingFromRow(p));
 
   // Derived from completed matches rather than the teams.wins/losses columns —
   // mirrors season/page.tsx and completeSeason's own finalStandings, since those

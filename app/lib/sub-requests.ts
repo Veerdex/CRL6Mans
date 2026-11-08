@@ -25,11 +25,11 @@ import {
   type ChannelPost,
 } from "./match-embeds";
 import { pushToAdmins, pushToTeam } from "./push";
-import { playerRatingFromRow } from "./rating";
+import { decisionRatingFromRow } from "./rating";
 
 export type SubRequestResult = { ok?: boolean; error?: string };
 
-const peakMmr = playerRatingFromRow;
+const peakMmr = decisionRatingFromRow;
 
 // A sub notification always goes to a match channel the caller already resolved,
 // so these post through sendChannelMessage rather than notifyMatchChannel.
@@ -167,7 +167,7 @@ export async function submitSubRequestCore(args: {
   const mmrLimit = playerOutMmr < 1400 ? playerOutMmr + 100 : playerOutMmr;
   if (subMmr > mmrLimit) {
     return {
-      error: `${sub.username}'s Rank Value (${Math.round(subMmr).toLocaleString()}) is too high for this substitution. Maximum allowed: ${Math.round(mmrLimit).toLocaleString()}.`,
+      error: `${sub.username}'s Rank Value is too high to substitute for ${playerOut.username}.`,
     };
   }
 

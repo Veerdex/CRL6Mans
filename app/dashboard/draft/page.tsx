@@ -3,13 +3,13 @@ import { redirectIfTestTournamentHidden } from "@/app/lib/test-tournament";
 import { decrypt } from "@/app/lib/session";
 import { isModeratorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { displayRatingFromRow } from "@/app/lib/rating";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { getTeamNumberForPick, totalDraftPicks } from "@/app/lib/draft-order";
 import { DraftLive } from "./draft-live";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
 
-const rankValue = playerRatingFromRow;
+const rankValue = displayRatingFromRow;
 
 export default async function DraftPage() {
   await redirectIfTestTournamentHidden();

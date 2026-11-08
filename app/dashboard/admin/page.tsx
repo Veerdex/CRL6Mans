@@ -7,7 +7,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { normalizeTeamSize } from "@/app/lib/team-size";
 import { matchHasBegun } from "@/app/lib/match-state";
 import { collegeIdSignedUrl } from "@/app/lib/college-ids";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { displayRatingFromRow } from "@/app/lib/rating";
 import { SEASON_ACCOLADES } from "@/app/lib/accolades";
 import { LeagueControls } from "./league-controls";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
@@ -805,8 +805,8 @@ export default async function AdminPage() {
   const subInMap        = Object.fromEntries((subPlayersIn  ?? []).map(p => [p.id, p]));
   const subRequesterMap = Object.fromEntries((subRequesters ?? []).map(p => [p.discord_id, p]));
 
-  function subPeakMmr(p: Parameters<typeof playerRatingFromRow>[0]) {
-    return Math.round(playerRatingFromRow(p));
+  function subPeakMmr(p: Parameters<typeof displayRatingFromRow>[0]) {
+    return Math.round(displayRatingFromRow(p));
   }
 
   const subRequestCards: SubRequestCardData[] = subReqs.map(req => {

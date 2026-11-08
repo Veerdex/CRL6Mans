@@ -3,7 +3,7 @@ import "server-only";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./paginate";
 import { careerPoints } from "./career-points";
-import { playerRatingFromRow } from "./rating";
+import { displayRatingFromRow } from "./rating";
 import { fetchEventHistory, type EventHistoryEntry } from "./event-results";
 
 /**
@@ -313,7 +313,7 @@ function displayMmr(raw: number | null): number | null {
 /**
  * Derived from the same four figures the ranks block renders, so the rating and
  * the MMR it came from can never disagree on screen. Null when none of them are
- * set: playerRatingFromRow reads a missing column as 0, which would show an
+ * set: displayRatingFromRow reads a missing column as 0, which would show an
  * unregistered player a confident rating rather than nothing to rate.
  */
 function rankValueOf(ranks: RankStats, rvAdjustment: number): number | null {
@@ -324,7 +324,7 @@ function rankValueOf(ranks: RankStats, rvAdjustment: number): number | null {
     ranks.seasonPeak3v3,
   ];
   if (registered.every((v) => v === null)) return null;
-  return playerRatingFromRow({
+  return displayRatingFromRow({
     peak_2v2: ranks.allTimePeak2v2,
     current_2v2: ranks.seasonPeak2v2,
     peak_3v3: ranks.allTimePeak3v3,

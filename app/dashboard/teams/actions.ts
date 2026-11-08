@@ -9,7 +9,7 @@ import { supabaseAdmin } from "@/app/lib/supabase";
 import { editRole, addRole, addRoleById, removeRoleById, removeRole, ensureRoles } from "@/app/lib/discord-api";
 import { validateImageUpload } from "@/app/lib/uploads";
 import { applyPlayerRVChangeToTeamRating, execDisqualifyTeam } from "@/app/lib/discord-bot";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { decisionRatingFromRow } from "@/app/lib/rating";
 import { resolveTeamSize } from "@/app/lib/team-size";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "@/app/lib/solo-team";
 
@@ -234,7 +234,7 @@ async function assignCaptainIfMissing(teamId: string): Promise<void> {
   if (!members?.length || members.length < (await resolveTeamSize())) return;
   if (members.some((m) => m.is_captain)) return;
 
-  const ratingOf = playerRatingFromRow;
+  const ratingOf = decisionRatingFromRow;
   const best = members.reduce((a, b) => (ratingOf(a) >= ratingOf(b) ? a : b));
 
   await supabaseAdmin.from("players").update({ is_captain: true }).eq("id", best.id);

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { swapPlayersBetweenTeams, swapRosterPlayerWithBenchPlayer, disqualifyTeam, removeTeam, addPlayerToEvent, removePlayerFromEvent, createTeam } from "./actions";
 import { MyTeamEditor } from "./my-team-editor";
 import { PlayerName } from "@/app/dashboard/player-name";
-import { playerRatingFromRow } from "@/app/lib/rating";
+import { displayRatingFromRow } from "@/app/lib/rating";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { DefaultLogo } from "@/app/lib/team-logo";
 
@@ -68,8 +68,8 @@ interface Props {
   bracketGenerated?: boolean;
 }
 
-function rv(p: Parameters<typeof playerRatingFromRow>[0]) {
-  return Math.round(playerRatingFromRow(p));
+function rv(p: Parameters<typeof displayRatingFromRow>[0]) {
+  return Math.round(displayRatingFromRow(p));
 }
 
 function BenchRow({

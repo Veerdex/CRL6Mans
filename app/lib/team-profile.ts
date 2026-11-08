@@ -1,7 +1,7 @@
 import "server-only";
 
 import { supabaseAdmin } from "./supabase";
-import { playerRatingFromRow, initialTeamRating } from "./rating";
+import { displayRatingFromRow, initialTeamRating } from "./rating";
 
 /**
  * Everything one team's popup shows, loaded on demand — the same content as a
@@ -128,7 +128,7 @@ async function loadRoster(teamId: string): Promise<TeamRosterEntry[]> {
         displayName: account?.display_name ?? null,
         avatar: account?.avatar ?? null,
         isCaptain: p.is_captain ?? false,
-        rankValue: Math.round(playerRatingFromRow(p)),
+        rankValue: Math.round(displayRatingFromRow(p)),
       };
     })
     // Captain first, then by rating — the same order as the Teams page rosters.
