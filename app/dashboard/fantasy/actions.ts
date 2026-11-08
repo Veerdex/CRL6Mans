@@ -134,8 +134,15 @@ export async function leaveLeague(leagueId: string): Promise<Result & { deleted?
       supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId).neq("account_id", me.accountId),
       supabaseAdmin.from("accounts").select("username, display_name").eq("id", me.accountId).maybeSingle(),
     ]);
-    const { error } = await supabaseAdmin.from("fantasy_leagues").delete().eq("id", leagueId);
+    // Pinned to pre_draft so a draft starting since the check above keeps its league.
+    const { data: deleted, error } = await supabaseAdmin
+      .from("fantasy_leagues")
+      .delete()
+      .eq("id", leagueId)
+      .eq("status", "pre_draft")
+      .select("id");
     if (error) return { error: "Couldn't disband the league." };
+    if (!deleted?.length) return { error: "The draft has started, so you can't leave this league now." };
 
     const otherIds = ((others ?? []) as { account_id: string }[]).map((m) => m.account_id);
     if (otherIds.length) {

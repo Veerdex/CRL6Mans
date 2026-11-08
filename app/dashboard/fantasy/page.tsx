@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { fantasyAccessOpen, getFantasyViewer, getHubData, type LeagueCard } from "@/app/lib/fantasy-leagues";
 import { CreateLeagueForm, JoinLeagueButton, StartDraftsButton } from "./fantasy-client";
-import { isDirector } from "@/app/lib/players";
+import { isDirectorVerified } from "@/app/lib/players";
 import { StatusBadge } from "./status-badge";
 import { HubTabs, type HubTab } from "./hub-tabs";
 import { PlayerName } from "@/app/dashboard/player-name";
@@ -23,7 +23,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
     );
   }
 
-  const [hub, canStartDrafts] = await Promise.all([getHubData(viewer), isDirector(session.userId)]);
+  const [hub, canStartDrafts] = await Promise.all([getHubData(viewer), isDirectorVerified(session.userId)]);
   if (!hub.season) {
     return (
       <Shell>
@@ -33,9 +33,13 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
   }
 
   // A manager in exactly one league lands straight in it; ?all=1 or an explicit
-  // tab is the way back.
+  // tab is the way back. Not while staff can start the drafts, since that
+  // control lives only here.
   const { all, tab: tabParam } = await searchParams;
-  if (hub.myLeagues.length === 1 && all !== "1" && !tabParam) redirect(`/dashboard/fantasy/${hub.myLeagues[0].id}`);
+  const showStartDrafts = canStartDrafts && hub.season.status === "open";
+  if (hub.myLeagues.length === 1 && all !== "1" && !tabParam && !showStartDrafts) {
+    redirect(`/dashboard/fantasy/${hub.myLeagues[0].id}`);
+  }
 
   const hasOwn = hub.myLeagues.length + hub.invitedLeagues.length > 0;
   const tab: HubTab =tabParam === "all" || tabParam === "mine" ? tabParam : hasOwn ? "mine" : "all";
@@ -54,7 +58,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
         </div>
       )}
 
-      {canStartDrafts && hub.season.status === "open" && (
+      {showStartDrafts && (
         <section className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 flex flex-col items-center gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Staff</h2>
           <StartDraftsButton />
