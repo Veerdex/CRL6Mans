@@ -56,13 +56,14 @@ Commissioners cannot force-close weeks or override results — that is staff onl
 ## 3. Player pool and tiers
 
 ### Who is draftable
-Every approved player in the real season (drafted rosters and the free-agent/sub pool),
-**except the managers of that league.** A manager can never draft, claim, add or receive in a
+Every player on a real team when the drafts start, **except the managers of that league.**
+Subs are never draftable: a sub is filler for whichever team needs one, and only becomes
+draftable by being swapped onto a team before the drafts start. A manager can never draft, claim, add or receive in a
 trade themselves or any other manager in their own league — those players are never shown as
 options.
 
 ### Tiers
-| Tier | Drafted players | Free agents (not on a real team at season start) |
+| Tier | Drafted players | Rostered without a draft round (auto-balanced, or added to a team) |
 |---|---|---|
 | Tier 1 — Captain | Real team captains | Top ⅓ by rating |
 | Tier 2 — 1st round | Real 1st-round picks | Middle ⅓ by rating |

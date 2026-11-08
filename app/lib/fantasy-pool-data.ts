@@ -23,8 +23,8 @@ import {
 } from "./fantasy-pool";
 
 // The player pool a fantasy league drafts from: every player rostered in the
-// real season, plus the free agents once the real draft is over. The league's
-// own managers are left out, since a manager can't roster themselves.
+// real season. The league's own managers are left out, since a manager can't
+// roster themselves.
 
 export type PoolTeam = { id: string; name: string };
 
@@ -53,7 +53,6 @@ type FrozenTier = { player_id: string; tier: FantasyTier; rating: number };
 type PlayerRow = PlayerRatingRow & {
   id: string;
   team_id: string | null;
-  sub_willing: boolean | null;
   draft_round?: number | null;
 };
 
@@ -73,7 +72,7 @@ type MatchRow = {
 
 type StatRow = { match_id: string; player_id: string; goals: number; assists: number; saves: number; shots: number; score: number };
 
-const PLAYER_COLS = "id, team_id, sub_willing, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment";
+const PLAYER_COLS = "id, team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment";
 
 // draft_round arrives with scripts/draft-round-migration.sql. Before it runs
 // the read fails and every drafted player falls back to the rating thirds.
@@ -84,15 +83,11 @@ async function fetchPoolPlayers(): Promise<PlayerRow[]> {
   return (data ?? []) as PlayerRow[];
 }
 
-// Free agents join the pool once the real draft is over: either the season is
-// running, or the draft has finished and seated players (the window the fantasy
-// draft runs in, before Round 1). Before the real draft nobody is rostered, and
-// every entrant would otherwise read as a free agent.
-function seasonPlayers(players: PlayerRow[], teamIds: Set<string>, settings: { season_active?: boolean; draft_active?: boolean } | null) {
-  const rostered = players.filter((p) => p.team_id && teamIds.has(p.team_id));
-  const freeAgentsOpen = !settings?.draft_active && (!!settings?.season_active || rostered.length > 0);
-  const freeAgents = freeAgentsOpen ? players.filter((p) => !p.team_id && p.sub_willing) : [];
-  return [...rostered, ...freeAgents];
+// Only rostered players are draftable. A sub is filler for whichever team needs
+// one, not a fantasy asset, and a sub-willing player who never entered the event
+// would otherwise be drafted into it. One swapped onto a team is rostered.
+function seasonPlayers(players: PlayerRow[], teamIds: Set<string>) {
+  return players.filter((p) => p.team_id && teamIds.has(p.team_id));
 }
 
 // A player's tier, read live. Thirds are cut across the whole season, managers
@@ -111,12 +106,11 @@ function liveTiers(season: PlayerRow[]): Map<string, FantasyTier> {
 
 /** The season's draftable pool as it stands, for freezing when the drafts start. */
 export async function currentSeasonTiers(): Promise<{ playerId: string; tier: FantasyTier; rating: number }[]> {
-  const [{ data: settings }, players, { data: teamRows }] = await Promise.all([
-    supabaseAdmin.from("league_settings").select("season_active, draft_active").maybeSingle(),
+  const [players, { data: teamRows }] = await Promise.all([
     fetchPoolPlayers(),
     supabaseAdmin.from("teams").select("id"),
   ]);
-  const season = seasonPlayers(players, new Set(((teamRows ?? []) as { id: string }[]).map((t) => t.id)), settings);
+  const season = seasonPlayers(players, new Set(((teamRows ?? []) as { id: string }[]).map((t) => t.id)));
   const tiers = liveTiers(season);
   return season.map((p) => ({
     playerId: p.id,
@@ -202,7 +196,7 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
   // Once the drafts start the pool and its tiers are the frozen ones (§3: fixed
   // for the season), whatever has happened to rosters since.
   const frozenTier = frozen ? new Map(frozen.map((f) => [f.player_id, f.tier])) : null;
-  const season = frozenTier ? players.filter((p) => frozenTier.has(p.id)) : seasonPlayers(players, new Set(teams.keys()), settings);
+  const season = frozenTier ? players.filter((p) => frozenTier.has(p.id)) : seasonPlayers(players, new Set(teams.keys()));
   const tierOf = frozenTier ?? liveTiers(season);
   const pool = season.filter((p) => !managers.has(p.id));
   if (!pool.length) return { players: [], hiddenForTest: false };
