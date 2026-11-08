@@ -126,9 +126,9 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
                 <td className="px-3 py-2"><TierBadge tier={p.tier} /></td>
                 <td className="px-3 py-2"><TeamCell team={p.team} /></td>
                 <td className="px-3 py-2"><Availability /></td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-200">{formatRating(p.rating)}</td>
+                <td className={`px-3 py-2 text-right tabular-nums ${ratingColor(p.rating)}`}>{formatRating(p.rating)}</td>
                 <td className="px-3 py-2 text-right"><Projection player={p} /></td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-200">{fmt(p.seasonPoints)}</td>
+                <td className={`px-3 py-2 text-right tabular-nums ${pointsColor(p.seasonPoints)}`}>{fmt(p.seasonPoints)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-200">
                   {average(p) === null ? "—" : fmt(average(p)!)}
                 </td>
@@ -170,8 +170,8 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
                   {open && (
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-xs">
                       <Detail label="Team"><TeamCell team={p.team} /></Detail>
-                      <Detail label="RV">{formatRating(p.rating)}</Detail>
-                      <Detail label="Season points">{fmt(p.seasonPoints)}</Detail>
+                      <Detail label="RV"><span className={ratingColor(p.rating)}>{formatRating(p.rating)}</span></Detail>
+                      <Detail label="Season points"><span className={pointsColor(p.seasonPoints)}>{fmt(p.seasonPoints)}</span></Detail>
                       <Detail label="Per series">{average(p) === null ? "—" : fmt(average(p)!)}</Detail>
                       <Detail label="Next match"><OpponentCell team={p.nextOpponent} /></Detail>
                     </dl>
@@ -262,6 +262,16 @@ function Availability({ compact = false }: { compact?: boolean }) {
   );
 }
 
+function bandColor(value: number | null, high: number, low: number, neutral: string) {
+  if (value === null) return neutral;
+  if (value >= high) return "text-emerald-400";
+  if (value <= low) return "text-red-400";
+  return neutral;
+}
+
+const pointsColor = (v: number | null, neutral = "text-zinc-200") => bandColor(v, 40, 10, neutral);
+const ratingColor = (v: number | null) => bandColor(v, 1850, 1450, "text-zinc-200");
+
 function Projection({ player }: { player: PoolPlayer }) {
   const note =
     player.projectionBasis === "rating" ? "No stat history yet: rating only" :
@@ -271,7 +281,7 @@ function Projection({ player }: { player: PoolPlayer }) {
       {player.projectionBasis !== "history" && (
         <span className="text-[10px] text-zinc-500">{player.projectionBasis === "rating" ? "rating" : "prov."}</span>
       )}
-      <span className="tabular-nums font-semibold text-white">{fmt(player.projected)}</span>
+      <span className={`tabular-nums font-semibold ${pointsColor(player.projected, "text-white")}`}>{fmt(player.projected)}</span>
     </span>
   );
 }
