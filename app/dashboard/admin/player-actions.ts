@@ -11,6 +11,7 @@ import { recordStaffAction } from "@/app/lib/staff-contributions";
 import { kickForRejectionCooldown, type RejectionCooldown } from "./player-moderation-actions";
 import { applyPlayerRVChangeToTeamRating } from "@/app/lib/discord-bot";
 import { adjustmentAfterMmrEdit } from "@/app/lib/rv-adjustment";
+import { hasMmrOnFile } from "@/app/lib/mmr-on-file";
 
 /**
  * What an admin can change while deciding a registration. Narrower than
@@ -139,9 +140,24 @@ export async function approvePlayerWithEdits(
   // Tier 3 row to hold it. Best-effort: a pre-migration read is just "none".
   const { data: seededRv } = await supabaseAdmin
     .from("seeded_rv_adjustments")
-    .select("rv_adjustment, rv_series_played")
+    .select("rv_adjustment, rv_series_played, rv_adjustment_basis")
     .eq("discord_id", account.discord_id)
     .maybeSingle();
+  // The adjustment was measured at the season's MMR rating. A registration
+  // that already carries ranks is measured against it now; one without keeps
+  // the basis for the first join confirmation to measure against instead.
+  const seededFields = seededRv
+    ? hasMmrOnFile(pending)
+      ? {
+          rv_adjustment: adjustmentAfterMmrEdit(
+            { peak_2v2: 0, current_2v2: 0, peak_3v3: 0, current_3v3: 0, ...seededRv },
+            pending,
+          ),
+          rv_series_played: seededRv.rv_series_played,
+          rv_adjustment_basis: null,
+        }
+      : seededRv
+    : {};
 
   // Tier 3 (players) is created here, id = account id. Many not-yet-migrated
   // call sites (draft/bracket/team-balancing logic) still read MMR straight off
@@ -164,9 +180,7 @@ export async function approvePlayerWithEdits(
       tracker_url: editable.tracker_url,
       sub_willing: pending.sub_willing ?? false,
       tracker_confirmed_at: pending.tracker_confirmed_at ?? null,
-      ...(seededRv
-        ? { rv_adjustment: seededRv.rv_adjustment, rv_series_played: seededRv.rv_series_played }
-        : {}),
+      ...seededFields,
       updated_at: now,
     },
     { onConflict: "id" }
@@ -269,15 +283,21 @@ export async function updatePlayerData(
 
   const { data: before } = await supabaseAdmin
     .from("players")
-    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, peak_1v1, current_1v1")
+    .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, rv_adjustment_basis, peak_1v1, current_1v1")
     .eq("id", id)
     .maybeSingle();
   const rvAdjustment = before ? adjustmentAfterMmrEdit(before, editable) : 0;
+  // An edit that still leaves no MMR on file has nothing to measure from yet.
+  const basisDone = hasMmrOnFile(editable);
 
   // Mirrored onto `players` too — see approvePlayerWithEdits for why.
   const { error } = await supabaseAdmin
     .from("players")
-    .update({ ...editable, ...(before ? { rv_adjustment: rvAdjustment } : {}), updated_at: now })
+    .update({
+      ...editable,
+      ...(before ? { rv_adjustment: rvAdjustment, ...(basisDone ? { rv_adjustment_basis: null } : {}) } : {}),
+      updated_at: now,
+    })
     .eq("id", id);
   if (error) return { error: error.message };
 

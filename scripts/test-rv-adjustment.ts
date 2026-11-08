@@ -110,3 +110,19 @@ test("a first MMR entry over the all-zero default keeps the adjustment", () => {
   const unset = { peak_2v2: "0", current_2v2: "0", peak_3v3: "0", current_3v3: "0", rv_adjustment: 16.6 };
   assert.equal(adjustmentAfterMmrEdit(unset, M3L0DY_ROW), 16.6);
 });
+
+const UNSET = { peak_2v2: "0", current_2v2: "0", peak_3v3: "0", current_3v3: "0" };
+
+test("a first entry is measured against the rating a seeded adjustment was earned at", () => {
+  const now = mmrRatingFromRow(M3L0DY_ROW);
+  const climbed = { ...UNSET, rv_adjustment: 100, rv_adjustment_basis: now - 100 };
+  close(adjustmentAfterMmrEdit(climbed, M3L0DY_ROW), absorbMmrChange(100, now - 100, now), 1e-9);
+  assert.ok(adjustmentAfterMmrEdit(climbed, M3L0DY_ROW) < 100);
+  const fell = { ...UNSET, rv_adjustment: 100, rv_adjustment_basis: now + 100 };
+  assert.equal(adjustmentAfterMmrEdit(fell, M3L0DY_ROW), 100);
+});
+
+test("an entry that still leaves no MMR on file keeps the basis untouched", () => {
+  const seeded = { ...UNSET, rv_adjustment: 100, rv_adjustment_basis: 1500 };
+  assert.equal(adjustmentAfterMmrEdit(seeded, UNSET), 100);
+});

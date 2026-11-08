@@ -103,12 +103,25 @@ export function absorbMmrChange(adjustment: number, oldMmrRv: number, newMmrRv: 
 }
 
 /**
- * Every MMR writer goes through this: the adjustment to store alongside `next`,
- * given the row as it was. `before` must have been selected with rv_adjustment.
+ * The MMR rating a seeded adjustment was measured against, kept while the row
+ * has no MMR on file — a past season's adjustment usually lands on a player
+ * before their first join confirmation, and without it that first entry could
+ * not tell a returning player who climbed from one who didn't.
  */
-export function adjustmentAfterMmrEdit(before: PlayerRatingRow, next: PlayerRatingRow): number {
-  // A first entry over the all-zero default is no ladder movement at all, and
-  // would otherwise wipe any positive adjustment in one save.
-  if (!hasMmrOnFile(before)) return Number(before.rv_adjustment ?? 0);
-  return absorbMmrChange(Number(before.rv_adjustment ?? 0), mmrRatingFromRow(before), mmrRatingFromRow(next));
+export type AdjustmentBasisRow = PlayerRatingRow & { rv_adjustment_basis?: string | number | null };
+
+/**
+ * Every MMR writer goes through this: the adjustment to store alongside `next`,
+ * given the row as it was. `before` must have been selected with rv_adjustment
+ * and rv_adjustment_basis, and the writer clears the basis in the same update.
+ */
+export function adjustmentAfterMmrEdit(before: AdjustmentBasisRow, next: PlayerRatingRow): number {
+  const adjustment = Number(before.rv_adjustment ?? 0);
+  if (hasMmrOnFile(before)) return absorbMmrChange(adjustment, mmrRatingFromRow(before), mmrRatingFromRow(next));
+  // A first entry over the all-zero default is no ladder movement in itself,
+  // and measured from 0 would wipe any positive adjustment in one save; it is
+  // movement only against the rating the adjustment was earned at.
+  const basis = before.rv_adjustment_basis;
+  if (basis === null || basis === undefined || !hasMmrOnFile(next)) return adjustment;
+  return absorbMmrChange(adjustment, Number(basis), mmrRatingFromRow(next));
 }

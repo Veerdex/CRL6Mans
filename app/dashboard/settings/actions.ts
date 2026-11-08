@@ -27,7 +27,7 @@ type MmrInput = {
 };
 
 const MMR_PLAYER_COLUMNS =
-  "id, team_id, peak_3v3, current_3v3, rv_adjustment, peak_2v2, current_2v2, peak_1v1, current_1v1";
+  "id, team_id, peak_3v3, current_3v3, rv_adjustment, rv_adjustment_basis, peak_2v2, current_2v2, peak_1v1, current_1v1";
 
 /** Typed to match RatingFields, which is what applyPlayerRVChangeToTeamRating takes. */
 type MmrPlayerRow = {
@@ -37,6 +37,7 @@ type MmrPlayerRow = {
   peak_2v2: string; current_2v2: string;
   peak_1v1: string | null; current_1v1: string | null;
   rv_adjustment: number | null;
+  rv_adjustment_basis: number | null;
 };
 
 function validateMmrInput(v: MmrInput): string | null {
@@ -100,6 +101,7 @@ async function applyMmrChange(
       peak_2v2:      next.peak_2v2,
       current_2v2:   next.current_2v2,
       rv_adjustment: rvAdjustment,
+      ...(hasMmrOnFile(next) ? { rv_adjustment_basis: null } : {}),
       updated_at:    now,
     })
     .eq("id", player.id);
