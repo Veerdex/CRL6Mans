@@ -119,7 +119,7 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
           </thead>
           <tbody className="divide-y divide-zinc-700/60">
             {shown.map((p) => (
-              <tr key={p.id} className="hover:bg-zinc-700/30">
+              <tr key={p.id} className="even:bg-zinc-700/30 hover:bg-zinc-700/60">
                 <td className="px-3 py-2">
                   <NameCell player={p} />
                 </td>
@@ -148,7 +148,7 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
             {shown.map((p) => {
               const open = expanded === p.id;
               return (
-                <li key={p.id}>
+                <li key={p.id} className="even:bg-zinc-700/30">
                   <div
                     role="button"
                     tabIndex={0}
