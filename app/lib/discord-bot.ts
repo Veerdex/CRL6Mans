@@ -1212,9 +1212,14 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
     captains.push({ discordId: sorted[i].discord_id ?? null, teamRoleId: captainTeams[i].discord_role_id ?? undefined });
   }
 
-  // All DB writes in one parallel batch, then immediately mark draft active
+  // The roster wipe must land before captains are seated. Batched with them, it
+  // raced their writes and un-seated whichever captains it landed after, which
+  // put them back in the pool to be drafted by another team.
+  const { error: wipeError } = await supabaseAdmin.from("players")
+    .update({ team_id: null, is_captain: false }).eq("status", "approved");
+  if (wipeError) return { ok: false, message: `❌ DB error clearing rosters: ${wipeError.message}` };
+
   await Promise.all([
-    supabaseAdmin.from("players").update({ team_id: null, is_captain: false }).eq("status", "approved"),
     supabaseAdmin.from("matches").delete().not("id", "is", null),
     // credits column kept in DB but unused in snake draft
     ...teamsToUse.map(t =>
