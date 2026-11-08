@@ -92,6 +92,7 @@ async function DraftRoom({ league: access }: { league: Promise<LeagueAccess> }) 
               pick={draft.current_pick}
               deadline={draft.pick_deadline}
               firesImmediately={viewerOnClock || viewer.isStaff}
+              yourTurn={viewerOnClock}
             />
             <p className="text-xs text-zinc-500 mt-0.5">until autopick</p>
           </div>

@@ -8,6 +8,7 @@ import { makeFantasyPick, triggerFantasyAutopick } from "../../actions";
 import { PoolTable } from "../players/pool-table";
 
 const POLL_MS = 10_000;
+const YOUR_TURN_SOUND = "/sounds/fantasy-your-turn.mp3";
 
 function formatClock(ms: number) {
   const total = Math.max(0, Math.ceil(ms / 1000));
@@ -25,15 +26,27 @@ export function DraftClock({
   pick,
   deadline,
   firesImmediately,
+  yourTurn,
 }: {
   leagueId: string;
   pick: number;
   deadline: string | null;
   /** The manager on the clock and staff fire the autopick at once; everyone else waits a jittered few seconds. */
   firesImmediately: boolean;
+  yourTurn: boolean;
 }) {
   const router = useRouter();
   const [now, setNow] = useState<number | null>(null);
+
+  // Once per pick, so back-to-back picks at the turn of a round each chime.
+  // A browser that hasn't seen a click on the page yet blocks the play; the
+  // banner still says it.
+  const chimedPick = useRef<number | null>(null);
+  useEffect(() => {
+    if (!yourTurn || chimedPick.current === pick) return;
+    chimedPick.current = pick;
+    new Audio(YOUR_TURN_SOUND).play().catch(() => {});
+  }, [yourTurn, pick]);
 
   useEffect(() => {
     const first = setTimeout(() => setNow(Date.now()), 0);
