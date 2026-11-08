@@ -234,24 +234,12 @@ function TierBadge({ tier }: { tier: FantasyTier }) {
   );
 }
 
-function TeamLogo({ team }: { team: PoolTeam }) {
-  return team.logoUrl ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={team.logoUrl} alt="" width={20} height={20} className="w-5 h-5 rounded object-cover shrink-0" />
-  ) : (
-    <span className="w-5 h-5 rounded bg-zinc-700 shrink-0" aria-hidden="true" />
-  );
-}
-
 function TeamCell({ team }: { team: PoolTeam | null }) {
   if (!team) return <span className="text-zinc-400">Free agent</span>;
   return (
-    <span className="inline-flex items-center gap-1.5 min-w-0">
-      <TeamLogo team={team} />
-      <TeamLink teamId={team.id} name={team.name} className="truncate text-zinc-200">
-        {team.name}
-      </TeamLink>
-    </span>
+    <TeamLink teamId={team.id} name={team.name} className="truncate min-w-0 text-zinc-200">
+      {team.name}
+    </TeamLink>
   );
 }
 

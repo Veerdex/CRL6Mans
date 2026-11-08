@@ -19,7 +19,7 @@ import {
 // real season, plus the free agents once the real draft is over. The league's
 // own managers are left out, since a manager can't roster themselves.
 
-export type PoolTeam = { id: string; name: string; logoUrl: string | null };
+export type PoolTeam = { id: string; name: string };
 
 export type PoolPlayer = {
   id: string;
@@ -80,7 +80,7 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
     supabaseAdmin.from("league_settings").select("season_active, draft_active").maybeSingle(),
     fetchPoolPlayers(),
     supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId),
-    supabaseAdmin.from("teams").select("id, name, logo_url"),
+    supabaseAdmin.from("teams").select("id, name"),
     fetchAllRows<MatchRow>((from, to) =>
       supabaseAdmin
         .from("matches")
@@ -91,9 +91,9 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
   ]);
 
   const teams = new Map<string, PoolTeam>(
-    ((teamRows ?? []) as { id: string; name: string; logo_url: string | null }[]).map((t) => [
+    ((teamRows ?? []) as { id: string; name: string }[]).map((t) => [
       t.id,
-      { id: t.id, name: t.name, logoUrl: t.logo_url },
+      { id: t.id, name: t.name },
     ]),
   );
   const managers = new Set(((memberRows ?? []) as { account_id: string }[]).map((m) => m.account_id));
