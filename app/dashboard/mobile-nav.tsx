@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useNavPathname } from "./use-nav-pathname";
 import { useEffect, useState } from "react";
 import { LogoutButton } from "./logout-button";
 import { NavLeafContent, PodiumGlowIcon, PODIUM_HREF, podiumTabClass, podiumLabelClass } from "./podium-glow";
@@ -26,7 +26,7 @@ function isActive(href: string, pathname: string) {
 }
 
 export default function MobileNav({ items, username, displayName, avatarDiscordId, avatarHash, avatarBorder, status, priorityHrefs = [] }: Props) {
-  const pathname = usePathname();
+  const pathname = useNavPathname();
   const [moreOpen, setMoreOpen] = useState(false);
 
   // Reorder: Home first, then priority items (if present in the user's nav), then the rest.

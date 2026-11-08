@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useNavPathname } from "./use-nav-pathname";
 import { useEffect, useRef, useState } from "react";
 import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
 
@@ -18,7 +18,7 @@ function isActive(href: string, pathname: string) {
 // sidebar. Click still works as a fallback since hover alone isn't
 // reachable via keyboard.
 export function SidebarNavGroup({ label, icon, items }: { label: string; icon: React.ReactNode; items: Item[] }) {
-  const pathname = usePathname();
+  const pathname = useNavPathname();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

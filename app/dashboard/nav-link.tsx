@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useNavPathname } from "./use-nav-pathname";
 
 type Props = {
   href: string;
@@ -15,7 +15,7 @@ type Props = {
 };
 
 export default function NavLink({ href, children, className = "", title, compact = false }: Props) {
-  const pathname = usePathname();
+  const pathname = useNavPathname();
   const active = href === "/dashboard" ? pathname === href : pathname.startsWith(href);
 
   return (

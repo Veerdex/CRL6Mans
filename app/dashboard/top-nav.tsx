@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useNavPathname } from "./use-nav-pathname";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLeafContent, PODIUM_HREF, podiumTabClass } from "./podium-glow";
 
@@ -50,7 +50,7 @@ const ChevronIcon = ({ open }: { open: boolean }) => (
 // the panel doesn't dismiss it) and on click, so keyboard/touch users can
 // still reach them without relying on hover.
 export function TopNav({ items }: { items: TopNavEntry[] }) {
-  const pathname = usePathname();
+  const pathname = useNavPathname();
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const [visibleCount, setVisibleCount] = useState(items.length);
