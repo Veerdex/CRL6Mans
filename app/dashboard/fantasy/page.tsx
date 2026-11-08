@@ -5,6 +5,7 @@ import { decrypt } from "@/app/lib/session";
 import { fantasyAccessOpen, getFantasyViewer, getHubData, type LeagueCard } from "@/app/lib/fantasy-leagues";
 import { CreateLeagueForm, JoinLeagueButton } from "./fantasy-client";
 import { StatusBadge } from "./status-badge";
+import { HubTabs, type HubTab } from "./hub-tabs";
 import { PlayerName } from "@/app/dashboard/player-name";
 
 export default async function FantasyHubPage({ searchParams }: { searchParams: Promise<{ all?: string; tab?: string }> }) {
@@ -36,7 +37,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
   if (hub.myLeagues.length === 1 && all !== "1" && !tabParam) redirect(`/dashboard/fantasy/${hub.myLeagues[0].id}`);
 
   const hasOwn = hub.myLeagues.length + hub.invitedLeagues.length > 0;
-  const tab: Tab = tabParam === "all" || tabParam === "mine" ? tabParam : hasOwn ? "mine" : "all";
+  const tab: HubTab =tabParam === "all" || tabParam === "mine" ? tabParam : hasOwn ? "mine" : "all";
   const canCreate = viewer.approved && !hub.hasCreated && hub.season.status === "open";
   const ownLeague = hub.myLeagues.find((l) => l.isOwner);
   const joinedLeagues = hub.myLeagues.filter((l) => !l.isOwner);
@@ -52,9 +53,10 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
         </div>
       )}
 
-      <TabSwitch active={tab} />
-
-      {tab === "mine" ? (
+      <HubTabs
+        key={tab}
+        initial={tab}
+        mine={
         <>
           {ownLeague && (
             <Section title="My League">
@@ -93,7 +95,8 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
             </div>
           )}
         </>
-      ) : (
+        }
+        all={
         <section className="space-y-2">
           {hub.otherLeagues.length === 0 ? (
             <p className="text-sm text-zinc-500 text-center">{hasOwn ? "No other leagues yet." : "No leagues yet."}</p>
@@ -103,32 +106,9 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
             ))
           )}
         </section>
-      )}
+        }
+      />
     </Shell>
-  );
-}
-
-type Tab = "mine" | "all";
-
-function TabSwitch({ active }: { active: Tab }) {
-  const pill = (tab: Tab, children: React.ReactNode) => (
-    <Link
-      href={`/dashboard/fantasy?tab=${tab}`}
-      aria-current={active === tab ? "page" : undefined}
-      className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-        active === tab ? "bg-indigo-600 text-on-accent" : "text-zinc-300 hover:bg-zinc-700"
-      }`}
-    >
-      {children}
-    </Link>
-  );
-  return (
-    <div className="flex justify-center">
-      <div className="inline-flex gap-1 p-1 bg-zinc-800 border border-zinc-700 rounded-full">
-        {pill("mine", "My Leagues")}
-        {pill("all", "All Leagues")}
-      </div>
-    </div>
   );
 }
 
