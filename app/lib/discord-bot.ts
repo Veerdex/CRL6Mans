@@ -1176,7 +1176,8 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
 
   const sorted = [...entered].sort((a, b) => rulesRatingFromRow(b) - rulesRatingFromRow(a));
   const drafted = numTeams * teamSize;
-  const undrafted = sorted.length - drafted;
+  // Against the whole pool, not `entered`: that is already cut to `drafted`.
+  const undrafted = enteredAll.length - drafted;
   const pickRounds = teamSize - 1;
 
   // ── Phase 1: all database writes ─────────────────────────────────────────
@@ -1280,7 +1281,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   const opened = await setDraftChannelVisibility(true);
 
   const startPost = draftStartPost(
-    { teamSize, numTeams, entered: sorted.length, undrafted, captains: captainSeats },
+    { teamSize, numTeams, entered: enteredAll.length, undrafted, captains: captainSeats },
     tournamentRole?.id ?? null,
   );
   await sendChannelMessage(settings.draft_channel_id, startPost.content, startPost.embeds, startPost.allowed_mentions);
