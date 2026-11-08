@@ -42,7 +42,14 @@ export function draftLabel(teamSize: number): string {
   return teamSize - 1 > 1 ? "Snake Draft" : `${teamSize}v${teamSize} Draft`;
 }
 
-export type CaptainSeat = { teamNum: number; name: string; rv: number };
+/** A round that runs straight up or down by one reads as "32 → 1". */
+function formatRound(order: number[]): string {
+  const step = order.length > 2 ? order[1] - order[0] : 0;
+  const isRun = Math.abs(step) === 1 && order.every((t, i) => i === 0 || t - order[i - 1] === step);
+  return isRun ? `${order[0]} → ${order[order.length - 1]}` : order.join(", ");
+}
+
+export type CaptainSeat ={ teamNum: number; name: string; rv: number };
 
 export function draftStartEmbed(opts: {
   teamSize: number;
@@ -57,9 +64,9 @@ export function draftStartEmbed(opts: {
   // Generated from getTeamNumberForPick rather than rebuilt by hand, so the order
   // shown here cannot drift from the order actually enforced.
   const rounds = Array.from({ length: pickRounds }, (_, r) =>
-    Array.from({ length: numTeams }, (_, i) =>
+    formatRound(Array.from({ length: numTeams }, (_, i) =>
       getTeamNumberForPick(r * numTeams + i, numTeams)
-    ).join(", ")
+    ))
   );
 
   const orderField = pickRounds > 1

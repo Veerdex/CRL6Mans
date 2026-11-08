@@ -73,15 +73,14 @@ test("the pick order shown is the pick order getTeamNumberForPick enforces", () 
 
   const snake = order(4, 3);
   assert.equal(snake.name, "Pick order (snake)");
-  assert.deepEqual(snake.value.split("\n"), ["**Round 1:** 4, 3, 2, 1", "**Round 2:** 1, 2, 3, 4"]);
+  assert.deepEqual(snake.value.split("\n"), ["**Round 1:** 4 → 1", "**Round 2:** 1 → 4"]);
+  assert.deepEqual(order(32, 3).value.split("\n"), ["**Round 1:** 32 → 1", "**Round 2:** 1 → 32"]);
 
   // 2v2 is one round, and it must read as the real order, not a snake's first leg.
   const single = order(4, 2);
   assert.equal(single.name, "Pick order (lowest Rank Value first)");
-  assert.equal(
-    single.value,
-    Array.from({ length: 4 }, (_, i) => getTeamNumberForPick(i, 4)).join(", "),
-  );
+  const picks = Array.from({ length: 4 }, (_, i) => getTeamNumberForPick(i, 4));
+  assert.equal(single.value, `${picks[0]} → ${picks[3]}`);
 });
 
 test("the completion embed names the format instead of always saying snake", () => {
