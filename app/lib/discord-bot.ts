@@ -1844,10 +1844,11 @@ const PRESET_MIN_TEAMS: Record<string, number> = {
   double_elimination: 4,
   group_single_elimination: 8,
   group_swiss_single_elimination: 32,
+  group_swiss_double_elimination: 24,
   se_swiss_single_elimination: 32,
   de_swiss_single_elimination: 32,
 };
-const GROUP_PRESETS = new Set(["group_single_elimination", "group_swiss_single_elimination"]);
+const GROUP_PRESETS = new Set(["group_single_elimination", "group_swiss_single_elimination", "group_swiss_double_elimination"]);
 
 /**
  * Default-schedule all scheduled matches off the active tournament's season start.

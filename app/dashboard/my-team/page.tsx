@@ -257,11 +257,11 @@ export default async function MyTeamPage() {
   const teamSize     = normalizeTeamSize(settings?.team_size);
   const preset       = (settings?.season_format as { preset?: string })?.preset ?? "single_elimination";
   // isDE covers all formats that use a double-elimination bracket (full or qualifier)
-  const isDE         = preset === "double_elimination" || preset === "de_swiss_single_elimination";
+  const isDE         = preset === "double_elimination" || preset === "de_swiss_single_elimination" || preset === "group_swiss_double_elimination";
   const isDEQualifier = preset === "de_swiss_single_elimination";
   const allTeams     = (allTeamsRaw ?? []) as TeamRow[];
   const teamMap      = Object.fromEntries(allTeams.map((t) => [t.id, t]));
-  const hasGroupStage = preset === "group_single_elimination" || preset === "group_swiss_single_elimination";
+  const hasGroupStage = preset === "group_single_elimination" || preset === "group_swiss_single_elimination" || preset === "group_swiss_double_elimination";
 
   const allSubCandidateIds = [
     ...new Set(

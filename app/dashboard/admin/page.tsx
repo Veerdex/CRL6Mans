@@ -1016,6 +1016,7 @@ export default async function AdminPage() {
   const FORMAT_MAX_TEAMS: Record<string, number> = {
     group_single_elimination: 64,
     group_swiss_single_elimination: 64,
+    group_swiss_double_elimination: 64,
     group_swiss_hybrid: 32,
     group_swiss_hybrid_8: 32,
   };

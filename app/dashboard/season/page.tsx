@@ -11,7 +11,7 @@ import { SimulateControls } from "./simulate-controls";
 import { StandingsClient, type StandingsRow } from "./standings-table";
 import { SeasonTabs, type SeasonTab } from "./season-tabs";
 import { SponsoredByLine } from "@/app/dashboard/sponsored-by-line";
-import { getNumGroups, SWISS_STAGE, SWISS_ADVANCE_WINS, SWISS8_ADVANCE_WINS, SE_QUALIFIER, DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS, HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF } from "@/app/lib/bracket";
+import { getNumGroups, SWISS_STAGE, SWISS_ADVANCE_WINS, SWISS8_ADVANCE_WINS, SE_QUALIFIER, DE_WINNERS, DE_QUALIFIER_WINNERS, DE_QUALIFIER_LOSERS, HYBRID_UB, HYBRID_LB, HYBRID_SF, HYBRID_GF, HYBRID8_UB, HYBRID8_LB, HYBRID8_SF, HYBRID8_GF } from "@/app/lib/bracket";
 
 export default async function SeasonPage() {
   await redirectIfTestTournamentHidden();
@@ -49,15 +49,17 @@ export default async function SeasonPage() {
 
   const isGroupSE           = format?.preset === "group_single_elimination";
   const isGroupSwissSE      = format?.preset === "group_swiss_single_elimination";
+  const isGroupSwissDE      = format?.preset === "group_swiss_double_elimination";
   const isGroupSwissHybrid  = format?.preset === "group_swiss_hybrid";
   const isGroupSwissHybrid8 = format?.preset === "group_swiss_hybrid_8";
   const isSESwissSE         = format?.preset === "se_swiss_single_elimination";
   const isDESwissSE         = format?.preset === "de_swiss_single_elimination";
-  const hasGroupStage       = isGroupSE || isGroupSwissSE || isGroupSwissHybrid || isGroupSwissHybrid8;
-  const hasSwissStage       = isGroupSwissSE || isSESwissSE || isDESwissSE || isGroupSwissHybrid || isGroupSwissHybrid8;
+  const hasGroupStage       = isGroupSE || isGroupSwissSE || isGroupSwissDE || isGroupSwissHybrid || isGroupSwissHybrid8;
+  const hasSwissStage       = isGroupSwissSE || isGroupSwissDE || isSESwissSE || isDESwissSE || isGroupSwissHybrid || isGroupSwissHybrid8;
 
   let groupsComplete     = false;
   let seExists           = false;
+  let deExists           = false;
   let qualifiersPerGroup = 2;
 
   let swissExists        = false;
@@ -107,6 +109,7 @@ export default async function SeasonPage() {
       seqRes,
       deqRes,
       swissRes,
+      deRes,
     ] = await Promise.all([
       supabaseAdmin.from("teams").select("id, name, logo_url"),
       supabaseAdmin
@@ -172,9 +175,15 @@ export default async function SeasonPage() {
             .eq("stage", SWISS_STAGE)
             .not("home_team_id", "is", null)
         : Promise.resolve({ data: null }),
+      isGroupSwissDE
+        ? supabaseAdmin
+            .from("matches").select("*", { count: "exact", head: true })
+            .eq("stage", DE_WINNERS).not("home_team_id", "is", null)
+        : Promise.resolve({ count: 0 }),
     ]);
 
     seExists = (seCount ?? 0) > 0;
+    deExists = (deRes.count ?? 0) > 0;
     hybridExists = hybridRes.exists;
     hybridDone = hybridRes.done;
     hybrid8Exists = hybrid8Res.exists;
@@ -284,7 +293,7 @@ export default async function SeasonPage() {
       });
     }
 
-    if (format?.preset === "double_elimination") {
+    if (format?.preset === "double_elimination" || (isGroupSwissDE && deExists)) {
       tabs.push({
         key: "bracket",
         label: "Bracket",
@@ -311,8 +320,9 @@ export default async function SeasonPage() {
               <div className="flex justify-end">
                 <SimulateControls
                   testingMode={testingMode}
-                  showNextSwissRound={swissRoundComplete && !swissDone && !seExists && !hybridExists && !hybrid8Exists}
-                  showSwissToSE={swissDone && !seExists && !isGroupSwissHybrid && !isGroupSwissHybrid8}
+                  showNextSwissRound={swissRoundComplete && !swissDone && !seExists && !deExists && !hybridExists && !hybrid8Exists}
+                  showSwissToSE={swissDone && !seExists && !isGroupSwissDE && !isGroupSwissHybrid && !isGroupSwissHybrid8}
+                  showSwissToDE={isGroupSwissDE && swissDone && !deExists}
                   showSwissToHybrid={isGroupSwissHybrid && swissDone && !hybridExists}
                   showSwissToHybrid8={isGroupSwissHybrid8 && swissDone && !hybrid8Exists}
                 />
@@ -403,7 +413,7 @@ export default async function SeasonPage() {
                 <SimulateControls
                   testingMode={testingMode}
                   showAdvanceToSE={isGroupSE && groupsComplete && !seExists}
-                  showAdvanceToSwiss={isGroupSwissSE && groupsComplete && !swissExists}
+                  showAdvanceToSwiss={(isGroupSwissSE || isGroupSwissDE) && groupsComplete && !swissExists}
                   showAdvanceToSwissHybrid={isGroupSwissHybrid && groupsComplete && !swissExists}
                   showAdvanceToSwissHybrid8={isGroupSwissHybrid8 && groupsComplete && !swissExists}
                 />

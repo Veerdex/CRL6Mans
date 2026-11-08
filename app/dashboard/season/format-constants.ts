@@ -19,6 +19,7 @@ export type PresetId =
   | "double_elimination"
   | "group_single_elimination"
   | "group_swiss_single_elimination"
+  | "group_swiss_double_elimination"
   | "group_swiss_hybrid"
   | "group_swiss_hybrid_8"
   | "se_swiss_single_elimination"
@@ -90,6 +91,14 @@ export const PRESETS: PresetDef[] = [
     minTeams: 32,
     maxTeams: 64,
     description: "Groups narrow to 16 → Swiss (16→8) → SE finals.",
+  },
+  {
+    id: "group_swiss_double_elimination",
+    name: "Group → Swiss → DE",
+    stageTypes: ["group", "swiss", "double_elimination"],
+    minTeams: 24,
+    maxTeams: 64,
+    description: "Groups narrow to 16 → Swiss (16→8) → 8-team DE finals.",
   },
   {
     id: "group_swiss_hybrid",
@@ -248,6 +257,20 @@ export const STAGE_SLOTS_BY_PRESET: Record<PresetId, StageSlotDef[]> = {
     { key: "group", label: "Group Stage", kind: "flat" },
     { key: "swiss", label: "Swiss Stage", kind: "flat" },
     { key: "single_elimination", label: "Single Elimination Finals", kind: "tiered" },
+  ],
+  group_swiss_double_elimination: [
+    { key: "group", label: "Group Stage", kind: "flat" },
+    { key: "swiss", label: "Swiss Stage", kind: "flat" },
+    {
+      key: "double_elimination",
+      label: "Double Elimination Finals",
+      kind: "tiered",
+      subSlots: [
+        { key: "de_winners", label: "Winners Bracket" },
+        { key: "de_losers", label: "Losers Bracket" },
+        { key: "de_grand_final", label: "Grand Final", kind: "flat" },
+      ],
+    },
   ],
   group_swiss_hybrid: [
     { key: "group", label: "Group Stage", kind: "flat" },
@@ -478,6 +501,14 @@ export function computeStageSchedule(
 
     case "group_swiss_single_elimination":
       return [groups, swiss, se8];
+
+    case "group_swiss_double_elimination":
+      return [groups, swiss, { key: "bracket", label: "Bracket", estimatedMinutes: deDuration(
+        8,
+        slotTiers(config, "de_winners"),
+        slotTiers(config, "de_losers"),
+        slotFlatBO(config, "de_grand_final"),
+      ) }];
 
     case "group_swiss_hybrid":
       // 5 wall-clock rounds: (UB QF ‖ LB R1), LB R2, LB QF, SF, GF — mapped to

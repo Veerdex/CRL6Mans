@@ -3,7 +3,7 @@ import { supabaseAdmin } from "./supabase";
 import { decisionRatingFromRow, initialTeamRating } from "./rating";
 import { attachForfeits } from "./forfeits";
 import {
-  generateSEMatchInserts, generateDEMatchInserts, generateSEPlaceholderInserts,
+  generateSEMatchInserts, generateDEMatchInserts, generateSEPlaceholderInserts, generateDEPlaceholderInserts,
   DE_WINNERS, DE_LOSERS, wbLoserTarget,
   nextPow2, getSeedOrder,
   getNumGroups, getGroupStage, parseGroupNum,
@@ -219,6 +219,7 @@ function avoidR1Rematches(
 const PRESET_MAX_TEAMS: Record<string, number> = {
   group_single_elimination: 64,
   group_swiss_single_elimination: 64,
+  group_swiss_double_elimination: 64,
   group_swiss_hybrid: 32,
   group_swiss_hybrid_8: 32,
 };
@@ -317,11 +318,14 @@ function downstreamPlaceholdersForGroupFormat(
     const qualifiersPerGroup = Math.max(1, Math.round(totalAdv / numGroups));
     return generateSEPlaceholderInserts(qualifiersPerGroup * numGroups, "single_elimination");
   }
-  if (preset === "group_swiss_single_elimination") {
+  if (preset === "group_swiss_single_elimination" || preset === "group_swiss_double_elimination") {
     const swissN = Math.floor(16 / numGroups) * numGroups;
     const roundSizes = computeSwissRoundSizes(swissN, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
     const swissInserts = roundSizes.flatMap((count, i) => generateSwissPlaceholderInserts(i + 1, count));
-    return [...swissInserts, ...generateSEPlaceholderInserts(8, "single_elimination")];
+    const finals = preset === "group_swiss_double_elimination"
+      ? generateDEPlaceholderInserts(8)
+      : generateSEPlaceholderInserts(8, "single_elimination");
+    return [...swissInserts, ...finals];
   }
   if (preset === "group_swiss_hybrid") {
     const roundSizes = computeSwissRoundSizes(16, SWISS_ADVANCE_WINS, SWISS_ELIMINATE_LOSSES);
@@ -433,8 +437,8 @@ export async function buildAndSaveSwissFromGroups(): Promise<{ error?: string; o
   const { data: settings } = await supabaseAdmin
     .from("league_settings").select("season_format, num_teams").single();
   const format = settings?.season_format as SeasonFormatConfig | null;
-  if (!format || format.preset !== "group_swiss_single_elimination")
-    return { error: "Format is not Group → Swiss → SE." };
+  if (!format || (format.preset !== "group_swiss_single_elimination" && format.preset !== "group_swiss_double_elimination"))
+    return { error: "Format is not Group → Swiss → SE or DE." };
 
   const n = (settings?.num_teams as number) ?? 0;
   if (!n) return { error: "No teams in league_settings." };
@@ -532,8 +536,8 @@ export async function buildAndSaveNextSwissRound(): Promise<{ error?: string; ok
   return { ok: true };
 }
 
-// Build SE bracket from the 8 Swiss qualifiers.
-export async function buildAndSaveSEFromSwiss(): Promise<{ error?: string; ok?: boolean }> {
+// Seeded Swiss qualifiers, with seeds swapped to avoid an R1 rematch from Swiss.
+async function seededSwissQualifiers(): Promise<{ error: string } | { qualified: { id: string }[] }> {
   const { data: swissMatches } = await supabaseAdmin
     .from("matches")
     .select("home_team_id, away_team_id, home_score, away_score, status")
@@ -549,12 +553,37 @@ export async function buildAndSaveSEFromSwiss(): Promise<{ error?: string; ok?: 
   ))];
   const dqIds = await getDisqualifiedTeamIds();
   const records = computeSwissRecords(swissMatches, teamIds).filter(r => !dqIds.has(r.teamId));
-  const seeded = seedSwissQualifiers(records);
-  if (seeded.length < 2) return { error: "Not enough Swiss qualifiers." };
+  return { qualified: avoidR1Rematches(seedSwissQualifiers(records), buildPlayedSet(swissMatches)) };
+}
 
-  // Swap seeds to avoid R1 SE rematches from Swiss without breaking bracket structure.
-  const swissPlayedPairs = buildPlayedSet(swissMatches);
-  const qualified = avoidR1Rematches(seeded, swissPlayedPairs);
+// Build the 8-team DE finals from the Swiss qualifiers (group → swiss → DE format).
+// Exactly 8 or nothing: the skeleton was pre-created bye-free at group-build time,
+// and a bracket with byes would need LB ghosting the backfill can't express.
+export async function buildAndSaveDEFromSwiss(): Promise<{ error?: string; ok?: boolean }> {
+  const { data: settings } = await supabaseAdmin.from("league_settings").select("season_format").single();
+  if ((settings?.season_format as { preset?: string } | null)?.preset !== "group_swiss_double_elimination")
+    return { error: "Format is not Group → Swiss → DE." };
+
+  const res = await seededSwissQualifiers();
+  if ("error" in res) return res;
+  if (res.qualified.length !== 8)
+    return { error: `The DE finals need 8 Swiss qualifiers, but ${res.qualified.length} qualified (a disqualification can cause this).` };
+
+  const deInserts = generateDEMatchInserts(res.qualified);
+  const { error } = await saveRoundOne(
+    DE_WINNERS,
+    deInserts.filter(m => m.stage === DE_WINNERS && m.round === 1),
+    deInserts.filter(m => !(m.stage === DE_WINNERS && m.round === 1)),
+  );
+  return error ? { error } : { ok: true };
+}
+
+// Build SE bracket from the 8 Swiss qualifiers.
+export async function buildAndSaveSEFromSwiss(): Promise<{ error?: string; ok?: boolean }> {
+  const res = await seededSwissQualifiers();
+  if ("error" in res) return res;
+  const { qualified } = res;
+  if (qualified.length < 2) return { error: "Not enough Swiss qualifiers." };
 
   const seInserts = generateSEMatchInserts(qualified);
   const { error: insertError } = await saveRoundOne(
@@ -957,7 +986,7 @@ export async function buildAndSaveBracket(): Promise<{ error?: string; ok?: bool
   }
 
   const isDE            = format?.preset === "double_elimination";
-  const isGroup         = format?.preset === "group_single_elimination" || format?.preset === "group_swiss_single_elimination" || format?.preset === "group_swiss_hybrid" || format?.preset === "group_swiss_hybrid_8";
+  const isGroup         = format?.preset === "group_single_elimination" || format?.preset === "group_swiss_single_elimination" || format?.preset === "group_swiss_double_elimination" || format?.preset === "group_swiss_hybrid" || format?.preset === "group_swiss_hybrid_8";
   const isSESwissSE     = format?.preset === "se_swiss_single_elimination";
   const isDESwissSE     = format?.preset === "de_swiss_single_elimination";
 

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { simulateMatch, simulateRound } from "./simulate-actions";
-import { advanceGroupsToSE, advanceGroupsToSwiss, advanceGroupsToSwissHybrid, advanceGroupsToSwissHybrid8, advanceSEQualifierToSwiss, advanceDEQualifierToSwiss, advanceSwissRound, advanceSwissToSE, advanceSwissToHybrid, advanceSwissToHybrid8 } from "./actions";
+import { advanceGroupsToSE, advanceGroupsToSwiss, advanceGroupsToSwissHybrid, advanceGroupsToSwissHybrid8, advanceSEQualifierToSwiss, advanceDEQualifierToSwiss, advanceSwissRound, advanceSwissToSE, advanceSwissToDE, advanceSwissToHybrid, advanceSwissToHybrid8 } from "./actions";
 
 interface SimulateControlsProps {
   testingMode?: boolean;
@@ -13,6 +13,7 @@ interface SimulateControlsProps {
   showAdvanceDEToSwiss?: boolean;
   showNextSwissRound?: boolean;
   showSwissToSE?: boolean;
+  showSwissToDE?: boolean;
   showSwissToHybrid?: boolean;
   showAdvanceToSwissHybrid8?: boolean;
   showSwissToHybrid8?: boolean;
@@ -28,6 +29,7 @@ export function SimulateControls({
   showAdvanceDEToSwiss = false,
   showNextSwissRound = false,
   showSwissToSE = false,
+  showSwissToDE = false,
   showSwissToHybrid = false,
   showSwissToHybrid8 = false,
 }: SimulateControlsProps) {
@@ -45,7 +47,7 @@ export function SimulateControls({
     });
   }
 
-  const hasAnything = testingMode || showAdvanceToSE || showAdvanceToSwiss || showAdvanceToSwissHybrid || showAdvanceToSwissHybrid8 || showAdvanceSEToSwiss || showAdvanceDEToSwiss || showNextSwissRound || showSwissToSE || showSwissToHybrid || showSwissToHybrid8;
+  const hasAnything = testingMode || showAdvanceToSE || showAdvanceToSwiss || showAdvanceToSwissHybrid || showAdvanceToSwissHybrid8 || showAdvanceSEToSwiss || showAdvanceDEToSwiss || showNextSwissRound || showSwissToSE || showSwissToDE || showSwissToHybrid || showSwissToHybrid8;
   if (!hasAnything) return null;
 
   return (
@@ -139,6 +141,15 @@ export function SimulateControls({
           className="px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
         >
           Advance to SE →
+        </button>
+      )}
+      {showSwissToDE && (
+        <button
+          onClick={() => run(advanceSwissToDE, "DE bracket generated!")}
+          disabled={isPending}
+          className="px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+        >
+          Advance to DE →
         </button>
       )}
       {showSwissToHybrid && (

@@ -13,6 +13,7 @@ import {
   buildAndSaveSwissFromGroups,
   buildAndSaveNextSwissRound,
   buildAndSaveSEFromSwiss,
+  buildAndSaveDEFromSwiss,
   buildAndSaveSwissFromSEQualifier,
   buildAndSaveSwissFromDEQualifier,
   buildAndSaveSwissFromGroupsHybrid,
@@ -132,6 +133,7 @@ export async function advanceGroupsToSwiss() { return runStageAdvance(buildAndSa
 export async function advanceSwissRound() { return runStageAdvance(buildAndSaveNextSwissRound); }
 export async function advanceSEQualifierToSwiss() { return runStageAdvance(buildAndSaveSwissFromSEQualifier); }
 export async function advanceSwissToSE() { return runStageAdvance(buildAndSaveSEFromSwiss); }
+export async function advanceSwissToDE() { return runStageAdvance(buildAndSaveDEFromSwiss); }
 export async function advanceDEQualifierToSwiss() { return runStageAdvance(buildAndSaveSwissFromDEQualifier); }
 export async function advanceGroupsToSwissHybrid() { return runStageAdvance(buildAndSaveSwissFromGroupsHybrid); }
 export async function advanceSwissToHybrid() { return runStageAdvance(buildAndSaveHybridFromSwiss); }

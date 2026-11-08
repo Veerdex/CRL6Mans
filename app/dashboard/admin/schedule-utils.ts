@@ -58,11 +58,13 @@ function seRounds(start: number, end: number): number {
 const PRESET_MIN_TEAMS: Record<string, number> = {
   single_elimination: 4, double_elimination: 4,
   group_single_elimination: 8, group_swiss_single_elimination: 32,
+  group_swiss_double_elimination: 24,
   group_swiss_hybrid: 24, group_swiss_hybrid_8: 16,
   se_swiss_single_elimination: 32, de_swiss_single_elimination: 32,
 };
 const PRESET_MAX_TEAMS: Record<string, number> = {
   group_single_elimination: 64, group_swiss_single_elimination: 64,
+  group_swiss_double_elimination: 64,
   group_swiss_hybrid: 32, group_swiss_hybrid_8: 32,
 };
 
@@ -100,6 +102,14 @@ export function expectedStageRounds(
         { stage: "group", rounds: groupRounds(t, ng) },
         { stage: "swiss", rounds: 5 },
         { stage: "single_elimination", rounds: 3 },
+      ];
+    case "group_swiss_double_elimination":
+      return [
+        { stage: "group", rounds: groupRounds(t, ng) },
+        { stage: "swiss", rounds: 5 },
+        { stage: "de_winners", rounds: 3 },
+        { stage: "de_losers", rounds: 4 },
+        { stage: "de_grand_final", rounds: 1 },
       ];
     case "group_swiss_hybrid":
       return [

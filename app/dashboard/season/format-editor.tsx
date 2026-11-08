@@ -180,6 +180,22 @@ function computeStageInfos(
       ];
     }
 
+    case "group_swiss_double_elimination": {
+      const ng = getNumGroups(teams);
+      const perGroup = Math.floor(16 / ng);
+      return [
+        {
+          type: "group",
+          label: "Group Stage",
+          start: teams,
+          end: 16,
+          detail: `${ng} groups · ${perGroup} advance each`,
+        },
+        { type: "swiss", label: "Swiss", start: 16, end: 8 },
+        { type: "double_elimination", label: "Double Elimination", start: 8, end: 1 },
+      ];
+    }
+
     case "group_swiss_hybrid": {
       const ng = getNumGroups(teams);
       return [
@@ -374,8 +390,8 @@ export function FormatEditor({
 
   const selectedPreset = PRESETS.find((p) => p.id === selected);
   const hasGroupStage =
-    selected === "group_single_elimination" || selected === "group_swiss_single_elimination" || selected === "group_swiss_hybrid" || selected === "group_swiss_hybrid_8";
-  const groupAdvancingFixed = selected === "group_swiss_single_elimination" || selected === "group_swiss_hybrid" || selected === "group_swiss_hybrid_8";
+    selected === "group_single_elimination" || selected === "group_swiss_single_elimination" || selected === "group_swiss_double_elimination" || selected === "group_swiss_hybrid" || selected === "group_swiss_hybrid_8";
+  const groupAdvancingFixed = selected === "group_swiss_single_elimination" || selected === "group_swiss_double_elimination" || selected === "group_swiss_hybrid" || selected === "group_swiss_hybrid_8";
 
   const numGroups = getNumGroups(previewTeams);
   const parsed = maxAdvancingInput.trim() === "" ? null : parseInt(maxAdvancingInput, 10);

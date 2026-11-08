@@ -638,6 +638,15 @@ export function generateDEMatchInserts(teams: { id: string }[]): BracketMatchIns
   return out;
 }
 
+// The empty skeleton of an n-team DE, for a DE whose entrants aren't known yet.
+// Only meaningful for a power of two: with byes the real build would complete
+// rows this leaves pending.
+export function generateDEPlaceholderInserts(n: number): BracketMatchInsert[] {
+  return generateDEMatchInserts(Array.from({ length: n }, () => ({ id: "" }))).map(m => ({
+    ...m, home_team_id: null, away_team_id: null, home_score: null, away_score: null, status: "pending",
+  }));
+}
+
 // Sequential letter label for a match (A, B, C... across all rounds).
 // For SE / WB — each round halves the match count.
 export function getMatchLabel(round: number, matchNum: number, numR1Matches: number): string {

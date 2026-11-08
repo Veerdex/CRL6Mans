@@ -41,6 +41,6 @@ export function stageShortLabel(presetId: PresetId, slotKey: StageSlotKey): stri
         ? "Single Elimination"
         : "SE";
     case "double_elimination":
-      return "Double Elimination";
+      return presetId === "double_elimination" ? "Double Elimination" : "DE";
   }
 }

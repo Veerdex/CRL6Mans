@@ -46,12 +46,13 @@ function buildTabs(archive: TournamentArchive): SeasonTab[] {
 
   const isGroupSE           = format === "group_single_elimination";
   const isGroupSwissSE      = format === "group_swiss_single_elimination";
+  const isGroupSwissDE      = format === "group_swiss_double_elimination";
   const isGroupSwissHybrid  = format === "group_swiss_hybrid";
   const isGroupSwissHybrid8 = format === "group_swiss_hybrid_8";
   const isSESwissSE         = format === "se_swiss_single_elimination";
   const isDESwissSE         = format === "de_swiss_single_elimination";
-  const hasGroupStage       = isGroupSE || isGroupSwissSE || isGroupSwissHybrid || isGroupSwissHybrid8;
-  const hasSwissStage       = isGroupSwissSE || isSESwissSE || isDESwissSE || isGroupSwissHybrid || isGroupSwissHybrid8;
+  const hasGroupStage       = isGroupSE || isGroupSwissSE || isGroupSwissDE || isGroupSwissHybrid || isGroupSwissHybrid8;
+  const hasSwissStage       = isGroupSwissSE || isGroupSwissDE || isSESwissSE || isDESwissSE || isGroupSwissHybrid || isGroupSwissHybrid8;
 
   const seMatches      = matches.filter((m) => m.stage === "single_elimination");
   const deMatches       = matches.filter((m) => m.stage === DE_WINNERS || m.stage === DE_LOSERS || m.stage === DE_GF);
@@ -95,7 +96,7 @@ function buildTabs(archive: TournamentArchive): SeasonTab[] {
     });
   }
 
-  if (format === "double_elimination" && deMatches.length > 0) {
+  if ((format === "double_elimination" || isGroupSwissDE) && deMatches.some((m) => m.homeTeamId)) {
     tabs.push({
       key: "bracket",
       label: "Bracket",

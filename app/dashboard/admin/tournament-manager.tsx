@@ -60,7 +60,8 @@ const PRESETS: { id: string; name: string }[] = [
   { id: "double_elimination",             name: "Double Elimination" },
   { id: "group_single_elimination",       name: "Group → Single Elimination" },
   { id: "group_swiss_single_elimination", name: "Group → Swiss → SE" },
-  { id: "group_swiss_hybrid",             name: "Group → Swiss → Hybrid(12)" },
+  { id: "group_swiss_double_elimination", name: "Group → Swiss → DE" },
+  { id: "group_swiss_hybrid",            name: "Group → Swiss → Hybrid(12)" },
   { id: "group_swiss_hybrid_8",           name: "Group → Swiss → Hybrid(8)" },
   { id: "se_swiss_single_elimination",    name: "SE Qualifier → Swiss → SE" },
   { id: "de_swiss_single_elimination",    name: "DE Qualifier → Swiss → SE" },
@@ -71,7 +72,8 @@ const FORMAT_TEAM_DEFAULTS: Record<string, { min: string }> = {
   double_elimination:             { min: "4" },
   group_single_elimination:       { min: "8" },
   group_swiss_single_elimination: { min: "32" },
-  group_swiss_hybrid:             { min: "24" },
+  group_swiss_double_elimination: { min: "24" },
+  group_swiss_hybrid:            { min: "24" },
   group_swiss_hybrid_8:           { min: "16" },
   se_swiss_single_elimination:    { min: "32" },
   de_swiss_single_elimination:    { min: "32" },
@@ -291,11 +293,13 @@ export function TournamentManager({
   const hasGroupStage = [
     "group_single_elimination",
     "group_swiss_single_elimination",
+    "group_swiss_double_elimination",
     "group_swiss_hybrid",
     "group_swiss_hybrid_8",
   ].includes(form.preset);
   const groupAdvancingFixed = [
     "group_swiss_single_elimination",
+    "group_swiss_double_elimination",
     "group_swiss_hybrid",
     "group_swiss_hybrid_8",
   ].includes(form.preset);

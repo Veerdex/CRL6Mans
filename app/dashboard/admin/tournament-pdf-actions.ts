@@ -47,6 +47,7 @@ const PRESET_NAMES: Record<string, string> = {
   double_elimination: "Double Elimination",
   group_single_elimination: "Group → Single Elimination",
   group_swiss_single_elimination: "Group → Swiss → SE",
+  group_swiss_double_elimination: "Group → Swiss → DE",
   se_swiss_single_elimination: "SE Qualifier → Swiss → SE",
   de_swiss_single_elimination: "DE Qualifier → Swiss → SE",
 };

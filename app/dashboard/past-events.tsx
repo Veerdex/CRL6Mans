@@ -3,6 +3,7 @@ const PRESET_LABELS: Record<string, string> = {
   double_elimination: "Double Elimination",
   group_single_elimination: "Group → Single Elimination",
   group_swiss_single_elimination: "Group → Swiss → SE",
+  group_swiss_double_elimination: "Group → Swiss → DE",
   group_swiss_hybrid: "Group → Swiss → Hybrid(12)",
   group_swiss_hybrid_8: "Group → Swiss → Hybrid(8)",
   se_swiss_single_elimination: "SE Qualifier → Swiss → SE",
