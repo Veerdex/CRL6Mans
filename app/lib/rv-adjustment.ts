@@ -79,18 +79,27 @@ export function applySeriesResult(
   };
 }
 
+// How fast a ranked move stops passing through as the adjustment grows: at a
+// gap of ABSORB_SCALE RV a move toward the adjusted rating passes ~1/e through.
+export const ABSORB_SCALE = 100;
+
 /**
  * The adjustment left after a player's MMR rating moves from `oldMmrRv` to
- * `newMmrRv`. A move in the adjustment's own direction is the ranked ladder
- * confirming what the stats already said, so it uses the adjustment up rather
- * than stacking on it; a move the other way leaves it alone. Re-saving the same
- * values therefore changes nothing, and no edit can wipe a negative adjustment.
+ * `newMmrRv`. A move toward the adjusted rating is the ladder confirming what
+ * the stats already said, so each RV of it passes through at e^(-gap/ABSORB_SCALE),
+ * the gap being the adjustment at that instant: 1:1 with no adjustment, barely
+ * at all with a large one. That is integrated over the move, so one edit and
+ * the same edit split in two land in the same place, and the gap shrinks toward
+ * zero without crossing it. A move away from the adjusted rating passes through
+ * 1:1 and leaves the adjustment alone — damping it too would floor a player
+ * whose ladder rank collapses, and cap one whose early stats undersold them.
  */
 export function absorbMmrChange(adjustment: number, oldMmrRv: number, newMmrRv: number): number {
   const delta = newMmrRv - oldMmrRv;
   if (adjustment === 0 || delta === 0 || Math.sign(delta) !== Math.sign(adjustment)) return adjustment;
-  const used = Math.min(Math.abs(delta), Math.abs(adjustment));
-  return adjustment - Math.sign(adjustment) * used;
+  const gap = Math.abs(adjustment) / ABSORB_SCALE;
+  const left = ABSORB_SCALE * Math.log1p(Math.expm1(gap) * Math.exp(-Math.abs(delta) / ABSORB_SCALE));
+  return Math.sign(adjustment) * left;
 }
 
 /**

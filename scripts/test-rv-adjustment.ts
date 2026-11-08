@@ -49,19 +49,37 @@ test("a series the player sat out changes nothing", () => {
   assert.deepEqual(r, { adjustment: 12, seriesPlayed: 2, delta: 0 });
 });
 
-test("an MMR rise in the adjustment's direction uses it up first", () => {
-  assert.equal(absorbMmrChange(70, 1753, 1790), 33);
-  assert.equal(absorbMmrChange(70, 1753, 1850), 0);
+const shown = (adj: number, from: number, to: number) => to + absorbMmrChange(adj, from, to) - (from + adj);
+
+test("with no adjustment an MMR move passes through 1:1", () => {
+  assert.equal(shown(0, 1500, 1600), 100);
+  assert.equal(shown(0, 1500, 1400), -100);
 });
 
-test("an MMR move against the adjustment leaves it alone", () => {
+test("a rise toward the adjusted rating passes through less the bigger the gap", () => {
+  close(shown(20, 1500, 1600), 87.8, 0.05);
+  close(shown(100, 1500, 1600), 49.0, 0.05);
+  close(shown(500, 1500, 1600), 1.2, 0.05);
+  close(shown(-100, 1600, 1500), -49.0, 0.05);
+});
+
+test("one edit and the same edit in two steps land in the same place", () => {
+  const twoSteps = absorbMmrChange(absorbMmrChange(100, 1500, 1550), 1550, 1600);
+  close(twoSteps, absorbMmrChange(100, 1500, 1600), 1e-9);
+});
+
+test("the adjustment shrinks toward zero without crossing it", () => {
+  const left = absorbMmrChange(70, 1753, 2753);
+  assert.ok(left > 0 && left < 0.01);
+});
+
+test("an MMR move away from the adjusted rating passes through 1:1", () => {
   assert.equal(absorbMmrChange(70, 1753, 1720), 70);
   assert.equal(absorbMmrChange(-40, 1753, 1800), -40);
 });
 
-test("re-saving the same MMR cannot wipe a negative adjustment", () => {
+test("re-saving the same MMR changes nothing", () => {
   assert.equal(absorbMmrChange(-40, 1753, 1753), -40);
-  assert.equal(absorbMmrChange(-40, 1753, 1700), 0);
 });
 
 test("the displayed rating is MMR rating plus the adjustment", () => {
@@ -76,7 +94,7 @@ test("an MMR edit is measured on the MMR rating, not the adjusted one", () => {
   const raised = { ...M3L0DY_ROW, peak_3v3: "1935", current_3v3: "1751" };
   const rise = mmrRatingFromRow(raised) - mmrRatingFromRow(M3L0DY_ROW);
   assert.ok(rise > 0 && rise < 100);
-  close(adjustmentAfterMmrEdit(before, raised), 100 - rise, 1e-9);
+  close(adjustmentAfterMmrEdit(before, raised), absorbMmrChange(100, 0, rise), 1e-9);
   assert.equal(adjustmentAfterMmrEdit(before, M3L0DY_ROW), 100);
 });
 
