@@ -14,7 +14,7 @@ export function LeagueTabs({ leagueId }: { leagueId: string }) {
   const pathname = usePathname();
   const base = `/dashboard/fantasy/${leagueId}`;
   return (
-    <nav aria-label="League sections" className="grid grid-cols-4 border-b border-zinc-700 bg-zinc-800">
+    <nav aria-label="League sections" className="sticky top-0 z-10 grid grid-cols-4 border-b border-zinc-700 bg-zinc-800">
       {TABS.map(({ segment, label }, i) => {
         const href = segment ? `${base}/${segment}` : base;
         const active = segment ? pathname.startsWith(href) : pathname === base;
