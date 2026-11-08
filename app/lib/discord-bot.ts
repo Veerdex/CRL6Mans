@@ -1702,9 +1702,10 @@ async function completePick(s: PickSettings, teamId: string, playerId: string, v
   const teamSize = normalizeTeamSize(s.team_size);
   const totalPicks = totalDraftPicks(s.num_teams, teamSize);
 
-  const [{ data: player }, { data: team }] = await Promise.all([
+  const [{ data: player }, { data: team }, { data: captain }] = await Promise.all([
     supabaseAdmin.from("players").select("id, username, discord_id").eq("id", playerId).single(),
     supabaseAdmin.from("teams").select("id, name, discord_role_id").eq("id", teamId).single(),
+    supabaseAdmin.from("players").select("username").eq("team_id", teamId).eq("is_captain", true).maybeSingle(),
   ]);
   if (!player || !team) return { ok: false, message: "❌ Could not find player or team." };
 
@@ -1743,7 +1744,7 @@ async function completePick(s: PickSettings, teamId: string, playerId: string, v
 
   if (s.draft_channel_id) {
     const result = pickEmbed({
-      teamName: team.name, playerName: player.username,
+      teamName: team.name, captainName: captain?.username, playerName: player.username,
       pickNumber: newPick, totalPicks, auto: viaAutoPick,
     });
 

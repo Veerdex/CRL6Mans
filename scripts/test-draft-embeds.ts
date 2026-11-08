@@ -117,6 +117,15 @@ test("a timed-out pick still reads as a pick, just an amber one", () => {
   assert.match(auto.title!, /ran out of time/);
 });
 
+test("a pick names the captain who made it, falling back to the team", () => {
+  const withCaptain = pickEmbed({ teamName: "Team 28", captainName: "Veerdex", playerName: "Aerose.", pickNumber: 5, totalPicks: 64, auto: true });
+  assert.equal(withCaptain.title, "⏰ Veerdex ran out of time — auto-picked Aerose.");
+  const manual = pickEmbed({ teamName: "Team 28", captainName: "Veerdex", playerName: "Aerose.", pickNumber: 5, totalPicks: 64 });
+  assert.equal(manual.title, "✅ Veerdex picks Aerose.");
+  const noCaptain = pickEmbed({ teamName: "Team 28", captainName: null, playerName: "Aerose.", pickNumber: 5, totalPicks: 64 });
+  assert.equal(noCaptain.title, "✅ Team 28 picks Aerose.");
+});
+
 test("the start embed reports the undrafted overflow only when there is some", () => {
   const withOverflow = draftStartEmbed({ teamSize: 3, numTeams: 4, entered: 14, undrafted: 2, captains: seats(4) });
   assert.match(withOverflow.description!, /2 not drafted/);
