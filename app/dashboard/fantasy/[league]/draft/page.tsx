@@ -169,7 +169,32 @@ function DraftBoard({
       <header className="px-4 py-3 border-b border-zinc-700">
         <h2 className="text-sm font-semibold text-white">Draft board</h2>
       </header>
-      <div className="overflow-x-auto">
+      {/* A phone can't fit a column per manager, so each manager becomes a card instead. */}
+      <ol className="sm:hidden divide-y divide-zinc-700/60">
+        {order.map((id, c) => {
+          const m = memberById.get(id);
+          return (
+            <li key={id} className="px-3 py-2.5">
+              <div className={`flex items-center gap-1.5 mb-1.5 text-xs font-medium ${id === viewerId ? "text-indigo-300" : "text-zinc-300"}`}>
+                {m && <Avatar member={m} size="w-5 h-5" />}
+                <span className="truncate">{id === viewerId ? "You" : m?.name ?? "Unknown"}</span>
+              </div>
+              <ol className="space-y-1 text-xs">
+                {rows.map((cells, r) => (
+                  <li
+                    key={r}
+                    className={`flex items-center gap-2 rounded px-1.5 py-1 ${cells[c] === currentPick ? "bg-indigo-500/15 ring-1 ring-inset ring-indigo-500/60" : ""}`}
+                  >
+                    <span className="w-8 shrink-0 text-zinc-500 tabular-nums">Rd {r + 1}</span>
+                    <PickCell pick={byPick.get(cells[c])} pickNo={cells[c]} current={cells[c] === currentPick} playerById={playerById} />
+                  </li>
+                ))}
+              </ol>
+            </li>
+          );
+        })}
+      </ol>
+      <div className="hidden sm:block overflow-x-auto">
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr className="text-zinc-400">
@@ -192,23 +217,13 @@ function DraftBoard({
               <tr key={r} className="border-t border-zinc-700/60">
                 <td className="px-2 py-1.5 text-zinc-500 tabular-nums">{r + 1}</td>
                 {cells.map((pickNo, c) => {
-                  const pick = byPick.get(pickNo);
-                  const player = pick ? playerById.get(pick.player_id) : undefined;
                   const current = pickNo === currentPick;
                   return (
                     <td
                       key={c}
                       className={`px-2 py-1.5 align-top border-l border-zinc-700/60 ${current ? "bg-indigo-500/15 ring-1 ring-inset ring-indigo-500/60" : ""}`}
                     >
-                      {pick ? (
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          {player && <TierBadge tier={player.tier} />}
-                          <span className="truncate text-zinc-100">{player?.name ?? "Unknown"}</span>
-                          {pick.auto && <span className="text-[10px] text-amber-400" title="Autopicked">auto</span>}
-                        </span>
-                      ) : (
-                        <span className="text-zinc-600 tabular-nums">{current ? "On the clock" : `#${pickNo + 1}`}</span>
-                      )}
+                      <PickCell pick={byPick.get(pickNo)} pickNo={pickNo} current={current} playerById={playerById} />
                     </td>
                   );
                 })}
@@ -218,6 +233,28 @@ function DraftBoard({
         </table>
       </div>
     </section>
+  );
+}
+
+function PickCell({
+  pick,
+  pickNo,
+  current,
+  playerById,
+}: {
+  pick: { player_id: string; auto: boolean } | undefined;
+  pickNo: number;
+  current: boolean;
+  playerById: Map<string, PoolPlayer>;
+}) {
+  if (!pick) return <span className="text-zinc-600 tabular-nums">{current ? "On the clock" : `#${pickNo + 1}`}</span>;
+  const player = playerById.get(pick.player_id);
+  return (
+    <span className="flex items-center gap-1.5 min-w-0">
+      {player && <TierBadge tier={player.tier} />}
+      <span className="truncate text-zinc-100">{player?.name ?? "Unknown"}</span>
+      {pick.auto && <span className="text-[10px] text-amber-400" title="Autopicked">auto</span>}
+    </span>
   );
 }
 
