@@ -345,8 +345,9 @@ Modelled on fantasy football so it's familiar:
 
 ## 14. Implementation notes
 
-- **Missing data:** record each player's real draft round (captain / round 1 / round 2) at
-  pick time.
+- **Real draft round:** `players.draft_round` (0 = captain, 1, 2), written by `execStartDraft`
+  and `completePick` (`scripts/draft-round-migration.sql`). Auto-balance has no rounds, so only
+  its captains get one; everyone else there tiers by the rating thirds.
 - **Points are derived, not stored** — from `player_game_stats` (per player, per game) plus
   `matches` (round, score, series length). The same discipline as `app/lib/career-points.ts`.
   The scoring formula should live in a pure leaf module with tests.

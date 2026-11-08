@@ -66,6 +66,12 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
               {isInvited && <DeclineInviteButton leagueId={league.id} />}
             </div>
           )}
+          <Link
+            href={`/dashboard/fantasy/${league.id}/players`}
+            className="inline-flex items-center min-h-10 rounded-lg bg-zinc-800 border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+          >
+            Player Pool
+          </Link>
         </div>
       </div>
 

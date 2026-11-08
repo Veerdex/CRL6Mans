@@ -17,6 +17,14 @@ export function totalDraftPicks(numTeams: number, teamSize: number): number {
   return numTeams * (teamSize - 1);
 }
 
+/** players.draft_round for a captain, seated before pick 0. */
+export const CAPTAIN_DRAFT_ROUND = 0;
+
+/** The 1-based pick round a 0-based pick index falls in. */
+export function draftRoundForPick(pickIndex: number, numTeams: number): number {
+  return Math.floor(pickIndex / numTeams) + 1;
+}
+
 /**
  * Maps RV rank onto team slots, deciding the whole pick order — getTeamNumberForPick
  * is fixed, so seating is the only lever. `teamsToUse` is ascending by slot number;

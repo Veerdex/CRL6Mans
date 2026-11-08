@@ -15,7 +15,7 @@ export const FP_BASELINE_RV = 1722.4;
 // Per-game league means at FP_BASELINE_RV, and how much each rises per RV point.
 const STAT_MEAN = { score: 345.55, goals: 0.70027, assists: 0.52663, saves: 1.35992, shots: 2.47082 };
 const STAT_SLOPE = { score: 0.3810, goals: 0.000928, assists: 0.000185, saves: 0.001646, shots: 0.002389 };
-const HISTORY_PRIOR_GAMES = 10;
+export const HISTORY_PRIOR_GAMES = 10;
 
 // RV per point of FP surprise. Fitted as RV-on-FP (R² × the inverse of the
 // 0.001019 FP-on-RV slope) rather than by inverting the projection line, which

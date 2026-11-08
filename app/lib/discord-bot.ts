@@ -24,7 +24,7 @@ import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analys
 import { matchHasBegun } from "./match-state";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize, resolveTeamSize } from "./team-size";
 import { APP_NAME } from "./constants";
-import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder } from "./draft-order";
+import { getTeamNumberForPick, totalDraftPicks, captainSeatOrder, draftRoundForPick, CAPTAIN_DRAFT_ROUND } from "./draft-order";
 import { draftLabel, draftStartEmbed, onTheClockEmbed, pickEmbed, draftCompleteEmbed, type CaptainSeat } from "./draft-embeds";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "./solo-team";
 import { notifyMatchChannel, moderatorPing } from "./match-notifications";
@@ -1210,6 +1210,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
         .eq("id", captain.id)
     ),
   ]);
+  await resetDraftRounds(sorted.slice(0, numTeams).map(c => c.id));
 
   const { data: activateRows, error: activateError } = await supabaseAdmin
     .from("league_settings").update({
@@ -1436,6 +1437,8 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
   ]);
   if (captainIds.length)
     await supabaseAdmin.from("players").update({ is_captain: true }).in("id", captainIds);
+  // Auto-balance has no pick rounds, so only its captains get one.
+  await resetDraftRounds(captainIds);
 
   await Promise.all(teamsToUse.map(t => syncSoloTeamIdentity(t.id, teamSize)));
 
@@ -1676,6 +1679,22 @@ async function rememberPickMessage(messageId: string | null): Promise<void> {
   if (error) console.error("[rememberPickMessage]", error.message);
 }
 
+// players.draft_round is what fantasy tiers read (docs/fantasy-rl.md §3). Its
+// writes are separate updates whose errors are ignored, so a deploy that lands
+// before scripts/draft-round-migration.sql can't lose a pick or a draft start.
+// Every player is cleared, not just the entered ones, or a free agent drafted
+// last season would keep that season's round.
+async function resetDraftRounds(captainIds: string[]): Promise<void> {
+  const { error } = await supabaseAdmin.from("players").update({ draft_round: null }).not("draft_round", "is", null);
+  if (error) return;
+  if (captainIds.length)
+    await supabaseAdmin.from("players").update({ draft_round: CAPTAIN_DRAFT_ROUND }).in("id", captainIds);
+}
+
+async function recordDraftRound(playerId: string, round: number): Promise<void> {
+  await supabaseAdmin.from("players").update({ draft_round: round }).eq("id", playerId);
+}
+
 async function completePick(s: PickSettings, teamId: string, playerId: string, viaAutoPick = false): Promise<{ ok: boolean; message: string }> {
   const teamSize = normalizeTeamSize(s.team_size);
   const totalPicks = totalDraftPicks(s.num_teams, teamSize);
@@ -1687,6 +1706,7 @@ async function completePick(s: PickSettings, teamId: string, playerId: string, v
   if (!player || !team) return { ok: false, message: "❌ Could not find player or team." };
 
   await supabaseAdmin.from("players").update({ team_id: team.id, updated_at: new Date().toISOString() }).eq("id", player.id);
+  await recordDraftRound(player.id, draftRoundForPick(s.current_pick, s.num_teams));
 
   if (player.discord_id) {
     const roleMap = await ensureRoles(["Drafted"]);
