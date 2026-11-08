@@ -1994,6 +1994,16 @@ export async function execStartSeason(): Promise<{ ok: boolean; message: string 
   if (settings?.season_active)
     return { ok: false, message: "❌ A season is already active." };
 
+  // Fantasy drafts run between the season draft and Round 1, off a pool frozen
+  // at their start, so the season waits for them. An error (no fantasy tables
+  // yet) reads as no draft running.
+  const { count: fantasyDrafting, error: fantasyError } = await supabaseAdmin
+    .from("fantasy_leagues")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "drafting");
+  if (!fantasyError && fantasyDrafting)
+    return { ok: false, message: "❌ A fantasy draft is still running. The season can start once every fantasy draft finishes." };
+
   const min = PRESET_MIN_TEAMS[format.preset] ?? 4;
   if (numTeams < min) {
     return { ok: false, message: `❌ **${format.preset.replace(/_/g, " ")}** requires at least **${min} teams** (current: ${numTeams}).` };

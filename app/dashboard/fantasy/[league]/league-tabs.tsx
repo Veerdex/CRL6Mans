@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useNavPathname } from "@/app/dashboard/use-nav-pathname";
+import type { FantasyLeagueStatus } from "@/app/lib/fantasy-rules";
 
 const TABS = [
   { segment: "roster", label: "Roster" },
@@ -10,12 +11,19 @@ const TABS = [
   { segment: "", label: "League" },
 ] as const;
 
-export function LeagueTabs({ leagueId }: { leagueId: string }) {
+// The Draft tab exists only while the league is drafting, and leads the row then.
+const DRAFT_TAB = { segment: "draft", label: "Draft" } as const;
+
+export function LeagueTabs({ leagueId, status }: { leagueId: string; status: FantasyLeagueStatus }) {
   const current = useNavPathname();
   const base = `/dashboard/fantasy/${leagueId}`;
+  const tabs = status === "drafting" ? [DRAFT_TAB, ...TABS] : TABS;
   return (
-    <nav aria-label="League sections" className="sticky top-0 z-10 grid grid-cols-4 border-b border-zinc-700 bg-zinc-800">
-      {TABS.map(({ segment, label }, i) => {
+    <nav
+      aria-label="League sections"
+      className={`sticky top-0 z-10 grid ${tabs.length === 5 ? "grid-cols-5" : "grid-cols-4"} border-b border-zinc-700 bg-zinc-800`}
+    >
+      {tabs.map(({ segment, label }, i) => {
         const href = segment ? `${base}/${segment}` : base;
         const active = segment ? current.startsWith(href) : current === base;
         return (

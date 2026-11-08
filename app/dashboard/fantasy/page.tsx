@@ -3,7 +3,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { fantasyAccessOpen, getFantasyViewer, getHubData, type LeagueCard } from "@/app/lib/fantasy-leagues";
-import { CreateLeagueForm, JoinLeagueButton } from "./fantasy-client";
+import { CreateLeagueForm, JoinLeagueButton, StartDraftsButton } from "./fantasy-client";
+import { isDirector } from "@/app/lib/players";
 import { StatusBadge } from "./status-badge";
 import { HubTabs, type HubTab } from "./hub-tabs";
 import { PlayerName } from "@/app/dashboard/player-name";
@@ -22,7 +23,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
     );
   }
 
-  const hub = await getHubData(viewer);
+  const [hub, canStartDrafts] = await Promise.all([getHubData(viewer), isDirector(session.userId)]);
   if (!hub.season) {
     return (
       <Shell>
@@ -51,6 +52,13 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
             Register
           </Link>
         </div>
+      )}
+
+      {canStartDrafts && hub.season.status === "open" && (
+        <section className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 flex flex-col items-center gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Staff</h2>
+          <StartDraftsButton />
+        </section>
       )}
 
       <HubTabs

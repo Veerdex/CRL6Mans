@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { execAutoPick } from "@/app/lib/discord-bot";
 import { stampCronHeartbeat } from "@/app/lib/cron-heartbeat";
+import { sweepFantasyAutopicks } from "@/app/lib/fantasy-draft-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -22,5 +23,7 @@ export async function GET(request: Request) {
     iterations++;
   }
 
-  return NextResponse.json({ ok: true, iterations });
+  const fantasyPicks = await sweepFantasyAutopicks();
+
+  return NextResponse.json({ ok: true, iterations, fantasyPicks });
 }

@@ -16,7 +16,8 @@ import {
   type LeagueRow,
 } from "@/app/lib/fantasy-leagues";
 import { normalizeLeagueName } from "@/app/lib/fantasy-rules";
-import { getStaffRole } from "@/app/lib/players";
+import { getStaffRole, isDirectorVerified } from "@/app/lib/players";
+import { autopickIfDue, startFantasyDrafts, submitPick } from "@/app/lib/fantasy-draft-server";
 
 type Result = { error?: string };
 
@@ -296,4 +297,38 @@ export async function searchInvitablePlayers(leagueId: string, query: string): P
       .slice(0, 8)
       .map((a) => ({ accountId: a.id, name: accountName(a), username: a.username, discordId: a.discord_id, avatar: a.avatar })),
   };
+}
+
+function refreshDraft(leagueId: string) {
+  revalidatePath("/dashboard/fantasy");
+  revalidatePath(`/dashboard/fantasy/${leagueId}`, "layout");
+}
+
+export async function makeFantasyPick(leagueId: string, playerId: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const res = await submitPick({ leagueId, managerId: me.accountId, playerId, auto: false });
+  if (res.error) return { error: res.error };
+  refreshDraft(leagueId);
+  return {};
+}
+
+// Anyone with the draft room open may call this: it only ever picks for
+// whoever's clock has run out, so it can't be used to pick early.
+export async function triggerFantasyAutopick(leagueId: string): Promise<Result> {
+  const session = await decrypt((await cookies()).get("session")?.value);
+  if (!session?.userId) return { error: "You need to be signed in." };
+  if (await autopickIfDue(leagueId)) refreshDraft(leagueId);
+  return {};
+}
+
+export async function startAllFantasyDrafts(): Promise<Result & { message?: string }> {
+  const session = await decrypt((await cookies()).get("session")?.value);
+  if (!session?.userId) return { error: "You need to be signed in." };
+  if (!(await isDirectorVerified(session.userId))) {
+    return { error: "Only directors with Discord 2FA on can start the fantasy drafts." };
+  }
+  const res = await startFantasyDrafts();
+  revalidatePath("/dashboard/fantasy", "layout");
+  return res;
 }

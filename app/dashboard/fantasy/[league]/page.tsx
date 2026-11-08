@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { type MemberView } from "@/app/lib/fantasy-leagues";
 import { leagueFromParams, type LeagueAccess } from "./league-access";
 import { TabSkeleton } from "./tab-skeleton";
@@ -65,6 +66,15 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
       {preDraft && (
         <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-sm text-zinc-300 text-center">
           Waiting for an admin to start the fantasy draft. Leagues need at least {FANTASY_MIN_MANAGERS} managers to draft.
+        </div>
+      )}
+
+      {league.status === "drafting" && (
+        <div className="bg-indigo-500/10 border border-indigo-500/40 rounded-xl p-4 text-sm text-indigo-100 text-center">
+          The draft is in progress.{" "}
+          <Link href={`/dashboard/fantasy/${league.id}/draft`} className="font-semibold underline hover:text-white">
+            Go to the draft room
+          </Link>
         </div>
       )}
 

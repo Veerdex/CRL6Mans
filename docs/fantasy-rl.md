@@ -365,10 +365,18 @@ Modelled on fantasy football so it's familiar:
   `fantasy_leagues`, `fantasy_league_members`, `fantasy_league_invites`,
   `fantasy_league_removals`, and the locking `fantasy_join_league` function that enforces
   the manager cap.
-- Likely tables still to come: `fantasy_player_tiers`,
-  `fantasy_lineup_slots` (league, manager, slot, player — the one current lineup),
-  `fantasy_slot_credits`, `fantasy_matchups`, `fantasy_waiver_claims`, `fantasy_trades` +
-  `fantasy_trade_items`, `fantasy_draft_picks`.
+- Draft (`scripts/fantasy-draft-migration.sql`): `fantasy_player_tiers` (tiers frozen per
+  season at draft start), `fantasy_draft_picks`, `fantasy_roster_slots` (league, manager,
+  slot, player — the one current lineup), `draft_order` / `current_pick` / `pick_deadline` on
+  `fantasy_leagues`, and the `fantasy_draft_pick` function, which compare-and-swaps
+  `current_pick` so two racing picks (a manager and an autopick) can't both land. Pick order,
+  slot assignment and autopick choice are pure (`app/lib/fantasy-draft.ts`,
+  `npm run test:fantasy-draft`); the server side is `app/lib/fantasy-draft-server.ts`.
+  Autopick fires from the open draft room when the clock hits 0, with the
+  `draft-autopick` cron as the backstop. The pick queue isn't built yet, so autopick goes
+  straight to tier then rating.
+- Likely tables still to come: `fantasy_slot_credits`, `fantasy_matchups`,
+  `fantasy_waiver_claims`, `fantasy_trades` + `fantasy_trade_items`.
 - The waiver run should be checked on every tick of the existing per-minute external pinger
   (like `clip-reset`), running once when 4 AM Pacific has passed and today's run hasn't happened.
   A fixed UTC Vercel cron would drift an hour across daylight saving. Fantasy shouldn't need

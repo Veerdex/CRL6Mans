@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { PoolPlayer, PoolTeam } from "@/app/lib/fantasy-pool-data";
 import { TIER_LABEL, type FantasyTier } from "@/app/lib/fantasy-pool";
 import { formatRating } from "@/app/lib/rating";
@@ -38,11 +38,19 @@ function sortValue(p: PoolPlayer, key: SortKey): number | string {
 // Text columns read A→Z and tiers Cap first; numbers read best first.
 const ASCENDING_FIRST: SortKey[] = ["name", "tier", "team"];
 
-export function PoolTable({ players }: { players: PoolPlayer[] }) {
+export function PoolTable({
+  players,
+  renderAction,
+  defaultAvailableOnly = false,
+}: {
+  players: PoolPlayer[];
+  /** A trailing cell per player, e.g. the draft room's Draft button. */
+  renderAction?: (player: PoolPlayer) => ReactNode;
+  defaultAvailableOnly?: boolean;
+}) {
   const [query, setQuery] = useState("");
   const [tier, setTier] = useState<TierFilter>("all");
-  // Every player is available until fantasy rosters exist, so the filter has nothing to remove yet.
-  const [availableOnly, setAvailableOnly] = useState(false);
+  const [availableOnly, setAvailableOnly] = useState(defaultAvailableOnly);
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: "projected", asc: false });
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -51,6 +59,7 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
     const filtered = players.filter(
       (p) =>
         (tier === "all" || p.tier === tier) &&
+        (!availableOnly || p.manager === null) &&
         (!q || p.name.toLowerCase().includes(q) || p.username.toLowerCase().includes(q) || p.team?.name.toLowerCase().includes(q)),
     );
     const dir = sort.asc ? 1 : -1;
@@ -60,7 +69,7 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
       const c = typeof x === "string" ? x.localeCompare(y as string) : x - (y as number);
       return c * dir || b.projected - a.projected;
     });
-  }, [players, query, tier, sort]);
+  }, [players, query, tier, availableOnly, sort]);
 
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, asc: !s.asc } : { key, asc: ASCENDING_FIRST.includes(key) }));
@@ -115,6 +124,7 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
               {header("seasonPoints", "Pts", "text-right")}
               {header("average", "Avg", "text-right")}
               <th className="px-3 py-2 font-medium">Next</th>
+              {renderAction && <th className="px-3 py-2"><span className="sr-only">Action</span></th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-700/60">
@@ -125,7 +135,7 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
                 </td>
                 <td className="px-3 py-2"><TierBadge tier={p.tier} /></td>
                 <td className="px-3 py-2"><TeamCell team={p.team} /></td>
-                <td className="px-3 py-2"><Availability /></td>
+                <td className="px-3 py-2"><Availability manager={p.manager} /></td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={ratingColor(p.rating)}>{formatRating(p.rating)}</td>
                 <td className="px-3 py-2 text-right"><Projection player={p} /></td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={pointsColor(p.seasonPoints)}>{fmt(p.seasonPoints)}</td>
@@ -133,6 +143,7 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
                   {average(p) === null ? "—" : fmt(average(p)!)}
                 </td>
                 <td className="px-3 py-2"><OpponentCell team={p.nextOpponent} /></td>
+                {renderAction && <td className="px-3 py-2 text-right">{renderAction(p)}</td>}
               </tr>
             ))}
           </tbody>
@@ -164,12 +175,19 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
                   >
                     <div className="flex-1 min-w-0"><NameCell player={p} /></div>
                     <TierBadge tier={p.tier} />
-                    <Availability compact />
+                    <Availability manager={p.manager} compact />
                     <div className="w-14 text-right"><Projection player={p} /></div>
+                    {renderAction && (
+                      // Its own click target, so drafting doesn't also toggle the row.
+                      <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                        {renderAction(p)}
+                      </div>
+                    )}
                   </div>
                   {open && (
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-xs">
                       <Detail label="Team"><TeamCell team={p.team} /></Detail>
+                      <Detail label="Fantasy"><Availability manager={p.manager} /></Detail>
                       <Detail label="RV"><span style={ratingColor(p.rating)}>{formatRating(p.rating)}</span></Detail>
                       <Detail label="Season points"><span style={pointsColor(p.seasonPoints)}>{fmt(p.seasonPoints)}</span></Detail>
                       <Detail label="Per series">
@@ -228,7 +246,7 @@ function NameCell({ player }: { player: PoolPlayer }) {
   );
 }
 
-function TierBadge({ tier }: { tier: FantasyTier }) {
+export function TierBadge({ tier }: { tier: FantasyTier }) {
   return (
     <span className={`inline-block rounded-md border px-1.5 py-0.5 text-[11px] font-semibold ${TIER_STYLE[tier]}`}>
       {TIER_LABEL[tier]}
@@ -255,8 +273,15 @@ function OpponentCell({ team }: { team: PoolTeam | null }) {
   );
 }
 
-// Every player is available until fantasy rosters exist.
-function Availability({ compact = false }: { compact?: boolean }) {
+function Availability({ manager, compact = false }: { manager: PoolPlayer["manager"]; compact?: boolean }) {
+  if (manager) {
+    const label = `On ${manager.name}'s roster`;
+    return compact ? (
+      <span className="w-2 h-2 rounded-full bg-zinc-500 shrink-0" title={label} aria-label={label} />
+    ) : (
+      <span className="text-xs text-zinc-400 truncate" title={label}>{manager.name}</span>
+    );
+  }
   return compact ? (
     <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" title="Available" aria-label="Available" />
   ) : (

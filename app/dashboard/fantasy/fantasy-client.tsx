@@ -15,6 +15,7 @@ import {
   renameLeague,
   searchInvitablePlayers,
   setLeagueVisibility,
+  startAllFantasyDrafts,
   type InviteCandidate,
 } from "./actions";
 
@@ -326,6 +327,56 @@ export function InvitePanel({ leagueId }: { leagueId: string }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// Two steps rather than window.confirm: it starts every league's draft at once
+// and disbands the leagues below the manager minimum, with no undo.
+export function StartDraftsButton() {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  if (message) return <p className="text-sm text-emerald-300 text-center">{message}</p>;
+  if (!confirming) {
+    return (
+      <button className={PRIMARY} onClick={() => setConfirming(true)}>
+        Start fantasy drafts
+      </button>
+    );
+  }
+  return (
+    <div className="space-y-2 max-w-md">
+      <p className="text-xs text-zinc-300 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2">
+        This starts every league&apos;s draft now, freezes each player&apos;s tier for the season and disbands any league
+        with too few managers. The real season can&apos;t start until every draft finishes. This can&apos;t be undone.
+      </p>
+      <div className="flex justify-center gap-2">
+        <button
+          className={PRIMARY}
+          disabled={pending}
+          onClick={() => {
+            setError(null);
+            startTransition(async () => {
+              const res = await startAllFantasyDrafts();
+              if (res.error) setError(res.error);
+              else {
+                setMessage(res.message ?? "Drafts started.");
+                router.refresh();
+              }
+            });
+          }}
+        >
+          {pending ? "Starting…" : "Start every draft"}
+        </button>
+        <button className={SECONDARY} disabled={pending} onClick={() => setConfirming(false)}>
+          Cancel
+        </button>
+      </div>
+      <ErrorLine error={error} />
     </div>
   );
 }

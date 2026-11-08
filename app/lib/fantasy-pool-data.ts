@@ -42,9 +42,13 @@ export type PoolPlayer = {
   seasonPoints: number;
   seriesPlayed: number;
   nextOpponent: PoolTeam | null;
+  /** The league manager who has this player, once the draft has started. */
+  manager: { accountId: string; name: string } | null;
 };
 
 export type PoolView = { players: PoolPlayer[]; hiddenForTest: boolean };
+
+type FrozenTier = { player_id: string; tier: FantasyTier; rating: number };
 
 type PlayerRow = PlayerRatingRow & {
   id: string;
@@ -80,11 +84,73 @@ async function fetchPoolPlayers(): Promise<PlayerRow[]> {
   return (data ?? []) as PlayerRow[];
 }
 
+// Free agents join the pool once the real draft is over: either the season is
+// running, or the draft has finished and seated players (the window the fantasy
+// draft runs in, before Round 1). Before the real draft nobody is rostered, and
+// every entrant would otherwise read as a free agent.
+function seasonPlayers(players: PlayerRow[], teamIds: Set<string>, settings: { season_active?: boolean; draft_active?: boolean } | null) {
+  const rostered = players.filter((p) => p.team_id && teamIds.has(p.team_id));
+  const freeAgentsOpen = !settings?.draft_active && (!!settings?.season_active || rostered.length > 0);
+  const freeAgents = freeAgentsOpen ? players.filter((p) => !p.team_id && p.sub_willing) : [];
+  return [...rostered, ...freeAgents];
+}
+
+// A player's tier, read live. Thirds are cut across the whole season, managers
+// included: hiding them from one league's list doesn't change where anyone else ranks.
+function liveTiers(season: PlayerRow[]): Map<string, FantasyTier> {
+  const seasonRatings = season.filter(hasMmrOnFile).map(rulesRatingFromRow);
+  return new Map(
+    season.map((p) => [
+      p.id,
+      p.team_id && p.draft_round !== null && p.draft_round !== undefined
+        ? tierFromDraftRound(p.draft_round)
+        : freeAgentTier(hasMmrOnFile(p) ? rulesRatingFromRow(p) : -Infinity, seasonRatings),
+    ]),
+  );
+}
+
+/** The season's draftable pool as it stands, for freezing when the drafts start. */
+export async function currentSeasonTiers(): Promise<{ playerId: string; tier: FantasyTier; rating: number }[]> {
+  const [{ data: settings }, players, { data: teamRows }] = await Promise.all([
+    supabaseAdmin.from("league_settings").select("season_active, draft_active").maybeSingle(),
+    fetchPoolPlayers(),
+    supabaseAdmin.from("teams").select("id"),
+  ]);
+  const season = seasonPlayers(players, new Set(((teamRows ?? []) as { id: string }[]).map((t) => t.id)), settings);
+  const tiers = liveTiers(season);
+  return season.map((p) => ({
+    playerId: p.id,
+    tier: tiers.get(p.id)!,
+    rating: hasMmrOnFile(p) ? rulesRatingFromRow(p) : 0,
+  }));
+}
+
+/** The tiers frozen at draft start, or null while the season hasn't drafted (or before the migration). */
+export async function frozenTiers(fantasySeasonId: string): Promise<FrozenTier[] | null> {
+  const rows = await fetchAllRows<FrozenTier>((from, to) =>
+    supabaseAdmin
+      .from("fantasy_player_tiers")
+      .select("player_id, tier, rating")
+      .eq("fantasy_season_id", fantasySeasonId)
+      .order("player_id")
+      .range(from, to),
+  ).catch(() => null);
+  if (!rows?.length) return null;
+  return rows.map((r) => ({ player_id: r.player_id, tier: Number(r.tier) as FantasyTier, rating: Number(r.rating) }));
+}
+
+async function fetchRosterOwners(leagueId: string): Promise<Map<string, string>> {
+  const { data, error } = await supabaseAdmin.from("fantasy_roster_slots").select("player_id, manager_id").eq("league_id", leagueId);
+  if (error) return new Map();
+  return new Map(((data ?? []) as { player_id: string; manager_id: string }[]).map((r) => [r.player_id, r.manager_id]));
+}
+
 export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Promise<PoolView> {
   const testEvent = await isTestEventActive();
   if (testEvent && !viewerIsStaff) return { players: [], hiddenForTest: true };
 
-  const [{ data: settings }, players, { data: memberRows }, { data: teamRows }, matches, statsOn] = await Promise.all([
+  const { data: leagueRow } = await supabaseAdmin.from("fantasy_leagues").select("fantasy_season_id").eq("id", leagueId).maybeSingle();
+  const [{ data: settings }, players, { data: memberRows }, { data: teamRows }, matches, statsOn, frozen, owners] = await Promise.all([
     supabaseAdmin.from("league_settings").select("season_active, draft_active, season_format").maybeSingle(),
     fetchPoolPlayers(),
     supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId),
@@ -97,6 +163,8 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
         .range(from, to),
     ),
     isStatsTrackingEnabled(),
+    leagueRow ? frozenTiers(leagueRow.fantasy_season_id as string) : Promise.resolve(null),
+    fetchRosterOwners(leagueId),
   ]);
 
   const typedTeams = (teamRows ?? []) as { id: string; name: string; season_rating: number | string | null }[];
@@ -128,23 +196,21 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
     Math.ceil(
       (m?.stage ? resolveBestOf(m.stage, m.round ?? 1, maxRoundByStage, format?.roundBestOf, fallbackBestOf) : fallbackBestOf) / 2,
     );
-  const managers = new Set(((memberRows ?? []) as { account_id: string }[]).map((m) => m.account_id));
-  const freeAgentsOpen = !!settings?.season_active && !settings?.draft_active;
+  const managerIds = ((memberRows ?? []) as { account_id: string }[]).map((m) => m.account_id);
+  const managers = new Set(managerIds);
 
-  const rostered = players.filter((p) => p.team_id && teams.has(p.team_id));
-  const freeAgents = freeAgentsOpen ? players.filter((p) => !p.team_id && p.sub_willing) : [];
-  const season = [...rostered, ...freeAgents];
+  // Once the drafts start the pool and its tiers are the frozen ones (§3: fixed
+  // for the season), whatever has happened to rosters since.
+  const frozenTier = frozen ? new Map(frozen.map((f) => [f.player_id, f.tier])) : null;
+  const season = frozenTier ? players.filter((p) => frozenTier.has(p.id)) : seasonPlayers(players, new Set(teams.keys()), settings);
+  const tierOf = frozenTier ?? liveTiers(season);
   const pool = season.filter((p) => !managers.has(p.id));
   if (!pool.length) return { players: [], hiddenForTest: false };
-
-  // Thirds are cut across the whole season, managers included: hiding them
-  // from this league's list doesn't change where anyone else ranks.
-  const seasonRatings = season.filter(hasMmrOnFile).map(rulesRatingFromRow);
 
   const poolIds = pool.map((p) => p.id);
   const completed = matches.filter((m) => m.status === "completed" && !m.forfeit && m.home_team_id && m.away_team_id);
   const [{ data: accounts }, history, stats] = await Promise.all([
-    supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar").in("id", poolIds),
+    supabaseAdmin.from("accounts").select("id, discord_id, username, display_name, avatar").in("id", [...poolIds, ...managerIds]),
     fetchAllTimeTotals(),
     completed.length
       ? fetchAllRows<StatRow>((from, to) =>
@@ -189,10 +255,9 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
   const out: PoolPlayer[] = pool.map((p) => {
     const a = accountById.get(p.id);
     const ranked = hasMmrOnFile(p);
-    const tier =
-      p.team_id && p.draft_round !== null && p.draft_round !== undefined
-        ? tierFromDraftRound(p.draft_round)
-        : freeAgentTier(ranked ? rulesRatingFromRow(p) : -Infinity, seasonRatings);
+    const tier = tierOf.get(p.id)!;
+    const ownerId = owners.get(p.id);
+    const owner = ownerId ? accountById.get(ownerId) : undefined;
 
     const h = history.get(p.id);
     const totals = h ? { ...h, scoreGames: h.games - (h.scorelessGames ?? 0) } : null;
@@ -252,6 +317,7 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
       seasonPoints,
       seriesPlayed,
       nextOpponent: opponentId ? teams.get(opponentId) ?? null : null,
+      manager: ownerId ? { accountId: ownerId, name: owner?.display_name || owner?.username || "Unknown" } : null,
     };
   });
 
