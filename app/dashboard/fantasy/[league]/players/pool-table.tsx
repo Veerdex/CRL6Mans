@@ -126,10 +126,10 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
                 <td className="px-3 py-2"><TierBadge tier={p.tier} /></td>
                 <td className="px-3 py-2"><TeamCell team={p.team} /></td>
                 <td className="px-3 py-2"><Availability /></td>
-                <td className={`px-3 py-2 text-right tabular-nums ${ratingColor(p.rating)}`}>{formatRating(p.rating)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={ratingColor(p.rating)}>{formatRating(p.rating)}</td>
                 <td className="px-3 py-2 text-right"><Projection player={p} /></td>
-                <td className={`px-3 py-2 text-right tabular-nums ${pointsColor(p.seasonPoints)}`}>{fmt(p.seasonPoints)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-200">
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={pointsColor(p.seasonPoints)}>{fmt(p.seasonPoints)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={pointsColor(average(p))}>
                   {average(p) === null ? "—" : fmt(average(p)!)}
                 </td>
                 <td className="px-3 py-2"><OpponentCell team={p.nextOpponent} /></td>
@@ -170,9 +170,11 @@ export function PoolTable({ players }: { players: PoolPlayer[] }) {
                   {open && (
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-xs">
                       <Detail label="Team"><TeamCell team={p.team} /></Detail>
-                      <Detail label="RV"><span className={ratingColor(p.rating)}>{formatRating(p.rating)}</span></Detail>
-                      <Detail label="Season points"><span className={pointsColor(p.seasonPoints)}>{fmt(p.seasonPoints)}</span></Detail>
-                      <Detail label="Per series">{average(p) === null ? "—" : fmt(average(p)!)}</Detail>
+                      <Detail label="RV"><span style={ratingColor(p.rating)}>{formatRating(p.rating)}</span></Detail>
+                      <Detail label="Season points"><span style={pointsColor(p.seasonPoints)}>{fmt(p.seasonPoints)}</span></Detail>
+                      <Detail label="Per series">
+                        <span style={pointsColor(average(p))}>{average(p) === null ? "—" : fmt(average(p)!)}</span>
+                      </Detail>
                       <Detail label="Next match"><OpponentCell team={p.nextOpponent} /></Detail>
                     </dl>
                   )}
@@ -262,15 +264,18 @@ function Availability({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function bandColor(value: number | null, high: number, low: number, neutral: string) {
-  if (value === null) return neutral;
-  if (value >= high) return "text-emerald-400";
-  if (value <= low) return "text-red-400";
-  return neutral;
+// Red at or below `low`, yellow at the midpoint, green at or above `high`. Mixing
+// the theme's own tokens keeps every point on the scale readable in each theme.
+function spectrum(value: number | null, low: number, high: number): React.CSSProperties | undefined {
+  if (value === null) return undefined;
+  const t = Math.min(1, Math.max(0, (value - low) / (high - low)));
+  const [from, to, share] =
+    t < 0.5 ? ["--c-red-400", "--c-yellow-400", t * 2] : ["--c-yellow-400", "--c-emerald-400", (t - 0.5) * 2];
+  return { color: `color-mix(in oklab, var(${from}), var(${to}) ${Math.round(share * 100)}%)` };
 }
 
-const pointsColor = (v: number | null, neutral = "text-zinc-200") => bandColor(v, 40, 10, neutral);
-const ratingColor = (v: number | null) => bandColor(v, 1850, 1450, "text-zinc-200");
+const pointsColor = (v: number | null) => spectrum(v, 10, 40);
+const ratingColor = (v: number | null) => spectrum(v, 1450, 1850);
 
 function Projection({ player }: { player: PoolPlayer }) {
   const note =
@@ -281,7 +286,7 @@ function Projection({ player }: { player: PoolPlayer }) {
       {player.projectionBasis !== "history" && (
         <span className="text-[10px] text-zinc-500">{player.projectionBasis === "rating" ? "rating" : "prov."}</span>
       )}
-      <span className={`tabular-nums font-semibold ${pointsColor(player.projected, "text-white")}`}>{fmt(player.projected)}</span>
+      <span className="tabular-nums font-semibold text-white" style={pointsColor(player.projected)}>{fmt(player.projected)}</span>
     </span>
   );
 }
