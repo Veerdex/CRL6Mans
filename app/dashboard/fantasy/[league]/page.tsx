@@ -1,8 +1,5 @@
-import Link from "next/link";
-import { cookies } from "next/headers";
-import { notFound, redirect } from "next/navigation";
-import { decrypt } from "@/app/lib/session";
-import { fantasyAccessOpen, getFantasyViewer, getLeagueView, type MemberView } from "@/app/lib/fantasy-leagues";
+import { type MemberView } from "@/app/lib/fantasy-leagues";
+import { loadLeague } from "./league-access";
 import { FANTASY_MIN_MANAGERS } from "@/app/lib/fantasy-rules";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
@@ -18,33 +15,15 @@ import {
 import { StatusBadge } from "../status-badge";
 
 export default async function FantasyLeaguePage({ params }: { params: Promise<{ league: string }> }) {
-  const session = await decrypt((await cookies()).get("session")?.value);
-  if (!session?.userId) redirect("/login");
-  const viewer = await getFantasyViewer(session.userId);
-  if (viewer.isGuest) redirect("/dashboard");
-  if (!(await fantasyAccessOpen(viewer))) redirect("/dashboard/fantasy");
-
-  const { league: leagueId } = await params;
-  const view = await getLeagueView(leagueId, viewer);
-  if (!view || view.league.status === "disbanded") notFound();
+  const { viewer, view } = await loadLeague((await params).league);
   const { league, members, invites, cap, isMember, isCommissioner, isInvited, isRemoved } = view;
   const preDraft = league.status === "pre_draft";
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
-      <Link
-        href="/dashboard/fantasy?tab=all"
-        className="inline-flex items-center gap-1.5 min-h-10 rounded-full bg-zinc-800 border border-zinc-700 pl-3 pr-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
-      >
-        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className="w-4 h-4">
-          <path fillRule="evenodd" d="M12.79 5.23a.75.75 0 0 1-.02 1.06L8.83 10l3.94 3.71a.75.75 0 1 1-1.04 1.08l-4.5-4.25a.75.75 0 0 1 0-1.08l4.5-4.25a.75.75 0 0 1 1.06.02Z" clipRule="evenodd" />
-        </svg>
-        All Leagues
-      </Link>
+    <div className="max-w-3xl mx-auto space-y-6">
       <div className="flex flex-col items-center gap-3 text-center">
         <div className="min-w-0 max-w-full">
-          <h1 className="text-2xl font-bold text-white break-words">{league.name}</h1>
-          <p className="text-sm text-zinc-400 mt-1">
+          <p className="text-sm text-zinc-400">
             {league.visibility === "private" ? "Private" : "Public"} league
             {view.season ? ` · ${view.season.name}` : ""}
           </p>
@@ -52,27 +31,19 @@ export default async function FantasyLeaguePage({ params }: { params: Promise<{ 
             <StatusBadge status={league.status} />
           </div>
         </div>
-        <div className="flex flex-wrap items-start justify-center gap-3">
-          {!isMember && preDraft && (
-            <div className="flex items-start gap-2">
-              <JoinLeagueButton
-                leagueId={league.id}
-                visibility={league.visibility}
-                isInvited={isInvited}
-                isRemoved={isRemoved}
-                full={members.length >= cap}
-                canManage={viewer.approved}
-              />
-              {isInvited && <DeclineInviteButton leagueId={league.id} />}
-            </div>
-          )}
-          <Link
-            href={`/dashboard/fantasy/${league.id}/players`}
-            className="inline-flex items-center min-h-10 rounded-lg bg-zinc-800 border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
-          >
-            Player Pool
-          </Link>
-        </div>
+        {!isMember && preDraft && (
+          <div className="flex items-start justify-center gap-2">
+            <JoinLeagueButton
+              leagueId={league.id}
+              visibility={league.visibility}
+              isInvited={isInvited}
+              isRemoved={isRemoved}
+              full={members.length >= cap}
+              canManage={viewer.approved}
+            />
+            {isInvited && <DeclineInviteButton leagueId={league.id} />}
+          </div>
+        )}
       </div>
 
       {isInvited && !isMember && preDraft && (
