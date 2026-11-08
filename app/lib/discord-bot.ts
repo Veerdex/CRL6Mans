@@ -19,7 +19,7 @@ import {
   TERMINAL_STAGES,
 } from "./bracket";
 import { buildAndSaveBracket } from "./bracket-server";
-import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, decisionRatingFromRow, displayRatingFromRow, rulesRatingFromRow, calculatedRatingFromRow, shownRatingFromRow, formatRating, calculatePlayerRating } from "./rating";
+import { initialTeamRating, applyRatingUpdate, applyFormRetention, teamRatingDeltaFromRatingChange, decisionRatingFromRow, rulesRatingFromRow, calculatedRatingFromRow, shownRatingFromRow, formatRating, calculatePlayerRating } from "./rating";
 import { getReplayAnalysisMode, matchHasUnmatchedPlayers } from "./replay-analysis-mode";
 import { matchHasBegun } from "./match-state";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize, resolveTeamSize } from "./team-size";
@@ -1208,7 +1208,7 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
   const captainSeats: CaptainSeat[] = [];
   const captains: Array<{ discordId: string | null; teamRoleId?: string }> = [];
   for (let i = 0; i < numTeams; i++) {
-    captainSeats.push({ teamNum: captainTeams[i].num, name: captainNames.get(sorted[i].id)!, rv: displayRatingFromRow(sorted[i]) });
+    captainSeats.push({ teamNum: captainTeams[i].num, name: captainNames.get(sorted[i].id)!, roleId: captainTeams[i].discord_role_id });
     captains.push({ discordId: sorted[i].discord_id ?? null, teamRoleId: captainTeams[i].discord_role_id ?? undefined });
   }
 

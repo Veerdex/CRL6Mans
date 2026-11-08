@@ -50,7 +50,8 @@ function formatRound(order: number[]): string {
   return isRun ? `${order[0]} → ${order[order.length - 1]}` : order.join(", ");
 }
 
-export type CaptainSeat = { teamNum: number; name: string; rv: number };
+/** `roleId` draws the team as its role chip. Inside an embed that pings nobody. */
+export type CaptainSeat = { teamNum: number; name: string; roleId?: string | null };
 
 export function draftStartEmbed(opts: {
   teamSize: number;
@@ -83,7 +84,7 @@ export function draftStartEmbed(opts: {
   const summary = `**${numTeams}** teams · **${entered}** entered · ${teamSize} per team`
     + (undrafted > 0 ? ` · ${undrafted} not drafted` : "");
   const captainHeading = "Captains (auto-assigned by Rank Value)";
-  const captainLines = captains.map(c => `**Team ${c.teamNum}** — ${c.name} · RV ${c.rv.toFixed(0)}`);
+  const captainLines = captains.map(c => `${c.roleId ? `<@&${c.roleId}>` : `**Team ${c.teamNum}**`} — ${c.name}`);
 
   // Discord spaces consecutive fields apart, so a captain list split across
   // fields reads with a gap in it. The description holds four times as much, so

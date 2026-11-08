@@ -21,11 +21,12 @@ const DESCRIPTION_LIMIT = 4096;
 const TITLE_LIMIT = 256;
 const EMBED_LIMIT = 6000;
 
+// Role IDs are snowflake-length, so the size tests measure the real line length.
 function seats(numTeams: number, nameLen = 24): CaptainSeat[] {
   return Array.from({ length: numTeams }, (_, i) => ({
     teamNum: numTeams - i,
     name: "x".repeat(nameLen),
-    rv: 1800 - i,
+    roleId: `1${String(numTeams - i).padStart(18, "0")}`,
   }));
 }
 
@@ -42,7 +43,7 @@ test("draftLabel only calls it a snake draft when there are rounds to snake betw
 });
 
 const listedTeams = (text: string) =>
-  [...text.matchAll(/\*\*Team (\d+)\*\*/g)].map(m => Number(m[1])).sort((a, b) => a - b);
+  [...text.matchAll(/<@&(\d+)>/g)].map(m => Number(m[1].slice(1))).sort((a, b) => a - b);
 const oneTo = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
 
 test("a 32-team captain list sits unbroken in the description, past the field limit", () => {
@@ -95,9 +96,22 @@ test("the completion embed names the format instead of always saying snake", () 
   assert.equal(draftCompleteEmbed({ teamSize: 3, numTeams: 4, totalPicks: 8 }).title, "🏁 Snake Draft complete!");
 });
 
+test("the captain list draws each team as its role chip, falling back to bold text", () => {
+  const [withRole] = seats(1);
+  const embed = draftStartEmbed({ teamSize: 3, numTeams: 2, entered: 6, undrafted: 0,
+    captains: [withRole, { teamNum: 2, name: "Veerdex", roleId: null }] });
+  assert.match(embed.description!, new RegExp(`<@&${withRole.roleId}> — x+`));
+  assert.match(embed.description!, /\*\*Team 2\*\* — Veerdex/);
+  assert.doesNotMatch(embed.description!, /RV/);
+});
+
+// Role chips in the captain list are the one exception: they draw a team, they
+// never notify, and every other kind of mention is still ruled out there.
 test("no embed carries a mention, since mentions inside embeds never notify", () => {
+  const start = draftStartEmbed({ teamSize: 3, numTeams: 4, entered: 12, undrafted: 2, captains: seats(4) });
+  assert.ok(!/<@!?\d|<@everyone|@everyone|@here/.test(JSON.stringify(start)), "start embed may only carry role chips");
   const all = [
-    draftStartEmbed({ teamSize: 3, numTeams: 4, entered: 12, undrafted: 2, captains: seats(4) }),
+    { ...start, description: "" },
     onTheClockEmbed(3),
     pickEmbed({ teamName: "Team 4", playerName: "someone", pickNumber: 1, totalPicks: 8 }),
     pickEmbed({ teamName: "Team 2", playerName: "someone", pickNumber: 2, totalPicks: 8, auto: true }),
