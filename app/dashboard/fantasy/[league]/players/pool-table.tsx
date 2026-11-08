@@ -267,11 +267,11 @@ function Projection({ player }: { player: PoolPlayer }) {
     player.projectionBasis === "rating" ? "No stat history yet: rating only" :
     player.projectionBasis === "provisional" ? "Provisional: little stat history yet" : undefined;
   return (
-    <span className="inline-flex flex-col items-end leading-tight" title={note ?? PROJECTION_TITLE}>
-      <span className="tabular-nums font-semibold text-white">{fmt(player.projected)}</span>
+    <span className="inline-flex items-baseline justify-end gap-1 whitespace-nowrap" title={note ?? PROJECTION_TITLE}>
       {player.projectionBasis !== "history" && (
         <span className="text-[10px] text-zinc-500">{player.projectionBasis === "rating" ? "rating" : "prov."}</span>
       )}
+      <span className="tabular-nums font-semibold text-white">{fmt(player.projected)}</span>
     </span>
   );
 }
