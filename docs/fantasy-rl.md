@@ -383,7 +383,10 @@ Modelled on fantasy football so it's familiar:
   and the season back to `open`. With nobody to play a test event, Simulate writes made-up
   `player_game_stats` for each simulated series (`app/lib/fake-series-stats.ts`,
   `npm run test:fake-series-stats`), only while a test event is active and stats tracking
-  is on. Those rows never reach career stats, the same as any test event's.
+  is on. Those rows never reach career stats, the same as any test event's. Every fantasy
+  table built later (slot credits, matchups, waivers, trades) needs a delete in the
+  rollback too. The rollback leaves league memberships alone, so test accounts left in a
+  league will join the real draft.
 - Likely tables still to come: `fantasy_slot_credits`, `fantasy_matchups`,
   `fantasy_waiver_claims`, `fantasy_trades` + `fantasy_trade_items`.
 - The waiver run should be checked on every tick of the existing per-minute external pinger
