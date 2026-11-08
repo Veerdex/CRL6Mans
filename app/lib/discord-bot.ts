@@ -2963,7 +2963,9 @@ async function pickPlayer(userId: string, playerUsername: string) {
     },
     currentTeam.id, target.id,
   );
-  return reply(result.message);
+  // With a draft channel, completePick's embed is the announcement, so a public
+  // reply would print the pick twice.
+  return settings.draft_channel_id ? ephemeralReply(result.message) : reply(result.message);
 }
 
 async function setRulesChannel(userId: string, channelId: string) {
