@@ -5247,6 +5247,7 @@ export async function applyStatsRvUpdate(matchId: string): Promise<void> {
           assists: total.assists - match.assists,
           saves: total.saves - match.saves,
           shots: total.shots - match.shots,
+          scoreGames: Math.max(0, total.games - match.games - (total.scorelessGames ?? 0)),
         }
       : null;
     const predicted = projectedFantasyPoints(playerRatingFromRow(p), history?.games ? history : null);

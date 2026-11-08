@@ -135,6 +135,14 @@ export async function approvePlayerWithEdits(
     .eq("account_id", id);
   if (pendingError) return { error: pendingError.message };
 
+  // A pre-site season's stats adjustment waits here for players who had no
+  // Tier 3 row to hold it. Best-effort: a pre-migration read is just "none".
+  const { data: seededRv } = await supabaseAdmin
+    .from("seeded_rv_adjustments")
+    .select("rv_adjustment, rv_series_played")
+    .eq("discord_id", account.discord_id)
+    .maybeSingle();
+
   // Tier 3 (players) is created here, id = account id. Many not-yet-migrated
   // call sites (draft/bracket/team-balancing logic) still read MMR straight off
   // `players`, so those columns are mirrored from Tier 2 rather than left at
@@ -156,11 +164,15 @@ export async function approvePlayerWithEdits(
       tracker_url: editable.tracker_url,
       sub_willing: pending.sub_willing ?? false,
       tracker_confirmed_at: pending.tracker_confirmed_at ?? null,
+      ...(seededRv
+        ? { rv_adjustment: seededRv.rv_adjustment, rv_series_played: seededRv.rv_series_played }
+        : {}),
       updated_at: now,
     },
     { onConflict: "id" }
   );
   if (insertError) return { error: insertError.message };
+  if (seededRv) await supabaseAdmin.from("seeded_rv_adjustments").delete().eq("discord_id", account.discord_id);
 
   await addRegisteredRole(account.discord_id);
 

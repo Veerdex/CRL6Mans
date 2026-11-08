@@ -8,12 +8,13 @@
 // docs/fantasy-projections.md for the projection model these constants come from.
 
 import { mmrRatingFromRow, type PlayerRatingRow } from "./rating";
+import { hasMmrOnFile } from "./mmr-on-file";
 
 export const FP_BASELINE_RV = 1722.4;
 
 // Per-game league means at FP_BASELINE_RV, and how much each rises per RV point.
-const STAT_MEAN = { score: 299.32, goals: 0.70027, assists: 0.52663, saves: 1.35992, shots: 2.47082 };
-const STAT_SLOPE = { score: 0.30220, goals: 0.000928, assists: 0.000185, saves: 0.001646, shots: 0.002389 };
+const STAT_MEAN = { score: 345.55, goals: 0.70027, assists: 0.52663, saves: 1.35992, shots: 2.47082 };
+const STAT_SLOPE = { score: 0.3810, goals: 0.000928, assists: 0.000185, saves: 0.001646, shots: 0.002389 };
 const HISTORY_PRIOR_GAMES = 10;
 
 // RV per point of FP surprise. Fitted as RV-on-FP (R² × the inverse of the
@@ -26,7 +27,12 @@ export const SERIES_PRIOR_GAMES = 7;
 export const SERIES_PLAYED_CAP = 5;
 
 export type StatLine = { score: number; goals: number; assists: number; saves: number; shots: number };
-export type StatTotals = StatLine & { games: number };
+/**
+ * `scoreGames` is how many of `games` recorded a score: two seeded past events
+ * have none, and counting them would read as a player scoring 0 every game.
+ * Absent means all of them.
+ */
+export type StatTotals = StatLine & { games: number; scoreGames?: number };
 
 const STATS = ["score", "goals", "assists", "saves", "shots"] as const;
 
@@ -36,10 +42,10 @@ export function fantasyPoints(s: StatLine): number {
 
 /** Per-game stat line expected of an RV, blended with the player's own history. */
 export function projectedStatLine(rv: number, history: StatTotals | null): StatLine {
-  const games = history?.games ?? 0;
-  const w = games / (games + HISTORY_PRIOR_GAMES);
   const out = {} as StatLine;
   for (const k of STATS) {
+    const games = Math.max(0, (k === "score" ? history?.scoreGames : undefined) ?? history?.games ?? 0);
+    const w = games / (games + HISTORY_PRIOR_GAMES);
     const fromRating = Math.max(0, STAT_MEAN[k] + STAT_SLOPE[k] * (rv - FP_BASELINE_RV));
     out[k] = games > 0 ? w * (history![k] / games) + (1 - w) * fromRating : fromRating;
   }
@@ -92,5 +98,8 @@ export function absorbMmrChange(adjustment: number, oldMmrRv: number, newMmrRv: 
  * given the row as it was. `before` must have been selected with rv_adjustment.
  */
 export function adjustmentAfterMmrEdit(before: PlayerRatingRow, next: PlayerRatingRow): number {
+  // A first entry over the all-zero default is no ladder movement at all, and
+  // would otherwise wipe any positive adjustment in one save.
+  if (!hasMmrOnFile(before)) return Number(before.rv_adjustment ?? 0);
   return absorbMmrChange(Number(before.rv_adjustment ?? 0), mmrRatingFromRow(before), mmrRatingFromRow(next));
 }

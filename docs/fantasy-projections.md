@@ -67,7 +67,7 @@ Fitted on the 30 registered players with ≥ 10 games and MMR on file:
 
 | Stat | leagueMean (per game) | slope (per RV point) | r with RV | Spec's slope (96 players) |
 |---|---|---|---|---|
-| Score | 299.32 | 0.30220 | 0.64 | — |
+| Score | 345.55 | 0.3810 | — | — |
 | Goals | 0.70027 | 0.000928 | 0.73 | 0.000937 |
 | Assists | 0.52663 | 0.000185 | 0.24 | 0.000314 |
 | Saves | 1.35992 | 0.001646 | 0.67 | 0.001464 |
@@ -77,6 +77,10 @@ The spec appears to have been fit on this same league with more players. Its slo
 closely, which supports these values. The spec has no score model, so all five values here
 come from our own fit.
 
+The score row was refit on 2026-11-07. Two seeded events
+(`191198e6-…`, `d600c105-…`) recorded no score at all, and counting their zeros had
+dragged the mean down to 299.32 and the slope to 0.30220. The other four stats are unchanged.
+
 ### Step 2 — Blend with the player's history
 ```
 w        = games / (games + 10)
@@ -84,6 +88,8 @@ baseline = w × historicalPerGame(s) + (1 − w) × ratingEstimate(s)
 ```
 - 0 games → w = 0 (rating only). 10 games → 0.5. 50 games → 0.83.
 - History = `seeded_player_stats` **plus** live `player_game_stats`, combined.
+- **Score history skips seeded events with no score recorded** (a seeded row with games > 0
+  and score 0). For score, `games` is the number of games that did record one (`scoreGames`).
 - **No MMR on file** (`hasMmrOnFile` false): use history alone if there is any. With neither
   history nor MMR, use the league means.
 - **Labels** (from the spec): w = 0 is *rating only*, 0 < w < 0.5 is *provisional*,

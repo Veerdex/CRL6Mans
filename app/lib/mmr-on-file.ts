@@ -12,7 +12,7 @@
  * the other, and a season peak of zero is ordinary a few days after a reset —
  * so either of those alone is a real value, not a missing one.
  */
-export function hasMmrOnFile(row: { peak_2v2?: string | null; peak_3v3?: string | null }): boolean {
+export function hasMmrOnFile(row: { peak_2v2?: string | number | null; peak_3v3?: string | number | null }): boolean {
   return (Number(row.peak_2v2) || 0) > 0 || (Number(row.peak_3v3) || 0) > 0;
 }
 

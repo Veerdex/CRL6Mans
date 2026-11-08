@@ -24,11 +24,11 @@ const perGame = (s: typeof M3L0DY_SERIES, games: number) => ({
 });
 
 test("the projection line passes through the league mean at the baseline RV", () => {
-  close(projectedFantasyPoints(FP_BASELINE_RV, null), 0.9477, 0.0005);
+  close(projectedFantasyPoints(FP_BASELINE_RV, null), 1.0177, 0.0005);
 });
 
-test("M3L0DY's pre-series projection matches the one quoted to the user", () => {
-  close(projectedFantasyPoints(mmrRatingFromRow(M3L0DY_ROW), M3L0DY_HISTORY), 1.093, 0.001);
+test("M3L0DY's pre-series projection under the refit score line", () => {
+  close(projectedFantasyPoints(mmrRatingFromRow(M3L0DY_ROW), M3L0DY_HISTORY), 1.103, 0.001);
   close(fantasyPoints(perGame(M3L0DY_SERIES, 3)), 2.070, 0.001);
 });
 
@@ -78,4 +78,17 @@ test("an MMR edit is measured on the MMR rating, not the adjusted one", () => {
   assert.ok(rise > 0 && rise < 100);
   close(adjustmentAfterMmrEdit(before, raised), 100 - rise, 1e-9);
   assert.equal(adjustmentAfterMmrEdit(before, M3L0DY_ROW), 100);
+});
+
+test("games with no recorded score are left out of the score history only", () => {
+  const scoreless = { ...M3L0DY_HISTORY, games: M3L0DY_HISTORY.games + 20 };
+  const rv = mmrRatingFromRow(M3L0DY_ROW);
+  const withScoreGames = projectedFantasyPoints(rv, { ...scoreless, scoreGames: M3L0DY_HISTORY.games });
+  const naive = projectedFantasyPoints(rv, scoreless);
+  assert.ok(withScoreGames > naive);
+});
+
+test("a first MMR entry over the all-zero default keeps the adjustment", () => {
+  const unset = { peak_2v2: "0", current_2v2: "0", peak_3v3: "0", current_3v3: "0", rv_adjustment: 16.6 };
+  assert.equal(adjustmentAfterMmrEdit(unset, M3L0DY_ROW), 16.6);
 });

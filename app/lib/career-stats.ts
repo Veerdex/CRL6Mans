@@ -12,6 +12,8 @@ export type CareerTotals = {
   score: number;
   demos: number;
   demoed: number;
+  /** Seeded games from events that recorded no score. Not counted in any display. */
+  scorelessGames?: number;
 };
 
 const ZERO: CareerTotals = { games: 0, goals: 0, assists: 0, saves: 0, shots: 0, score: 0, demos: 0, demoed: 0 };
@@ -183,6 +185,7 @@ export async function fetchAllTimeTotals(): Promise<Map<string, CareerTotals>> {
       t.score += s.score;
       t.demos += s.demos;
       t.demoed += s.demoed;
+      if (s.games > 0 && s.score === 0) t.scorelessGames = (t.scorelessGames ?? 0) + s.games;
     }
   }
 
