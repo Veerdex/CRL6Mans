@@ -4,6 +4,7 @@ import { recordNotification } from "./notifications";
 import { isStatsTrackingEnabled } from "./career-stats";
 import { isTestEventActive } from "./test-tournament";
 import { normalizeTeamSize } from "./team-size";
+import { developerDiscordIds } from "./players";
 import { getCurrentFantasySeason } from "./fantasy-leagues";
 import { currentSeasonTiers, frozenTiers } from "./fantasy-pool-data";
 import { FANTASY_MIN_MANAGERS } from "./fantasy-rules";
@@ -119,6 +120,7 @@ export async function submitPick({ leagueId, managerId, playerId, auto }: PickIn
   const slot = slotForPick(new Set(mine.map((s) => s.slot)), tier);
   if (!slot) return { error: "Your roster is full." };
 
+  const testRun = await isTestRun(league.fantasy_season_id);
   const { data: outcome, error } = await supabaseAdmin.rpc("fantasy_draft_pick", {
     p_league: leagueId,
     p_pick: pick,
@@ -127,7 +129,7 @@ export async function submitPick({ leagueId, managerId, playerId, auto }: PickIn
     p_slot: slot,
     p_auto: auto,
     p_total: totalDraftPicks(order.length),
-    p_seconds: FANTASY_PICK_SECONDS,
+    p_seconds: pickSeconds(testRun),
   });
   if (error) return { error: "Couldn't make the pick." };
   if (outcome === "stale") return { error: "That pick has already been made." };
@@ -184,16 +186,15 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
   if (!season) return { error: "There's no fantasy season." };
   if (season.status !== "open") return { error: "This fantasy season's drafts have already started." };
 
-  const [{ data: settings }, statsOn, testEvent] = await Promise.all([
+  const [{ data: settings }, statsOn, testRun] = await Promise.all([
     supabaseAdmin.from("league_settings").select("team_size, draft_active, season_active").maybeSingle(),
     isStatsTrackingEnabled(),
     isTestEventActive(),
   ]);
-  // §1: a 3v3 season with stats tracking, never a test one; §8: after the real
-  // draft and before Round 1.
+  // §1: a 3v3 season with stats tracking; §8: after the real draft and before
+  // Round 1. A test event gets a test run: see rollbackFantasyTestRun.
   if (normalizeTeamSize(settings?.team_size) !== 3) return { error: "Fantasy only runs alongside a 3v3 season." };
   if (!statsOn) return { error: "Turn stats tracking on first. Fantasy scores come from replay stats." };
-  if (testEvent) return { error: "Fantasy doesn't run during a test event." };
   if (settings?.draft_active) return { error: "Finish the season draft first." };
   if (settings?.season_active) return { error: "The season has already started. Fantasy drafts run before Round 1." };
 
@@ -202,12 +203,13 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
 
   // The claim: two staff pressing at once can't both start the drafts, and the
   // season leaving 'open' stops new leagues being created.
-  const { data: claimed } = await supabaseAdmin
+  const { data: claimed, error: claimError } = await supabaseAdmin
     .from("fantasy_seasons")
-    .update({ status: "drafting" })
+    .update(testRun ? { status: "drafting", test_run: true } : { status: "drafting" })
     .eq("id", season.id)
     .eq("status", "open")
     .select("id");
+  if (claimError && testRun) return { error: "Couldn't mark this as a test run. Has scripts/fantasy-test-run-migration.sql been run?" };
   if (!claimed?.length) return { error: "This fantasy season's drafts have already started." };
 
   // Leagues leave pre_draft before their members are read, since joining locks
@@ -225,7 +227,10 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
     if (leagues.length) {
       await supabaseAdmin.from("fantasy_leagues").update({ status: "pre_draft" }).in("id", leagues.map((l) => l.id));
     }
-    await supabaseAdmin.from("fantasy_seasons").update({ status: "open" }).eq("id", season.id);
+    await supabaseAdmin
+      .from("fantasy_seasons")
+      .update(testRun ? { status: "open", test_run: false } : { status: "open" })
+      .eq("id", season.id);
   };
 
   const { data: memberRows, error: memberError } = leagues.length
@@ -238,8 +243,18 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
   const membersOf = new Map<string, string[]>(leagues.map((l) => [l.id, []]));
   for (const m of (memberRows ?? []) as { league_id: string; account_id: string }[]) membersOf.get(m.league_id)?.push(m.account_id);
 
-  const drafting = leagues.filter((l) => membersOf.get(l.id)!.length >= FANTASY_MIN_MANAGERS);
-  const disbanding = leagues.filter((l) => membersOf.get(l.id)!.length < FANTASY_MIN_MANAGERS);
+  // A test run drafts only leagues made entirely of staff and test accounts,
+  // and disbands nothing: every other league goes back to pre_draft untouched,
+  // so the rollback at the end of the test has nothing it can't undo.
+  const testSafe = testRun ? await staffOrTestAccounts([...membersOf.values()].flat()) : null;
+  const sized = leagues.filter((l) => membersOf.get(l.id)!.length >= FANTASY_MIN_MANAGERS);
+  const drafting = testSafe ? sized.filter((l) => membersOf.get(l.id)!.every((id) => testSafe.has(id))) : sized;
+  const disbanding = testSafe ? [] : leagues.filter((l) => membersOf.get(l.id)!.length < FANTASY_MIN_MANAGERS);
+  const untouched = testSafe ? leagues.filter((l) => !drafting.includes(l)) : [];
+  if (testRun && !drafting.length) {
+    await revert();
+    return { error: "No league can run a test draft: one needs at least 4 managers, all of them staff or test accounts." };
+  }
 
   // Refused up front rather than left to stall: a league whose pool can't fill
   // every roster would reach a pick with nobody legal to take.
@@ -264,7 +279,10 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
     }
   }
 
-  const deadline = new Date(Date.now() + FANTASY_PICK_SECONDS * 1000).toISOString();
+  if (untouched.length) {
+    await supabaseAdmin.from("fantasy_leagues").update({ status: "pre_draft" }).in("id", untouched.map((l) => l.id));
+  }
+  const deadline = new Date(Date.now() + pickSeconds(testRun) * 1000).toISOString();
   for (const l of drafting) {
     await supabaseAdmin
       .from("fantasy_leagues")
@@ -302,8 +320,61 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
   }
 
   return {
-    message: `Started ${drafting.length} draft${drafting.length === 1 ? "" : "s"}${
+    message: `Started ${drafting.length} ${testRun ? "test " : ""}draft${drafting.length === 1 ? "" : "s"}${
       disbanding.length ? `, disbanded ${disbanding.length} league${disbanding.length === 1 ? "" : "s"}` : ""
-    }.`,
+    }${untouched.length ? `, left ${untouched.length} league${untouched.length === 1 ? "" : "s"} waiting` : ""}.`,
   };
+}
+
+// Test-account managers can't log in, so every one of their picks is an
+// autopick; at the real clock a test draft would take hours.
+const TEST_PICK_SECONDS = 30;
+
+function pickSeconds(testRun: boolean): number {
+  return testRun ? TEST_PICK_SECONDS : FANTASY_PICK_SECONDS;
+}
+
+async function isTestRun(fantasySeasonId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.from("fantasy_seasons").select("test_run").eq("id", fantasySeasonId).maybeSingle();
+  return !error && data?.test_run === true;
+}
+
+async function staffOrTestAccounts(accountIds: string[]): Promise<Set<string>> {
+  if (!accountIds.length) return new Set();
+  const [{ data: accounts }, { data: staff }] = await Promise.all([
+    supabaseAdmin.from("accounts").select("id, discord_id").in("id", [...new Set(accountIds)]),
+    supabaseAdmin.from("staff_roles").select("discord_id"),
+  ]);
+  const staffIds = new Set([...((staff ?? []) as { discord_id: string }[]).map((s) => s.discord_id), ...developerDiscordIds()]);
+  return new Set(
+    ((accounts ?? []) as { id: string; discord_id: string }[])
+      .filter((a) => a.discord_id.startsWith("test_") || staffIds.has(a.discord_id))
+      .map((a) => a.id),
+  );
+}
+
+/**
+ * Undoes a fantasy test run when the test event ends (resetSeason): its picks,
+ * rosters and frozen tiers go, its leagues return to pre_draft and the season to
+ * open, so the real season's drafts start from nothing. A no-op otherwise.
+ */
+export async function rollbackFantasyTestRun(): Promise<void> {
+  const season = await getCurrentFantasySeason();
+  if (!season || !(await isTestRun(season.id))) return;
+  const { data: leagueRows } = await supabaseAdmin
+    .from("fantasy_leagues")
+    .select("id")
+    .eq("fantasy_season_id", season.id)
+    .in("status", ["drafting", "active"]);
+  const ids = ((leagueRows ?? []) as { id: string }[]).map((l) => l.id);
+  if (ids.length) {
+    await supabaseAdmin.from("fantasy_roster_slots").delete().in("league_id", ids);
+    await supabaseAdmin.from("fantasy_draft_picks").delete().in("league_id", ids);
+    await supabaseAdmin
+      .from("fantasy_leagues")
+      .update({ status: "pre_draft", draft_order: null, current_pick: 0, pick_deadline: null })
+      .in("id", ids);
+  }
+  await supabaseAdmin.from("fantasy_player_tiers").delete().eq("fantasy_season_id", season.id);
+  await supabaseAdmin.from("fantasy_seasons").update({ status: "open", test_run: false }).eq("id", season.id);
 }

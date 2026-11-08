@@ -8,6 +8,9 @@ import { isDirector } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import { cleanupStageCategoryIfComplete, openReadyMatchChannels } from "@/app/lib/discord-bot";
 import { deleteChannel } from "@/app/lib/discord-api";
+import { isTestEventActive } from "@/app/lib/test-tournament";
+import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
+import { fakeSeriesStats } from "@/app/lib/fake-series-stats";
 import {
   DE_WINNERS, DE_LOSERS, DE_GF,
   getDEWBRounds, getDELBRounds,
@@ -668,6 +671,7 @@ export async function simulateMatch(): Promise<{ error?: string; ok?: boolean }>
 // testing tool and shouldn't require waiting out real-world round windows the way
 // real player-reported matches do.
 async function deleteChannelsForBatch(matchIds: string[]): Promise<void> {
+  await writeFakeStats(matchIds);
   if (matchIds.length) {
     const { data: ms } = await supabaseAdmin
       .from("matches").select("id, stage, round, discord_channel_id").in("id", matchIds);
@@ -684,6 +688,51 @@ async function deleteChannelsForBatch(matchIds: string[]): Promise<void> {
     }
   }
   await openReadyMatchChannels({ ignoreScheduleDeadline: true });
+}
+
+// A test event has nobody to play it, so a simulated series gets made-up
+// scoreboard lines (fake-series-stats.ts) for fantasy and the Stats page to
+// read. Only ever in a test event: those rows are never rolled into career
+// stats (resetSeason) and go with the matches they hang off. Simulate itself
+// isn't test-only, hence the server-side gate.
+async function writeFakeStats(matchIds: string[]): Promise<void> {
+  if (!matchIds.length || !(await isTestEventActive()) || !(await isStatsTrackingEnabled())) return;
+  const { data: matches } = await supabaseAdmin
+    .from("matches")
+    .select("id, home_team_id, away_team_id, home_score, away_score")
+    .in("id", matchIds);
+  const teamIds = [...new Set((matches ?? []).flatMap((m) => [m.home_team_id, m.away_team_id]).filter(Boolean))];
+  if (!teamIds.length) return;
+  const { data: players } = await supabaseAdmin.from("players").select("id, username, team_id").in("team_id", teamIds);
+  const rosterOf = (teamId: string | null) => (players ?? []).filter((p) => p.team_id === teamId);
+  const nameOf = new Map((players ?? []).map((p) => [p.id as string, (p.username as string | null) ?? "Player"]));
+
+  for (const m of matches ?? []) {
+    const lines = fakeSeriesStats({
+      home: rosterOf(m.home_team_id).map((p) => p.id as string),
+      away: rosterOf(m.away_team_id).map((p) => p.id as string),
+      homeScore: m.home_score ?? 0,
+      awayScore: m.away_score ?? 0,
+    });
+    if (!lines.length) continue;
+    await supabaseAdmin.from("player_game_stats").delete().eq("match_id", m.id);
+    await supabaseAdmin.from("player_game_stats").insert(
+      lines.map((l) => ({
+        match_id: m.id,
+        player_id: l.playerId,
+        game_number: l.gameNumber,
+        replay_name: nameOf.get(l.playerId)!,
+        replay_id: `sim-${m.id}-${l.gameNumber}`,
+        goals: l.goals,
+        assists: l.assists,
+        saves: l.saves,
+        shots: l.shots,
+        score: l.score,
+        demos: l.demos,
+        demoed: l.demoed,
+      })),
+    );
+  }
 }
 
 export async function simulateRound(): Promise<{ error?: string; ok?: boolean }> {

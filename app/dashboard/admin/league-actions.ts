@@ -13,6 +13,7 @@ import { ADMIN_NOTIFICATION_CATEGORIES } from "@/app/lib/admin-notification-pref
 import { APP_NAME } from "@/app/lib/constants";
 import { computeTopStats } from "@/app/lib/game-stats";
 import { rollUpCareerStats } from "@/app/lib/career-stats";
+import { rollbackFantasyTestRun } from "@/app/lib/fantasy-draft-server";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { fetchEventWinner } from "@/app/lib/bracket-server";
 import { computeFullArchive } from "./tournament-archive";
@@ -607,6 +608,9 @@ export async function resetSeason() {
   // Reset Season button — and each of the others would otherwise make a test's
   // stats permanent while reporting "No records saved."
   if (!(await isTestEventActive())) await rollUpCareerStats();
+  // Keyed on the fantasy season's own test_run flag rather than the event, so
+  // a test run is undone even if the event's test flag is already gone.
+  await rollbackFantasyTestRun();
 
   await supabaseAdmin.from("sub_requests").delete().not("id", "is", null);
   await supabaseAdmin.from("matches").delete().not("id", "is", null);

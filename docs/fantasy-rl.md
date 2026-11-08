@@ -375,6 +375,15 @@ Modelled on fantasy football so it's familiar:
   Autopick fires from the open draft room when the clock hits 0, with the
   `draft-autopick` cron as the backstop. The pick queue isn't built yet, so autopick goes
   straight to tier then rating.
+- **Test runs** (`scripts/fantasy-test-run-migration.sql`): starting the drafts during a test
+  event sets `fantasy_seasons.test_run`. A test run drafts only leagues whose managers are
+  all staff or `test_` accounts, disbands nothing (every other league stays in `pre_draft`),
+  and runs a 30-second pick clock. `resetSeason` calls `rollbackFantasyTestRun`, which
+  deletes the run's picks, rosters and frozen tiers and puts the leagues back in `pre_draft`
+  and the season back to `open`. With nobody to play a test event, Simulate writes made-up
+  `player_game_stats` for each simulated series (`app/lib/fake-series-stats.ts`,
+  `npm run test:fake-series-stats`), only while a test event is active and stats tracking
+  is on. Those rows never reach career stats, the same as any test event's.
 - Likely tables still to come: `fantasy_slot_credits`, `fantasy_matchups`,
   `fantasy_waiver_claims`, `fantasy_trades` + `fantasy_trade_items`.
 - The waiver run should be checked on every tick of the existing per-minute external pinger
