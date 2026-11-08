@@ -169,12 +169,17 @@ test("the on-the-clock post pings a real captain in content, never in the embed"
   assert.equal(post.content, "<@123456789012345678>");
   assert.deepEqual(post.allowed_mentions, { parse: [], users: ["123456789012345678"] });
   assert.doesNotMatch(post.embeds[0].description!, /<@/);
-  assert.match(post.embeds[0].description!, /Cap/);
+  assert.equal(post.embeds[0].title, "⏭️ Cap is on the clock");
+  assert.match(post.embeds[0].description!, /Team 3/);
 });
 
 test("a test account captain gets their name shown, not a raw <@test_…>", () => {
   const post = onTheClockPost(3, { discordId: "test_1794172999047_0_d195", name: "GhostViper_d195" });
   assert.equal(post.content, "");
   assert.deepEqual(post.allowed_mentions.users, []);
-  assert.match(post.embeds[0].description!, /GhostViper_d195/);
+  assert.match(post.embeds[0].title!, /GhostViper_d195/);
+});
+
+test("a captainless team on the clock falls back to its team number", () => {
+  assert.equal(onTheClockPost(20, null).embeds[0].title, "⏭️ Team 20 is on the clock");
 });

@@ -107,8 +107,8 @@ export function draftStartEmbed(opts: {
 export function onTheClockEmbed(teamNum: number, captainName?: string): DiscordEmbed {
   return {
     color: BRAND_ORANGE,
-    title: `⏭️ Team ${teamNum} is on the clock`,
-    description: (captainName ? `Captain: **${captainName}**\n` : "")
+    title: `⏭️ ${captainName || `Team ${teamNum}`} is on the clock`,
+    description: (captainName ? `Picking for **Team ${teamNum}**\n` : "")
       + "Use `/pick <player>` to take someone from the pool.",
     footer: { text: "45 seconds, then the highest Rank Value left is picked for you" },
   };
