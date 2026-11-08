@@ -95,11 +95,19 @@ baseline = w × historicalPerGame(s) + (1 − w) × ratingEstimate(s)
 - **Labels** (from the spec): w = 0 is *rating only*, 0 < w < 0.5 is *provisional*,
   w ≥ 0.5 is *history weighted*.
 
-### Step 3 — Matchup adjustment: none in v1
-The spec scales each stat up or down with the team's chance of winning a game (goals +0.12,
-assists +0.10, saves −0.08, shots +0.08, clamped to ±10%). It describes these as untested
-guesses and has no value for score, so v1 leaves them out. The matchup still counts through
-the win bonus (§3). Once there's live game-by-game data, revisit this.
+### Step 3 — Matchup adjustment
+The spec's dominance adjustment (§10), with `pGame` the player's team's chance of winning one
+game of their next series:
+```
+dominance  = clamp(2·pGame − 1, −1, 1)
+multiplier = clamp(1 + coefficient × dominance, 0.90, 1.10)
+coefficients: goals +0.12, assists +0.10, saves −0.08, shots +0.08
+```
+The spec has no coefficient for **score**, so score is left as projected. The spec calls these
+coefficients conservative starting values that need a backtest, so they're among the first
+things to refit in §4. A player with no next match (a free agent, or a team with nothing
+scheduled) projects as an even matchup: no stat scaling and the even win bonus at the season's
+default series length.
 
 ---
 

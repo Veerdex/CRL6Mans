@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  applyMatchup,
+  expectedWinBonus,
   freeAgentTier,
+  projectedSeriesPoints,
   projectedStatPoints,
   projectionBasis,
   seriesFantasyPoints,
@@ -55,6 +58,31 @@ test("no ranks and no history projects the league mean", () => {
 test("no ranks with history projects the history alone", () => {
   const history = { games: 4, goals: 4, assists: 4, saves: 4, shots: 8, score: 1600 };
   close(projectedStatPoints(null, history), 20 * fantasyPoints({ score: 400, goals: 1, assists: 1, saves: 1, shots: 2 }));
+});
+
+test("an even best-of-5 adds the docs' 0.94 expected bonus and leaves stats alone", () => {
+  close(expectedWinBonus({ ownRating: 1700, oppRating: 1700, winsNeeded: 3 }), 0.9375);
+  const even = projectedSeriesPoints(1800, null, { ownRating: 1700, oppRating: 1700, winsNeeded: 3 });
+  close(even, projectedStatPoints(1800, null) + 0.9375);
+});
+
+test("the same player projects lower against a stronger team", () => {
+  const vsStrong = projectedSeriesPoints(1800, null, { ownRating: 1800, oppRating: 2000, winsNeeded: 3 });
+  const vsWeak = projectedSeriesPoints(1800, null, { ownRating: 1800, oppRating: 1500, winsNeeded: 3 });
+  assert.ok(vsStrong < vsWeak, `${vsStrong} should be below ${vsWeak}`);
+});
+
+test("matchup scaling follows the spec's coefficients, capped at ±10%, and leaves score alone", () => {
+  const line = { score: 300, goals: 1, assists: 1, saves: 1, shots: 1 };
+  const favoured = applyMatchup(line, 0.75);
+  close(favoured.score, 300);
+  close(favoured.goals, 1.06);
+  close(favoured.assists, 1.05);
+  close(favoured.saves, 0.96);
+  close(favoured.shots, 1.04);
+  const crushed = applyMatchup(line, 0);
+  close(crushed.goals, 0.9);
+  close(crushed.saves, 1.08);
 });
 
 test("a 3-1 win played in full: stats over 4 games plus the 2-game bonus", () => {

@@ -1,13 +1,20 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./paginate";
-import { fetchAllTimeTotals } from "./career-stats";
+import { fetchAllTimeTotals, isStatsTrackingEnabled } from "./career-stats";
 import { isTestEventActive } from "./test-tournament";
-import { decisionRatingFromRow, rulesRatingFromRow, shownRatingFromRow, type PlayerRatingRow } from "./rating";
+import {
+  decisionRatingFromRow,
+  resolveTeamRating,
+  rulesRatingFromRow,
+  shownRatingFromRow,
+  type PlayerRatingRow,
+} from "./rating";
 import { hasMmrOnFile } from "./mmr-on-file";
+import { resolveBestOf, type BestOf, type RoundBestOfConfig } from "@/app/dashboard/season/format-constants";
 import {
   freeAgentTier,
-  projectedStatPoints,
+  projectedSeriesPoints,
   projectionBasis,
   seriesFantasyPoints,
   tierFromDraftRound,
@@ -55,6 +62,7 @@ type MatchRow = {
   status: string;
   forfeit: boolean | null;
   scheduled_at: string | null;
+  stage: string | null;
   round: number | null;
   match_number: number | null;
 };
@@ -76,26 +84,50 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
   const testEvent = await isTestEventActive();
   if (testEvent && !viewerIsStaff) return { players: [], hiddenForTest: true };
 
-  const [{ data: settings }, players, { data: memberRows }, { data: teamRows }, matches] = await Promise.all([
-    supabaseAdmin.from("league_settings").select("season_active, draft_active").maybeSingle(),
+  const [{ data: settings }, players, { data: memberRows }, { data: teamRows }, matches, statsOn] = await Promise.all([
+    supabaseAdmin.from("league_settings").select("season_active, draft_active, season_format").maybeSingle(),
     fetchPoolPlayers(),
     supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId),
-    supabaseAdmin.from("teams").select("id, name"),
+    supabaseAdmin.from("teams").select("id, name, season_rating"),
     fetchAllRows<MatchRow>((from, to) =>
       supabaseAdmin
         .from("matches")
-        .select("id, home_team_id, away_team_id, home_score, away_score, status, forfeit, scheduled_at, round, match_number")
+        .select("id, home_team_id, away_team_id, home_score, away_score, status, forfeit, scheduled_at, stage, round, match_number")
         .order("id")
         .range(from, to),
     ),
+    isStatsTrackingEnabled(),
   ]);
 
-  const teams = new Map<string, PoolTeam>(
-    ((teamRows ?? []) as { id: string; name: string }[]).map((t) => [
+  const typedTeams = (teamRows ?? []) as { id: string; name: string; season_rating: number | string | null }[];
+  const teams = new Map<string, PoolTeam>(typedTeams.map((t) => [t.id, { id: t.id, name: t.name }]));
+
+  // Team ratings the way the wagers predictor reads them (match-predictions.ts):
+  // with stats tracking on, roster RVs replace the drifting season rating.
+  const rosterRatings = new Map<string, number[]>();
+  for (const p of players) {
+    if (!p.team_id) continue;
+    const list = rosterRatings.get(p.team_id);
+    if (list) list.push(decisionRatingFromRow(p));
+    else rosterRatings.set(p.team_id, [decisionRatingFromRow(p)]);
+  }
+  const teamRating = new Map(
+    typedTeams.map((t) => [
       t.id,
-      { id: t.id, name: t.name },
+      resolveTeamRating(!statsOn && t.season_rating != null ? Number(t.season_rating) : null, rosterRatings.get(t.id) ?? []),
     ]),
   );
+
+  const format = settings?.season_format as { roundBestOf?: RoundBestOfConfig; best_of?: number } | null;
+  const fallbackBestOf = (format?.best_of ?? 3) as BestOf;
+  const maxRoundByStage: Record<string, number> = {};
+  for (const m of matches) {
+    if (m.stage) maxRoundByStage[m.stage] = Math.max(maxRoundByStage[m.stage] ?? 0, m.round ?? 0);
+  }
+  const winsNeededFor = (m: MatchRow | undefined) =>
+    Math.ceil(
+      (m?.stage ? resolveBestOf(m.stage, m.round ?? 1, maxRoundByStage, format?.roundBestOf, fallbackBestOf) : fallbackBestOf) / 2,
+    );
   const managers = new Set(((memberRows ?? []) as { account_id: string }[]).map((m) => m.account_id));
   const freeAgentsOpen = !!settings?.season_active && !settings?.draft_active;
 
@@ -148,10 +180,10 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
         (a.scheduled_at ?? "￿").localeCompare(b.scheduled_at ?? "￿") ||
         (a.match_number ?? 0) - (b.match_number ?? 0),
     );
-  const nextOpponentByTeam = new Map<string, string>();
+  const nextMatchByTeam = new Map<string, { match: MatchRow; opponentId: string }>();
   for (const m of upcoming) {
-    if (!nextOpponentByTeam.has(m.home_team_id!)) nextOpponentByTeam.set(m.home_team_id!, m.away_team_id!);
-    if (!nextOpponentByTeam.has(m.away_team_id!)) nextOpponentByTeam.set(m.away_team_id!, m.home_team_id!);
+    if (!nextMatchByTeam.has(m.home_team_id!)) nextMatchByTeam.set(m.home_team_id!, { match: m, opponentId: m.away_team_id! });
+    if (!nextMatchByTeam.has(m.away_team_id!)) nextMatchByTeam.set(m.away_team_id!, { match: m, opponentId: m.home_team_id! });
   }
 
   const out: PoolPlayer[] = pool.map((p) => {
@@ -195,7 +227,17 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
       }
     }
 
-    const opponentId = p.team_id ? nextOpponentByTeam.get(p.team_id) : undefined;
+    // No next match (a free agent, or a team with nothing scheduled) projects
+    // as an even matchup at the season's default series length.
+    const next = p.team_id ? nextMatchByTeam.get(p.team_id) : undefined;
+    const opponentId = next?.opponentId;
+    const matchup = next
+      ? {
+          ownRating: teamRating.get(p.team_id!) ?? 0,
+          oppRating: teamRating.get(next.opponentId) ?? 0,
+          winsNeeded: winsNeededFor(next.match),
+        }
+      : { ownRating: 0, oppRating: 0, winsNeeded: winsNeededFor(undefined) };
     return {
       id: p.id,
       discordId: a?.discord_id ?? "",
@@ -205,7 +247,7 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
       tier,
       team: p.team_id ? teams.get(p.team_id) ?? null : null,
       rating: shownRatingFromRow(p),
-      projected: projectedStatPoints(ranked ? decisionRatingFromRow(p) : null, totals),
+      projected: projectedSeriesPoints(ranked ? decisionRatingFromRow(p) : null, totals, matchup),
       projectionBasis: projectionBasis(totals?.games ?? 0),
       seasonPoints,
       seriesPlayed,

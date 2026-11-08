@@ -12,6 +12,7 @@ import {
   type StatTotals,
 } from "./rv-adjustment";
 import { CAPTAIN_DRAFT_ROUND } from "./draft-order";
+import { PREDICTION_SCALE, gameWinProbability, predictSeries } from "./rating";
 
 export type FantasyTier = 1 | 2 | 3;
 
@@ -50,24 +51,63 @@ export function projectionBasis(games: number): ProjectionBasis {
   return w < 0.5 ? "provisional" : "history";
 }
 
+/** The player's team rating, the opponent's, and the wins the series takes. */
+export type Matchup = { ownRating: number; oppRating: number; winsNeeded: number };
+
 /**
- * Projected stat points per series, before the win bonus. `rating` is null for
- * a player with no ranks on file: their history alone if they have any, the
- * league means if they have none.
+ * The spec's matchup dominance (§10): a favoured team's players score and shoot
+ * a little more and save a little less. The spec gives score no coefficient, so
+ * it stays as projected.
  */
-export function projectedStatPoints(rating: number | null, history: StatTotals | null): number {
+const DOMINANCE_COEFFICIENT = { goals: 0.12, assists: 0.1, saves: -0.08, shots: 0.08 };
+const MAX_MATCHUP_SHIFT = 0.1;
+
+function projectedPerGameLine(rating: number | null, history: StatTotals | null): StatLine {
   const games = history?.games ?? 0;
-  if (rating !== null || games === 0) {
-    return STAT_POINTS_PER_FP * fantasyPoints(projectedStatLine(rating ?? FP_BASELINE_RV, games > 0 ? history : null));
-  }
+  if (rating !== null || games === 0) return projectedStatLine(rating ?? FP_BASELINE_RV, games > 0 ? history : null);
   const scoreGames = history!.scoreGames ?? games;
-  return STAT_POINTS_PER_FP * fantasyPoints({
+  return {
     score: scoreGames > 0 ? history!.score / scoreGames : projectedStatLine(FP_BASELINE_RV, null).score,
     goals: history!.goals / games,
     assists: history!.assists / games,
     saves: history!.saves / games,
     shots: history!.shots / games,
-  });
+  };
+}
+
+/** Stat points per series before the matchup and the win bonus. */
+export function projectedStatPoints(rating: number | null, history: StatTotals | null): number {
+  return STAT_POINTS_PER_FP * fantasyPoints(projectedPerGameLine(rating, history));
+}
+
+export function applyMatchup(line: StatLine, pGame: number): StatLine {
+  const dominance = Math.min(1, Math.max(-1, 2 * pGame - 1));
+  const scale = (c: number) => Math.min(1 + MAX_MATCHUP_SHIFT, Math.max(1 - MAX_MATCHUP_SHIFT, 1 + c * dominance));
+  return {
+    score: line.score,
+    goals: line.goals * scale(DOMINANCE_COEFFICIENT.goals),
+    assists: line.assists * scale(DOMINANCE_COEFFICIENT.assists),
+    saves: line.saves * scale(DOMINANCE_COEFFICIENT.saves),
+    shots: line.shots * scale(DOMINANCE_COEFFICIENT.shots),
+  };
+}
+
+/** docs/fantasy-projections.md §3: Σ over the team's winning scorelines of P × (winsNeeded − games lost). */
+export function expectedWinBonus({ ownRating, oppRating, winsNeeded }: Matchup): number {
+  return predictSeries(ownRating, oppRating, winsNeeded, PREDICTION_SCALE)
+    .scorelines.filter((s) => s.winner === "A")
+    .reduce((sum, s) => sum + s.probability * (winsNeeded - s.losses), 0);
+}
+
+/**
+ * Projected series points: stat points adjusted for the matchup, plus the
+ * expected win bonus. `rating` is null for a player with no ranks on file:
+ * their history alone if they have any, the league means if they have none.
+ */
+export function projectedSeriesPoints(rating: number | null, history: StatTotals | null, matchup: Matchup): number {
+  const pGame = gameWinProbability(matchup.ownRating, matchup.oppRating, PREDICTION_SCALE);
+  const line = applyMatchup(projectedPerGameLine(rating, history), pGame);
+  return STAT_POINTS_PER_FP * fantasyPoints(line) + expectedWinBonus(matchup);
 }
 
 export type SeriesForScoring = {

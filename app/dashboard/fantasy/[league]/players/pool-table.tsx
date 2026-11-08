@@ -18,7 +18,7 @@ const TIER_STYLE: Record<FantasyTier, string> = {
 };
 
 const PROJECTION_TITLE =
-  "Projected stat points per series, before the win bonus — from the player's rating, blended with their own stat history as it builds up.";
+  "Projected points for the next series, win bonus included — from the player's rating, blended with their own stat history as it builds up, and adjusted for their team's chances against the opponent. With no match scheduled it assumes an even matchup.";
 
 const average = (p: PoolPlayer) => (p.seriesPlayed ? p.seasonPoints / p.seriesPlayed : null);
 const fmt = (n: number) => n.toFixed(1);
