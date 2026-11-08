@@ -116,8 +116,8 @@ export function pickEmbed(opts: {
   return opts.auto
     ? {
         color: WARN_AMBER,
-        title: `⏰ ${opts.teamName} ran out of time — ${opts.playerName}`,
-        description: "Auto-picked: the highest Rank Value left in the pool.",
+        title: `⏰ ${opts.teamName} ran out of time — auto-picked ${opts.playerName}`,
+        description: "The highest Rank Value left in the pool was picked for them.",
         footer: { text: `Pick ${opts.pickNumber} of ${opts.totalPicks}` },
       }
     : {
