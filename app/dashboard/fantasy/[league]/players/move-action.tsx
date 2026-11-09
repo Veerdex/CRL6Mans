@@ -56,7 +56,6 @@ export function MoveAction({
   if (claim && (!open || frozen)) {
     return (
       <span className="inline-flex items-center gap-1.5">
-        <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300">Claim pending</span>
         {!frozen && (
           <button type="button" onClick={() => setOpen(true)} className={`${BUTTON} bg-zinc-700 text-zinc-100 hover:bg-zinc-600`}>
             Edit
