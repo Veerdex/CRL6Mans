@@ -81,6 +81,10 @@ export function PoolTable({
     const t = rankShare(players.filter((p) => p.seriesPlayed > 0).map((p) => p.seasonPoints));
     return (p: PoolPlayer) => (p.seriesPlayed > 0 ? spectrum(t(p.seasonPoints), 0, 1) : undefined);
   }, [players]);
+  const ratingColor = useMemo(() => {
+    const t = rankShare(players.flatMap((p) => (p.rating === null ? [] : [p.rating])));
+    return (p: PoolPlayer) => (p.rating === null ? undefined : spectrum(t(p.rating), 0, 1));
+  }, [players]);
 
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, asc: !s.asc } : { key, asc: ASCENDING_FIRST.includes(key) }));
@@ -150,7 +154,7 @@ export function PoolTable({
                 <td className="px-3 py-2"><TierBadge tier={p.tier} /></td>
                 <td className="px-3 py-2"><TeamCell team={p.team} /></td>
                 <td className="px-3 py-2"><Availability player={p} /></td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={ratingColor(p.rating)}>{formatRating(p.rating)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={ratingColor(p)}>{formatRating(p.rating)}</td>
                 <td className="px-3 py-2 text-right"><Projection player={p} /></td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={seasonPointsColor(p)}>{fmt(p.seasonPoints)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={pointsColor(average(p))}>
@@ -202,7 +206,7 @@ export function PoolTable({
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-xs">
                       <Detail label="Team"><TeamCell team={p.team} /></Detail>
                       <Detail label="Fantasy"><Availability player={p} /></Detail>
-                      <Detail label="RV"><span style={ratingColor(p.rating)}>{formatRating(p.rating)}</span></Detail>
+                      <Detail label="RV"><span style={ratingColor(p)}>{formatRating(p.rating)}</span></Detail>
                       <Detail label="Season points"><span style={seasonPointsColor(p)}>{fmt(p.seasonPoints)}</span></Detail>
                       <Detail label="Per series">
                         <span style={pointsColor(average(p))}>{average(p) === null ? "—" : fmt(average(p)!)}</span>
@@ -344,7 +348,6 @@ function rankShare(values: number[]): (v: number) => number | null {
 }
 
 const pointsColor = (v: number | null) => spectrum(v, 10, 40);
-const ratingColor = (v: number | null) => spectrum(v, 1450, 1850);
 
 function Projection({ player }: { player: PoolPlayer }) {
   const note =
