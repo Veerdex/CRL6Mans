@@ -8,7 +8,7 @@ import type { MemberView } from "@/app/lib/fantasy-leagues";
 import { leagueFromParams, type LeagueAccess } from "../league-access";
 import { WaiverOrder } from "../waiver-order";
 import { ComingSoon } from "../coming-soon";
-import { isFinalLeague } from "@/app/lib/fantasy-rules";
+import { FANTASY_TRADES_ENABLED, isFinalLeague } from "@/app/lib/fantasy-rules";
 import { PoolSection, PoolSkeleton } from "./pool-section";
 import type { RosterMoves } from "./move-action";
 
@@ -16,8 +16,8 @@ export default function FantasyPlayerPoolPage({ params }: { params: Promise<{ le
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
       <p className="text-sm text-zinc-400 text-center">
-        Every player in the season, as they come off the real draft. Add free agents, claim waivers, and trade for
-        another manager&apos;s players here.
+        Every player in the season, as they come off the real draft. Add free agents and claim waivers here
+        {FANTASY_TRADES_ENABLED ? ", and trade for another manager's players" : ""}.
       </p>
       <Suspense fallback={<PoolSkeleton />}>
         <Pool league={leagueFromParams(params)} />
@@ -72,6 +72,7 @@ async function rosterMoves(
   // The run sweeps frozen trades daily; doing it here too means nobody is
   // shown an offer they can no longer accept.
   const trades = eliminatedInLeague(leagueId).then(async (eliminated) => {
+    if (!FANTASY_TRADES_ENABLED) return { eliminated, list: [] };
     await cancelFrozenTrades(leagueId, eliminated);
     return { eliminated, list: await managerTrades(leagueId, managerId) };
   });

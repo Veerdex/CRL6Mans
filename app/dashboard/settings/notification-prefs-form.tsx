@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { saveNotificationPrefs } from "./actions";
 import type { NotificationCategory } from "@/app/lib/push";
+import { FANTASY_TRADES_ENABLED } from "@/app/lib/fantasy-rules";
 
 type Category = {
   key: NotificationCategory;
@@ -21,11 +22,15 @@ const FANTASY_CATEGORIES: Category[] = [
     label: "Waiver claims",
     description: "Which of your claims won or lost, once a day after the 4 AM Pacific waiver run",
   },
-  {
-    key: "fantasy_trades",
-    label: "Trades",
-    description: "Offers you receive, and your trades being accepted, rejected or cancelled",
-  },
+  ...(FANTASY_TRADES_ENABLED
+    ? [
+        {
+          key: "fantasy_trades" as const,
+          label: "Trades",
+          description: "Offers you receive, and your trades being accepted, rejected or cancelled",
+        },
+      ]
+    : []),
   {
     key: "fantasy_lineup",
     label: "Lineup alerts",

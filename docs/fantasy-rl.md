@@ -213,8 +213,8 @@ before the report to keep the slot open. Teams scheduling their matches closes t
 ### Playoffs
 - Top 4: **1 v 4, 2 v 3** in the semifinals, winners meet in the final.
 - A tied playoff matchup → **higher seed advances**.
-- **No trade deadline** (see [Open questions](#open-questions)).
-- **Eliminated managers are frozen:** no adds, drops, waiver claims or trades.
+- **Eliminated managers are frozen:** no adds, drops, waiver claims or trades (trades are
+  disabled for everyone, §10).
 
 | | Regular season | Playoffs, still alive | Eliminated |
 |---|---|---|---|
@@ -285,6 +285,14 @@ Free agent (instant add)
 ---
 
 ## 10. Trades
+
+**Disabled (2026-11-09).** Every manager shares one Discord, so a lopsided trade is far more
+likely to be two friends teaming up than one manager outsmarting another, and waivers and free
+agency already cover fixing a roster. `FANTASY_TRADES_ENABLED` in `app/lib/fantasy-rules.ts`
+is off: proposing and accepting are refused server-side, and the Players tab's Trades view,
+the Trade button and the Trades notification setting are hidden. The code, the
+`fantasy_trades` tables and any pending rows are kept, so turning trades back on is that one
+line. The rules below are what it would restore.
 
 - **Any size**, as long as each side gives up the same tiers it receives (keeps both rosters
   at 2/3/3).
@@ -588,15 +596,13 @@ later from the stored summaries.
 
 ## Open questions
 
-1. **Trade deadline or trade review?** There is currently no deadline; the elimination freeze
-   covers dumping once a manager is out. What it doesn't cover is the classic fantasy problem
-   of a manager who is out of contention late in the regular season, but not yet eliminated,
-   dumping his best players on a friend. Options if that becomes a problem:
-   - A deadline partway through the regular season (e.g. after Week 4 of 6). A deadline at the
-     semifinals adds little, since the freeze already covers it, and is hard to define when
-     rounds are played out of order.
-   - A short review window (a day or two) in which the league's other managers can veto an
-     accepted trade.
+None at the moment.
+
+**Decided: trades are disabled** rather than given a deadline or a veto window (§10). If they
+are ever turned back on, the dumping problem returns: a manager out of contention but not yet
+eliminated can send their best players to a friend, which the elimination freeze doesn't
+cover. A deadline after Week 4 of 6, or a day-or-two veto window for the other managers, are
+the options considered.
 
 **Decided: no freeze for waivers before elimination is known.** Managers aren't eliminated
 until Week 6 closes, but a Round 7 series can be played before then, so in that window a

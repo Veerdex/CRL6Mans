@@ -5,6 +5,7 @@ import type { PoolPlayer } from "@/app/lib/fantasy-pool-data";
 import type { LineupEntry } from "@/app/lib/fantasy-lineup";
 import { swapInProblem } from "@/app/lib/fantasy-waivers";
 import { SLOT_LABEL } from "@/app/lib/fantasy-draft";
+import { FANTASY_TRADES_ENABLED } from "@/app/lib/fantasy-rules";
 import { LocalTime } from "@/app/dashboard/local-time";
 import type { TradeView } from "@/app/lib/fantasy-trades";
 import { addFantasyFreeAgent, cancelFantasyClaim, claimFantasyPlayer } from "../../actions";
@@ -44,7 +45,7 @@ export function MoveAction({
   const frozen = moves.eliminated.includes(moves.managerId);
   if (player.manager) {
     const mine = player.manager.accountId === moves.managerId;
-    return mine || frozen || moves.eliminated.includes(player.manager.accountId) ? null : (
+    return !FANTASY_TRADES_ENABLED || mine || frozen || moves.eliminated.includes(player.manager.accountId) ? null : (
       <TradeButton player={player} moves={moves} playerOf={playerOf} rosterOf={rosterOf} />
     );
   }

@@ -6,6 +6,7 @@ import { lockedPlayerIds, managerLineup } from "./fantasy-lineup-server";
 import { tradeMoves, tradeShapeProblem, type TradeStatus, type TradeView } from "./fantasy-trades";
 import { eliminatedInLeague } from "./fantasy-matchup-server";
 import { FROZEN_NOTE } from "./fantasy-schedule";
+import { FANTASY_TRADES_ENABLED, TRADES_DISABLED_NOTE } from "./fantasy-rules";
 
 // Trades (docs/fantasy-rl.md §10). The rules are in fantasy-trades.ts; the
 // move itself is fantasy_accept_trade (scripts/fantasy-trades-migration.sql).
@@ -117,6 +118,7 @@ export async function proposeTrade(
   giveIds: string[],
   getIds: string[],
 ): Promise<Result> {
+  if (!FANTASY_TRADES_ENABLED) return { error: TRADES_DISABLED_NOTE };
   if (proposerId === receiverId) return { error: "You can't trade with yourself." };
   const give = [...new Set(giveIds)];
   const get = [...new Set(getIds)];
@@ -227,6 +229,7 @@ export async function rejectTrade(leagueId: string, managerId: string, tradeId: 
 }
 
 export async function acceptTrade(leagueId: string, managerId: string, tradeId: string): Promise<Result> {
+  if (!FANTASY_TRADES_ENABLED) return { error: TRADES_DISABLED_NOTE };
   const { data: trade } = await supabaseAdmin
     .from("fantasy_trades")
     .select("id, league_id, proposer_id, receiver_id, fantasy_trade_items(player_id, from_manager_id)")

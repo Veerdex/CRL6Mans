@@ -183,7 +183,7 @@ export function buildSchedule(input: {
  * closes, the semifinal losers once the semis close, and everyone once the
  * season's last week closes, since nothing is left to play for.
  */
-export const FROZEN_NOTE = "Your season is over, so your roster is frozen: no adds, claims or trades.";
+export const FROZEN_NOTE = "Your season is over, so your roster is frozen: no more roster moves.";
 
 export function eliminatedManagers(schedule: Schedule): Set<string> {
   const { weeks, standings } = schedule;

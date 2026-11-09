@@ -6,6 +6,7 @@ import { PoolTable } from "./pool-table";
 import { MoveAction, type RosterMoves } from "./move-action";
 import { TradesPanel } from "./trades";
 import { FROZEN_NOTE } from "@/app/lib/fantasy-schedule";
+import { FANTASY_TRADES_ENABLED } from "@/app/lib/fantasy-rules";
 
 export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: Promise<RosterMoves> | null }) {
   const { players, hiddenForTest } = use(pool);
@@ -42,18 +43,20 @@ export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: P
             {FROZEN_NOTE}
           </p>
         )}
-        <div role="tablist" aria-label="Players view" className="mx-auto flex w-fit rounded-lg border border-zinc-700 bg-zinc-900 p-1">
-          <ViewTab active={view === "free"} onClick={() => setView("free")}>
-            Available
-          </ViewTab>
-          <ViewTab active={view === "trade"} onClick={() => setView("trade")}>
-            Trades
-            {offers > 0 && (
-              <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-on-accent">{offers}</span>
-            )}
-          </ViewTab>
-        </div>
-        {view === "free" ? (
+        {FANTASY_TRADES_ENABLED && (
+          <div role="tablist" aria-label="Players view" className="mx-auto flex w-fit rounded-lg border border-zinc-700 bg-zinc-900 p-1">
+            <ViewTab active={view === "free"} onClick={() => setView("free")}>
+              Available
+            </ViewTab>
+            <ViewTab active={view === "trade"} onClick={() => setView("trade")}>
+              Trades
+              {offers > 0 && (
+                <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-on-accent">{offers}</span>
+              )}
+            </ViewTab>
+          </div>
+        )}
+        {view === "free" || !FANTASY_TRADES_ENABLED ? (
           <PoolTable key="free" players={players} include={unrostered} allLabel="All" renderAction={action} />
         ) : (
           <>
