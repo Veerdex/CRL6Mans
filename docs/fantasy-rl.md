@@ -32,7 +32,7 @@ season is a round robin; the top 4 enter a two-week playoff.
 | Invites | **Private leagues only** — a public league has nothing to invite to. The commissioner invites by name from the league page; the invitee gets a feed notification. A private league's Join button carries small "Invite Only" text above it and is **grey** unless the viewer is invited, **green** when they are |
 | Viewing | Anyone logged in can view any league, **public or private** (read-only) — including unregistered and pending players. Guests can't |
 | Undersized | A league with **fewer than 4 managers** when the admin starts the drafts is **disbanded** |
-| End of season | League is archived read-only |
+| End of season | League is archived read-only (§15) |
 
 ### Commissioner (league creator) powers
 - Rename the league
@@ -517,6 +517,61 @@ Modelled on fantasy football so it's familiar:
     Players-tab load, so nobody is shown an offer they can't accept.
   - Lineup swaps stay open, and a frozen manager can still withdraw a claim.
 - **Not built yet:** putting a departing manager's players on waivers (§11).
+
+---
+
+## 15. Season end *(designed, not built)*
+
+A fantasy season is **officially complete when its event's archive is exported** from the
+admin tab. It gets there in two steps, because the data fantasy scores from is destroyed
+earlier, when the event is *completed*: `completeTournament` and `completeSeason` both end
+in `resetSeason`, which deletes `matches`, and `fantasy_slot_credits` and
+`player_game_stats` cascade with them.
+
+Statuses (`scripts/fantasy-season-end-migration.sql`), on both the season and its leagues:
+`active → ended → complete`, or `→ cancelled`.
+
+**1. Event completed → `ended`.**
+- `snapshotFantasySeason()` runs beside `computeFullArchive`, before the reset. For each
+  active league it captures:
+  - the final standings and champion;
+  - every week's matchups and points;
+  - the final rosters and each slot's points per week;
+  - the draft board, so the league's history is complete.
+- Managers and players carry their `discordId`, as the event archive does, since usernames
+  change.
+- The snapshot goes into the event's `full_archive` as `fantasy`. That way the Export
+  button's JSON carries it, and the purge drops it, with no extra plumbing.
+- Each league also gets a small permanent `summary` (standings and champion).
+- The season records `event_kind`/`event_id`, and it and its leagues move to `ended`.
+  - Leaving `active` is required, not cosmetic: `groupMatches()` reads every group-stage
+    match in the database, so a still-active league would score the next event's Round 1.
+  - Every mutator, the waiver run, the notice sweep and autopick already require
+    `active`, so `ended` freezes them all.
+- League pages show "Final — results pending export" and read from the snapshot. The Roster
+  tab most of all: with teams cleared, every player would otherwise read as ineligible.
+- A test event carries no snapshot: `rollbackFantasyTestRun` has already undone its run.
+
+**2. Archive exported → `complete`.**
+- `purgeExportedArchive` moves the linked season and leagues from `ended` to `complete` in
+  the same step that clears the archive. That step only runs once the JSON download is
+  confirmed, so "complete" means the data is on disk, and a later PDF-only re-export changes
+  nothing.
+- The PDF report gains a fantasy page: each league's champion and final standings, from
+  `summary`.
+- Managers get one "season complete" notice under Results and playoffs.
+
+**Ending without an archive.** Cancel Tournament on an active event, or the manual Reset
+Season button, marks a running (non-test) fantasy season and its leagues `cancelled`. No
+record is kept.
+
+**The next season** is opened by staff with an **Open fantasy season** control (a name) in the
+admin panel. It's allowed once no season is `open`, `drafting` or `active`. An `ended` season
+doesn't block it, since that season only waits on an export. `getCurrentFantasySeason` must
+then skip `ended` and `cancelled` as well as `complete`.
+
+**Profiles:** fantasy results are not shown on player profiles for now. They can be added
+later from the stored summaries.
 
 ---
 
