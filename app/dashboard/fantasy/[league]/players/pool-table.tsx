@@ -203,7 +203,6 @@ export function PoolTable({
                     }}
                     className="flex items-center gap-2 px-3 py-2.5 cursor-pointer"
                   >
-                    <Availability player={p} compact />
                     <div className="flex-1 min-w-0"><NameCell player={p} badge /></div>
                     <div className="w-14 text-right"><Projection player={p} /></div>
                     {renderAction && (
@@ -271,7 +270,12 @@ function NameCell({ player, badge = false }: { player: PoolPlayer; badge?: boole
       <div className="min-w-0 flex whitespace-nowrap">
         <PlayerName displayName={player.name} username={player.username} discordId={player.discordId || null} className={`text-sm font-medium ${TIER_NAME_CLASS[player.tier]}`} />
       </div>
-      {badge && <span className="shrink-0"><TierBadge tier={player.tier} /></span>}
+      {badge && (
+        <>
+          <span className="shrink-0"><TierBadge tier={player.tier} /></span>
+          <Availability player={player} compact />
+        </>
+      )}
     </div>
   );
 }
