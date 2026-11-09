@@ -81,19 +81,28 @@ The score row was refit on 2026-11-07. Two seeded events
 (`191198e6-…`, `d600c105-…`) recorded no score at all, and counting their zeros had
 dragged the mean down to 299.32 and the slope to 0.30220. The other four stats are unchanged.
 
-### Step 2 — Blend with the player's history
-```
-w        = games / (games + 10)
-baseline = w × historicalPerGame(s) + (1 − w) × ratingEstimate(s)
-```
-- 0 games → w = 0 (rating only). 10 games → 0.5. 50 games → 0.83.
+### Step 2 — History, only when there are no ranks
+- **MMR on file:** the projection is the rating estimate alone. The player's stat history
+  is **not** blended in. The RV already carries `rv_adjustment`, which moves after every
+  series by how those same stats compared with the projection, so blending raw history on
+  top counted a hot or cold start twice.
+- **No MMR on file** (`hasMmrOnFile` false): use history alone if there is any. With neither
+  history nor MMR, use the league means.
 - History = `seeded_player_stats` **plus** live `player_game_stats`, combined.
 - **Score history skips seeded events with no score recorded** (a seeded row with games > 0
   and score 0). For score, `games` is the number of games that did record one (`scoreGames`).
-- **No MMR on file** (`hasMmrOnFile` false): use history alone if there is any. With neither
-  history nor MMR, use the league means.
-- **Labels** (from the spec): w = 0 is *rating only*, 0 < w < 0.5 is *provisional*,
-  w ≥ 0.5 is *history weighted*.
+- **Labels** say how much stat history stands behind a projection, through the adjustment
+  or directly. With w = games / (games + 10): w = 0 is *rating only*, 0 < w < 0.5 is
+  *provisional*, w ≥ 0.5 is *history weighted*.
+
+The **RV update still blends** (`projectedStatLine` in `rv-adjustment.ts`, w as above) when
+it measures a series. Dropping the blend there as well backtested worse, and it would move
+every player's rating.
+
+Changed 2026-11-08 after a backtest replaying the adjustment series by series over Summer
+2025 and Summer 2026. Mean absolute error per player-series fell from 5.54 to 5.36 (2025)
+and from 5.60 to 5.36 (2026), and the new rule was better in 17 of 18 weeks. Shrinking the
+history weight (10 → 20 or 40 games) helped less than dropping it.
 
 ### Step 3 — Matchup adjustment
 This replaces the spec's ±10% per-stat dominance (§10), which barely moved a heavy
@@ -151,15 +160,15 @@ projectedSeriesPoints = projectedStatPoints + expectedBonus
 
 **Bye, or a forfeit known in advance:** 0.
 
-### Worked example — Veerdex (RV 1689, 41 games)
+### Worked example — RV 1689
 | | Score | Goals | Assists | Saves | Shots |
 |---|---|---|---|---|---|
-| Rating estimate | 289.2 | 0.669 | 0.521 | 1.305 | 2.391 |
-| History | 326.8 | 0.683 | 0.488 | 1.195 | 2.293 |
-| Blend (w = 41/51 = 0.80) | 319.4 | 0.680 | 0.494 | 1.217 | 2.312 |
+| Rating estimate | 332.8 | 0.669 | 0.521 | 1.305 | 2.391 |
 
-projectedFP = (319.4 + 170.1 + 42.0 + 73.0 + 23.1) / 660 = 0.951, so
-**stat points ≈ 19.0**. In an even best-of-5, add 0.94 for **≈ 19.9 series points**.
+projectedFP = (332.8 + 167.3 + 44.3 + 78.3 + 23.9) / 660 = 0.980, so
+**stat points ≈ 19.6**. In an even best-of-5, add 0.94 for **≈ 20.5 series points**.
+The player's games played don't enter it; their history reaches the projection only
+through the `rv_adjustment` inside the RV.
 
 ---
 

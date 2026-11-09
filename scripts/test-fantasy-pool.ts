@@ -47,10 +47,10 @@ test("projection basis follows the history weight", () => {
   assert.equal(projectionBasis(10), "history");
 });
 
-test("projection with ranks on file is 20 × the rv-adjustment projection", () => {
+test("projection with ranks on file is the rating alone; history doesn't move it", () => {
   const history = { games: 20, goals: 20, assists: 10, saves: 30, shots: 50, score: 8000 };
-  close(projectedStatPoints(1800, history), 20 * projectedFantasyPoints(1800, history));
   close(projectedStatPoints(1800, null), 20 * projectedFantasyPoints(1800, null));
+  close(projectedStatPoints(1800, history), projectedStatPoints(1800, null));
 });
 
 test("no ranks and no history projects the league mean", () => {

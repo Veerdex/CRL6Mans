@@ -47,7 +47,10 @@ export function freeAgentTier(rating: number, seasonRatings: number[]): FantasyT
 
 export type ProjectionBasis = "rating" | "provisional" | "history";
 
-/** docs/fantasy-projections.md §2's labels: how much of a projection is the player's own history. */
+/**
+ * docs/fantasy-projections.md §2's labels: how much stat history stands behind a projection,
+ * either through the rating's adjustment or, with no ranks on file, directly.
+ */
 export function projectionBasis(games: number): ProjectionBasis {
   const w = games / (games + HISTORY_PRIOR_GAMES);
   if (w === 0) return "rating";
@@ -63,9 +66,14 @@ export const MATCHUP_CEILING = 1.5;
 /** How slowly the multiplier leaves 1: a 75% favourite gets 1 + 0.5 × 0.5^1.75 ≈ 1.15. */
 const MATCHUP_CURVE = 1.75;
 
+/**
+ * A ranked player projects from their rating alone, never blended with their stat history:
+ * the rating already carries rv_adjustment, which learns from those same stats, so blending
+ * them in again double-counts a hot or cold start (docs/fantasy-projections.md §2 step 2).
+ */
 function projectedPerGameLine(rating: number | null, history: StatTotals | null): StatLine {
   const games = history?.games ?? 0;
-  if (rating !== null || games === 0) return projectedStatLine(rating ?? FP_BASELINE_RV, games > 0 ? history : null);
+  if (rating !== null || games === 0) return projectedStatLine(rating ?? FP_BASELINE_RV, null);
   const scoreGames = history!.scoreGames ?? games;
   return {
     score: scoreGames > 0 ? history!.score / scoreGames : projectedStatLine(FP_BASELINE_RV, null).score,
