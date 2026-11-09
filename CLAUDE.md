@@ -202,7 +202,9 @@ The Discord side isn't gated by `is_test` and doesn't need to be: `createTextCha
 The autopick timer is 45 seconds; the client fires it instantly when the deadline passes, so the cron only matters when nobody has the draft page open. `tournament-scheduler` also fires push notifications on signups open/close, draft start and season start.
 
 ### `clip-reset`
-Two independent things on every invocation, both needing the per-minute pinger since expiries land on different days for different clips:
+It also runs the **fantasy waiver run** (`runWaivers` in `app/lib/fantasy-waivers-server.ts`). That run has no cron of its own: once per active league per day, the first tick after 4 AM America/Los_Angeles settles claims, guarded by a compare-and-set on `fantasy_leagues.waivers_ran_at`. So this route's pinger is load-bearing for fantasy too.
+
+The clip work is two independent things on every invocation, both needing the per-minute pinger since expiries land on different days for different clips:
 1. Archives any clip whose own `expires_at` has passed. Each clip's expiry is computed at submission via `computeClipExpiry` in `app/lib/clip-schedule.ts` as the end of the week *after* the one it was submitted in, guaranteeing at least 7 days regardless of submission day (a Saturday submission survives 8 days, not <1).
 2. Once per week (most recent Sunday 00:00 America/Los_Angeles), crowns the Media tab's Clip of the Week and archives only that winning clip so it stops appearing in the main feed.
 
