@@ -86,7 +86,7 @@ export async function creditFantasySlots(matchIds: string[]): Promise<void> {
 
 /**
  * §9: a player goes on waivers when his series is reported, and playing again
- * restarts his 24 hours. Only players in a league's frozen pool and on nobody's
+ * restarts his waivers. Only players in a league's frozen pool and on nobody's
  * roster there; a rostered player goes on waivers only when he's dropped.
  */
 async function putReportedOnWaivers(

@@ -254,16 +254,19 @@ playoffs (by trade or by dropping them onto waivers).
 Free agent (instant add)
    │  his series is reported, or a manager drops him
    ▼
-On waivers (24h)  ──claimed──▶  that manager's roster
+On waivers (12–36h)  ──claimed──▶  that manager's roster
    │  no claims
    ▼
 Free agent (instant add)
 ```
-- A player goes on waivers when **his series is reported** (playing again restarts the 24h),
-  when he's **dropped**, or when his manager **leaves the league**.
+- A player goes on waivers when **his series is reported** (playing again restarts his
+  waivers), when he's **dropped**, or when his manager **leaves the league**.
 - A **forfeit does not** put a player on waivers.
-- **Claims resolve in one fixed daily run at 4:00 AM Pacific**, for every player whose 24h has
-  passed. Pinned to `America/Los_Angeles` like the clip-of-the-week crowning, so it stays at
+- **Every player is on waivers for at least 12 hours.** He clears at the next 4 AM run, unless
+  he went on within 12 hours of it, in which case he waits for the run after. That makes 12 to
+  36 hours: anyone going on after 4 PM Pacific waits until 4 AM the day after next.
+- **Claims resolve in one fixed daily run at 4:00 AM Pacific**, for every player whose waivers
+  have ended. Pinned to `America/Los_Angeles` like the clip-of-the-week crowning, so it stays at
   4 AM through daylight saving changes (11:00 UTC in PDT, 12:00 UTC in PST). The UI shows the
   time in each viewer's own timezone.
 - **Free agents** can be added instantly, first come, first served.

@@ -41,11 +41,17 @@ test("the runs either side of each daylight saving change stay at 4 AM local", (
   assert.equal(latestWaiverRun(at("2026-11-01T11:30:00Z")).toISOString(), "2026-10-31T11:00:00.000Z");
 });
 
-test("a player clears in the first run once his 24 hours are up", () => {
-  // Reported Wednesday 9 PM Pacific: 24h runs to Thursday 9 PM, so Friday 4 AM.
+test("a player clears in the first run at least 12 hours on", () => {
+  // Reported Wednesday 3 PM Pacific: Thursday's 4 AM run is 13h away.
+  assert.equal(waiverClearsAt(at("2026-07-15T22:00:00Z")).toISOString(), "2026-07-16T11:00:00.000Z");
+  // Exactly 12h before the run still makes it.
+  assert.equal(waiverClearsAt(at("2026-07-15T23:00:00Z")).toISOString(), "2026-07-16T11:00:00.000Z");
+  // Wednesday 9 PM is inside the 12h, so he waits for Friday's run: 31h.
   assert.equal(waiverClearsAt(at("2026-07-16T04:00:00Z")).toISOString(), "2026-07-17T11:00:00.000Z");
-  // Reported at 3 AM: 24h ends at 3 AM the next day, an hour before that day's run.
-  assert.equal(waiverClearsAt(at("2026-07-15T10:00:00Z")).toISOString(), "2026-07-16T11:00:00.000Z");
+  // Just after 4 PM is the longest wait, just under 36h.
+  assert.equal(waiverClearsAt(at("2026-07-15T23:00:01Z")).toISOString(), "2026-07-17T11:00:00.000Z");
+  // Just after a run is a 24h wait.
+  assert.equal(waiverClearsAt(at("2026-07-15T11:00:01Z")).toISOString(), "2026-07-16T11:00:00.000Z");
 });
 
 test("waiver order starts as the reverse of the draft order", () => {

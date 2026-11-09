@@ -2,10 +2,10 @@
 -- FANTASY — waivers and free agency (docs/fantasy-rl.md §9). Additive only.
 --
 -- fantasy_waivers        an unrostered player on waivers in one league, until
---                        clears_at (the first 4 AM Pacific run at least 24h after
+--                        clears_at (the first 4 AM Pacific run at least 12h after
 --                        his series was reported or he was dropped). Playing again
---                        upserts a later clears_at, which is the "restarts the
---                        24h" rule. No row, or a past clears_at, is a free agent.
+--                        upserts a later clears_at, which restarts his waivers.
+--                        No row, or a past clears_at, is a free agent.
 -- fantasy_waiver_claims  a manager's claim on a player on waivers, with the
 --                        same-tier player he drops if it wins. One pending claim
 --                        per manager per player; the daily run settles it.
