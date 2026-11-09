@@ -38,6 +38,7 @@ function sortValue(p: PoolPlayer, key: SortKey): number | string {
 
 // Text columns read A→Z and tiers Cap first; numbers read best first.
 const ASCENDING_FIRST: SortKey[] = ["name", "tier", "team"];
+type StatusFilter = "everyone" | "available" | "waivers";
 
 export function PoolTable({
   players,
@@ -51,7 +52,8 @@ export function PoolTable({
 }) {
   const [query, setQuery] = useState("");
   const [tier, setTier] = useState<TierFilter>("all");
-  const [availableOnly, setAvailableOnly] = useState(defaultAvailableOnly);
+  const [status, setStatus] = useState<StatusFilter>(defaultAvailableOnly ? "available" : "everyone");
+  const anyOnWaivers = players.some((p) => !p.manager && p.waiverClearsAt);
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: "projected", asc: false });
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -60,7 +62,8 @@ export function PoolTable({
     const filtered = players.filter(
       (p) =>
         (tier === "all" || p.tier === tier) &&
-        (!availableOnly || p.manager === null) &&
+        (status === "everyone" ||
+          (!p.manager && (status === "waivers") === !!p.waiverClearsAt)) &&
         (!q || p.name.toLowerCase().includes(q) || p.username.toLowerCase().includes(q) || p.team?.name.toLowerCase().includes(q)),
     );
     const dir = sort.asc ? 1 : -1;
@@ -70,7 +73,7 @@ export function PoolTable({
       const c = typeof x === "string" ? x.localeCompare(y as string) : x - (y as number);
       return c * dir || b.projected - a.projected;
     });
-  }, [players, query, tier, availableOnly, sort]);
+  }, [players, query, tier, status, sort]);
 
   // Against the whole pool, not the filtered rows, so a player's colour doesn't
   // change with the search box.
@@ -111,8 +114,11 @@ export function PoolTable({
           </Chip>
         ))}
         <span className="mx-1 h-5 w-px bg-zinc-700" aria-hidden="true" />
-        <Chip active={!availableOnly} onClick={() => setAvailableOnly(false)}>Everyone</Chip>
-        <Chip active={availableOnly} onClick={() => setAvailableOnly(true)}>Available</Chip>
+        <Chip active={status === "everyone"} onClick={() => setStatus("everyone")}>Everyone</Chip>
+        <Chip active={status === "available"} onClick={() => setStatus("available")}>Available</Chip>
+        {anyOnWaivers && (
+          <Chip active={status === "waivers"} onClick={() => setStatus("waivers")}>Waivers</Chip>
+        )}
         <span className="ml-auto text-xs text-zinc-400">
           {shown.length} of {players.length}
         </span>
