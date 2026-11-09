@@ -57,11 +57,8 @@ function TrendRow({ player }: { player: PoolPlayer }) {
           {fmt(s.projected)} projected · {status}
         </p>
       </div>
-      <span className="shrink-0 flex flex-col items-end leading-tight">
-        <span className={`text-sm font-bold tabular-nums ${s.points >= s.projected ? "text-emerald-400" : "text-zinc-300"}`}>
-          {fmt(s.points)}
-        </span>
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">Last series</span>
+      <span className={`shrink-0 text-sm font-bold tabular-nums ${s.points >= s.projected ? "text-emerald-400" : "text-zinc-300"}`}>
+        {fmt(s.points)} pts
       </span>
     </div>
   );
