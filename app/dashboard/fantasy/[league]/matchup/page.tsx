@@ -71,7 +71,6 @@ async function Matchup({ league, query }: { league: Promise<LeagueAccess>; query
         </ComingSoon>
       ) : (
         <>
-          <MatchupPicker week={week} focus={focus} member={member} viewerId={viewer.accountId} base={base} />
           {left && (
             <Board
               week={week}
@@ -82,6 +81,7 @@ async function Matchup({ league, query }: { league: Promise<LeagueAccess>; query
               records={records}
             />
           )}
+          <MatchupPicker week={week} focus={focus} member={member} viewerId={viewer.accountId} base={base} />
         </>
       )}
 
@@ -133,39 +133,32 @@ function MatchupPicker({
   viewerId: string | null;
   base: string;
 }) {
-  if (week.matchups.length < 2) return null;
+  // The board already shows the focused matchup, so only the others are listed.
+  const others = week.matchups.filter((m) => m !== focus);
+  if (!others.length) return null;
   return (
-    <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-      {week.matchups.map((m) => {
-        const active = m === focus;
-        return (
+    <div>
+      <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Other matchups</div>
+      <ul className="grid gap-1.5 sm:grid-cols-2">
+        {others.map((m) => (
           <li key={`${m.a}-${m.b}`}>
             <Link
               href={`${base}?week=${week.week}&manager=${m.a}`}
-              aria-current={active ? "true" : undefined}
-              className={`block rounded-lg border px-3 py-2 text-xs transition-colors ${
-                active ? "border-indigo-500 bg-zinc-800" : "border-zinc-700 bg-zinc-800/60 hover:bg-zinc-800"
-              }`}
+              className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-xs transition-colors hover:bg-zinc-800"
             >
-              <PickerRow name={managerName(member.get(m.a), viewerId)} points={m.aPoints} won={m.winner === m.a} />
-              {m.b ? (
-                <PickerRow name={managerName(member.get(m.b), viewerId)} points={m.bPoints} won={m.winner === m.b} />
-              ) : (
-                <div className="text-zinc-500">Bye</div>
-              )}
+              <span className={`truncate ${m.winner === m.a ? "text-white font-semibold" : "text-zinc-300"}`}>
+                {managerName(member.get(m.a), viewerId)}
+              </span>
+              <span className="tabular-nums text-zinc-400">
+                {m.b ? `${m.aPoints.toFixed(1)} – ${m.bPoints.toFixed(1)}` : "Bye"}
+              </span>
+              <span className={`truncate text-right ${m.winner === m.b ? "text-white font-semibold" : "text-zinc-300"}`}>
+                {m.b ? managerName(member.get(m.b), viewerId) : ""}
+              </span>
             </Link>
           </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function PickerRow({ name, points, won }: { name: string; points: number; won: boolean }) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className={`truncate ${won ? "text-white font-semibold" : "text-zinc-300"}`}>{name}</span>
-      <span className={`tabular-nums ${won ? "text-white font-semibold" : "text-zinc-400"}`}>{points.toFixed(1)}</span>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -380,14 +373,16 @@ function PlayerCell({ line, align }: { line: SlotLine; align: "left" | "right" }
   if (!player) {
     return (
       <div className={`flex items-center gap-2 min-w-0 ${right ? "flex-row-reverse text-right" : ""}`}>
-        <span className="w-7 h-7 shrink-0 rounded-full border border-dashed border-zinc-600" aria-hidden />
+        <span className="hidden sm:block w-7 h-7 shrink-0 rounded-full border border-dashed border-zinc-600" aria-hidden />
         <span className="text-xs text-zinc-500 truncate">{state.kind === "missed" ? "No score" : "Empty"}</span>
       </div>
     );
   }
   return (
     <div className={`flex items-center gap-2 min-w-0 ${right ? "flex-row-reverse text-right" : ""}`}>
-      <PlayerAvatar discordId={player.discordId} avatar={player.avatar} username={player.username} className="w-7 h-7" cdnSize={64} />
+      <span className="hidden sm:block shrink-0">
+        <PlayerAvatar discordId={player.discordId} avatar={player.avatar} username={player.username} className="w-7 h-7" cdnSize={64} />
+      </span>
       <div className="min-w-0">
         <div className={`flex whitespace-nowrap ${right ? "justify-end" : ""}`}>
           <PlayerName displayName={player.name} username={player.username} discordId={player.discordId || null} className="text-sm text-white truncate" />
