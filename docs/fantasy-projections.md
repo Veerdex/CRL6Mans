@@ -146,7 +146,11 @@ The stats are per-game averages, so series length doesn't change this part. The
 projection assumes the player plays every game for their own team.
 
 Because the formula is linear, this equals projecting FP directly:
-`0.9477 + 0.001019 × (RV − 1722.4)`, which has R² = 0.70 against RV.
+`1.0177 + 0.001138 × (RV − 1722.4)`. Against the 30 players in Step 1's fit, this line
+has R² = 0.71 using MMR alone, or 0.76 using MMR plus the current `rv_adjustment`. The
+higher figure is partly circular, since the adjustment has learned from those same stats.
+(Recomputed 2026-11-08 after the score refit. The old `0.9477 + 0.001019` came from the
+score row before it was refit.)
 
 **Expected win bonus:** use `predictSeries()` with each team's `resolveTeamRating()`.
 ```
