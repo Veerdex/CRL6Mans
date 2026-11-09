@@ -140,6 +140,8 @@ function WeekPanel({
     score: m.b ? `${m.aPoints.toFixed(1)} – ${m.bPoints.toFixed(1)}` : "Bye",
     aWon: m.winner === m.a,
     bWon: !!m.b && m.winner === m.b,
+    aIsViewer: !!viewerId && m.a === viewerId,
+    bIsViewer: !!viewerId && m.b === viewerId,
   }));
   return <MatchupSwitcher key={week.week} week={week.week} chips={chips} boards={boards} initial={initial} />;
 }

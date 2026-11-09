@@ -47,7 +47,22 @@ export function WeekSwitcher({ tabs, initial, panels }: { tabs: WeekTab[]; initi
   );
 }
 
-export type MatchupChip = { managerId: string; a: string; b: string | null; score: string; aWon: boolean; bWon: boolean };
+export type MatchupChip = {
+  managerId: string;
+  a: string;
+  b: string | null;
+  score: string;
+  aWon: boolean;
+  bWon: boolean;
+  aIsViewer: boolean;
+  bIsViewer: boolean;
+};
+
+// The viewer's own name stands out from a winner's, so their matchup is easy to find again.
+function chipNameClass(won: boolean, isViewer: boolean) {
+  if (isViewer) return "text-indigo-400 font-bold";
+  return won ? "text-white font-semibold" : "text-zinc-300";
+}
 
 export function MatchupSwitcher({
   week,
@@ -79,9 +94,9 @@ export function MatchupSwitcher({
                   }}
                   className="w-full grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-xs text-left transition-colors hover:bg-zinc-800"
                 >
-                  <span className={`truncate ${c.aWon ? "text-white font-semibold" : "text-zinc-300"}`}>{c.a}</span>
+                  <span className={`truncate ${chipNameClass(c.aWon, c.aIsViewer)}`}>{c.a}</span>
                   <span className="tabular-nums text-zinc-400">{c.score}</span>
-                  <span className={`truncate text-right ${c.bWon ? "text-white font-semibold" : "text-zinc-300"}`}>{c.b ?? ""}</span>
+                  <span className={`truncate text-right ${chipNameClass(c.bWon, c.bIsViewer)}`}>{c.b ?? ""}</span>
                 </button>
               </li>
             ))}
