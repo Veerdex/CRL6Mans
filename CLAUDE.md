@@ -152,6 +152,8 @@ unregistered → (submits register form) → pending → (admin approves) → ap
 - The match is in a **terminal stage**: `single_elimination` (SE final), `de_grand_final`, `hybrid_gf`, or `hybrid8_gf`. Group/Swiss/qualifier matches are non-terminal, so the "0 scheduled matches" lull between stages can't trigger it.
 - **No scheduled matches remain** (both teams assigned). For a DE grand final a lower-bracket win schedules the reset match *before* this check (`advanceBracketWinner` runs first), so the count stays > 0 until the bracket is truly decided.
 
+**Fantasy season end** (`app/lib/fantasy-season-end.ts`, docs/fantasy-rl.md §15): `completeTournament`/`completeSeason` snapshot the running fantasy season into the archive and call `endFantasySeason` **before** `resetSeason` — the reset cancels any still-running fantasy season (it is also the Cancel/Reset path), and it deletes the matches the snapshot reads. Exporting the archive (`purgeExportedArchive`) is what moves it to `complete`.
+
 `completeTournament` (the admin archival step) sends **no** push — completion is driven solely by the final match. All current format presets culminate in a terminal stage above; a format without one would not trigger this.
 
 ---
