@@ -21,6 +21,8 @@ import {
   type FantasyTier,
   type ProjectionBasis,
 } from "./fantasy-pool";
+import type { StatTotals } from "./rv-adjustment";
+import { GROUP_STAGE_PREFIX } from "./bracket";
 
 // The player pool a fantasy league drafts from: every player rostered in the
 // real season. The league's own managers are left out, since a manager can't
@@ -44,6 +46,11 @@ export type PoolPlayer = {
   nextOpponent: PoolTeam | null;
   /** The league manager who has this player, once the draft has started. */
   manager: { accountId: string; name: string } | null;
+  /**
+   * Group-stage match id → the projection for that series as it stood before it
+   * was played. Only built for the Matchup tab ({ byMatch: true }).
+   */
+  matchProjected?: Record<string, number>;
 };
 
 export type PoolView = { players: PoolPlayer[]; hiddenForTest: boolean };
@@ -139,7 +146,7 @@ async function fetchRosterOwners(leagueId: string): Promise<Map<string, string>>
   return new Map(((data ?? []) as { player_id: string; manager_id: string }[]).map((r) => [r.player_id, r.manager_id]));
 }
 
-export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Promise<PoolView> {
+export async function getPoolView(leagueId: string, viewerIsStaff: boolean, opts: { byMatch?: boolean } = {}): Promise<PoolView> {
   const testEvent = await isTestEventActive();
   if (testEvent && !viewerIsStaff) return { players: [], hiddenForTest: true };
 
@@ -225,12 +232,44 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
   );
 
   const statsByPlayerMatch = new Map<string, StatRow[]>();
+  const statsByPlayer = new Map<string, StatRow[]>();
   for (const r of stats) {
     const key = `${r.player_id}:${r.match_id}`;
     const list = statsByPlayerMatch.get(key);
     if (list) list.push(r);
     else statsByPlayerMatch.set(key, [r]);
+    const own = statsByPlayer.get(r.player_id);
+    if (own) own.push(r);
+    else statsByPlayer.set(r.player_id, [r]);
   }
+
+  // A past week is judged against what was projected before it was played, so
+  // its history leaves out every game from that week on: the rest of the group
+  // stage, and every later stage. During a test event the live games were never
+  // in the history (fetchAllTimeTotals), so there is nothing to take out.
+  const matchById = new Map(matches.map((m) => [m.id, m]));
+  const groupMatches = matches.filter((m) => (m.stage ?? "").startsWith(GROUP_STAGE_PREFIX) && m.round !== null);
+  const playedFrom = (statMatchId: string, week: number) => {
+    const m = matchById.get(statMatchId);
+    if (!m) return false;
+    if (!(m.stage ?? "").startsWith(GROUP_STAGE_PREFIX)) return true;
+    return (m.round ?? 0) >= week;
+  };
+  const historyBefore = (playerId: string, totals: StatTotals | null, week: number): StatTotals | null => {
+    if (!totals || testEvent) return totals;
+    const out = { ...totals };
+    for (const r of statsByPlayer.get(playerId) ?? []) {
+      if (!playedFrom(r.match_id, week)) continue;
+      out.games -= 1;
+      out.goals -= r.goals;
+      out.assists -= r.assists;
+      out.saves -= r.saves;
+      out.shots -= r.shots;
+      out.score -= r.score;
+      if (out.scoreGames !== undefined) out.scoreGames -= 1;
+    }
+    return out.games > 0 ? out : null;
+  };
 
   const upcoming = matches
     .filter((m) => m.status === "scheduled" && m.home_team_id && m.away_team_id)
@@ -286,6 +325,22 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
           winsNeeded: winsNeededFor(next.match),
         }
       : { ownRating: 0, oppRating: 0, winsNeeded: winsNeededFor(undefined) };
+    const rating = ranked ? decisionRatingFromRow(p) : null;
+
+    let matchProjected: Record<string, number> | undefined;
+    if (opts.byMatch && p.team_id) {
+      matchProjected = {};
+      for (const m of groupMatches) {
+        if (!m.home_team_id || !m.away_team_id) continue;
+        if (m.home_team_id !== p.team_id && m.away_team_id !== p.team_id) continue;
+        const oppId = m.home_team_id === p.team_id ? m.away_team_id : m.home_team_id;
+        matchProjected[m.id] = projectedSeriesPoints(rating, historyBefore(p.id, totals, m.round!), {
+          ownRating: teamRating.get(p.team_id) ?? 0,
+          oppRating: teamRating.get(oppId) ?? 0,
+          winsNeeded: winsNeededFor(m),
+        });
+      }
+    }
     return {
       id: p.id,
       discordId: a?.discord_id ?? "",
@@ -295,12 +350,13 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
       tier,
       team: p.team_id ? teams.get(p.team_id) ?? null : null,
       rating: shownRatingFromRow(p),
-      projected: projectedSeriesPoints(ranked ? decisionRatingFromRow(p) : null, totals, matchup),
+      projected: projectedSeriesPoints(rating, totals, matchup),
       projectionBasis: projectionBasis(totals?.games ?? 0),
       seasonPoints,
       seriesPlayed,
       nextOpponent: opponentId ? teams.get(opponentId) ?? null : null,
       manager: ownerId ? { accountId: ownerId, name: owner?.display_name || owner?.username || "Unknown" } : null,
+      matchProjected,
     };
   });
 

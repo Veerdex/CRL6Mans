@@ -410,6 +410,11 @@ Modelled on fantasy football so it's familiar:
   The board's win odds (`winChance` in the same module) treat banked points as fixed and each
   starter still to play as their projection ± `SLOT_SPREAD` (35%) of it, under a normal
   approximation. That 35% is a guess and should be fitted once there are scored weeks.
+  Each slot is drawn as its points (0 until played) over a pill holding the projection for
+  that slot's own series (`PoolPlayer.matchProjected`, built with `getPoolView(…, { byMatch: true })`).
+  A played week's projection is rebuilt from the history as it stood before it, by removing
+  every game from that week on, so a scored slot is measured against what was predicted, not
+  hindsight. Team ratings are today's, not that week's, which is the remaining drift.
 - Likely tables still to come: `fantasy_waiver_claims`, `fantasy_trades` + `fantasy_trade_items`.
 - The waiver run should be checked on every tick of the existing per-minute external pinger
   (like `clip-reset`), running once when 4 AM Pacific has passed and today's run hasn't happened.

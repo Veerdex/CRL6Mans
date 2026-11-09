@@ -22,7 +22,12 @@ export type SlotState =
   | { kind: "missed" }
   | { kind: "empty" };
 
-export type SlotLine = { slot: LineupSlot; player: PoolPlayer | null; state: SlotState };
+/**
+ * `projected` is the projection for this slot's own series, from before it was
+ * played: what a scored slot is measured against, and what an unplayed one
+ * adds to the projected total. Null when the slot has no series to project.
+ */
+export type SlotLine = { slot: LineupSlot; player: PoolPlayer | null; state: SlotState; projected: number | null };
 
 export type ManagerWeek = { total: number; starters: SlotLine[]; bench: SlotLine[] };
 
@@ -58,7 +63,7 @@ export async function getMatchupData(leagueId: string, viewerIsStaff: boolean, w
   const [{ data: league }, { data: memberRows }, pool, matches, credits, { data: slotRows }, { data: teamRows }] = await Promise.all([
     supabaseAdmin.from("fantasy_leagues").select("draft_order").eq("id", leagueId).maybeSingle(),
     supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId).order("joined_at"),
-    getPoolView(leagueId, viewerIsStaff),
+    getPoolView(leagueId, viewerIsStaff, { byMatch: true }),
     fetchAllRows<GroupMatch>((from, to) =>
       supabaseAdmin
         .from("matches")
@@ -185,6 +190,15 @@ export async function getMatchupData(leagueId: string, viewerIsStaff: boolean, w
     return { kind: "upcoming", opponent: opponentId ? teamName.get(opponentId) ?? null : null, at: m.scheduled_at };
   };
 
+  // An unplayed slot's projection for this week's series, falling back to the
+  // pool's next-series figure for a team the per-match table doesn't cover.
+  const openLine = (w: number, slot: LineupSlot, player: PoolPlayer | null): SlotLine => {
+    const state = openState(w, player);
+    if (!player || (state.kind !== "live" && state.kind !== "upcoming")) return { slot, player, state, projected: null };
+    const m = player.team ? matchOfTeam.get(`${w}:${player.team.id}`) : undefined;
+    return { slot, player, state, projected: (m && player.matchProjected?.[m.id]) ?? player.projected };
+  };
+
   // Every week is built up front so the page can switch between them without a round trip.
   const lineups = new Map<number, Map<string, ManagerWeek>>();
   for (let w = 1; w <= totalWeeks; w++) {
@@ -197,17 +211,23 @@ export async function getMatchupData(leagueId: string, viewerIsStaff: boolean, w
         const sitting = occupant.get(`${managerId}:${slot}`);
         const sittingPlayer = sitting ? playerById.get(sitting) ?? null : null;
         if (!isStarterSlot(slot)) {
-          if (!closed) bench.push({ slot, player: sittingPlayer, state: openState(w, sittingPlayer) });
+          if (!closed) bench.push(openLine(w, slot, sittingPlayer));
           continue;
         }
         const credit = creditAt.get(`${w}:${managerId}:${slot}`);
         if (credit) {
           const { points, forfeit } = creditPoints(credit);
-          starters.push({ slot, player: playerById.get(credit.player_id) ?? null, state: { kind: "scored", points, forfeit } });
+          const player = playerById.get(credit.player_id) ?? null;
+          starters.push({
+            slot,
+            player,
+            state: { kind: "scored", points, forfeit },
+            projected: player?.matchProjected?.[credit.match_id] ?? null,
+          });
         } else if (closed) {
-          starters.push({ slot, player: null, state: { kind: "missed" } });
+          starters.push({ slot, player: null, state: { kind: "missed" }, projected: null });
         } else {
-          starters.push({ slot, player: sittingPlayer, state: openState(w, sittingPlayer) });
+          starters.push(openLine(w, slot, sittingPlayer));
         }
       }
       week.set(managerId, { total: weekTotals.get(`${w}:${managerId}`) ?? 0, starters, bench });

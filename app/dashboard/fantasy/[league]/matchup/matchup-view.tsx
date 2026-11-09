@@ -226,26 +226,26 @@ function Board({
   );
 }
 
-// The number beside a player: points once scored, the projection while still to play.
-function slotValue(line: SlotLine | null): { value: number; scored: boolean } | null {
-  if (!line) return null;
-  if (line.state.kind === "scored") return { value: line.state.points, scored: true };
-  if ((line.state.kind === "live" || line.state.kind === "upcoming") && line.player) return { value: line.player.projected, scored: false };
-  return null;
+// What a slot has scored: its points once played, 0 until then, nothing for an empty or missed slot.
+type SlotScore = { points: number; scored: boolean; projected: number | null };
+
+function slotScore(line: SlotLine | null): SlotScore | null {
+  if (!line || !line.player) return null;
+  if (line.state.kind === "scored") return { points: line.state.points, scored: true, projected: line.projected };
+  return { points: 0, scored: false, projected: line.projected };
 }
 
 // Points already banked plus the projection of every starter still to play.
 function projectedTotal(starters: SlotLine[]) {
-  return starters.reduce((sum, line) => sum + (slotValue(line)?.value ?? 0), 0);
+  const o = outlook(starters);
+  return o.banked + o.remaining.reduce((s, p) => s + p, 0);
 }
 
 function outlook(starters: SlotLine[]): SideOutlook {
   const side: SideOutlook = { banked: 0, remaining: [] };
   for (const line of starters) {
-    const v = slotValue(line);
-    if (!v) continue;
-    if (v.scored) side.banked += v.value;
-    else side.remaining.push(v.value);
+    if (line.state.kind === "scored") side.banked += line.state.points;
+    else if (line.projected !== null) side.remaining.push(line.projected);
   }
   return side;
 }
@@ -318,12 +318,12 @@ function ManagerHeader({
 }
 
 function BoardRow({ label, left, right, hasRight }: { label: string; left: SlotLine; right: SlotLine | null; hasRight: boolean }) {
-  const a = slotValue(left);
-  const b = hasRight ? slotValue(right) : null;
-  // Only real points win a slot; projections never earn the check.
+  const a = slotScore(left);
+  const b = hasRight ? slotScore(right) : null;
+  // Only a slot both sides have played can be won.
   const bothScored = !!a?.scored && !!b?.scored;
-  const leftBest = bothScored && a!.value > b!.value;
-  const rightBest = bothScored && b!.value > a!.value;
+  const leftBest = bothScored && a!.points > b!.points;
+  const rightBest = bothScored && b!.points > a!.points;
   return (
     <li className="grid grid-cols-[1fr_2.5rem_1fr] sm:grid-cols-[1fr_3rem_1fr] items-stretch rounded-lg bg-zinc-900/60 overflow-hidden">
       <div className="flex items-center gap-2 px-2 sm:px-3 py-2.5 min-w-0">
@@ -349,23 +349,39 @@ function BoardRow({ label, left, right, hasRight }: { label: string; left: SlotL
   );
 }
 
-function SlotNumber({ value, best, align }: { value: { value: number; scored: boolean } | null; best: boolean; align: "left" | "right" }) {
-  if (!value) return <span className="w-14 shrink-0 text-center text-sm text-zinc-600">—</span>;
+// Points as the main number, the projection in a pill under it. Once the series
+// is in, the points turn green or red for beating or missing the projection.
+function SlotNumber({ value, best, align }: { value: SlotScore | null; best: boolean; align: "left" | "right" }) {
+  if (!value) return <span className="w-14 sm:w-16 shrink-0 text-center text-sm text-zinc-600">—</span>;
+  const { points, scored, projected } = value;
+  const tone = !scored
+    ? "text-zinc-300"
+    : projected === null || points.toFixed(1) === projected.toFixed(1)
+      ? "text-white"
+      : points > projected
+        ? "text-emerald-400"
+        : "text-red-400";
   const check = best ? (
     <span className="text-emerald-400" aria-label="higher">
       ✓
     </span>
   ) : null;
+  const end = align === "right";
   return (
-    <span
-      className={`w-14 sm:w-16 shrink-0 flex items-center gap-1 text-sm tabular-nums ${align === "right" ? "justify-end" : "justify-start"} ${
-        value.scored ? "font-semibold text-white" : "text-zinc-400"
-      }`}
-      title={value.scored ? "Points" : "Projected"}
-    >
-      {align === "right" && check}
-      {value.value.toFixed(1)}
-      {align === "left" && check}
+    <span className={`w-14 sm:w-16 shrink-0 flex flex-col gap-0.5 ${end ? "items-end" : "items-start"}`}>
+      <span className={`flex items-center gap-1 text-sm font-semibold tabular-nums ${tone}`} title="Points">
+        {end && check}
+        {points.toFixed(1)}
+        {!end && check}
+      </span>
+      {projected !== null && (
+        <span
+          className="rounded-full border border-zinc-700 bg-zinc-800 px-1.5 text-[10px] leading-4 tabular-nums text-zinc-400"
+          title="Projected"
+        >
+          {projected.toFixed(1)}
+        </span>
+      )}
     </span>
   );
 }
