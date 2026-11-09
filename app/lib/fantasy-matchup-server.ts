@@ -29,13 +29,13 @@ export type ManagerWeek = { total: number; starters: SlotLine[]; bench: SlotLine
 export type MatchupData = {
   hiddenForTest: boolean;
   schedule: Schedule;
-  /** The earliest open week, and the week the lineups are for. */
+  /** The earliest open week, and the week to open on. */
   currentWeek: number | null;
   shownWeek: number | null;
   /** The managers in draft order, which is the round robin's seating. */
   managers: string[];
-  /** Every manager's lineup for the week asked for. */
-  lineups: Map<string, ManagerWeek>;
+  /** Every manager's lineup, for every week: week → manager → lineup. */
+  lineups: Map<number, Map<string, ManagerWeek>>;
 };
 
 type GroupMatch = {
@@ -162,19 +162,21 @@ export async function getMatchupData(leagueId: string, viewerIsStaff: boolean, w
   const teamName = new Map(((teamRows ?? []) as { id: string; name: string }[]).map((t) => [t.id, t.name]));
   const matchOfTeam = new Map<string, GroupMatch>();
   for (const m of matches) {
-    if (m.round !== shownWeek) continue;
-    if (m.home_team_id) matchOfTeam.set(m.home_team_id, m);
-    if (m.away_team_id) matchOfTeam.set(m.away_team_id, m);
+    if (m.round === null) continue;
+    if (m.home_team_id) matchOfTeam.set(`${m.round}:${m.home_team_id}`, m);
+    if (m.away_team_id) matchOfTeam.set(`${m.round}:${m.away_team_id}`, m);
   }
   const now = Date.now();
-  const closed = closedWeeks.has(shownWeek);
+  const occupant = new Map(
+    ((slotRows ?? []) as { manager_id: string; slot: LineupSlot; player_id: string }[]).map((s) => [`${s.manager_id}:${s.slot}`, s.player_id]),
+  );
 
   // A slot nobody has scored in yet, read off whoever sits in it now.
-  const openState = (player: PoolPlayer | null): SlotState => {
+  const openState = (w: number, player: PoolPlayer | null): SlotState => {
     if (!player) return { kind: "empty" };
     const teamId = player.team?.id;
     if (!teamId) return { kind: "ineligible" };
-    const m = matchOfTeam.get(teamId);
+    const m = matchOfTeam.get(`${w}:${teamId}`);
     if (!m) return { kind: "bye" };
     if (m.status === "completed") return m.forfeit ? { kind: "forfeit" } : { kind: "spent" };
     if (m.status === "cancelled") return { kind: "bye" };
@@ -183,31 +185,34 @@ export async function getMatchupData(leagueId: string, viewerIsStaff: boolean, w
     return { kind: "upcoming", opponent: opponentId ? teamName.get(opponentId) ?? null : null, at: m.scheduled_at };
   };
 
-  const occupant = new Map(
-    ((slotRows ?? []) as { manager_id: string; slot: LineupSlot; player_id: string }[]).map((s) => [`${s.manager_id}:${s.slot}`, s.player_id]),
-  );
-  const lineups = new Map<string, ManagerWeek>();
-  for (const managerId of managers) {
-    const starters: SlotLine[] = [];
-    const bench: SlotLine[] = [];
-    for (const slot of LINEUP_SLOTS) {
-      const sitting = occupant.get(`${managerId}:${slot}`);
-      const sittingPlayer = sitting ? playerById.get(sitting) ?? null : null;
-      if (!isStarterSlot(slot)) {
-        if (!closed) bench.push({ slot, player: sittingPlayer, state: openState(sittingPlayer) });
-        continue;
+  // Every week is built up front so the page can switch between them without a round trip.
+  const lineups = new Map<number, Map<string, ManagerWeek>>();
+  for (let w = 1; w <= totalWeeks; w++) {
+    const closed = closedWeeks.has(w);
+    const week = new Map<string, ManagerWeek>();
+    for (const managerId of managers) {
+      const starters: SlotLine[] = [];
+      const bench: SlotLine[] = [];
+      for (const slot of LINEUP_SLOTS) {
+        const sitting = occupant.get(`${managerId}:${slot}`);
+        const sittingPlayer = sitting ? playerById.get(sitting) ?? null : null;
+        if (!isStarterSlot(slot)) {
+          if (!closed) bench.push({ slot, player: sittingPlayer, state: openState(w, sittingPlayer) });
+          continue;
+        }
+        const credit = creditAt.get(`${w}:${managerId}:${slot}`);
+        if (credit) {
+          const { points, forfeit } = creditPoints(credit);
+          starters.push({ slot, player: playerById.get(credit.player_id) ?? null, state: { kind: "scored", points, forfeit } });
+        } else if (closed) {
+          starters.push({ slot, player: null, state: { kind: "missed" } });
+        } else {
+          starters.push({ slot, player: sittingPlayer, state: openState(w, sittingPlayer) });
+        }
       }
-      const credit = creditAt.get(`${shownWeek}:${managerId}:${slot}`);
-      if (credit) {
-        const { points, forfeit } = creditPoints(credit);
-        starters.push({ slot, player: playerById.get(credit.player_id) ?? null, state: { kind: "scored", points, forfeit } });
-      } else if (closed) {
-        starters.push({ slot, player: null, state: { kind: "missed" } });
-      } else {
-        starters.push({ slot, player: sittingPlayer, state: openState(sittingPlayer) });
-      }
+      week.set(managerId, { total: weekTotals.get(`${w}:${managerId}`) ?? 0, starters, bench });
     }
-    lineups.set(managerId, { total: weekTotals.get(`${shownWeek}:${managerId}`) ?? 0, starters, bench });
+    lineups.set(w, week);
   }
 
   return { hiddenForTest: false, schedule, currentWeek: current, shownWeek, managers, lineups };

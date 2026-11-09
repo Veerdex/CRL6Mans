@@ -1,5 +1,5 @@
-import { Suspense } from "react";
-import Link from "next/link";
+import { Suspense, type ReactNode } from "react";
+import { WeekSwitcher, MatchupSwitcher, type MatchupChip } from "./matchup-switcher";
 import { getMatchupData, type ManagerWeek, type SlotLine, type SlotState } from "@/app/lib/fantasy-matchup-server";
 import { weekLabel, type Matchup as WeekMatchup, type ScheduleWeek } from "@/app/lib/fantasy-schedule";
 import { SLOT_LABEL } from "@/app/lib/fantasy-draft";
@@ -48,44 +48,33 @@ async function Matchup({ league, query }: { league: Promise<LeagueAccess>; query
   }
 
   const member = new Map(view.members.map((m) => [m.accountId, m]));
-  const focus =
-    (q.manager && week.matchups.find((m) => m.a === q.manager || m.b === q.manager)) ||
-    (viewer.accountId && week.matchups.find((m) => m.a === viewer.accountId || m.b === viewer.accountId)) ||
-    week.matchups[0];
-  // The viewer's own side goes on the left.
-  const [left, right] = focus && focus.b === viewer.accountId ? [focus.b, focus.a] : [focus?.a, focus?.b ?? null];
-  const base = `/dashboard/fantasy/${leagueId}/matchup`;
+  const viewerId = viewer.accountId;
   const records = new Map(
     data.schedule.standings.map((s) => [s.managerId, `${s.wins}-${s.losses}${s.ties ? `-${s.ties}` : ""}`]),
   );
 
+  const panels: Record<number, ReactNode> = {};
+  for (const w of data.schedule.weeks) {
+    panels[w.week] = (
+      <WeekPanel
+        week={w}
+        lineups={data.lineups.get(w.week)}
+        member={member}
+        viewerId={viewerId}
+        records={records}
+        focusManager={w.week === week.week ? q.manager ?? null : null}
+      />
+    );
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-4">
-      <WeekNav weeks={data.schedule.weeks} shown={week.week} current={data.currentWeek} base={base} />
-
-      {week.pending ? (
-        <ComingSoon title={weekLabel(week)}>
-          {week.kind === "semifinal"
-            ? "The top four are seeded 1 v 4 and 2 v 3 once every regular-season week has closed."
-            : "The final is set once both semifinals have closed."}
-        </ComingSoon>
-      ) : (
-        <>
-          {left && (
-            <Board
-              week={week}
-              left={{ id: left, member: member.get(left), lineup: data.lineups.get(left) }}
-              right={right ? { id: right, member: member.get(right), lineup: data.lineups.get(right) } : null}
-              winner={focus?.winner ?? null}
-              viewerId={viewer.accountId}
-              records={records}
-            />
-          )}
-          <MatchupPicker week={week} focus={focus} member={member} viewerId={viewer.accountId} base={base} />
-        </>
-      )}
-
-      <Standings data={data.schedule.standings} member={member} viewerId={viewer.accountId} champion={data.schedule.champion} />
+      <WeekSwitcher
+        tabs={data.schedule.weeks.map((w) => ({ week: w.week, label: weekLabel(w), current: w.week === data.currentWeek && !w.closed }))}
+        initial={week.week}
+        panels={panels}
+      />
+      <Standings data={data.schedule.standings} member={member} viewerId={viewerId} champion={data.schedule.champion} />
     </div>
   );
 }
@@ -95,72 +84,59 @@ function managerName(m: MemberView | undefined, viewerId: string | null) {
   return m.accountId === viewerId ? "You" : m.name;
 }
 
-function WeekNav({ weeks, shown, current, base }: { weeks: ScheduleWeek[]; shown: number; current: number | null; base: string }) {
-  return (
-    <nav aria-label="Weeks" className="flex flex-wrap justify-center gap-2">
-      {weeks.map((w) => {
-        const active = w.week === shown;
-        return (
-          <Link
-            key={w.week}
-            href={`${base}?week=${w.week}`}
-            aria-current={active ? "page" : undefined}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-              active ? "bg-indigo-500 border-indigo-500 text-on-accent" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
-            }`}
-          >
-            {weekLabel(w)}
-            {w.week === current && !w.closed && (
-              <span className={`w-1.5 h-1.5 rounded-full ${active ? "bg-pure-white" : "bg-emerald-400"}`} aria-label="current week" />
-            )}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
-
-function MatchupPicker({
+function WeekPanel({
   week,
-  focus,
+  lineups,
   member,
   viewerId,
-  base,
+  records,
+  focusManager,
 }: {
   week: ScheduleWeek;
-  focus: WeekMatchup | undefined;
+  lineups: Map<string, ManagerWeek> | undefined;
   member: Map<string, MemberView>;
   viewerId: string | null;
-  base: string;
+  records: Map<string, string>;
+  focusManager: string | null;
 }) {
-  // The board already shows the focused matchup, so only the others are listed.
-  const others = week.matchups.filter((m) => m !== focus);
-  if (!others.length) return null;
-  return (
-    <div>
-      <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Other matchups</div>
-      <ul className="grid gap-1.5 sm:grid-cols-2">
-        {others.map((m) => (
-          <li key={`${m.a}-${m.b}`}>
-            <Link
-              href={`${base}?week=${week.week}&manager=${m.a}`}
-              className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-xs transition-colors hover:bg-zinc-800"
-            >
-              <span className={`truncate ${m.winner === m.a ? "text-white font-semibold" : "text-zinc-300"}`}>
-                {managerName(member.get(m.a), viewerId)}
-              </span>
-              <span className="tabular-nums text-zinc-400">
-                {m.b ? `${m.aPoints.toFixed(1)} – ${m.bPoints.toFixed(1)}` : "Bye"}
-              </span>
-              <span className={`truncate text-right ${m.winner === m.b ? "text-white font-semibold" : "text-zinc-300"}`}>
-                {m.b ? managerName(member.get(m.b), viewerId) : ""}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+  if (week.pending) {
+    return (
+      <ComingSoon title={weekLabel(week)}>
+        {week.kind === "semifinal"
+          ? "The top four are seeded 1 v 4 and 2 v 3 once every regular-season week has closed."
+          : "The final is set once both semifinals have closed."}
+      </ComingSoon>
+    );
+  }
+  const involves = (m: WeekMatchup, id: string | null) => !!id && (m.a === id || m.b === id);
+  const found = week.matchups.findIndex((m) => involves(m, focusManager));
+  const own = week.matchups.findIndex((m) => involves(m, viewerId));
+  const initial = found >= 0 ? found : own >= 0 ? own : 0;
+
+  const boards = week.matchups.map((m) => {
+    // The viewer's own side goes on the left.
+    const [left, right] = m.b && m.b === viewerId ? [m.b, m.a] : [m.a, m.b];
+    return (
+      <Board
+        key={m.a}
+        week={week}
+        left={{ id: left, member: member.get(left), lineup: lineups?.get(left) }}
+        right={right ? { id: right, member: member.get(right), lineup: lineups?.get(right) } : null}
+        winner={m.winner}
+        viewerId={viewerId}
+        records={records}
+      />
+    );
+  });
+  const chips: MatchupChip[] = week.matchups.map((m) => ({
+    managerId: m.a,
+    a: managerName(member.get(m.a), viewerId),
+    b: m.b ? managerName(member.get(m.b), viewerId) : null,
+    score: m.b ? `${m.aPoints.toFixed(1)} – ${m.bPoints.toFixed(1)}` : "Bye",
+    aWon: m.winner === m.a,
+    bWon: !!m.b && m.winner === m.b,
+  }));
+  return <MatchupSwitcher key={week.week} week={week.week} chips={chips} boards={boards} initial={initial} />;
 }
 
 type Side = { id: string; member: MemberView | undefined; lineup: ManagerWeek | undefined };
