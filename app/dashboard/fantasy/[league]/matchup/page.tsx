@@ -196,7 +196,7 @@ function Board({
   const rightProjected = right ? projectedTotal(rightStarters) : null;
 
   return (
-    <section className="bg-zinc-800 border border-zinc-700 rounded-xl overflow-hidden">
+    <section className="-mx-4 sm:mx-0 bg-zinc-800 border-y sm:border border-zinc-700 sm:rounded-xl overflow-hidden">
       <header className="grid grid-cols-2 gap-3 px-4 pt-4 pb-3 border-b border-zinc-700">
         <ManagerHeader
           side={left}
@@ -226,7 +226,7 @@ function Board({
         </div>
       </header>
 
-      <ul className="p-1.5 space-y-1.5">
+      <ul className="p-1 sm:p-1.5 space-y-1 sm:space-y-1.5">
         {leftStarters.map((line, i) => (
           <BoardRow key={line.slot} label={SLOT_LABEL[line.slot]} left={line} right={rightStarters[i] ?? null} hasRight={!!right} />
         ))}
@@ -237,7 +237,7 @@ function Board({
           <div className="px-4 py-1.5 border-t border-zinc-700 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
             Bench · scores nothing
           </div>
-          <ul className="px-1.5 pb-1.5 space-y-1.5 opacity-75">
+          <ul className="px-1 pb-1 sm:px-1.5 sm:pb-1.5 space-y-1 sm:space-y-1.5 opacity-75">
             {leftBench.map((line, i) => (
               <BoardRow key={line.slot} label="BN" left={line} right={rightBench[i] ?? null} hasRight={!!right} />
             ))}
