@@ -226,8 +226,31 @@ function Board({
           </ul>
         </>
       )}
+
+      {!week.closed && (
+        <div className="grid grid-cols-[1fr_3rem_2.5rem_3rem_1fr] sm:grid-cols-[1fr_3.5rem_3rem_3.5rem_1fr] items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2.5 border-t-2 border-zinc-600 bg-zinc-900/40">
+          <span className="text-xs font-semibold text-zinc-300">Projected</span>
+          <span className="text-right text-sm font-semibold tabular-nums text-indigo-300">{projectedTotal(leftStarters).toFixed(1)}</span>
+          <span />
+          {right ? (
+            <span className="text-left text-sm font-semibold tabular-nums text-indigo-300">{projectedTotal(rightStarters).toFixed(1)}</span>
+          ) : (
+            <span />
+          )}
+          <span className="text-right text-xs font-semibold text-zinc-300">{right ? "Projected" : ""}</span>
+        </div>
+      )}
     </section>
   );
+}
+
+// Points already banked plus the projection of every starter still to play.
+function projectedTotal(starters: SlotLine[]) {
+  return starters.reduce((sum, line) => {
+    if (line.state.kind === "scored") return sum + line.state.points;
+    if ((line.state.kind === "live" || line.state.kind === "upcoming") && line.player) return sum + line.player.projected;
+    return sum;
+  }, 0);
 }
 
 function ManagerHeader({ side, viewerId, won, align }: { side: Side; viewerId: string | null; won: boolean; align: "left" | "right" }) {
