@@ -1,8 +1,7 @@
 # Fantasy Rocket League — Design Spec
 
 Status: **design agreed, not yet built.** Living document — edit as decisions change.
-Origin: Kotala's proposal + the design discussion of 2026-11-05/06. Anything marked
-*(assumed)* was filled in without an explicit decision; anything in
+Origin: Kotala's proposal + the design discussion of 2026-11-05/06. Anything in
 [Open questions](#open-questions) is still undecided.
 
 ---
@@ -137,9 +136,9 @@ A manager's weekly total = the sum of his 6 starting slots' scores for that week
 | Case | Score | Fills the slot for that week? |
 |---|---|---|
 | Normal series | Formula above | **Yes** |
-| Forfeited series | 0 | **No** — another player can still fill it *(assumed)* |
+| Forfeited series | 0 | **No** — another player can still fill it |
 | Real team on bye | 0, shown with a **BYE** tag | **No** |
-| Didn't play (sub covered all games) | 0 | **Yes** — his team played *(assumed)* |
+| Didn't play (sub covered all games) | 0 | **Yes** — their team played |
 | Player kicked / banned / left the league | 0, obvious **ineligible** indicator | **No** — replace with an unlocked same-tier player |
 | Slot never filled by the time the week closes | 0 | — |
 
@@ -602,6 +601,3 @@ later from the stored summaries.
    but a Round 7 series can be played before then. In that window a soon-to-be-eliminated
    manager can still drop players onto waivers for a playoff manager. Option: freeze waivers
    and free agency from the first Round 7 lock until Week 6 closes.
-
-Items marked *(assumed)* above are worth confirming before build:
-- A forfeited series doesn't fill its slot; a player whose sub covered every game does (with 0).
