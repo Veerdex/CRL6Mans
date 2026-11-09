@@ -6,7 +6,12 @@ import { TIER_LABEL, type FantasyTier } from "./fantasy-pool";
 import { LINEUP_SLOTS, type LineupSlot } from "./fantasy-draft";
 import type { LineupEntry } from "./fantasy-lineup";
 
-export type TradeStatus = "pending" | "accepted" | "rejected" | "cancelled" | "failed";
+export type TradeStatus = "pending" | "review" | "accepted" | "rejected" | "cancelled" | "failed" | "vetoed";
+export type TradeVote = "accept" | "reject";
+
+/** How the league has voted on a trade in review. Only managers still eligible count. */
+export type ReviewTally = { accepts: number; rejects: number; eligible: number };
+
 export type TradeView = {
   id: string;
   proposerId: string;
@@ -16,7 +21,37 @@ export type TradeView = {
   createdAt: string;
   resolvedAt: string | null;
   items: { playerId: string; fromManagerId: string }[];
+  /** Set while the trade is in league review. */
+  review: (ReviewTally & { endsAt: string; myVote: TradeVote | null }) | null;
 };
+
+/** How long the rest of the league has to review an accepted trade. */
+export const REVIEW_MS = 24 * 3600_000;
+
+/** Counts the votes of managers who can still vote: everyone else still running a team. */
+export function tallyVotes(votes: readonly { accountId: string; vote: TradeVote }[], eligible: ReadonlySet<string>): ReviewTally {
+  let accepts = 0;
+  let rejects = 0;
+  for (const v of votes) {
+    if (!eligible.has(v.accountId)) continue;
+    if (v.vote === "accept") accepts++;
+    else rejects++;
+  }
+  return { accepts, rejects, eligible: eligible.size };
+}
+
+/**
+ * What happens to a trade in review: half or more of the eligible managers
+ * rejecting declines it, more than half accepting puts it through early, and
+ * otherwise it goes through when the window ends. With nobody to vote it goes
+ * straight through.
+ */
+export function reviewOutcome(tally: ReviewTally, endsAt: Date, now: Date): "veto" | "execute" | "wait" {
+  if (tally.eligible <= 0) return "execute";
+  if (tally.rejects * 2 >= tally.eligible) return "veto";
+  if (tally.accepts * 2 > tally.eligible) return "execute";
+  return now.getTime() >= endsAt.getTime() ? "execute" : "wait";
+}
 
 const TIERS: FantasyTier[] = [1, 2, 3];
 

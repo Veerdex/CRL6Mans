@@ -32,6 +32,7 @@ import {
   proposeTrade,
   rejectTrade,
   setFantasyTradesEnabledCore,
+  voteOnTrade,
 } from "@/app/lib/fantasy-trades-server";
 
 type Result = { error?: string };
@@ -492,6 +493,16 @@ export async function acceptFantasyTrade(leagueId: string, tradeId: string): Pro
   }
   refreshRosterMove(leagueId);
   return {};
+}
+
+export async function voteOnFantasyTrade(leagueId: string, tradeId: string, vote: "accept" | "reject"): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  if (vote !== "accept" && vote !== "reject") return { error: "Pick accept or reject." };
+  const res = await voteOnTrade(leagueId, me.accountId, tradeId, vote);
+  // A deciding vote may have moved players, so every roster view refreshes.
+  refreshRosterMove(leagueId);
+  return res;
 }
 
 export async function rejectFantasyTrade(leagueId: string, tradeId: string): Promise<Result> {

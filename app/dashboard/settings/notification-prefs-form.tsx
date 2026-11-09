@@ -12,7 +12,7 @@ type Category = {
 const TRADES_CATEGORY: Category = {
   key: "fantasy_trades",
   label: "Trades",
-  description: "Offers you receive, and your trades being accepted, rejected or cancelled",
+  description: "Offers you receive, trades up for league review, and how your trades turn out",
 };
 
 const FANTASY_CATEGORIES: Category[] = [

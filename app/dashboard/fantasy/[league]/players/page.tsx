@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { getPoolView } from "@/app/lib/fantasy-pool-data";
 import { managerLineup } from "@/app/lib/fantasy-lineup-server";
 import { leagueWaiverPriority, managerPendingClaims } from "@/app/lib/fantasy-waivers-server";
-import { cancelFrozenTrades, fantasyTradesEnabled, managerTrades } from "@/app/lib/fantasy-trades-server";
+import { cancelFrozenTrades, fantasyTradesEnabled, leagueReviews, managerTrades } from "@/app/lib/fantasy-trades-server";
 import { isDirectorVerified } from "@/app/lib/players";
 import { eliminatedInLeague } from "@/app/lib/fantasy-matchup-server";
 import type { MemberView } from "@/app/lib/fantasy-leagues";
@@ -98,11 +98,12 @@ async function rosterMoves(
   // The run sweeps frozen trades daily; doing it here too means nobody is
   // shown an offer they can no longer accept.
   const trades = eliminatedInLeague(leagueId).then(async (eliminated) => {
-    if (!tradesEnabled) return { eliminated, list: [] };
+    if (!tradesEnabled) return { eliminated, list: [], reviews: [] };
     await cancelFrozenTrades(leagueId, eliminated);
-    return { eliminated, list: await managerTrades(leagueId, managerId) };
+    const [list, reviews] = await Promise.all([managerTrades(leagueId, managerId), leagueReviews(leagueId, managerId)]);
+    return { eliminated, list, reviews };
   });
-  const [lineup, claims, order, { eliminated, list }] = await Promise.all([
+  const [lineup, claims, order, { eliminated, list, reviews }] = await Promise.all([
     managerLineup(leagueId, fantasySeasonId, managerId),
     managerPendingClaims(leagueId, managerId),
     priority,
@@ -114,6 +115,7 @@ async function rosterMoves(
     managerId,
     eliminated: [...eliminated],
     trades: list,
+    reviews,
     tradesEnabled,
     managerNames: Object.fromEntries(members.map((m) => [m.accountId, m.name])),
     lineup,

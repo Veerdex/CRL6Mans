@@ -11,7 +11,9 @@ import {
   dismissFantasyTrade,
   proposeFantasyTrade,
   rejectFantasyTrade,
+  voteOnFantasyTrade,
 } from "../../actions";
+import { LocalTime } from "@/app/dashboard/local-time";
 import type { RosterMoves } from "./move-action";
 
 const BUTTON = "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50";
@@ -164,23 +166,111 @@ function TradeBuilder({
 
 const STATUS_LABEL: Record<TradeView["status"], { text: string; className: string }> = {
   pending: { text: "Pending", className: "text-amber-300" },
+  review: { text: "In league review", className: "text-amber-300" },
   accepted: { text: "Accepted", className: "text-emerald-400" },
   rejected: { text: "Rejected", className: "text-red-400" },
   cancelled: { text: "Cancelled", className: "text-zinc-400" },
   failed: { text: "Called off", className: "text-zinc-400" },
+  vetoed: { text: "Declined by the league", className: "text-red-400" },
 };
 
 export function TradesPanel({ moves, playerOf }: { moves: RosterMoves; playerOf: PlayerLookup }) {
-  if (!moves.trades.length) return null;
+  if (!moves.trades.length && !moves.reviews.length) return null;
   return (
-    <section className="rounded-xl border border-zinc-700 bg-zinc-800 p-4 space-y-3">
-      <h2 className="text-sm font-semibold text-white">Trades</h2>
-      <ul className="space-y-2">
-        {moves.trades.map((t) => (
-          <TradeRow key={t.id} trade={t} moves={moves} playerOf={playerOf} />
-        ))}
-      </ul>
+    <section className="rounded-xl border border-zinc-700 bg-zinc-800 p-4 space-y-4">
+      {moves.trades.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold text-white">Your trades</h2>
+          <ul className="space-y-2">
+            {moves.trades.map((t) => (
+              <TradeRow key={t.id} trade={t} moves={moves} playerOf={playerOf} />
+            ))}
+          </ul>
+        </div>
+      )}
+      {moves.reviews.length > 0 && (
+        <div className="space-y-2">
+          <div>
+            <h2 className="text-sm font-semibold text-white">Up for league review</h2>
+            <p className="text-xs text-zinc-400">
+              Trades between other managers. One is declined if half or more of the league rejects it, and goes through
+              early if more than half accepts. Otherwise it goes through when its review ends.
+            </p>
+          </div>
+          <ul className="space-y-2">
+            {moves.reviews.map((t) => (
+              <ReviewRow key={t.id} trade={t} moves={moves} playerOf={playerOf} />
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
+  );
+}
+
+function Tally({ review }: { review: NonNullable<TradeView["review"]> }) {
+  return (
+    <p className="mt-1 text-xs text-zinc-400">
+      <span className="text-emerald-400">{review.accepts} accept</span> ·{" "}
+      <span className="text-red-400">{review.rejects} reject</span> of {review.eligible} · review ends{" "}
+      <LocalTime iso={review.endsAt} upcoming />
+    </p>
+  );
+}
+
+const playerList = (ids: string[], playerOf: PlayerLookup) =>
+  ids.map((id, i) => (
+    <span key={id}>
+      {i > 0 && ", "}
+      <PlayerName id={id} playerOf={playerOf} />
+    </span>
+  ));
+
+function ReviewRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterMoves; playerOf: PlayerLookup }) {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const name = (id: string) => moves.managerNames[id] ?? "A manager";
+  const proposer = name(trade.proposerId);
+  const receiver = name(trade.receiverId);
+  const from = (id: string) => trade.items.filter((i) => i.fromManagerId === id).map((i) => i.playerId);
+  const review = trade.review;
+
+  const vote = (v: "accept" | "reject") =>
+    start(async () => {
+      const res = await voteOnFantasyTrade(moves.leagueId, trade.id, v);
+      setError(res.error ?? null);
+    });
+
+  const voteButton = (v: "accept" | "reject", label: string, on: string, off: string) => (
+    <button
+      type="button"
+      disabled={pending}
+      aria-pressed={review?.myVote === v}
+      onClick={() => vote(v)}
+      className={`${BUTTON} ${review?.myVote === v ? on : off}`}
+    >
+      {review?.myVote === v ? `${label}ed` : label}
+    </button>
+  );
+
+  return (
+    <li className="rounded-lg border border-zinc-700 bg-zinc-900/40 px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-medium text-white">
+          {proposer} ⇄ {receiver}
+        </span>
+        <span className="ml-auto inline-flex gap-1.5">
+          {voteButton("accept", "Accept", "bg-emerald-600 text-on-accent", "bg-emerald-600/15 text-emerald-300 hover:bg-emerald-600/25")}
+          {voteButton("reject", "Reject", "bg-red-500 text-on-accent", "bg-red-500/15 text-red-300 hover:bg-red-500/25")}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-zinc-400">
+        {proposer} gets {playerList(from(trade.receiverId), playerOf)} · {receiver} gets{" "}
+        {playerList(from(trade.proposerId), playerOf)}
+      </p>
+      {review && <Tally review={review} />}
+      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+    </li>
   );
 }
 
@@ -192,7 +282,8 @@ function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterM
   const other = moves.managerNames[incoming ? trade.proposerId : trade.receiverId] ?? "A manager";
   const gets = trade.items.filter((i) => i.fromManagerId !== moves.managerId).map((i) => i.playerId);
   const gives = trade.items.filter((i) => i.fromManagerId === moves.managerId).map((i) => i.playerId);
-  const open = trade.status === "pending";
+  const offered = trade.status === "pending";
+  const open = offered || trade.status === "review";
   const status = STATUS_LABEL[trade.status];
 
   const act = (fn: (leagueId: string, tradeId: string) => Promise<{ error?: string }>) =>
@@ -214,13 +305,7 @@ function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterM
 
   if (hidden) return null;
 
-  const list = (ids: string[]) =>
-    ids.map((id, i) => (
-      <span key={id}>
-        {i > 0 && ", "}
-        <PlayerName id={id} playerOf={playerOf} />
-      </span>
-    ));
+  const list = (ids: string[]) => playerList(ids, playerOf);
 
   return (
     <li className={`rounded-lg border border-zinc-700 px-3 py-2 text-sm ${open ? "bg-zinc-900/40" : "opacity-70"}`}>
@@ -229,7 +314,7 @@ function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterM
         <span className={`text-xs ${status.className}`}>{status.text}</span>
         {open && (
           <span className="ml-auto inline-flex gap-1.5">
-            {incoming ? (
+            {incoming && offered ? (
               <>
                 <button
                   type="button"
@@ -264,6 +349,10 @@ function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterM
       <p className="mt-1 text-xs text-zinc-400">
         You get {list(gets)} · you give {list(gives)}
       </p>
+      {incoming && offered && (
+        <p className="mt-1 text-xs text-zinc-500">Accepting sends it to the rest of the league to review for 24 hours.</p>
+      )}
+      {trade.review && <Tally review={trade.review} />}
       {trade.note && !open && <p className="mt-1 text-xs text-zinc-500">{trade.note}</p>}
       {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
     </li>

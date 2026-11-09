@@ -293,26 +293,39 @@ waivers and free agency already cover fixing a roster. A director turns trades o
 every league at once from the top of the Players tab (`league_settings.fantasy_trades_enabled`,
 read by `fantasyTradesEnabled()`). While they're off, proposing and accepting are refused
 server-side, and the Players tab's Trades view, the Trade button and the Trades notification
-setting are hidden. Turning them off cancels every pending trade, so turning them back on
+setting are hidden. Turning them off cancels every open trade (pending or in review), so turning them back on
 later doesn't revive offers made against rosters that have since changed. The rules below
 apply while trades are on.
 
 - **Any size**, as long as each side gives up the same tiers it receives (keeps both rosters
   at 2/3/3).
 - One manager proposes; the other **accepts or rejects**.
-- **Either manager can cancel** a pending trade — the proposer or the receiver.
-- **Every player in the trade must be unlocked** (not mid-match) when it's accepted.
-- If a player in a pending trade **locks**, the trade can't be accepted until his series is
-  reported and he unlocks. It stays pending until then.
+- **An accepted trade goes to the league for review** for 24 hours (`REVIEW_MS`) before it
+  moves anyone. Every other manager still running a team can vote **Accept** or **Reject**, and
+  change their vote until it settles. The thresholds are `reviewOutcome` in
+  `app/lib/fantasy-trades.ts`:
+  - **Half or more reject** → it's declined (`vetoed`). Both managers' cards read "Declined by
+    the league" with a Dismiss button.
+  - **More than half accept** → it goes through at once.
+  - Otherwise it goes through when the 24 hours are up. With nobody else to vote, it goes
+    through as soon as it's accepted.
+  - Only managers who are still eligible count, on both sides of the fraction, so a manager
+    who leaves mid-review takes their vote with them.
+- A player can be in only one trade under review at a time; accepting a second is refused
+  until the first settles.
+- **Either manager can cancel** a trade until it goes through — pending or in review.
+- **Every player in the trade must be unlocked** (not mid-match) when it goes through. A trade
+  that's due while one is locked waits in review until his series is reported, then goes
+  through on the next cron tick.
 - Traded players arrive in their new manager's lineup carrying nothing — scores their old slots
   banked stay with the old manager.
 - A trade doesn't name slots. At acceptance each incoming player takes the slot of an outgoing
   player of the same tier, pairing them in lineup order (Cap, 1st, 2nd, Flex, Bench).
-- If a player in a pending trade has since left either roster (dropped, claimed, or traded
-  elsewhere), accepting **calls the trade off** instead.
-- Accepting a trade cancels every other pending trade that includes one of its players.
+- If a player in a trade has since left either roster (dropped, claimed, or traded
+  elsewhere), accepting it or its review ending **calls the trade off** instead.
+- A trade going through cancels every other open trade that includes one of its players.
 - Every change to a trade notifies the other side (§12).
-- **No trade deadline.** A pending trade is cancelled automatically if either manager is
+- **No trade deadline.** An open trade is cancelled automatically if either manager is
   eliminated, since eliminated managers are frozen.
 
 ---
@@ -367,7 +380,7 @@ covers both the push and the feed entry, and all six default to on.
 |---|---|---|
 | Fantasy draft | `fantasy_draft` | The draft starts (each manager learns their seat, and the first picker also sees their clock). They're on the clock. They were autopicked. Their league was disbanded at the start for having too few managers. |
 | Waiver claims | `fantasy_waivers` | One summary per manager per daily run (about 4 AM Pacific), listing each claim as won, lost to a manager higher in the order, or failed with its reason. |
-| Trades | `fantasy_trades` | A trade is proposed, accepted, rejected, withdrawn or cancelled. It is also sent when a trade is called off by a freeze, or by a roster change (a player left a roster, or was traded first in another deal). |
+| Trades | `fantasy_trades` | A trade is proposed, accepted (into review), rejected, withdrawn or cancelled, and when the league's review declines it or it goes through. Every other manager is told when a trade comes up for review. It is also sent when a trade is called off by a freeze, or by a roster change (a player left a roster, or was traded first in another deal). |
 | Lineup alerts | `fantasy_lineup` | A starter won't score in the current week, either because their team has a bye in that round or because they aren't on a team. Only sent while the week is open, for managers who have an opponent that week. |
 | Results and playoffs | `fantasy_results` | A week closes: each manager gets their result. Semifinal winners and losers, the champion and runner-up, and everyone else in the league hear about the final. Seeding is sent once the regular season closes: who made the playoffs and whom they face, and who is out. |
 | League changes | `fantasy_league` | A manager in their league left, was removed, or was kicked or banned. It names the new owner if ownership passed, and the new owner gets their own notice. The owner removed them. (§11) |
@@ -413,9 +426,10 @@ Modelled on fantasy football so it's familiar:
   Matchup tab's (`trendingByTier` in `fantasy-pool.ts`, `lastSeries` in `getPoolView`). Trades
   live here too,
   so there's no Trades tab. A toggle splits the page into **Available** (unrostered
-  players only) and **Trades**, which has the manager's pending trades, plus those resolved in
-  the last week, above a table of other managers' players, each with a Trade button. The toggle
-  carries a count of incoming offers. A resolved trade can be dismissed, which hides it for that
+  players only) and **Trades**, which has the manager's open trades, plus those resolved in
+  the last week, then other managers' trades up for league review with Accept/Reject votes and
+  the running tally, above a table of other managers' players, each with a Trade button. The
+  toggle carries a count of incoming offers plus reviews the manager hasn't voted on. A resolved trade can be dismissed, which hides it for that
   manager only. A visitor who isn't a manager sees the whole pool with no toggle.
 - **Standings** — W-L, total points, waiver priority.
 - **Draft room** — live board, queue, pick timer.
@@ -548,9 +562,16 @@ Modelled on fantasy football so it's familiar:
     all the traded rows before reinserting them, because the roster's unique keys would reject
     a row-by-row move. In the same transaction it cancels every other pending trade that
     includes a moved player.
-  - Locks are checked in the server action before the call, and a locked player leaves the
-    trade pending.
-  - `rollbackFantasyTestRun` deletes trades by league. Items cascade.
+  - Locks are checked before the call, and a locked player leaves the trade in review.
+  - `rollbackFantasyTestRun` deletes trades by league. Items and votes cascade.
+- **League review** (`scripts/fantasy-trade-review-migration.sql`): adds the `review` and
+  `vetoed` statuses, `fantasy_trades.review_ends_at`, and `fantasy_trade_votes` (PK
+  `trade_id, account_id`, `accept`/`reject`). The receiver's accept moves the trade to `review`.
+  `settleReview` decides it, after every vote and on every `clip-reset` tick (`runTradeReviews`).
+  The tick re-evaluates every trade in review, not just expired ones, so a passed trade held up
+  by a lock goes through as soon as the lock clears. Each way out of review is pinned to
+  `status = 'review'`, so a vote and the tick racing notify once. `fantasy_accept_trade` takes a
+  trade from `pending` or `review`, and cancels overlapping trades in either.
 - **The freeze** (§7) is derived on read like the rest of the schedule, so it needs no
   table. `eliminatedManagers` in `app/lib/fantasy-schedule.ts` (pure, `npm run
   test:fantasy-schedule`) reads a built schedule: nobody before the regular season closes,

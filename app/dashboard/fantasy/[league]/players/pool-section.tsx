@@ -34,7 +34,9 @@ export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: P
     const action = (p: PoolPlayer) => (
       <MoveAction player={p} moves={roster} nameOf={nameOf} playerOf={playerOf} rosterOf={rosterOf} />
     );
-    const offers = roster.trades.filter((t) => t.status === "pending" && t.receiverId === roster.managerId).length;
+    const offers =
+      roster.trades.filter((t) => t.status === "pending" && t.receiverId === roster.managerId).length +
+      roster.reviews.filter((t) => !t.review?.myVote).length;
     return (
       <div className="space-y-4">
         {roster.eliminated.includes(roster.managerId) && (

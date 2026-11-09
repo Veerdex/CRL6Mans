@@ -72,7 +72,7 @@ export async function orphanTeam(
       .from("fantasy_trades")
       .update({ status: "cancelled", note: LEFT_NOTE, resolved_at: now })
       .eq("league_id", league.id)
-      .eq("status", "pending")
+      .in("status", ["pending", "review"])
       .or(`proposer_id.eq.${accountId},receiver_id.eq.${accountId}`),
   ]);
   const heir = await passOwnership(league, accountId);

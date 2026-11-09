@@ -17,6 +17,8 @@ export type RosterMoves = {
   eliminated: string[];
   managerNames: Record<string, string>;
   trades: TradeView[];
+  /** Other managers' trades in league review, which the viewer can vote on. */
+  reviews: TradeView[];
   /** league_settings.fantasy_trades_enabled, the director's switch. */
   tradesEnabled: boolean;
   lineup: LineupEntry[];

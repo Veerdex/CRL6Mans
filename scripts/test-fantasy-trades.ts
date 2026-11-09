@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { tradeMoves, tradeShapeProblem } from "../app/lib/fantasy-trades";
+import { reviewOutcome, tallyVotes, tradeMoves, tradeShapeProblem } from "../app/lib/fantasy-trades";
 import type { LineupEntry } from "../app/lib/fantasy-lineup";
 
 const t = (tier: 1 | 2 | 3) => ({ tier });
@@ -81,4 +81,44 @@ test("acceptance re-checks the shape against the current lineups", () => {
     { managerId: "b", lineup: lineup("b"), out: ["b-2a"] },
   );
   assert.match(moves as string, /like for like/);
+});
+
+const tally = (accepts: number, rejects: number, eligible: number) => ({ accepts, rejects, eligible });
+const ends = new Date("2026-11-10T00:00:00Z");
+const before = new Date("2026-11-09T12:00:00Z");
+const after = new Date("2026-11-10T00:00:01Z");
+
+test("a trade with nobody to review it goes straight through", () => {
+  assert.equal(reviewOutcome(tally(0, 0, 0), ends, before), "execute");
+});
+
+test("half or more of the league rejecting declines a trade", () => {
+  assert.equal(reviewOutcome(tally(0, 1, 1), ends, before), "veto");
+  assert.equal(reviewOutcome(tally(0, 1, 2), ends, before), "veto");
+  assert.equal(reviewOutcome(tally(1, 1, 3), ends, before), "wait");
+  assert.equal(reviewOutcome(tally(0, 2, 3), ends, before), "veto");
+  assert.equal(reviewOutcome(tally(0, 2, 4), ends, after), "veto");
+});
+
+test("more than half accepting puts a trade through early", () => {
+  assert.equal(reviewOutcome(tally(1, 0, 1), ends, before), "execute");
+  assert.equal(reviewOutcome(tally(1, 0, 2), ends, before), "wait");
+  assert.equal(reviewOutcome(tally(2, 0, 3), ends, before), "execute");
+  assert.equal(reviewOutcome(tally(2, 1, 4), ends, before), "wait");
+  assert.equal(reviewOutcome(tally(3, 1, 4), ends, before), "execute");
+});
+
+test("a trade the league hasn't declined goes through when the window ends", () => {
+  assert.equal(reviewOutcome(tally(0, 0, 3), ends, before), "wait");
+  assert.equal(reviewOutcome(tally(0, 0, 3), ends, after), "execute");
+  assert.equal(reviewOutcome(tally(0, 1, 3), ends, after), "execute");
+});
+
+test("only managers still eligible to vote are counted", () => {
+  const votes = [
+    { accountId: "c", vote: "reject" as const },
+    { accountId: "d", vote: "accept" as const },
+    { accountId: "gone", vote: "reject" as const },
+  ];
+  assert.deepEqual(tallyVotes(votes, new Set(["c", "d", "e"])), tally(1, 1, 3));
 });

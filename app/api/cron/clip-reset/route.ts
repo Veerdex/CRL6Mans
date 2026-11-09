@@ -9,6 +9,7 @@ import { stampCronHeartbeat } from "@/app/lib/cron-heartbeat";
 import { deleteExpiredNotifications } from "@/app/lib/notifications";
 import { runWaivers } from "@/app/lib/fantasy-waivers-server";
 import { runFantasyNotices } from "@/app/lib/fantasy-notices-server";
+import { runTradeReviews } from "@/app/lib/fantasy-trades-server";
 
 export const runtime = "nodejs";
 
@@ -56,6 +57,8 @@ export async function GET(request: Request) {
   fired.push(...(await runWaivers(now).catch(() => [])));
   // Weekly results, playoff seeding and lineup alerts: derived each tick, sent once.
   fired.push(...(await runFantasyNotices().catch(() => [])));
+  // Trades the league is reviewing go through or are declined as votes and the clock decide.
+  fired.push(...(await runTradeReviews(now).catch(() => [])));
 
   const boundary = mostRecentSundayMidnightPacific(now);
 
