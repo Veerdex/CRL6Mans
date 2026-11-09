@@ -217,8 +217,8 @@ export function LeaveLeagueButton({
   const disbands = isCreator && !afterDraft;
   const warning = afterDraft
     ? `Your team stays in the league without a manager and keeps scoring with its current lineup${
-        isOwner ? ". Ownership passes to the next manager, who" : ". The owner"
-      } can hand it to someone new. You can't come back to it.`
+        isOwner ? ". Nobody takes over as owner, so it can't be handed to someone new" : ". The owner can hand it to someone new"
+      }. You can't come back to it.`
     : disbands
       ? `You created this league, so leaving disbands it. The league is deleted${
           others > 0 ? ` and ${others === 1 ? "the other manager is" : `all ${others} other managers are`} removed` : ""

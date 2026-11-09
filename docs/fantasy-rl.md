@@ -332,10 +332,12 @@ purpose as the creator still disbands the league, as in §2.)
   any more, and gets no more notices about it.
 - During the draft, its picks are made automatically straight away rather than waiting out the
   clock.
-- If the owner left, ownership passes to the earliest-joined manager still active. With nobody
-  left, the owner stays on record and the league plays out on the lineups it has.
+- The owner leaving is no different: their team is orphaned and **ownership doesn't pass on**.
+  After the draft the only setting left is the league's name, so the league needs no owner to
+  play out. The departed owner stays on record but can't act for the league.
 
-**The owner looks after an orphan** until someone takes it over:
+**An active owner looks after an orphan** until someone takes it over. Once the owner has
+left, orphans stay as they are for the rest of the season.
 - They can set its lineup from the Roster tab. It can't make waiver claims or trades.
 - Once the draft is finished, they can **hand it over**: offer the team to any approved player
   who isn't already in the league and isn't on one of its rosters. The offer arrives as an

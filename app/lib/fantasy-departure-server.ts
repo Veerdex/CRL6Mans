@@ -26,8 +26,8 @@ async function nextOwner(leagueId: string, except: string): Promise<string | nul
   return (data?.account_id as string | undefined) ?? null;
 }
 
-// An owner who leaves passes the league on. With nobody left to take it the
-// owner stays on record, and the league plays out on the lineups it has.
+// Before the draft an owner who leaves passes the league on, since invites and
+// settings still need someone. With nobody left the league is deleted anyway.
 async function passOwnership(league: LeagueLite, accountId: string) {
   if (league.commissioner_id !== accountId) return;
   const heir = await nextOwner(league.id, accountId);
@@ -61,7 +61,8 @@ export async function orphanTeam(league: LeagueLite, accountId: string): Promise
       .eq("status", "pending")
       .or(`proposer_id.eq.${accountId},receiver_id.eq.${accountId}`),
   ]);
-  await passOwnership(league, accountId);
+  // An owner's team is orphaned like anyone else's and nobody inherits the
+  // league: after the draft only its name is left to change.
   await tellOwner(league.id, accountId);
   if (league.status === "drafting") await autopickIfDue(league.id);
   return {};
@@ -71,6 +72,13 @@ async function tellOwner(leagueId: string, departed: string) {
   const { data: league } = await supabaseAdmin.from("fantasy_leagues").select("name, status, commissioner_id").eq("id", leagueId).maybeSingle();
   const ownerId = league?.commissioner_id as string | undefined;
   if (!league || !ownerId || ownerId === departed) return;
+  const { data: ownerSeat } = await supabaseAdmin
+    .from("fantasy_league_members")
+    .select("orphaned_at")
+    .eq("league_id", leagueId)
+    .eq("account_id", ownerId)
+    .maybeSingle();
+  if (!ownerSeat || ownerSeat.orphaned_at) return;
   const { data: rows } = await supabaseAdmin.from("accounts").select("id, discord_id, username, display_name").in("id", [ownerId, departed]);
   const accounts = (rows ?? []) as { id: string; discord_id: string; username: string | null; display_name: string | null }[];
   const owner = accounts.find((a) => a.id === ownerId);
