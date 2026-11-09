@@ -175,23 +175,21 @@ export type LastSeries = { points: number; projected: number };
 export const TRENDING_PER_TIER = 2;
 
 /**
- * The Players tab's trending strip: per tier, whoever beat their projection by
- * the biggest multiple in their last series. A projection of zero or less has
- * no multiple, so it can't trend; a tie goes to the bigger score.
+ * The Players tab's trending strip: per tier, the biggest scores in their last
+ * series. Raw points rather than a multiple of projection, since a multiple
+ * ranks an ordinary series on a tiny projection over a big one. A tie goes to
+ * whoever beat their projection by more.
  */
 export function trendingByTier<T extends { tier: FantasyTier; lastSeries: LastSeries | null }>(
   players: readonly T[],
   perTier = TRENDING_PER_TIER,
-): Record<FantasyTier, { player: T; multiplier: number }[]> {
-  const out: Record<FantasyTier, { player: T; multiplier: number }[]> = { 1: [], 2: [], 3: [] };
-  for (const player of players) {
-    const s = player.lastSeries;
-    if (!s || !(s.projected > 0)) continue;
-    out[player.tier].push({ player, multiplier: s.points / s.projected });
-  }
+): Record<FantasyTier, T[]> {
+  const out: Record<FantasyTier, T[]> = { 1: [], 2: [], 3: [] };
+  for (const player of players) if (player.lastSeries) out[player.tier].push(player);
+  const margin = (p: T) => p.lastSeries!.points - p.lastSeries!.projected;
   for (const tier of [1, 2, 3] as const) {
     out[tier] = out[tier]
-      .sort((a, b) => b.multiplier - a.multiplier || b.player.lastSeries!.points - a.player.lastSeries!.points)
+      .sort((a, b) => b.lastSeries!.points - a.lastSeries!.points || margin(b) - margin(a))
       .slice(0, perTier);
   }
   return out;

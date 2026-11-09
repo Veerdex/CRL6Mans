@@ -18,7 +18,7 @@ export function TrendingPlayers({ pool }: { pool: Promise<PoolView> }) {
     <section className="bg-zinc-800 border border-zinc-700 rounded-xl">
       <header className="px-4 py-3 border-b border-zinc-700 text-center">
         <h2 className="text-sm font-semibold text-white">Trending</h2>
-        <p className="text-xs text-zinc-400">Who beat their projection by the most in their last series, per tier.</p>
+        <p className="text-xs text-zinc-400">The biggest scores in each tier from their last series.</p>
       </header>
       <div className="grid sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-zinc-700/60">
         {([1, 2, 3] as FantasyTier[]).map((tier) => (
@@ -27,7 +27,7 @@ export function TrendingPlayers({ pool }: { pool: Promise<PoolView> }) {
               <TierBadge tier={tier} />
             </div>
             {trend[tier].length ? (
-              trend[tier].map(({ player, multiplier }) => <TrendRow key={player.id} player={player} multiplier={multiplier} />)
+              trend[tier].map((player) => <TrendRow key={player.id} player={player} />)
             ) : (
               <p className="text-xs text-zinc-500 text-center">No {TIER_LABEL[tier]} has played a series yet.</p>
             )}
@@ -38,7 +38,7 @@ export function TrendingPlayers({ pool }: { pool: Promise<PoolView> }) {
   );
 }
 
-function TrendRow({ player, multiplier }: { player: PoolPlayer; multiplier: number }) {
+function TrendRow({ player }: { player: PoolPlayer }) {
   const s = player.lastSeries!;
   const status = player.manager ? player.manager.name : player.waiverClearsAt ? "On waivers" : "Free agent";
   return (
@@ -54,11 +54,11 @@ function TrendRow({ player, multiplier }: { player: PoolPlayer; multiplier: numb
           />
         </div>
         <p className="text-xs text-zinc-400 truncate">
-          {fmt(s.points)} pts vs {fmt(s.projected)} proj · {status}
+          {fmt(s.projected)} proj · {status}
         </p>
       </div>
-      <span className={`shrink-0 text-sm font-bold tabular-nums ${multiplier >= 1 ? "text-emerald-400" : "text-zinc-300"}`}>
-        {multiplier.toFixed(1)}×
+      <span className={`shrink-0 text-sm font-bold tabular-nums ${s.points >= s.projected ? "text-emerald-400" : "text-zinc-300"}`}>
+        {fmt(s.points)} pts
       </span>
     </div>
   );

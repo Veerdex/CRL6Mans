@@ -122,24 +122,22 @@ test("a forfeit or a series not played scores nothing", () => {
   assert.equal(seriesFantasyPoints({ forfeit: false, ownScore: 3, oppScore: 0, stats: ZERO, gamesPlayed: 0 }), 0);
 });
 
-test("trending takes the biggest multiples of projection, two per tier", () => {
+test("trending takes the biggest scores in a last series, two per tier", () => {
   const p = (id: string, tier: 1 | 2 | 3, points: number, projected: number | null) => ({
     id,
     tier,
     lastSeries: projected === null ? null : { points, projected },
   });
   const trend = trendingByTier([
-    p("a", 2, 40, 20), // 2x
-    p("b", 2, 30, 10), // 3x
-    p("c", 2, 15, 10), // 1.5x, third, so cut
-    p("d", 2, 99, 0), // no projection to beat
-    p("e", 2, 50, null), // hasn't played
-    p("f", 1, 10, 20), // 0.5x, still the best Cap
-    p("g", 3, 20, 10), // 2x, tied...
-    p("h", 3, 30, 15), // ...and the bigger score wins it
+    p("a", 3, 30, 25), // the bigger score wins...
+    p("b", 3, 25, 10), // ...over the bigger beat of projection
+    p("c", 3, 20, 5), // third, so cut
+    p("d", 3, 50, null), // hasn't played
+    p("e", 1, 10, 20), // under projection, still the best Cap
+    p("f", 2, 20, 18), // tied on points...
+    p("g", 2, 20, 12), // ...so the bigger beat of projection goes first
   ]);
-  assert.deepEqual(trend[2].map((t) => t.player.id), ["b", "a"]);
-  close(trend[2][0].multiplier, 3);
-  assert.deepEqual(trend[1].map((t) => t.player.id), ["f"]);
-  assert.deepEqual(trend[3].map((t) => t.player.id), ["h", "g"]);
+  assert.deepEqual(trend[3].map((t) => t.id), ["a", "b"]);
+  assert.deepEqual(trend[1].map((t) => t.id), ["e"]);
+  assert.deepEqual(trend[2].map((t) => t.id), ["g", "f"]);
 });
