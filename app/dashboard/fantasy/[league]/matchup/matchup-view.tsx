@@ -11,6 +11,7 @@ import {
 } from "@/app/lib/fantasy-schedule";
 import { SLOT_LABEL } from "@/app/lib/fantasy-draft";
 import { TIER_NAME_CLASS } from "@/app/lib/fantasy-pool";
+import { teamAbbreviations } from "@/app/lib/team-abbreviation";
 import type { MemberView } from "@/app/lib/fantasy-leagues";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
@@ -38,6 +39,7 @@ export function MatchupView({
 }) {
   const member = new Map(members.map((m) => [m.accountId, m]));
   const records = new Map(schedule.standings.map((s) => [s.managerId, `${s.wins}-${s.losses}${s.ties ? `-${s.ties}` : ""}`]));
+  const abbr = teamAbbreviations(boardTeamNames(lineups));
 
   const panels: Record<number, ReactNode> = {};
   for (const w of schedule.weeks) {
@@ -48,6 +50,7 @@ export function MatchupView({
         member={member}
         viewerId={viewerId}
         records={records}
+        abbr={abbr}
         focusManager={w.week === shownWeek.week ? focusManager : null}
       />
     );
@@ -65,6 +68,19 @@ export function MatchupView({
   );
 }
 
+// Every team named anywhere on the board, so abbreviations are unique across all
+// of it rather than within one row.
+function boardTeamNames(lineups: Map<number, Map<string, ManagerWeek>>): string[] {
+  const names: string[] = [];
+  for (const week of lineups.values())
+    for (const side of week.values())
+      for (const line of [...side.starters, ...side.bench]) {
+        if (line.player?.team) names.push(line.player.team.name);
+        if (line.state.kind === "upcoming" && line.state.opponent) names.push(line.state.opponent);
+      }
+  return names;
+}
+
 function managerName(m: MemberView | undefined, viewerId: string | null) {
   if (!m) return "Former manager";
   return m.accountId === viewerId ? "You" : m.name;
@@ -76,6 +92,7 @@ function WeekPanel({
   member,
   viewerId,
   records,
+  abbr,
   focusManager,
 }: {
   week: ScheduleWeek;
@@ -83,6 +100,7 @@ function WeekPanel({
   member: Map<string, MemberView>;
   viewerId: string | null;
   records: Map<string, string>;
+  abbr: Map<string, string>;
   focusManager: string | null;
 }) {
   if (week.pending) {
@@ -111,6 +129,7 @@ function WeekPanel({
         winner={m.winner}
         viewerId={viewerId}
         records={records}
+        abbr={abbr}
       />
     );
   });
@@ -134,6 +153,7 @@ function Board({
   winner,
   viewerId,
   records,
+  abbr,
 }: {
   week: ScheduleWeek;
   left: Side;
@@ -141,6 +161,7 @@ function Board({
   winner: string | null;
   viewerId: string | null;
   records: Map<string, string>;
+  abbr: Map<string, string>;
 }) {
   const leftStarters = left.lineup?.starters ?? [];
   const rightStarters = right?.lineup?.starters ?? [];
@@ -195,7 +216,7 @@ function Board({
 
       <ul className="p-1 sm:p-1.5 space-y-1 sm:space-y-1.5">
         {leftStarters.map((line, i) => (
-          <BoardRow key={line.slot} label={SLOT_LABEL[line.slot]} left={line} right={rightStarters[i] ?? null} hasRight={!!right} />
+          <BoardRow key={line.slot} label={SLOT_LABEL[line.slot]} left={line} right={rightStarters[i] ?? null} hasRight={!!right} abbr={abbr} />
         ))}
       </ul>
 
@@ -206,7 +227,7 @@ function Board({
           </div>
           <ul className="px-1 pb-1 sm:px-1.5 sm:pb-1.5 space-y-1 sm:space-y-1.5 opacity-75">
             {leftBench.map((line, i) => (
-              <BoardRow key={line.slot} label="BN" left={line} right={rightBench[i] ?? null} hasRight={!!right} />
+              <BoardRow key={line.slot} label="BN" left={line} right={rightBench[i] ?? null} hasRight={!!right} abbr={abbr} />
             ))}
           </ul>
         </>
@@ -318,7 +339,19 @@ function ManagerHeader({
   );
 }
 
-function BoardRow({ label, left, right, hasRight }: { label: string; left: SlotLine; right: SlotLine | null; hasRight: boolean }) {
+function BoardRow({
+  label,
+  left,
+  right,
+  hasRight,
+  abbr,
+}: {
+  label: string;
+  left: SlotLine;
+  right: SlotLine | null;
+  hasRight: boolean;
+  abbr: Map<string, string>;
+}) {
   const a = slotScore(left);
   const b = hasRight ? slotScore(right) : null;
   // Only a slot both sides have played can be won.
@@ -329,7 +362,7 @@ function BoardRow({ label, left, right, hasRight }: { label: string; left: SlotL
     <li className="grid grid-cols-[1fr_2.5rem_1fr] sm:grid-cols-[1fr_3rem_1fr] items-stretch rounded-lg bg-zinc-900/60 overflow-hidden">
       <div className="flex items-center gap-2 px-2 sm:px-3 py-2.5 min-w-0">
         <div className="flex-1 min-w-0">
-          <PlayerCell line={left} align="left" />
+          <PlayerCell line={left} align="left" abbr={abbr} />
         </div>
         <SlotNumber value={a} best={leftBest} align="right" />
       </div>
@@ -340,7 +373,7 @@ function BoardRow({ label, left, right, hasRight }: { label: string; left: SlotL
         <div className="flex items-center gap-2 px-2 sm:px-3 py-2.5 min-w-0">
           <SlotNumber value={b} best={rightBest} align="left" />
           <div className="flex-1 min-w-0">
-            <PlayerCell line={right} align="right" />
+            <PlayerCell line={right} align="right" abbr={abbr} />
           </div>
         </div>
       ) : (
@@ -387,7 +420,7 @@ function SlotNumber({ value, best, align }: { value: SlotScore | null; best: boo
   );
 }
 
-function PlayerCell({ line, align }: { line: SlotLine; align: "left" | "right" }) {
+function PlayerCell({ line, align, abbr }: { line: SlotLine; align: "left" | "right"; abbr: Map<string, string> }) {
   const right = align === "right";
   const { player, state } = line;
   if (!player) {
@@ -407,13 +440,13 @@ function PlayerCell({ line, align }: { line: SlotLine; align: "left" | "right" }
         <div className={`flex whitespace-nowrap ${right ? "justify-end" : ""}`}>
           <PlayerName displayName={player.name} username={player.username} discordId={player.discordId || null} className={`text-sm font-medium truncate ${TIER_NAME_CLASS[player.tier]}`} />
         </div>
-        <StateLine state={state} team={player.team?.name ?? null} />
+        <StateLine state={state} team={player.team?.name ?? null} abbr={abbr} />
       </div>
     </div>
   );
 }
 
-function StateLine({ state, team }: { state: SlotState; team: string | null }) {
+function StateLine({ state, team, abbr }: { state: SlotState; team: string | null; abbr: Map<string, string> }) {
   const cls = "block text-[11px] truncate";
   switch (state.kind) {
     case "scored":
@@ -423,7 +456,13 @@ function StateLine({ state, team }: { state: SlotState; team: string | null }) {
     case "upcoming":
       return (
         <span className={`${cls} text-zinc-400`}>
-          {state.opponent ? `vs ${state.opponent}` : "Opponent TBD"}
+          {state.opponent ? (
+            <>
+              vs <abbr title={state.opponent} className="no-underline">{abbr.get(state.opponent) ?? state.opponent}</abbr>
+            </>
+          ) : (
+            "Opponent TBD"
+          )}
           {state.at ? (
             <>
               {" · "}
