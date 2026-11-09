@@ -6,6 +6,8 @@ import { lockedPlayerIds } from "./fantasy-lineup-server";
 import { eliminatedInLeague } from "./fantasy-matchup-server";
 import { cancelFrozenTrades } from "./fantasy-trades-server";
 import { FROZEN_NOTE as FROZEN } from "./fantasy-schedule";
+import { accountNames, notifyManagers } from "./fantasy-notify";
+import { waiverNotice, type WaiverResultLine } from "./fantasy-notices";
 import {
   byPreference,
   latestWaiverRun,
@@ -217,6 +219,7 @@ export async function cancelClaim(leagueId: string, managerId: string, claimId: 
 
 type RunLeague = {
   id: string;
+  name: string;
   fantasy_season_id: string;
   draft_order: string[] | null;
   waiver_order: string[] | null;
@@ -232,7 +235,7 @@ export async function runWaivers(now: Date): Promise<string[]> {
   const boundary = latestWaiverRun(now).toISOString();
   const { data: leagues } = await supabaseAdmin
     .from("fantasy_leagues")
-    .select("id, fantasy_season_id, draft_order, waiver_order, waivers_ran_at")
+    .select("id, name, fantasy_season_id, draft_order, waiver_order, waivers_ran_at")
     .eq("status", "active")
     .or(`waivers_ran_at.is.null,waivers_ran_at.lt.${boundary}`);
 
@@ -255,6 +258,24 @@ export async function runWaivers(now: Date): Promise<string[]> {
     if (line) fired.push(line);
   }
   return fired;
+}
+
+// §12: one notice per manager per run, however many claims they had settled.
+async function announceClaims(league: RunLeague, claims: PendingClaim[], outcomes: Map<string, ClaimOutcome>) {
+  const settled = claims.filter((c) => outcomes.has(c.id));
+  if (!settled.length) return;
+  const names = await accountNames(settled.flatMap((c) => [c.playerId, c.dropPlayerId]));
+  const name = (id: string) => names.get(id) ?? "a player";
+  const byManager = new Map<string, WaiverResultLine[]>();
+  for (const c of settled) {
+    const o = outcomes.get(c.id)!;
+    const line = { status: o.status, player: name(c.playerId), drop: name(c.dropPlayerId), note: o.note };
+    byManager.set(c.managerId, [...(byManager.get(c.managerId) ?? []), line]);
+  }
+  for (const [managerId, lines] of byManager) {
+    const { title, body } = waiverNotice(league.name, lines);
+    notifyManagers([managerId], "fantasy_waivers", { title, body, url: `/dashboard/fantasy/${league.id}/players` });
+  }
 }
 
 async function settleLeague(league: RunLeague, boundary: string, now: Date, eliminated: Set<string>): Promise<string | null> {
@@ -340,5 +361,6 @@ async function settleLeague(league: RunLeague, boundary: string, now: Date, elim
   // time doesn't cost its manager priority.
   if (winners.length) await supabaseAdmin.from("fantasy_leagues").update({ waiver_order: orderAfterRun(order, winners) }).eq("id", league.id);
 
+  await announceClaims(league, allClaims, outcomes);
   return `waivers:${league.id}:${dropped.length}/${result.cleared.length}`;
 }

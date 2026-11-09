@@ -1,9 +1,9 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
-import { accountName, getLeague, type LeagueRow } from "./fantasy-leagues";
+import { getLeague, type LeagueRow } from "./fantasy-leagues";
+import { accountNames, notifyManagers } from "./fantasy-notify";
 import { lockedPlayerIds, managerLineup } from "./fantasy-lineup-server";
 import { tradeMoves, tradeShapeProblem, type TradeStatus, type TradeView } from "./fantasy-trades";
-import { recordNotification } from "./notifications";
 import { eliminatedInLeague } from "./fantasy-matchup-server";
 import { FROZEN_NOTE } from "./fantasy-schedule";
 
@@ -76,13 +76,25 @@ const FROZEN_TRADE_NOTE = "One side's season is over, and its roster is frozen."
 export async function cancelFrozenTrades(leagueId: string, eliminated: Set<string>): Promise<void> {
   if (!eliminated.size) return;
   const ids = [...eliminated].join(",");
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("fantasy_trades")
     .update({ status: "cancelled", note: FROZEN_TRADE_NOTE, resolved_at: new Date().toISOString() })
     .eq("league_id", leagueId)
     .eq("status", "pending")
-    .or(`proposer_id.in.(${ids}),receiver_id.in.(${ids})`);
-  if (error) console.error(`[fantasy] cancelling frozen trades in ${leagueId} failed: ${error.message}`);
+    .or(`proposer_id.in.(${ids}),receiver_id.in.(${ids})`)
+    .select("proposer_id, receiver_id");
+  if (error) return console.error(`[fantasy] cancelling frozen trades in ${leagueId} failed: ${error.message}`);
+  // Only the rows this call moved off pending come back, so a page load that
+  // finds nothing left to cancel notifies nobody.
+  const rows = (data ?? []) as { proposer_id: string; receiver_id: string }[];
+  if (rows.length) {
+    notify(
+      rows.flatMap((r) => [r.proposer_id, r.receiver_id]),
+      "Fantasy trade called off",
+      `A pending trade of yours was cancelled. ${FROZEN_TRADE_NOTE}`,
+      leagueId,
+    );
+  }
 }
 
 async function frozenProblem(leagueId: string, viewerId: string, otherId: string): Promise<string | null> {
@@ -92,16 +104,11 @@ async function frozenProblem(leagueId: string, viewerId: string, otherId: string
   return null;
 }
 
-async function notify(accountIds: string[], title: string, body: string, leagueId: string): Promise<void> {
-  const { data } = await supabaseAdmin.from("accounts").select("discord_id").in("id", accountIds);
-  const discordIds = ((data ?? []) as { discord_id: string }[]).map((a) => a.discord_id);
-  if (discordIds.length) await recordNotification({ kind: "users", discordIds }, { title, body, url: `/dashboard/fantasy/${leagueId}/players` });
+function notify(accountIds: string[], title: string, body: string, leagueId: string): void {
+  notifyManagers(accountIds, "fantasy_trades", { title, body, url: `/dashboard/fantasy/${leagueId}/players` });
 }
 
-async function names(ids: string[]): Promise<Map<string, string>> {
-  const { data } = await supabaseAdmin.from("accounts").select("id, username, display_name").in("id", ids);
-  return new Map(((data ?? []) as { id: string; username: string | null; display_name: string | null }[]).map((a) => [a.id, accountName(a)]));
-}
+const names = accountNames;
 
 export async function proposeTrade(
   leagueId: string,
@@ -147,7 +154,7 @@ export async function proposeTrade(
 
   const n = await names([proposerId, ...give, ...get]);
   const list = (ids: string[]) => ids.map((id) => n.get(id) ?? "Unknown").join(", ");
-  await notify(
+  notify(
     [receiverId],
     "Fantasy trade offer",
     `${n.get(proposerId)} offered ${list(give)} for ${list(get)} in ${league.name}.`,
@@ -171,16 +178,26 @@ async function settle(
     .eq("status", "pending");
   if (where.receiver) q = q.eq("receiver_id", where.receiver);
   if (where.either) q = q.or(`proposer_id.eq.${where.either},receiver_id.eq.${where.either}`);
-  const { data, error } = await q.select("proposer_id");
+  const { data, error } = await q.select("proposer_id, receiver_id");
   if (error) return { error: "Couldn't update that trade. Try again." };
   if (!data?.length) return { error: "That trade isn't pending any more." };
-  return { proposerId: (data[0] as { proposer_id: string }).proposer_id };
+  const row = data[0] as { proposer_id: string; receiver_id: string };
+  return { proposerId: row.proposer_id, receiverId: row.receiver_id };
 }
 
 /** Either manager can cancel a pending trade. */
 export async function cancelTrade(leagueId: string, managerId: string, tradeId: string): Promise<Result> {
   const res = await settle(leagueId, tradeId, "cancelled", null, { either: managerId });
-  return "error" in res ? res : {};
+  if ("error" in res) return res;
+  const other = res.proposerId === managerId ? res.receiverId : res.proposerId;
+  const [league, n] = await Promise.all([getLeague(leagueId), names([managerId])]);
+  notify(
+    [other],
+    res.proposerId === managerId ? "Fantasy trade withdrawn" : "Fantasy trade cancelled",
+    `${n.get(managerId)} ${res.proposerId === managerId ? "withdrew their offer" : "cancelled your trade"} in ${league?.name ?? "your league"}.`,
+    leagueId,
+  );
+  return {};
 }
 
 /** Hides a settled trade from this manager's list; the other side still sees it. */
@@ -205,7 +222,7 @@ export async function rejectTrade(leagueId: string, managerId: string, tradeId: 
   if ("error" in res) return res;
   const league = await getLeague(leagueId);
   const n = await names([managerId]);
-  await notify([res.proposerId], "Fantasy trade rejected", `${n.get(managerId)} rejected your trade in ${league?.name ?? "your league"}.`, leagueId);
+  notify([res.proposerId], "Fantasy trade rejected", `${n.get(managerId)} rejected your trade in ${league?.name ?? "your league"}.`, leagueId);
   return {};
 }
 
@@ -225,7 +242,10 @@ export async function acceptTrade(leagueId: string, managerId: string, tradeId: 
   const league = await activeLeagueWithMembers(leagueId, [proposerId, managerId]);
   if ("error" in league) return league;
   if (await frozenProblem(leagueId, managerId, proposerId)) {
-    await settle(leagueId, tradeId, "cancelled", FROZEN_TRADE_NOTE, { receiver: managerId });
+    const res = await settle(leagueId, tradeId, "cancelled", FROZEN_TRADE_NOTE, { receiver: managerId });
+    if (!("error" in res)) {
+      notify([proposerId], "Fantasy trade called off", `Your trade in ${league.name} was cancelled. ${FROZEN_TRADE_NOTE}`, leagueId);
+    }
     return { error: `${FROZEN_TRADE_NOTE} The trade has been called off.` };
   }
 
@@ -239,11 +259,23 @@ export async function acceptTrade(leagueId: string, managerId: string, tradeId: 
     { managerId, lineup: mine, out: items.filter((i) => i.from_manager_id === managerId).map((i) => i.player_id) },
   );
   if (typeof moves === "string") {
-    await settle(leagueId, tradeId, "failed", moves, { receiver: managerId });
+    const res = await settle(leagueId, tradeId, "failed", moves, { receiver: managerId });
+    if (!("error" in res)) {
+      notify([proposerId], "Fantasy trade called off", `Your trade in ${league.name} couldn't go through. ${moves}`, leagueId);
+    }
     return { error: `${moves} The trade has been called off.` };
   }
   // §10: it stays pending until the series is reported.
   if (locked.size) return { error: "A player in this trade is mid-match. Accept it once his series is reported." };
+
+  // The RPC cancels these itself, so they're read first to tell both sides.
+  const { data: overlapping } = await supabaseAdmin
+    .from("fantasy_trades")
+    .select("proposer_id, receiver_id, fantasy_trade_items!inner(player_id)")
+    .eq("league_id", leagueId)
+    .eq("status", "pending")
+    .neq("id", tradeId)
+    .in("fantasy_trade_items.player_id", moves.map((m) => m.playerId));
 
   const { data: outcome, error } = await supabaseAdmin.rpc("fantasy_accept_trade", {
     p_trade: tradeId,
@@ -259,6 +291,14 @@ export async function acceptTrade(leagueId: string, managerId: string, tradeId: 
   if (outcome !== "ok") return { error: "A roster changed in the meantime. Refresh and try again." };
 
   const n = await names([managerId]);
-  await notify([proposerId], "Fantasy trade accepted", `${n.get(managerId)} accepted your trade in ${league.name}.`, leagueId);
+  notify([proposerId], "Fantasy trade accepted", `${n.get(managerId)} accepted your trade in ${league.name}.`, leagueId);
+  for (const t of (overlapping ?? []) as { proposer_id: string; receiver_id: string }[]) {
+    notify(
+      [t.proposer_id, t.receiver_id],
+      "Fantasy trade called off",
+      `A pending trade of yours in ${league.name} was cancelled because a player in it was traded first.`,
+      leagueId,
+    );
+  }
   return {};
 }

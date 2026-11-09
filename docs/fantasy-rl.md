@@ -236,7 +236,8 @@ playoffs (by trade or by dropping them onto waivers).
   season while any fantasy draft is in progress, so no Round 1 series can be played before
   every fantasy draft has finished.
 - **Snake draft, order randomized** when the draft starts.
-- **10 minutes per pick.**
+- **1:30 per pick**, except the draft's opening pick, which gets **5 minutes** so every
+  manager has time to arrive.
 - **Autopick** when the clock runs out: the manager's queue first, otherwise the best
   available by **tier, then rating**, respecting the tier limits.
 - Live updates: each open page **polls every 10 seconds**, pausing while the tab is hidden and
@@ -300,7 +301,7 @@ Free agent (instant add)
 - If a player in a pending trade has since left either roster (dropped, claimed, or traded
   elsewhere), accepting **calls the trade off** instead.
 - Accepting a trade cancels every other pending trade that includes one of its players.
-- Proposed, accepted and rejected trades land in the notification feed.
+- Every change to a trade notifies the other side (§12).
 - **No trade deadline.** A pending trade is cancelled automatically if either manager is
   eliminated, since eliminated managers are frozen.
 
@@ -321,14 +322,35 @@ Leaving after the draft, or being kicked or banned from the site:
 
 ## 12. Notifications
 
-Fantasy gets its **own notification section** with its own toggles, separate from the
-league's. Proposed list:
-- Draft starting / you're on the clock / autopicked for you
-- Waiver claim won or lost (daily run results)
-- Trade proposed, accepted or rejected
-- A rostered player is on bye, or became ineligible, for an upcoming week
-- Weekly matchup result
-- Playoff seeding and elimination
+Fantasy has its **own section** in Settings → Notifications, with five toggles. Each one
+covers both the push and the feed entry, and all five default to on.
+
+| Toggle | Category | Sent when |
+|---|---|---|
+| Fantasy draft | `fantasy_draft` | The draft starts (each manager learns their seat, and the first picker also sees their clock). They're on the clock. They were autopicked. Their league was disbanded at the start for having too few managers. |
+| Waiver claims | `fantasy_waivers` | One summary per manager per daily run (about 4 AM Pacific), listing each claim as won, lost to a manager higher in the order, or failed with its reason. |
+| Trades | `fantasy_trades` | A trade is proposed, accepted, rejected, withdrawn or cancelled. It is also sent when a trade is called off by a freeze, or by a roster change (a player left a roster, or was traded first in another deal). |
+| Lineup alerts | `fantasy_lineup` | A starter won't score in the current week, either because their team has a bye in that round or because they aren't on a team. Only sent while the week is open, for managers who have an opponent that week. |
+| Results and playoffs | `fantasy_results` | A week closes: each manager gets their result. Semifinal winners and losers, the champion and runner-up, and everyone else in the league hear about the final. Seeding is sent once the regular season closes: who made the playoffs and whom they face, and who is out. |
+
+How it works:
+- Event notices (draft, trades, waivers) are sent where the event happens, through
+  `notifyManagers` in `app/lib/fantasy-notify.ts`. Sending runs in `after()`, so it never
+  slows down the action.
+- Each on-the-clock notice carries the tag `fantasy-clock-{league}`, so a newer one replaces
+  the last on the device.
+- Results, seeding and lineup alerts have no single moment when they happen, so they are
+  **derived on every `clip-reset` tick** by `runFantasyNotices`
+  (`app/lib/fantasy-notices-server.ts`).
+- Those derived notices are sent once each:
+  - `fantasy_notices` (`league_id`, `key`) is the sent log. A key is claimed with
+    insert-on-conflict-do-nothing, and only the rows this tick inserted are sent.
+  - The first sweep of a league writes a `baseline` row and marks every notice that is
+    already due as sent, without sending it, so a deploy mid-season doesn't flood anyone.
+  - Scores are only read when a key is new.
+- The wording is in `app/lib/fantasy-notices.ts`, a pure leaf with tests in
+  `npm run test:fantasy-notices`.
+- A test run's rollback deletes the run's `fantasy_notices` rows along with its leagues.
 
 ---
 
@@ -494,8 +516,7 @@ Modelled on fantasy football so it's familiar:
   - Pending trades with a frozen side are cancelled with a note by the daily run and on every
     Players-tab load, so nobody is shown an offer they can't accept.
   - Lineup swaps stay open, and a frozen manager can still withdraw a claim.
-- **Not built yet:** claim-result notifications (§12), the fantasy notification toggles
-  (§12), and putting a departing manager's players on waivers (§11).
+- **Not built yet:** putting a departing manager's players on waivers (§11).
 
 ---
 

@@ -10,6 +10,34 @@ type Category = {
   description: string;
 };
 
+const FANTASY_CATEGORIES: Category[] = [
+  {
+    key: "fantasy_draft",
+    label: "Fantasy draft",
+    description: "Your draft starting, being on the clock, and picks made for you when time ran out",
+  },
+  {
+    key: "fantasy_waivers",
+    label: "Waiver claims",
+    description: "Which of your claims won or lost, once a day after the 4 AM Pacific waiver run",
+  },
+  {
+    key: "fantasy_trades",
+    label: "Trades",
+    description: "Offers you receive, and your trades being accepted, rejected or cancelled",
+  },
+  {
+    key: "fantasy_lineup",
+    label: "Lineup alerts",
+    description: "A starter of yours with a bye or no team this week",
+  },
+  {
+    key: "fantasy_results",
+    label: "Results and playoffs",
+    description: "Your weekly matchup result, playoff seeding, elimination and the champion",
+  },
+];
+
 const CATEGORIES: Category[] = [
   {
     key: "tournament",
@@ -55,9 +83,8 @@ export function NotificationPrefsForm({
 
   const enabled = (key: string) => prefs[key] !== false;
 
-  return (
-    <div className="space-y-2">
-      {CATEGORIES.map(({ key, label, description }) => (
+  const rows = (categories: Category[]) =>
+    categories.map(({ key, label, description }) => (
         <div
           key={key}
           className="flex items-center justify-between gap-4 px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg"
@@ -77,7 +104,13 @@ export function NotificationPrefsForm({
             <div className="w-11 h-6 bg-zinc-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-pure-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 peer-disabled:opacity-50" />
           </label>
         </div>
-      ))}
+      ));
+
+  return (
+    <div className="space-y-2">
+      {rows(CATEGORIES)}
+      <h3 className="pt-3 px-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">Fantasy</h3>
+      {rows(FANTASY_CATEGORIES)}
       {saved && <p className="text-xs text-emerald-400 px-1">Preferences saved.</p>}
     </div>
   );

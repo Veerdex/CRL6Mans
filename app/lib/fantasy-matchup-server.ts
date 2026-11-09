@@ -43,7 +43,7 @@ export type MatchupData = {
   lineups: Map<number, Map<string, ManagerWeek>>;
 };
 
-type GroupMatch = {
+export type GroupMatch = {
   id: string;
   round: number | null;
   status: string;
@@ -55,12 +55,12 @@ type GroupMatch = {
   scheduled_at: string | null;
 };
 
-type Credit = { manager_id: string; week: number; slot: LineupSlot; player_id: string; match_id: string; team_id: string };
+export type Credit = { manager_id: string; week: number; slot: LineupSlot; player_id: string; match_id: string; team_id: string };
 
 const FINAL_STATUSES = new Set(["completed", "cancelled"]);
 
 /** Each credit's series points, and every manager's total per week keyed `week:manager`. */
-async function scoreCredits(matches: GroupMatch[], credits: Credit[]) {
+export async function scoreCredits(matches: GroupMatch[], credits: Credit[]) {
   const matchById = new Map(matches.map((m) => [m.id, m]));
   const creditedMatches = [...new Set(credits.map((c) => c.match_id))];
   const creditedPlayers = [...new Set(credits.map((c) => c.player_id))];
@@ -107,18 +107,25 @@ async function scoreCredits(matches: GroupMatch[], credits: Credit[]) {
   return { matchById, creditPoints, weekTotals };
 }
 
+/** Members by draft seat, latecomers after; `members` in join order. */
+export function seatOrder(draftOrder: string[] | null, members: string[]): string[] {
+  const order = (draftOrder ?? []).filter((id) => members.includes(id));
+  return [...order, ...members.filter((id) => !order.includes(id))];
+}
+
 /** The league's managers in draft order, which is the round robin's seating. */
 async function leagueManagers(leagueId: string): Promise<string[]> {
   const [{ data: league }, { data: memberRows }] = await Promise.all([
     supabaseAdmin.from("fantasy_leagues").select("draft_order").eq("id", leagueId).maybeSingle(),
     supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId).order("joined_at"),
   ]);
-  const members = ((memberRows ?? []) as { account_id: string }[]).map((m) => m.account_id);
-  const order = ((league?.draft_order as string[] | null) ?? []).filter((id) => members.includes(id));
-  return [...order, ...members.filter((id) => !order.includes(id))];
+  return seatOrder(
+    (league?.draft_order as string[] | null) ?? null,
+    ((memberRows ?? []) as { account_id: string }[]).map((m) => m.account_id),
+  );
 }
 
-const groupMatches = () =>
+export const groupMatches = () =>
   fetchAllRows<GroupMatch>((from, to) =>
     supabaseAdmin
       .from("matches")
@@ -128,7 +135,7 @@ const groupMatches = () =>
       .range(from, to),
   );
 
-const leagueCredits = (leagueId: string) =>
+export const leagueCredits = (leagueId: string) =>
   fetchAllRows<Credit>((from, to) =>
     supabaseAdmin
       .from("fantasy_slot_credits")
@@ -140,7 +147,7 @@ const leagueCredits = (leagueId: string) =>
       .range(from, to),
   ).catch(() => [] as Credit[]);
 
-function weeksOf(matches: GroupMatch[]): { totalWeeks: number; closedWeeks: Set<number> } {
+export function weeksOf(matches: GroupMatch[]): { totalWeeks: number; closedWeeks: Set<number> } {
   const totalWeeks = matches.reduce((max, m) => Math.max(max, m.round ?? 0), 0);
   const closedWeeks = new Set<number>();
   for (let w = 1; w <= totalWeeks; w++) {

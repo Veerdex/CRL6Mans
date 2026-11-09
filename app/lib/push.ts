@@ -12,7 +12,16 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY!
 );
 
-export type NotificationCategory = "tournament" | "draft" | "season" | "announcement";
+export type NotificationCategory =
+  | "tournament"
+  | "draft"
+  | "season"
+  | "announcement"
+  | "fantasy_draft"
+  | "fantasy_waivers"
+  | "fantasy_trades"
+  | "fantasy_lineup"
+  | "fantasy_results";
 
 export type PushPayload = {
   title: string;
@@ -354,7 +363,9 @@ export async function pushToEnteredDraft(payload: PushPayload) {
 // a "draft" row is visible only to players.draft_entered, which is precisely the
 // column these audiences exist to avoid, so recording one would hide the notice
 // from the people it was sent to.
-async function pushToPlayerIds(playerIds: string[], payload: PushPayload) {
+// players.id is the account id, so this is also how an audience of fantasy
+// managers, which are accounts, honours their category toggles.
+export async function pushToPlayerIds(playerIds: string[], payload: PushPayload) {
   if (!playerIds.length) return;
   const { data: players, error } = await supabaseAdmin
     .from("players")

@@ -8,6 +8,7 @@ import { mostRecentSundayMidnightPacific } from "@/app/lib/clip-schedule";
 import { stampCronHeartbeat } from "@/app/lib/cron-heartbeat";
 import { deleteExpiredNotifications } from "@/app/lib/notifications";
 import { runWaivers } from "@/app/lib/fantasy-waivers-server";
+import { runFantasyNotices } from "@/app/lib/fantasy-notices-server";
 
 export const runtime = "nodejs";
 
@@ -53,6 +54,8 @@ export async function GET(request: Request) {
   // records the run it last settled, so riding this per-minute pinger costs
   // one query on the ticks where nothing is due.
   fired.push(...(await runWaivers(now).catch(() => [])));
+  // Weekly results, playoff seeding and lineup alerts: derived each tick, sent once.
+  fired.push(...(await runFantasyNotices().catch(() => [])));
 
   const boundary = mostRecentSundayMidnightPacific(now);
 

@@ -1,6 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
-import { recordNotification } from "./notifications";
+import { accountNames, clockLabel, notifyManagers } from "./fantasy-notify";
+import { ordinal } from "./fantasy-notices";
 import { isStatsTrackingEnabled } from "./career-stats";
 import { isTestEventActive } from "./test-tournament";
 import { normalizeTeamSize } from "./team-size";
@@ -10,6 +11,7 @@ import { currentSeasonTiers, frozenTiers } from "./fantasy-pool-data";
 import { FANTASY_MIN_MANAGERS } from "./fantasy-rules";
 import { TIER_LABEL, type FantasyTier } from "./fantasy-pool";
 import {
+  FANTASY_FIRST_PICK_SECONDS,
   FANTASY_PICK_SECONDS,
   ROSTER_TIER_LIMITS,
   chooseAutopick,
@@ -30,6 +32,7 @@ import {
 
 export type DraftLeague = {
   id: string;
+  name: string;
   fantasy_season_id: string;
   status: string;
   draft_order: string[] | null;
@@ -37,7 +40,7 @@ export type DraftLeague = {
   pick_deadline: string | null;
 };
 
-const DRAFT_COLS = "id, fantasy_season_id, status, draft_order, current_pick, pick_deadline";
+const DRAFT_COLS = "id, name, fantasy_season_id, status, draft_order, current_pick, pick_deadline";
 
 export async function getDraftLeague(leagueId: string): Promise<DraftLeague | null> {
   const { data, error } = await supabaseAdmin.from("fantasy_leagues").select(DRAFT_COLS).eq("id", leagueId).maybeSingle();
@@ -72,12 +75,6 @@ export async function draftPicks(leagueId: string): Promise<DraftPickRow[]> {
     .eq("league_id", leagueId)
     .order("pick_no");
   return (data ?? []) as DraftPickRow[];
-}
-
-async function discordIdsFor(accountIds: string[]): Promise<string[]> {
-  if (!accountIds.length) return [];
-  const { data } = await supabaseAdmin.from("accounts").select("discord_id").in("id", accountIds);
-  return ((data ?? []) as { discord_id: string }[]).map((r) => r.discord_id);
 }
 
 // The real season can't start while a fantasy draft runs (§8), so the season
@@ -135,7 +132,44 @@ export async function submitPick({ leagueId, managerId, playerId, auto }: PickIn
   if (outcome === "stale") return { error: "That pick has already been made." };
   if (outcome === "taken") return { error: "That player has already been drafted." };
   if (outcome === "done") await finishSeasonIfDrafted(league.fantasy_season_id);
+  await announcePick(league, pick, managerId, playerId, auto, outcome === "done", pickSeconds(testRun));
   return { done: outcome === "done" };
+}
+
+// §12: the manager now on the clock, and the one whose time ran out. A manager
+// picking twice at a snake turn is already on the page, so they hear nothing
+// unless the pick was made for them.
+async function announcePick(
+  league: DraftLeague,
+  pick: number,
+  managerId: string,
+  playerId: string,
+  auto: boolean,
+  done: boolean,
+  seconds: number,
+) {
+  const order = league.draft_order ?? [];
+  const next = done ? null : order[managerIndexForPick(pick + 1, order.length)];
+  const url = `/dashboard/fantasy/${league.id}/draft`;
+  const tag = `fantasy-clock-${league.id}`;
+  if (auto) {
+    const names = await accountNames([playerId]);
+    const again = next === managerId ? ` You're on the clock again, with ${clockLabel(seconds)} to pick.` : "";
+    notifyManagers([managerId], "fantasy_draft", {
+      title: "Autopicked for you",
+      body: `Time ran out in the ${league.name} draft, so you drafted ${names.get(playerId) ?? "a player"}.${again}`,
+      url,
+      tag,
+    });
+  }
+  if (next && next !== managerId) {
+    notifyManagers([next], "fantasy_draft", {
+      title: "You're on the clock",
+      body: `It's your pick in the ${league.name} draft. You have ${clockLabel(seconds)}.`,
+      url,
+      tag,
+    });
+  }
 }
 
 /** Picks for whoever is on the clock if their time is up. True when a pick landed. */
@@ -282,12 +316,13 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
   if (untouched.length) {
     await supabaseAdmin.from("fantasy_leagues").update({ status: "pre_draft" }).in("id", untouched.map((l) => l.id));
   }
-  const deadline = new Date(Date.now() + pickSeconds(testRun) * 1000).toISOString();
+  const firstSeconds = testRun ? TEST_PICK_SECONDS : FANTASY_FIRST_PICK_SECONDS;
+  const deadline = new Date(Date.now() + firstSeconds * 1000).toISOString();
+  const orders = new Map<string, string[]>();
   for (const l of drafting) {
-    await supabaseAdmin
-      .from("fantasy_leagues")
-      .update({ draft_order: shuffled(membersOf.get(l.id)!), current_pick: 0, pick_deadline: deadline })
-      .eq("id", l.id);
+    const order = shuffled(membersOf.get(l.id)!);
+    orders.set(l.id, order);
+    await supabaseAdmin.from("fantasy_leagues").update({ draft_order: order, current_pick: 0, pick_deadline: deadline }).eq("id", l.id);
   }
   if (disbanding.length) {
     await supabaseAdmin.from("fantasy_leagues").update({ status: "disbanded" }).in("id", disbanding.map((l) => l.id));
@@ -296,27 +331,27 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
     await supabaseAdmin.from("fantasy_seasons").update({ status: "active" }).eq("id", season.id);
   }
 
+  // The first picker's start notice doubles as their on-the-clock one.
   for (const l of drafting) {
-    const discordIds = await discordIdsFor(membersOf.get(l.id)!);
-    if (discordIds.length) {
-      await recordNotification(
-        { kind: "users", discordIds },
-        { title: "Fantasy draft started", body: `The ${l.name} draft is live.`, url: `/dashboard/fantasy/${l.id}/draft` },
-      );
-    }
+    const order = orders.get(l.id)!;
+    order.forEach((managerId, i) =>
+      notifyManagers([managerId], "fantasy_draft", {
+        title: "Fantasy draft started",
+        body:
+          i === 0
+            ? `The ${l.name} draft is live and you pick first. You have ${clockLabel(firstSeconds)}.`
+            : `The ${l.name} draft is live. You pick ${ordinal(i + 1)} in the first round.`,
+        url: `/dashboard/fantasy/${l.id}/draft`,
+        tag: `fantasy-clock-${l.id}`,
+      }),
+    );
   }
   for (const l of disbanding) {
-    const discordIds = await discordIdsFor(membersOf.get(l.id)!);
-    if (discordIds.length) {
-      await recordNotification(
-        { kind: "users", discordIds },
-        {
-          title: "Fantasy league disbanded",
-          body: `${l.name} had fewer than ${FANTASY_MIN_MANAGERS} managers when the drafts started, so it was disbanded.`,
-          url: "/dashboard/fantasy",
-        },
-      );
-    }
+    notifyManagers(membersOf.get(l.id)!, "fantasy_draft", {
+      title: "Fantasy league disbanded",
+      body: `${l.name} had fewer than ${FANTASY_MIN_MANAGERS} managers when the drafts started, so it was disbanded.`,
+      url: "/dashboard/fantasy",
+    });
   }
 
   return {
@@ -374,6 +409,9 @@ export async function rollbackFantasyTestRun(): Promise<void> {
     await supabaseAdmin.from("fantasy_waiver_claims").delete().in("league_id", ids);
     await supabaseAdmin.from("fantasy_waivers").delete().in("league_id", ids);
     await supabaseAdmin.from("fantasy_trades").delete().in("league_id", ids);
+    // The real season reuses these leagues, so the test run's sent notices
+    // would otherwise suppress the real ones.
+    await supabaseAdmin.from("fantasy_notices").delete().in("league_id", ids);
     await supabaseAdmin
       .from("fantasy_leagues")
       .update({ status: "pre_draft", draft_order: null, current_pick: 0, pick_deadline: null, waiver_order: null, waivers_ran_at: null })

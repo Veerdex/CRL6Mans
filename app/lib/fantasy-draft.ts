@@ -7,7 +7,9 @@ import type { FantasyTier } from "./fantasy-pool";
 
 export const ROSTER_TIER_LIMITS: Record<FantasyTier, number> = { 1: 2, 2: 3, 3: 3 };
 export const ROSTER_SIZE = 8;
-export const FANTASY_PICK_SECONDS = 10 * 60;
+export const FANTASY_PICK_SECONDS = 90;
+/** The draft's opening pick gets longer, so every manager has time to arrive. */
+export const FANTASY_FIRST_PICK_SECONDS = 5 * 60;
 
 export const LINEUP_SLOTS = ["cap", "first1", "first2", "second1", "second2", "flex", "bench1", "bench2"] as const;
 export type LineupSlot = (typeof LINEUP_SLOTS)[number];
