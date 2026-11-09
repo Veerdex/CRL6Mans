@@ -2,7 +2,7 @@
 // (negative — e.g. -7h during PDT, -8h during PST). Derived by formatting the
 // instant into Pacific wall-clock fields, then comparing that (interpreted as
 // UTC) against the instant itself.
-function pacificOffsetMs(instant: Date): number {
+export function pacificOffsetMs(instant: Date): number {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Los_Angeles",
     year: "numeric", month: "2-digit", day: "2-digit",
