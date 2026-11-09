@@ -44,11 +44,18 @@ export function PoolTable({
   players,
   renderAction,
   defaultAvailableOnly = false,
+  include,
+  statusChips = true,
+  allLabel = "Everyone",
 }: {
   players: PoolPlayer[];
   /** A trailing cell per player, e.g. the draft room's Draft button. */
   renderAction?: (player: PoolPlayer) => ReactNode;
   defaultAvailableOnly?: boolean;
+  /** Narrows the rows while the colour scales stay measured against all of `players`. */
+  include?: (player: PoolPlayer) => boolean;
+  statusChips?: boolean;
+  allLabel?: string;
 }) {
   const [query, setQuery] = useState("");
   const [tier, setTier] = useState<TierFilter>("all");
@@ -56,10 +63,11 @@ export function PoolTable({
   const anyOnWaivers = players.some((p) => !p.manager && p.waiverClearsAt);
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: "projected", asc: false });
   const [expanded, setExpanded] = useState<string | null>(null);
+  const scoped = useMemo(() => (include ? players.filter(include) : players), [players, include]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = players.filter(
+    const filtered = scoped.filter(
       (p) =>
         (tier === "all" || p.tier === tier) &&
         (status === "everyone" ||
@@ -73,7 +81,7 @@ export function PoolTable({
       const c = typeof x === "string" ? x.localeCompare(y as string) : x - (y as number);
       return c * dir || b.projected - a.projected;
     });
-  }, [players, query, tier, status, sort]);
+  }, [scoped, query, tier, status, sort]);
 
   // Against the whole pool, not the filtered rows, so a player's colour doesn't
   // change with the search box.
@@ -117,14 +125,18 @@ export function PoolTable({
             {t === "all" ? "All tiers" : TIER_LABEL[t]}
           </Chip>
         ))}
-        <span className="mx-1 h-5 w-px bg-zinc-700" aria-hidden="true" />
-        <Chip active={status === "everyone"} onClick={() => setStatus("everyone")}>Everyone</Chip>
-        <Chip active={status === "available"} onClick={() => setStatus("available")}>Available</Chip>
-        {anyOnWaivers && (
-          <Chip active={status === "waivers"} onClick={() => setStatus("waivers")}>Waivers</Chip>
+        {statusChips && (
+          <>
+            <span className="mx-1 h-5 w-px bg-zinc-700" aria-hidden="true" />
+            <Chip active={status === "everyone"} onClick={() => setStatus("everyone")}>{allLabel}</Chip>
+            <Chip active={status === "available"} onClick={() => setStatus("available")}>Available</Chip>
+            {anyOnWaivers && (
+              <Chip active={status === "waivers"} onClick={() => setStatus("waivers")}>Waivers</Chip>
+            )}
+          </>
         )}
         <span className="ml-auto text-xs text-zinc-400">
-          {shown.length} of {players.length}
+          {shown.length} of {scoped.length}
         </span>
       </div>
 

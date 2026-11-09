@@ -15,6 +15,7 @@ import {
 import type { RosterMoves } from "./move-action";
 
 const BUTTON = "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50";
+const SECONDARY = "bg-zinc-700 text-zinc-100 hover:bg-zinc-600";
 
 export type PlayerLookup = (playerId: string) => PoolPlayer | undefined;
 
@@ -38,7 +39,7 @@ export function TradeButton({
   const manager = player.manager!;
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className={`${BUTTON} bg-zinc-700 text-zinc-100 hover:bg-zinc-600`}>
+      <button type="button" onClick={() => setOpen(true)} className={`${BUTTON} ${SECONDARY}`}>
         Trade
       </button>
       {open && (
@@ -238,12 +239,12 @@ function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterM
                 >
                   Accept
                 </button>
-                <button type="button" disabled={pending} onClick={() => act(rejectFantasyTrade)} className={`${BUTTON} text-zinc-300 hover:text-white`}>
+                <button type="button" disabled={pending} onClick={() => act(rejectFantasyTrade)} className={`${BUTTON} bg-red-500/15 text-red-300 hover:bg-red-500/25`}>
                   Reject
                 </button>
               </>
             ) : (
-              <button type="button" disabled={pending} onClick={() => act(cancelFantasyTrade)} className={`${BUTTON} text-zinc-300 hover:text-white`}>
+              <button type="button" disabled={pending} onClick={() => act(cancelFantasyTrade)} className={`${BUTTON} ${SECONDARY}`}>
                 Cancel
               </button>
             )}
@@ -254,7 +255,7 @@ function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterM
             type="button"
             disabled={pending}
             onClick={dismiss}
-            className={`ml-auto ${BUTTON} text-zinc-400 hover:text-white`}
+            className={`ml-auto ${BUTTON} ${SECONDARY}`}
           >
             Dismiss
           </button>

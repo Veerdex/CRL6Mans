@@ -63,7 +63,7 @@ export function MoveAction({
               setError(res.error ?? null);
             })
           }
-          className={`${BUTTON} text-zinc-400 hover:text-white`}
+          className={`${BUTTON} bg-zinc-700 text-zinc-100 hover:bg-zinc-600`}
         >
           Cancel
         </button>

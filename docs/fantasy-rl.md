@@ -342,9 +342,11 @@ Modelled on fantasy football so it's familiar:
 - **Matchup** — the two lineups side by side with points per player (like Kotala's mockup).
 - **Players / Waiver wire** — free agents and waiver players, with tier, status
   ("Free agent — Add" / "Waivers — clears in 14h — Claim") and trending. Trades live here too,
-  so there's no Trades tab: another manager's player has a Trade button, and the manager's
-  pending trades, plus those resolved in the last week, sit above the table. A resolved trade
-  can be dismissed, which hides it for that manager only.
+  so there's no Trades tab. A toggle splits the page into **Free agents & waivers** (unrostered
+  players only) and **Trades**, which has the manager's pending trades, plus those resolved in
+  the last week, above a table of other managers' players, each with a Trade button. The toggle
+  carries a count of incoming offers. A resolved trade can be dismissed, which hides it for that
+  manager only. A visitor who isn't a manager sees the whole pool with no toggle.
 - **Standings** — W-L, total points, waiver priority.
 - **Draft room** — live board, queue, pick timer.
 - **League directory** — every league to join or view; create a league.

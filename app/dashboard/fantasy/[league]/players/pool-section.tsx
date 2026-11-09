@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useMemo } from "react";
+import { use, useCallback, useMemo, useState } from "react";
 import type { PoolPlayer, PoolView } from "@/app/lib/fantasy-pool-data";
 import { PoolTable } from "./pool-table";
 import { MoveAction, type RosterMoves } from "./move-action";
@@ -24,18 +24,37 @@ export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: P
     };
   }, [players]);
 
+  const [view, setView] = useState<"free" | "trade">("free");
+  const managerId = roster?.managerId;
+  const othersRostered = useCallback((p: PoolPlayer) => !!p.manager && p.manager.accountId !== managerId, [managerId]);
+
   if (players.length > 0) {
+    if (!roster) return <PoolTable players={players} />;
+    const action = (p: PoolPlayer) => (
+      <MoveAction player={p} moves={roster} nameOf={nameOf} playerOf={playerOf} rosterOf={rosterOf} />
+    );
+    const offers = roster.trades.filter((t) => t.status === "pending" && t.receiverId === roster.managerId).length;
     return (
       <div className="space-y-4">
-        {roster && <TradesPanel moves={roster} playerOf={playerOf} />}
-        <PoolTable
-          players={players}
-          renderAction={
-            roster
-              ? (p) => <MoveAction player={p} moves={roster} nameOf={nameOf} playerOf={playerOf} rosterOf={rosterOf} />
-              : undefined
-          }
-        />
+        <div role="tablist" aria-label="Players view" className="inline-flex rounded-lg border border-zinc-700 bg-zinc-900 p-1">
+          <ViewTab active={view === "free"} onClick={() => setView("free")}>
+            Free agents &amp; waivers
+          </ViewTab>
+          <ViewTab active={view === "trade"} onClick={() => setView("trade")}>
+            Trades
+            {offers > 0 && (
+              <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-on-accent">{offers}</span>
+            )}
+          </ViewTab>
+        </div>
+        {view === "free" ? (
+          <PoolTable key="free" players={players} include={unrostered} allLabel="All" renderAction={action} />
+        ) : (
+          <>
+            <TradesPanel moves={roster} playerOf={playerOf} />
+            <PoolTable key="trade" players={players} include={othersRostered} statusChips={false} renderAction={action} />
+          </>
+        )}
       </div>
     );
   }
@@ -45,6 +64,24 @@ export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: P
         ? "The player pool opens when the next season starts."
         : "No players yet. The pool fills as players are drafted onto teams."}
     </div>
+  );
+}
+
+const unrostered = (p: PoolPlayer) => !p.manager;
+
+function ViewTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+        active ? "bg-indigo-500 text-on-accent" : "text-zinc-300 hover:text-white"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

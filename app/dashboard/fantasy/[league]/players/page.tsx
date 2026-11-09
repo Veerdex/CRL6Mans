@@ -11,7 +11,7 @@ import type { RosterMoves } from "./move-action";
 
 export default function FantasyPlayerPoolPage({ params }: { params: Promise<{ league: string }> }) {
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="w-full max-w-6xl mx-auto space-y-6">
       <p className="text-sm text-zinc-400 text-center">
         Every player in the season, as they come off the real draft. Add free agents, claim waivers, and trade for
         another manager&apos;s players here.
