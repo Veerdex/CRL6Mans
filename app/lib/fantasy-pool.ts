@@ -12,7 +12,7 @@ import {
   type StatTotals,
 } from "./rv-adjustment";
 import { CAPTAIN_DRAFT_ROUND } from "./draft-order";
-import { PREDICTION_SCALE, gameWinProbability, predictSeries } from "./rating";
+import { PREDICTION_SCALE, predictSeries } from "./rating";
 
 export type FantasyTier = 1 | 2 | 3;
 
@@ -54,13 +54,9 @@ export function projectionBasis(games: number): ProjectionBasis {
 /** The player's team rating, the opponent's, and the wins the series takes. */
 export type Matchup = { ownRating: number; oppRating: number; winsNeeded: number };
 
-/**
- * The spec's matchup dominance (§10): a favoured team's players score and shoot
- * a little more and save a little less. The spec gives score no coefficient, so
- * it stays as projected.
- */
-const DOMINANCE_COEFFICIENT = { goals: 0.12, assists: 0.1, saves: -0.08, shots: 0.08 };
-const MAX_MATCHUP_SHIFT = 0.1;
+/** Stat points are multiplied by this when a team is certain to lose its series, and by MATCHUP_CEILING when certain to win it. */
+export const MATCHUP_FLOOR = 0.1;
+export const MATCHUP_CEILING = 1.5;
 
 function projectedPerGameLine(rating: number | null, history: StatTotals | null): StatLine {
   const games = history?.games ?? 0;
@@ -80,16 +76,20 @@ export function projectedStatPoints(rating: number | null, history: StatTotals |
   return STAT_POINTS_PER_FP * fantasyPoints(projectedPerGameLine(rating, history));
 }
 
-export function applyMatchup(line: StatLine, pGame: number): StatLine {
-  const dominance = Math.min(1, Math.max(-1, 2 * pGame - 1));
-  const scale = (c: number) => Math.min(1 + MAX_MATCHUP_SHIFT, Math.max(1 - MAX_MATCHUP_SHIFT, 1 + c * dominance));
-  return {
-    score: line.score,
-    goals: line.goals * scale(DOMINANCE_COEFFICIENT.goals),
-    assists: line.assists * scale(DOMINANCE_COEFFICIENT.assists),
-    saves: line.saves * scale(DOMINANCE_COEFFICIENT.saves),
-    shots: line.shots * scale(DOMINANCE_COEFFICIENT.shots),
-  };
+export function seriesWinChance({ ownRating, oppRating, winsNeeded }: Matchup): number {
+  return predictSeries(ownRating, oppRating, winsNeeded, PREDICTION_SCALE).pASeries;
+}
+
+/**
+ * docs/fantasy-projections.md §2 step 3. Two straight lines meeting at 1 for an
+ * even series rather than one line from floor to ceiling, which would put an even
+ * series at 0.8 and project every player in the league low. Both the projection
+ * and the RV update apply it, so a favourite's padded stats aren't read as the
+ * player outplaying their rating.
+ */
+export function matchupMultiplier(pSeries: number): number {
+  const p = Math.min(1, Math.max(0, pSeries));
+  return p >= 0.5 ? 1 + (MATCHUP_CEILING - 1) * (2 * p - 1) : MATCHUP_FLOOR + (1 - MATCHUP_FLOOR) * 2 * p;
 }
 
 /** docs/fantasy-projections.md §3: Σ over the team's winning scorelines of P × (winsNeeded − games lost). */
@@ -105,9 +105,7 @@ export function expectedWinBonus({ ownRating, oppRating, winsNeeded }: Matchup):
  * their history alone if they have any, the league means if they have none.
  */
 export function projectedSeriesPoints(rating: number | null, history: StatTotals | null, matchup: Matchup): number {
-  const pGame = gameWinProbability(matchup.ownRating, matchup.oppRating, PREDICTION_SCALE);
-  const line = applyMatchup(projectedPerGameLine(rating, history), pGame);
-  return STAT_POINTS_PER_FP * fantasyPoints(line) + expectedWinBonus(matchup);
+  return projectedStatPoints(rating, history) * matchupMultiplier(seriesWinChance(matchup)) + expectedWinBonus(matchup);
 }
 
 export type SeriesForScoring = {

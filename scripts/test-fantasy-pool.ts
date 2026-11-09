@@ -2,13 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  applyMatchup,
   expectedWinBonus,
   freeAgentTier,
+  matchupMultiplier,
   projectedSeriesPoints,
   projectedStatPoints,
   projectionBasis,
   seriesFantasyPoints,
+  seriesWinChance,
   tierFromDraftRound,
 } from "../app/lib/fantasy-pool";
 import { FP_BASELINE_RV, fantasyPoints, projectedFantasyPoints } from "../app/lib/rv-adjustment";
@@ -72,17 +73,23 @@ test("the same player projects lower against a stronger team", () => {
   assert.ok(vsStrong < vsWeak, `${vsStrong} should be below ${vsWeak}`);
 });
 
-test("matchup scaling follows the spec's coefficients, capped at ±10%, and leaves score alone", () => {
-  const line = { score: 300, goals: 1, assists: 1, saves: 1, shots: 1 };
-  const favoured = applyMatchup(line, 0.75);
-  close(favoured.score, 300);
-  close(favoured.goals, 1.06);
-  close(favoured.assists, 1.05);
-  close(favoured.saves, 0.96);
-  close(favoured.shots, 1.04);
-  const crushed = applyMatchup(line, 0);
-  close(crushed.goals, 0.9);
-  close(crushed.saves, 1.08);
+test("the matchup multiplier runs 0.1 at a certain loss, 1 at an even series, 1.5 at a certain win", () => {
+  close(matchupMultiplier(0), 0.1);
+  close(matchupMultiplier(0.25), 0.55);
+  close(matchupMultiplier(0.5), 1);
+  close(matchupMultiplier(0.75), 1.25);
+  close(matchupMultiplier(1), 1.5);
+  close(matchupMultiplier(-1), 0.1);
+  close(matchupMultiplier(2), 1.5);
+});
+
+test("projected stat points scale by the series win chance; the win bonus doesn't", () => {
+  const matchup = { ownRating: 1944, oppRating: 1644, winsNeeded: 3 };
+  const p = seriesWinChance(matchup);
+  close(
+    projectedSeriesPoints(1800, null, matchup),
+    projectedStatPoints(1800, null) * matchupMultiplier(p) + expectedWinBonus(matchup),
+  );
 });
 
 test("a 3-1 win played in full: stats over 4 games plus the 2-game bonus", () => {

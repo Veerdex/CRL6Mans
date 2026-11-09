@@ -6,6 +6,7 @@ import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfa
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { isActiveTournamentTest, isTestTournament, isTestEventActive } from "./test-tournament";
 import { applySeriesResult, fantasyPoints, projectedFantasyPoints, type StatTotals } from "./rv-adjustment";
+import { matchupMultiplier, seriesWinChance } from "./fantasy-pool";
 import { ptDate, ptWallToUtc } from "./pt-time";
 import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, ensureRolesWithList, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView, type DiscordEmbed } from "./discord-api";
 import {
@@ -5286,13 +5287,37 @@ export async function applyStatsRvUpdate(matchId: string): Promise<void> {
   for (const t of thisMatch.values()) t.games = t.gameNumbers.size;
 
   const ids = [...thisMatch.keys()];
-  const [{ data: players }, allTime] = await Promise.all([
+  const [{ data: players }, allTime, { data: matchRow }, bestOf] = await Promise.all([
     supabaseAdmin
       .from("players")
-      .select("id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, rv_series_played")
+      .select("id, team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, rv_series_played")
       .in("id", ids),
     fetchAllTimeTotals(),
+    supabaseAdmin.from("matches").select("home_team_id, away_team_id").eq("id", matchId).maybeSingle(),
+    getBestOfForMatch(matchId),
   ]);
+
+  // The same roster ratings the stats-mode prediction uses, read before any of
+  // this series' adjustments land. A player on neither roster (a sub) is judged
+  // as in an even series.
+  const sides = [matchRow?.home_team_id, matchRow?.away_team_id].filter((t): t is string => !!t);
+  const { data: rosters } = sides.length === 2
+    ? await supabaseAdmin
+        .from("players")
+        .select("team_id, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment")
+        .in("team_id", sides)
+        .eq("status", "approved")
+    : { data: [] };
+  const teamRating = new Map(
+    sides.map((t) => [t, initialTeamRating((rosters ?? []).filter((r) => r.team_id === t).map(decisionRatingFromRow))]),
+  );
+  const multiplierFor = (teamId: string | null) => {
+    const opp = sides.find((t) => t !== teamId);
+    if (!teamId || !teamRating.has(teamId) || !opp) return 1;
+    return matchupMultiplier(
+      seriesWinChance({ ownRating: teamRating.get(teamId)!, oppRating: teamRating.get(opp)!, winsNeeded: Math.ceil(bestOf / 2) }),
+    );
+  };
 
   const updates = [];
   for (const p of players ?? []) {
@@ -5313,7 +5338,8 @@ export async function applyStatsRvUpdate(matchId: string): Promise<void> {
       : null;
     // Fixed to the calculated rating rather than either switch: the adjustment
     // converges only if each series is judged against the rating it produced.
-    const predicted = projectedFantasyPoints(calculatedRatingFromRow(p), history?.games ? history : null);
+    const predicted =
+      projectedFantasyPoints(calculatedRatingFromRow(p), history?.games ? history : null) * multiplierFor(p.team_id);
     const actual = fantasyPoints({
       score: match.score / match.games,
       goals: match.goals / match.games,

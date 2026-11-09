@@ -96,18 +96,26 @@ baseline = w × historicalPerGame(s) + (1 − w) × ratingEstimate(s)
   w ≥ 0.5 is *history weighted*.
 
 ### Step 3 — Matchup adjustment
-The spec's dominance adjustment (§10), with `pGame` the player's team's chance of winning one
-game of their next series:
+This replaces the spec's ±10% per-stat dominance (§10), which barely moved a heavy
+favourite. All five projected stats are multiplied by one factor taken from `pSeries`, the
+player's team's chance of winning their next series:
 ```
-dominance  = clamp(2·pGame − 1, −1, 1)
-multiplier = clamp(1 + coefficient × dominance, 0.90, 1.10)
-coefficients: goals +0.12, assists +0.10, saves −0.08, shots +0.08
+pSeries ≥ 0.5:  multiplier = 1 + 0.5 × (2·pSeries − 1)     1.0 → 1.5
+pSeries < 0.5:  multiplier = 0.1 + 0.9 × 2·pSeries          0.1 → 1.0
 ```
-The spec has no coefficient for **score**, so score is left as projected. The spec calls these
-coefficients conservative starting values that need a backtest, so they're among the first
-things to refit in §4. A player with no next match (a free agent, or a team with nothing
-scheduled) projects as an even matchup: no stat scaling and the even win bonus at the season's
-default series length.
+The two lines meet at 1 for an even series. A single line from 0.1 to 1.5 would put an even
+series at 0.8, so every player in the league would be projected low. The win bonus is not
+multiplied, since it already depends on the matchup.
+
+The **RV update applies the same multiplier** to the FP it measures a series against. Each
+team's rating there is `initialTeamRating` of its roster's decision ratings, read before the
+series' adjustments land. A favourite's padded stats therefore aren't read as the player
+outplaying their rating. A player on neither roster (a sub) is judged as in an even series.
+
+The endpoints are a judgement call, not a fit. They're among the first things to refit in §4.
+A player with no next match (a free agent, or a team with nothing scheduled) projects as an
+even matchup. That means a multiplier of 1 and the even win bonus at the season's default
+series length.
 
 ---
 
