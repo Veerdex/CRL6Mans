@@ -166,8 +166,7 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
         <div className="flex justify-center">
           <LeaveLeagueButton
             leagueId={league.id}
-            isCreator={viewer.accountId === league.created_by}
-            managerCount={members.length}
+            managerCount={members.filter((m) => !m.orphaned).length}
             afterDraft={!preDraft}
             isOwner={isCommissioner}
           />

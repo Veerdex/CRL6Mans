@@ -164,19 +164,41 @@ async function fetchAccounts(ids: string[]): Promise<Map<string, AccountLite>> {
   return new Map(((data ?? []) as AccountLite[]).map((a) => [a.id, a]));
 }
 
+/**
+ * Whether the account runs a league this season: the one-league rule. An owner
+ * whose team is orphaned with nobody left to inherit has left, so they don't.
+ */
+export async function ownsLeague(seasonId: string, accountId: string): Promise<boolean> {
+  const { data: owned } = await supabaseAdmin
+    .from("fantasy_leagues")
+    .select("id")
+    .eq("fantasy_season_id", seasonId)
+    .eq("commissioner_id", accountId)
+    .not("status", "in", "(disbanded,cancelled)");
+  const ids = ((owned ?? []) as { id: string }[]).map((l) => l.id);
+  if (!ids.length) return false;
+  const { count } = await supabaseAdmin
+    .from("fantasy_league_members")
+    .select("account_id", { count: "exact", head: true })
+    .in("league_id", ids)
+    .eq("account_id", accountId)
+    .is("orphaned_at", null);
+  return (count ?? 0) > 0;
+}
+
 export type HubData = {
   season: FantasySeason | null;
   cap: number;
   myLeagues: LeagueCard[];
   invitedLeagues: LeagueCard[];
   otherLeagues: LeagueCard[];
-  hasCreated: boolean;
+  ownsLeague: boolean;
 };
 
 export async function getHubData(viewer: FantasyViewer): Promise<HubData> {
   const season = await getHubSeason();
   const cap = await getManagerCap();
-  if (!season) return { season, cap, myLeagues: [], invitedLeagues: [], otherLeagues: [], hasCreated: false };
+  if (!season) return { season, cap, myLeagues: [], invitedLeagues: [], otherLeagues: [], ownsLeague: false };
 
   const { data: leagueRows } = await supabaseAdmin
     .from("fantasy_leagues")
@@ -217,7 +239,7 @@ export async function getHubData(viewer: FantasyViewer): Promise<HubData> {
       commissionerUsername: accounts.get(l.commissioner_id)?.username ?? accountName(accounts.get(l.commissioner_id)),
       commissionerDiscordId: accounts.get(l.commissioner_id)?.discord_id ?? null,
       isMember: !!viewer.accountId && roster.some((m) => m.account_id === viewer.accountId && !m.orphaned_at),
-      isOwner: !!viewer.accountId && l.created_by === viewer.accountId,
+      isOwner: !!viewer.accountId && l.commissioner_id === viewer.accountId,
       isInvited: invited.has(l.id),
       isRemoved: removed.has(l.id),
     };
@@ -229,7 +251,7 @@ export async function getHubData(viewer: FantasyViewer): Promise<HubData> {
     myLeagues: cards.filter((c) => c.isMember),
     invitedLeagues: cards.filter((c) => !c.isMember && c.isInvited),
     otherLeagues: cards.filter((c) => !c.isMember && !c.isInvited),
-    hasCreated: !!viewer.accountId && leagues.some((l) => l.created_by === viewer.accountId),
+    ownsLeague: cards.some((c) => c.isOwner && c.isMember),
   };
 }
 

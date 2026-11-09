@@ -24,7 +24,7 @@ season is a round robin; the top 4 enter a two-week playoff.
 | Rule | Decision |
 |---|---|
 | Who can manage | Any registered (approved) player |
-| Creating | Each person can **create one** league per season |
+| Creating | Each person can **own one** league per season. A creator who left has passed theirs on and can create another; someone who inherited one can't |
 | Joining | A person can be in **multiple** leagues |
 | Size | **4–6 managers.** If the real season has **21 or fewer teams**, max is **4** |
 | Visibility | Commissioner sets **public** (anyone can join) or **private** (invite only). Both are listed in the directory |
@@ -39,9 +39,9 @@ season is a round robin; the top 4 enter a two-week playoff.
 - Remove managers **before the draft** (a removed manager can't rejoin unless re-invited, which means switching the league to private first)
 - Invite players by name, and cancel pending invites, **before the draft** (private leagues only)
 
-If the creator leaves before the draft, the league is **disbanded**: it's deleted, every
-other manager gets a feed notification, and the creator is free to create another. The
-leave confirmation warns them first.
+An owner who leaves never disbands the league: it **passes to the earliest-joined manager
+left**, before or after the draft (§11). Only a league left with nobody in it is deleted.
+The leave confirmation tells the owner who it passes to.
 
 Commissioners cannot force-close weeks or override results — that is staff only.
 
@@ -323,8 +323,7 @@ A kick or ban from the site counts the same as leaving. It applies to every leag
 manages in, and it withdraws every invite and team offer they hold.
 
 **Before the draft** the manager just drops out. If they were the owner, the league passes to
-the earliest-joined manager left. A league left with nobody in it is deleted. (Leaving on
-purpose as the creator still disbands the league, as in §2.)
+the earliest-joined manager left. A league left with nobody in it is deleted.
 
 **After the draft** (or during it, for a kick or ban), the team becomes an **orphan**:
 - It keeps its roster, seat, schedule, record and place in the waiver order. It **keeps scoring
@@ -334,12 +333,16 @@ purpose as the creator still disbands the league, as in §2.)
   any more, and gets no more notices about it.
 - During the draft, its picks are made automatically straight away rather than waiting out the
   clock.
-- The owner leaving is no different: their team is orphaned and **ownership doesn't pass on**.
-  After the draft the only setting left is the league's name, so the league needs no owner to
-  play out. The departed owner stays on record but can't act for the league.
+- The owner leaving is no different, except that **ownership passes on** to the earliest-joined
+  manager whose team isn't orphaned, so there is still someone to look after orphans. Only if
+  every other team is orphaned does the departed owner stay on record, unable to act.
 
-**An active owner looks after an orphan** until someone takes it over. Once the owner has
-left, orphans stay as they are for the rest of the season.
+**Every departure is announced.** Each manager still running a team gets a feed notice naming
+who left or was removed (the owner who did the removing doesn't). If ownership passed, the
+notice says who the new owner is, and the new owner gets their own version saying so.
+Written by `tellManagers` in `app/lib/fantasy-departure-server.ts`.
+
+**The owner looks after an orphan** until someone takes it over.
 - They can set its lineup from the Roster tab. It can't make waiver claims or trades.
 - Once the draft is finished, they can **hand it over**: offer the team to any approved player
   who isn't already in the league and isn't on one of its rosters. The offer arrives as an
@@ -363,6 +366,8 @@ covers both the push and the feed entry, and all five default to on.
 | Results and playoffs | `fantasy_results` | A week closes: each manager gets their result. Semifinal winners and losers, the champion and runner-up, and everyone else in the league hear about the final. Seeding is sent once the regular season closes: who made the playoffs and whom they face, and who is out. |
 
 How it works:
+- Membership notices (invites, team offers, a manager leaving or being removed, a change of
+  owner, §11) sit outside the toggles. They go to the feed only, through `recordNotification`.
 - Event notices (draft, trades, waivers) are sent where the event happens, through
   `notifyManagers` in `app/lib/fantasy-notify.ts`. Sending runs in `after()`, so it never
   slows down the action.

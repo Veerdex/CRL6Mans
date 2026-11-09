@@ -50,7 +50,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
 
   const hasOwn = hub.myLeagues.length + hub.invitedLeagues.length > 0;
   const tab: HubTab =tabParam === "all" || tabParam === "mine" ? tabParam : hasOwn ? "mine" : "all";
-  const canCreate = viewer.approved && !hub.hasCreated && hub.season.status === "open";
+  const canCreate = viewer.approved && !hub.ownsLeague && hub.season.status === "open";
   const ownLeague = hub.myLeagues.find((l) => l.isOwner);
   const joinedLeagues = hub.myLeagues.filter((l) => !l.isOwner);
 

@@ -15,6 +15,7 @@ import {
   getManagerCap,
   isActiveManager,
   orphanedManagers,
+  ownsLeague,
   type LeagueRow,
 } from "@/app/lib/fantasy-leagues";
 import { dropBeforeDraft, orphanTeam } from "@/app/lib/fantasy-departure-server";
@@ -71,6 +72,9 @@ export async function createLeague(rawName: string, visibility: "public" | "priv
 
   const season = await getCurrentFantasySeason();
   if (!season || season.status !== "open") return { error: "Leagues can't be created right now." };
+  // The one-league rule is on owning, not creating: a creator who left passed
+  // their league on, and someone who inherited one has a league to run.
+  if (await ownsLeague(season.id, me.accountId)) return { error: "You already own a league this season." };
 
   const { data: league, error } = await supabaseAdmin
     .from("fantasy_leagues")
@@ -83,11 +87,7 @@ export async function createLeague(rawName: string, visibility: "public" | "priv
     })
     .select("id")
     .single();
-  if (error || !league) {
-    // 23505 is the (season, created_by) unique key: the one-league rule.
-    if (error?.code === "23505") return { error: "You've already created a league this season." };
-    return { error: "Couldn't create the league." };
-  }
+  if (error || !league) return { error: "Couldn't create the league." };
 
   const { error: memberError } = await supabaseAdmin
     .from("fantasy_league_members")
@@ -127,7 +127,7 @@ export async function joinLeague(leagueId: string): Promise<Result> {
   return {};
 }
 
-export async function leaveLeague(leagueId: string): Promise<Result & { deleted?: boolean }> {
+export async function leaveLeague(leagueId: string): Promise<Result> {
   const me = await requireManager();
   if ("error" in me) return me;
   const current = await getLeague(leagueId);
@@ -136,7 +136,7 @@ export async function leaveLeague(leagueId: string): Promise<Result & { deleted?
   if (current.status === "drafting") return { error: "You can't leave while the draft is running." };
   // §11: after the draft the team stays in the league without a manager.
   if (current.status === "active") {
-    const res = await orphanTeam(current, me.accountId);
+    const res = await orphanTeam(current, me.accountId, "left");
     if (res.error) return res;
     refresh(leagueId);
     return {};
@@ -144,45 +144,8 @@ export async function leaveLeague(leagueId: string): Promise<Result & { deleted?
   const league = await requirePreDraftLeague(leagueId);
   if ("error" in league) return league;
 
-  if (league.created_by === me.accountId) {
-    // The creator leaving disbands the league: it's deleted outright (members and
-    // invites cascade), which also frees the creator to create another.
-    const [{ data: others }, { data: creator }] = await Promise.all([
-      supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId).neq("account_id", me.accountId),
-      supabaseAdmin.from("accounts").select("username, display_name").eq("id", me.accountId).maybeSingle(),
-    ]);
-    // Pinned to pre_draft so a draft starting since the check above keeps its league.
-    const { data: deleted, error } = await supabaseAdmin
-      .from("fantasy_leagues")
-      .delete()
-      .eq("id", leagueId)
-      .eq("status", "pre_draft")
-      .select("id");
-    if (error) return { error: "Couldn't disband the league." };
-    if (!deleted?.length) return { error: "The draft has started, so you can't leave this league now." };
-
-    const otherIds = ((others ?? []) as { account_id: string }[]).map((m) => m.account_id);
-    if (otherIds.length) {
-      const { data: rows } = await supabaseAdmin.from("accounts").select("discord_id").in("id", otherIds);
-      const discordIds = ((rows ?? []) as { discord_id: string }[]).map((r) => r.discord_id);
-      if (discordIds.length) {
-        await recordNotification(
-          { kind: "users", discordIds },
-          {
-            title: "Fantasy league disbanded",
-            body: `${accountName(creator)} left ${league.name}, so the league was disbanded.`,
-            url: "/dashboard/fantasy",
-          },
-        );
-      }
-    }
-    refresh();
-    return { deleted: true };
-  }
-
-  // An owner who isn't the creator inherited the league from a kick or ban,
-  // and passes it on the same way rather than leaving it with nobody to run it.
-  await dropBeforeDraft(league, me.accountId);
+  // An owner passes the league on rather than disbanding it.
+  await dropBeforeDraft(league, me.accountId, "left");
   refresh(leagueId);
   return {};
 }
@@ -230,10 +193,10 @@ export async function removeManager(leagueId: string, accountId: string): Promis
   if (league.status === "drafting") return { error: "Managers can't be removed while the draft is running." };
   if (league.status === "active") {
     // §11: the team stays, without the manager, until the owner hands it over.
-    const res = await orphanTeam(league, accountId);
+    const res = await orphanTeam(league, accountId, "removed", ctx.me.accountId);
     if (res.error) return res;
   } else if (league.status === "pre_draft") {
-    await supabaseAdmin.from("fantasy_league_members").delete().eq("league_id", leagueId).eq("account_id", accountId);
+    await dropBeforeDraft(league, accountId, "removed", ctx.me.accountId);
   } else {
     return { error: "This league is closed." };
   }

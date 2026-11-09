@@ -198,13 +198,11 @@ export function DeclineInviteButton({ leagueId }: { leagueId: string }) {
 
 export function LeaveLeagueButton({
   leagueId,
-  isCreator,
   managerCount,
   afterDraft = false,
   isOwner = false,
 }: {
   leagueId: string;
-  isCreator: boolean;
   managerCount: number;
   afterDraft?: boolean;
   isOwner?: boolean;
@@ -214,16 +212,15 @@ export function LeaveLeagueButton({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const others = managerCount - 1;
-  const disbands = isCreator && !afterDraft;
-  const warning = afterDraft
-    ? `Your team stays in the league without a manager and keeps scoring with its current lineup${
-        isOwner ? ". Nobody takes over as owner, so it can't be handed to someone new" : ". The owner can hand it to someone new"
-      }. You can't come back to it.`
-    : disbands
-      ? `You created this league, so leaving disbands it. The league is deleted${
-          others > 0 ? ` and ${others === 1 ? "the other manager is" : `all ${others} other managers are`} removed` : ""
-        }. This can't be undone.`
-      : null;
+  const deletes = !afterDraft && others <= 0;
+  const handOff = isOwner && others > 0 ? "You own this league, so it passes to the manager who joined earliest after you. " : "";
+  const warning = deletes
+    ? "You're the only manager, so leaving deletes the league. This can't be undone."
+    : afterDraft
+      ? `${handOff}Your team stays in the league without a manager and keeps scoring with its current lineup until the owner hands it to someone new. You can't come back to it.`
+      : handOff
+        ? `${handOff}The other managers are told you left.`
+        : null;
 
   if (!confirming) {
     return (
@@ -250,7 +247,7 @@ export function LeaveLeagueButton({
             });
           }}
         >
-          {pending ? (disbands ? "Disbanding…" : "Leaving…") : disbands ? "Leave and disband" : "Confirm leave"}
+          {pending ? "Leaving…" : "Confirm leave"}
         </button>
         <button className={LEAVE_SECONDARY} disabled={pending} onClick={() => setConfirming(false)}>
           Cancel
