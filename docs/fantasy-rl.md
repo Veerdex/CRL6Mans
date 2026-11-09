@@ -388,7 +388,12 @@ Modelled on fantasy football so it's familiar:
   points. No projections or next-game stats.
 - **Matchup** — the two lineups side by side with points per player (like Kotala's mockup).
 - **Players / Waiver wire** — free agents and waiver players, with tier, status
-  ("Free agent — Add" / "Waivers — clears in 14h — Claim") and trending. Trades live here too,
+  ("Free agent — Add" / "Waivers — clears in 14h — Claim"). A **Trending** strip at the top
+  shows two players per tier, from the whole pool, rostered or not: whoever scored the biggest
+  multiple of their projection in their last group-stage series for their own team (40 points
+  on a 20 projection is 2×; a tie goes to the bigger score). The projection is the one that stood
+  before that week was played, rebuilt the same way as the Matchup tab's (`trendingByTier` in
+  `fantasy-pool.ts`, `lastSeries` in `getPoolView`). Trades live here too,
   so there's no Trades tab. A toggle splits the page into **Available** (unrostered
   players only) and **Trades**, which has the manager's pending trades, plus those resolved in
   the last week, above a table of other managers' players, each with a Trade button. The toggle

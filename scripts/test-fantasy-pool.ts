@@ -12,6 +12,7 @@ import {
   seriesPointsFromGames,
   seriesWinChance,
   tierFromDraftRound,
+  trendingByTier,
 } from "../app/lib/fantasy-pool";
 import { FP_BASELINE_RV, fantasyPoints, projectedFantasyPoints } from "../app/lib/rv-adjustment";
 
@@ -119,4 +120,26 @@ test("a forfeit or a series not played scores nothing", () => {
   const stats = { score: 1000, goals: 3, assists: 0, saves: 0, shots: 3 };
   assert.equal(seriesFantasyPoints({ forfeit: true, ownScore: 3, oppScore: 0, stats, gamesPlayed: 3 }), 0);
   assert.equal(seriesFantasyPoints({ forfeit: false, ownScore: 3, oppScore: 0, stats: ZERO, gamesPlayed: 0 }), 0);
+});
+
+test("trending takes the biggest multiples of projection, two per tier", () => {
+  const p = (id: string, tier: 1 | 2 | 3, points: number, projected: number | null) => ({
+    id,
+    tier,
+    lastSeries: projected === null ? null : { points, projected },
+  });
+  const trend = trendingByTier([
+    p("a", 2, 40, 20), // 2x
+    p("b", 2, 30, 10), // 3x
+    p("c", 2, 15, 10), // 1.5x, third, so cut
+    p("d", 2, 99, 0), // no projection to beat
+    p("e", 2, 50, null), // hasn't played
+    p("f", 1, 10, 20), // 0.5x, still the best Cap
+    p("g", 3, 20, 10), // 2x, tied...
+    p("h", 3, 30, 15), // ...and the bigger score wins it
+  ]);
+  assert.deepEqual(trend[2].map((t) => t.player.id), ["b", "a"]);
+  close(trend[2][0].multiplier, 3);
+  assert.deepEqual(trend[1].map((t) => t.player.id), ["f"]);
+  assert.deepEqual(trend[3].map((t) => t.player.id), ["h", "g"]);
 });

@@ -10,6 +10,7 @@ import { WaiverOrder } from "../waiver-order";
 import { ComingSoon } from "../coming-soon";
 import { FANTASY_TRADES_ENABLED, isFinalLeague } from "@/app/lib/fantasy-rules";
 import { PoolSection, PoolSkeleton } from "./pool-section";
+import { TrendingPlayers } from "./trending";
 import type { RosterMoves } from "./move-action";
 
 export default function FantasyPlayerPoolPage({ params }: { params: Promise<{ league: string }> }) {
@@ -35,15 +36,19 @@ async function Pool({ league }: { league: Promise<LeagueAccess> }) {
   const active = view.league.status === "active";
   const canMove = active && view.isMember && !!viewer.accountId;
   const priority = active ? leagueWaiverPriority(leagueId) : Promise.resolve([]);
+  const pool = getPoolView(leagueId, viewer.isStaff);
   return (
     <div className="space-y-4">
+      <Suspense fallback={null}>
+        <TrendingPlayers pool={pool} />
+      </Suspense>
       {active && (
         <Suspense fallback={null}>
           <PriorityStrip priority={priority} members={view.members} viewerId={viewer.accountId} />
         </Suspense>
       )}
       <PoolSection
-        pool={getPoolView(leagueId, viewer.isStaff)}
+        pool={pool}
         moves={canMove ? rosterMoves(leagueId, view.league.fantasy_season_id, viewer.accountId!, priority, view.members) : null}
       />
     </div>

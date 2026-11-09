@@ -19,6 +19,7 @@ import {
   seriesPointsFromGames,
   tierFromDraftRound,
   type FantasyTier,
+  type LastSeries,
   type ProjectionBasis,
 } from "./fantasy-pool";
 import type { StatTotals } from "./rv-adjustment";
@@ -49,6 +50,8 @@ export type PoolPlayer = {
   manager: { accountId: string; name: string } | null;
   /** When an unrostered player is on waivers (§9), the run he clears in. Null means a free agent. */
   waiverClearsAt: string | null;
+  /** His last group-stage series for his own team, for the trending strip. Null until he's played one. */
+  lastSeries: LastSeries | null;
   /**
    * Group-stage match id → the projection for that series as it stood before it
    * was played. Only built for the Matchup tab ({ byMatch: true }).
@@ -303,18 +306,26 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean, opts
     // series they subbed into for another team counts nothing.
     let seasonPoints = 0;
     let seriesPlayed = 0;
+    let last: { match: MatchRow; points: number } | null = null;
     if (p.team_id) {
       for (const m of completed) {
         if (m.home_team_id !== p.team_id && m.away_team_id !== p.team_id) continue;
         const rows = statsByPlayerMatch.get(`${p.id}:${m.id}`);
         if (!rows?.length) continue;
         const home = m.home_team_id === p.team_id;
-        seasonPoints += seriesPointsFromGames(rows, {
+        const points = seriesPointsFromGames(rows, {
           forfeit: false,
           ownScore: (home ? m.home_score : m.away_score) ?? 0,
           oppScore: (home ? m.away_score : m.home_score) ?? 0,
         });
+        seasonPoints += points;
         seriesPlayed += 1;
+        // Group stage only: a week's projection is rebuilt from the history
+        // before it, which historyBefore can do only for a group round.
+        if (!(m.stage ?? "").startsWith(GROUP_STAGE_PREFIX) || m.round === null) continue;
+        if (!last || m.round > last.match.round! || (m.round === last.match.round && (m.scheduled_at ?? "") > (last.match.scheduled_at ?? ""))) {
+          last = { match: m, points };
+        }
       }
     }
 
@@ -345,6 +356,19 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean, opts
         });
       }
     }
+    let lastSeries: LastSeries | null = null;
+    if (last && p.team_id) {
+      const m = last.match;
+      const oppId = m.home_team_id === p.team_id ? m.away_team_id! : m.home_team_id!;
+      lastSeries = {
+        points: last.points,
+        projected: projectedSeriesPoints(rating, historyBefore(p.id, totals, m.round!), {
+          ownRating: teamRating.get(p.team_id) ?? 0,
+          oppRating: teamRating.get(oppId) ?? 0,
+          winsNeeded: winsNeededFor(m),
+        }),
+      };
+    }
     return {
       id: p.id,
       discordId: a?.discord_id ?? "",
@@ -361,6 +385,7 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean, opts
       nextOpponent: opponentId ? teams.get(opponentId) ?? null : null,
       manager: ownerId ? { accountId: ownerId, name: owner?.display_name || owner?.username || "Unknown" } : null,
       waiverClearsAt: ownerId ? null : waivers.get(p.id) ?? null,
+      lastSeries,
       matchProjected,
     };
   });
