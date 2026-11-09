@@ -55,6 +55,9 @@ async function Matchup({ league, query }: { league: Promise<LeagueAccess>; query
   // The viewer's own side goes on the left.
   const [left, right] = focus && focus.b === viewer.accountId ? [focus.b, focus.a] : [focus?.a, focus?.b ?? null];
   const base = `/dashboard/fantasy/${leagueId}/matchup`;
+  const records = new Map(
+    data.schedule.standings.map((s) => [s.managerId, `${s.wins}-${s.losses}${s.ties ? `-${s.ties}` : ""}`]),
+  );
 
   return (
     <div className="max-w-4xl mx-auto space-y-4">
@@ -76,6 +79,7 @@ async function Matchup({ league, query }: { league: Promise<LeagueAccess>; query
               right={right ? { id: right, member: member.get(right), lineup: data.lineups.get(right) } : null}
               winner={focus?.winner ?? null}
               viewerId={viewer.accountId}
+              records={records}
             />
           )}
         </>
@@ -174,12 +178,14 @@ function Board({
   right,
   winner,
   viewerId,
+  records,
 }: {
   week: ScheduleWeek;
   left: Side;
   right: Side | null;
   winner: string | null;
   viewerId: string | null;
+  records: Map<string, string>;
 }) {
   const leftStarters = left.lineup?.starters ?? [];
   const rightStarters = right?.lineup?.starters ?? [];
@@ -193,22 +199,41 @@ function Board({
         : "Final"
     : "In progress";
 
+  const leftProjected = projectedTotal(leftStarters);
+  const rightProjected = right ? projectedTotal(rightStarters) : null;
+
   return (
     <section className="bg-zinc-800 border border-zinc-700 rounded-xl overflow-hidden">
-      <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-3 border-b border-zinc-700">
-        <ManagerHeader side={left} viewerId={viewerId} won={winner === left.id} align="left" />
-        <div className="text-center">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{weekLabel(week)}</div>
-          <div className={`text-[11px] ${week.closed ? "text-zinc-300" : "text-emerald-400"}`}>{status}</div>
-        </div>
+      <header className="grid grid-cols-2 gap-3 px-4 pt-4 pb-3 border-b border-zinc-700">
+        <ManagerHeader
+          side={left}
+          viewerId={viewerId}
+          won={winner === left.id}
+          record={records.get(left.id)}
+          projected={week.closed ? null : leftProjected}
+          ahead={rightProjected === null || leftProjected >= rightProjected}
+          align="left"
+        />
         {right ? (
-          <ManagerHeader side={right} viewerId={viewerId} won={winner === right.id} align="right" />
+          <ManagerHeader
+            side={right}
+            viewerId={viewerId}
+            won={winner === right.id}
+            record={records.get(right.id)}
+            projected={week.closed ? null : rightProjected}
+            ahead={rightProjected !== null && rightProjected >= leftProjected}
+            align="right"
+          />
         ) : (
-          <div className="text-right text-sm text-zinc-500">Bye week · no opponent</div>
+          <div className="self-center text-right text-sm text-zinc-500">Bye week · no opponent</div>
         )}
+        <div className="col-span-2 text-center text-[11px] font-semibold uppercase tracking-wide">
+          <span className="text-zinc-400">{weekLabel(week)}</span>
+          <span className={week.closed ? "text-zinc-300" : "text-emerald-400"}> · {status}</span>
+        </div>
       </header>
 
-      <ul className="divide-y divide-zinc-700/60">
+      <ul className="p-1.5 space-y-1.5">
         {leftStarters.map((line, i) => (
           <BoardRow key={line.slot} label={SLOT_LABEL[line.slot]} left={line} right={rightStarters[i] ?? null} hasRight={!!right} />
         ))}
@@ -216,88 +241,137 @@ function Board({
 
       {(leftBench.length > 0 || rightBench.length > 0) && (
         <>
-          <div className="px-4 py-1.5 border-t-2 border-zinc-600 bg-zinc-900/40 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+          <div className="px-4 py-1.5 border-t border-zinc-700 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
             Bench · scores nothing
           </div>
-          <ul className="divide-y divide-zinc-700/60 opacity-75">
+          <ul className="px-1.5 pb-1.5 space-y-1.5 opacity-75">
             {leftBench.map((line, i) => (
-              <BoardRow key={line.slot} label="BN" left={line} right={rightBench[i] ?? null} hasRight={!!right} bench />
+              <BoardRow key={line.slot} label="BN" left={line} right={rightBench[i] ?? null} hasRight={!!right} />
             ))}
           </ul>
         </>
       )}
 
       {!week.closed && (
-        <div className="grid grid-cols-[1fr_3rem_2.5rem_3rem_1fr] sm:grid-cols-[1fr_3.5rem_3rem_3.5rem_1fr] items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2.5 border-t-2 border-zinc-600 bg-zinc-900/40">
-          <span className="text-xs font-semibold text-zinc-300">Projected</span>
-          <span className="text-right text-sm font-semibold tabular-nums text-indigo-300">{projectedTotal(leftStarters).toFixed(1)}</span>
-          <span />
-          {right ? (
-            <span className="text-left text-sm font-semibold tabular-nums text-indigo-300">{projectedTotal(rightStarters).toFixed(1)}</span>
-          ) : (
-            <span />
-          )}
-          <span className="text-right text-xs font-semibold text-zinc-300">{right ? "Projected" : ""}</span>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-4 border-t border-zinc-700 bg-zinc-900/50">
+          <span className="text-center text-3xl font-bold tabular-nums text-white">{leftProjected.toFixed(1)}</span>
+          <span className="text-center text-sm font-bold leading-tight text-zinc-200">
+            Projected
+            <br />
+            Totals
+          </span>
+          <span className="text-center text-3xl font-bold tabular-nums text-white">{rightProjected?.toFixed(1) ?? ""}</span>
         </div>
       )}
     </section>
   );
 }
 
-// Points already banked plus the projection of every starter still to play.
-function projectedTotal(starters: SlotLine[]) {
-  return starters.reduce((sum, line) => {
-    if (line.state.kind === "scored") return sum + line.state.points;
-    if ((line.state.kind === "live" || line.state.kind === "upcoming") && line.player) return sum + line.player.projected;
-    return sum;
-  }, 0);
+// The number beside a player: points once scored, the projection while still to play.
+function slotValue(line: SlotLine | null): { value: number; scored: boolean } | null {
+  if (!line) return null;
+  if (line.state.kind === "scored") return { value: line.state.points, scored: true };
+  if ((line.state.kind === "live" || line.state.kind === "upcoming") && line.player) return { value: line.player.projected, scored: false };
+  return null;
 }
 
-function ManagerHeader({ side, viewerId, won, align }: { side: Side; viewerId: string | null; won: boolean; align: "left" | "right" }) {
+// Points already banked plus the projection of every starter still to play.
+function projectedTotal(starters: SlotLine[]) {
+  return starters.reduce((sum, line) => sum + (slotValue(line)?.value ?? 0), 0);
+}
+
+function ManagerHeader({
+  side,
+  viewerId,
+  won,
+  record,
+  projected,
+  ahead,
+  align,
+}: {
+  side: Side;
+  viewerId: string | null;
+  won: boolean;
+  record: string | undefined;
+  projected: number | null;
+  ahead: boolean;
+  align: "left" | "right";
+}) {
   const m = side.member;
+  const right = align === "right";
   return (
-    <div className={`flex items-center gap-2 min-w-0 ${align === "right" ? "flex-row-reverse text-right" : ""}`}>
-      {m && <PlayerAvatar discordId={m.discordId} avatar={m.avatar} username={m.username ?? m.name} className="w-8 h-8" cdnSize={64} />}
-      <div className="min-w-0">
-        <div className="text-sm font-semibold text-white truncate">{managerName(m, viewerId)}</div>
-        <div className={`text-xl font-bold tabular-nums ${won ? "text-emerald-400" : "text-white"}`}>
-          {(side.lineup?.total ?? 0).toFixed(1)}
+    <div className={`min-w-0 ${right ? "text-right" : ""}`}>
+      <div className={`flex items-center gap-3 ${right ? "flex-row-reverse" : ""}`}>
+        {m && <PlayerAvatar discordId={m.discordId} avatar={m.avatar} username={m.username ?? m.name} className="w-12 h-12 sm:w-14 sm:h-14" cdnSize={128} />}
+        <div>
+          <div className={`text-3xl sm:text-4xl font-bold leading-none tabular-nums ${won ? "text-emerald-400" : "text-white"}`}>
+            {(side.lineup?.total ?? 0).toFixed(1)}
+          </div>
+          {projected !== null && (
+            <div className={`mt-1 flex items-center gap-1 text-xs tabular-nums text-zinc-400 ${right ? "flex-row-reverse" : ""}`}>
+              {projected.toFixed(1)}
+              <span className={ahead ? "text-emerald-400" : "text-red-400"} aria-label={ahead ? "projected to win" : "projected to lose"}>
+                {ahead ? "▲" : "▼"}
+              </span>
+            </div>
+          )}
         </div>
       </div>
+      <div className="mt-2 text-sm font-semibold text-white truncate">{managerName(m, viewerId)}</div>
+      {record && <div className="text-xs text-zinc-400">{record}</div>}
     </div>
   );
 }
 
-function BoardRow({
-  label,
-  left,
-  right,
-  hasRight,
-  bench = false,
-}: {
-  label: string;
-  left: SlotLine;
-  right: SlotLine | null;
-  hasRight: boolean;
-  bench?: boolean;
-}) {
+function BoardRow({ label, left, right, hasRight }: { label: string; left: SlotLine; right: SlotLine | null; hasRight: boolean }) {
+  const a = slotValue(left);
+  const b = hasRight ? slotValue(right) : null;
+  const leftBest = !!a && !!b && a.value > b.value;
+  const rightBest = !!a && !!b && b.value > a.value;
   return (
-    <li className="grid grid-cols-[1fr_3rem_2.5rem_3rem_1fr] sm:grid-cols-[1fr_3.5rem_3rem_3.5rem_1fr] items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2">
-      <PlayerCell line={left} align="left" />
-      <Points state={left.state} bench={bench} align="right" />
-      <span className="text-center text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{label}</span>
-      {hasRight && right ? <Points state={right.state} bench={bench} align="left" /> : <span />}
-      {hasRight && right ? <PlayerCell line={right} align="right" /> : <span />}
+    <li className="grid grid-cols-[1fr_2.5rem_1fr] sm:grid-cols-[1fr_3rem_1fr] items-stretch gap-1.5">
+      <div className="flex items-center gap-2 rounded-lg bg-zinc-900/60 px-2 sm:px-3 py-2.5 min-w-0">
+        <div className="flex-1 min-w-0">
+          <PlayerCell line={left} align="left" />
+        </div>
+        <SlotNumber value={a} best={leftBest} align="right" />
+      </div>
+      <span className="flex items-center justify-center rounded-lg bg-zinc-900/30 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+        {label}
+      </span>
+      {hasRight && right ? (
+        <div className="flex items-center gap-2 rounded-lg bg-zinc-900/60 px-2 sm:px-3 py-2.5 min-w-0">
+          <SlotNumber value={b} best={rightBest} align="left" />
+          <div className="flex-1 min-w-0">
+            <PlayerCell line={right} align="right" />
+          </div>
+        </div>
+      ) : (
+        <span />
+      )}
     </li>
   );
 }
 
-function Points({ state, bench, align }: { state: SlotState; bench: boolean; align: "left" | "right" }) {
-  const side = align === "right" ? "text-right" : "text-left";
-  if (state.kind === "scored") {
-    return <span className={`${side} text-sm font-semibold tabular-nums text-white`}>{state.points.toFixed(1)}</span>;
-  }
-  return <span className={`${side} text-sm tabular-nums text-zinc-600`}>{bench ? "" : "—"}</span>;
+function SlotNumber({ value, best, align }: { value: { value: number; scored: boolean } | null; best: boolean; align: "left" | "right" }) {
+  if (!value) return <span className="w-14 shrink-0 text-center text-sm text-zinc-600">—</span>;
+  const check = best ? (
+    <span className="text-emerald-400" aria-label="higher">
+      ✓
+    </span>
+  ) : null;
+  return (
+    <span
+      className={`w-14 sm:w-16 shrink-0 flex items-center gap-1 text-sm tabular-nums ${align === "right" ? "justify-end" : "justify-start"} ${
+        value.scored ? "font-semibold text-white" : "text-zinc-400"
+      }`}
+      title={value.scored ? "Points" : "Projected"}
+    >
+      {align === "right" && check}
+      {value.value.toFixed(1)}
+      {align === "left" && check}
+    </span>
+  );
 }
 
 function PlayerCell({ line, align }: { line: SlotLine; align: "left" | "right" }) {
