@@ -17,7 +17,7 @@ import {
   orphanedManagers,
   type LeagueRow,
 } from "@/app/lib/fantasy-leagues";
-import { orphanTeam } from "@/app/lib/fantasy-departure-server";
+import { dropBeforeDraft, orphanTeam } from "@/app/lib/fantasy-departure-server";
 import { isClosedLeague, normalizeLeagueName } from "@/app/lib/fantasy-rules";
 import { getStaffRole, isDirectorVerified } from "@/app/lib/players";
 import { autopickIfDue, startFantasyDrafts, submitPick } from "@/app/lib/fantasy-draft-server";
@@ -180,7 +180,9 @@ export async function leaveLeague(leagueId: string): Promise<Result & { deleted?
     return { deleted: true };
   }
 
-  await supabaseAdmin.from("fantasy_league_members").delete().eq("league_id", leagueId).eq("account_id", me.accountId);
+  // An owner who isn't the creator inherited the league from a kick or ban,
+  // and passes it on the same way rather than leaving it with nobody to run it.
+  await dropBeforeDraft(league, me.accountId);
   refresh(leagueId);
   return {};
 }

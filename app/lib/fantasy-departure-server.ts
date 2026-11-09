@@ -94,7 +94,7 @@ async function tellOwner(leagueId: string, departed: string) {
 }
 
 /** Before the draft: the manager is just gone, and an owner passes the league on. */
-async function dropBeforeDraft(league: LeagueLite, accountId: string) {
+export async function dropBeforeDraft(league: LeagueLite, accountId: string) {
   await passOwnership(league, accountId);
   await supabaseAdmin.from("fantasy_league_members").delete().eq("league_id", league.id).eq("account_id", accountId);
   const { count } = await supabaseAdmin
