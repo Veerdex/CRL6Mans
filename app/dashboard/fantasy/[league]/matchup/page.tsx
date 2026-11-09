@@ -319,8 +319,10 @@ function ManagerHeader({
 function BoardRow({ label, left, right, hasRight }: { label: string; left: SlotLine; right: SlotLine | null; hasRight: boolean }) {
   const a = slotValue(left);
   const b = hasRight ? slotValue(right) : null;
-  const leftBest = !!a && !!b && a.value > b.value;
-  const rightBest = !!a && !!b && b.value > a.value;
+  // Only real points win a slot; projections never earn the check.
+  const bothScored = !!a?.scored && !!b?.scored;
+  const leftBest = bothScored && a!.value > b!.value;
+  const rightBest = bothScored && b!.value > a!.value;
   return (
     <li className="grid grid-cols-[1fr_2.5rem_1fr] sm:grid-cols-[1fr_3rem_1fr] items-stretch gap-1.5">
       <div className="flex items-center gap-2 rounded-lg bg-zinc-900/60 px-2 sm:px-3 py-2.5 min-w-0">
