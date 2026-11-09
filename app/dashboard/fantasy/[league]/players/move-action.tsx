@@ -6,10 +6,15 @@ import type { LineupEntry } from "@/app/lib/fantasy-lineup";
 import { swapInProblem } from "@/app/lib/fantasy-waivers";
 import { SLOT_LABEL } from "@/app/lib/fantasy-draft";
 import { LocalTime } from "@/app/dashboard/local-time";
+import type { TradeView } from "@/app/lib/fantasy-trades";
 import { addFantasyFreeAgent, cancelFantasyClaim, claimFantasyPlayer } from "../../actions";
+import { TradeButton, type PlayerLookup } from "./trades";
 
 export type RosterMoves = {
   leagueId: string;
+  managerId: string;
+  managerNames: Record<string, string>;
+  trades: TradeView[];
   lineup: LineupEntry[];
   claims: { id: string; playerId: string; dropPlayerId: string }[];
   /** The viewer's place in the waiver order, 1 being first. */
@@ -22,15 +27,23 @@ export function MoveAction({
   player,
   moves,
   nameOf,
+  playerOf,
+  rosterOf,
 }: {
   player: PoolPlayer;
   moves: RosterMoves;
   nameOf: (playerId: string) => string;
+  playerOf: PlayerLookup;
+  rosterOf: (managerId: string) => PoolPlayer[];
 }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  if (player.manager) return null;
+  if (player.manager) {
+    return player.manager.accountId === moves.managerId ? null : (
+      <TradeButton player={player} moves={moves} playerOf={playerOf} rosterOf={rosterOf} />
+    );
+  }
 
   const claim = moves.claims.find((c) => c.playerId === player.id);
   const onWaivers = player.waiverClearsAt !== null;

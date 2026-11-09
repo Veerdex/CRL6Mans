@@ -20,6 +20,7 @@ import { getStaffRole, isDirectorVerified } from "@/app/lib/players";
 import { autopickIfDue, startFantasyDrafts, submitPick } from "@/app/lib/fantasy-draft-server";
 import { moveLineupPlayer } from "@/app/lib/fantasy-lineup-server";
 import { addFreeAgent, cancelClaim, fileClaim, rankClaims } from "@/app/lib/fantasy-waivers-server";
+import { acceptTrade, cancelTrade, proposeTrade, rejectTrade } from "@/app/lib/fantasy-trades-server";
 
 type Result = { error?: string };
 
@@ -369,6 +370,46 @@ export async function rankFantasyClaims(leagueId: string, claimIds: string[]): P
   const res = await rankClaims(leagueId, me.accountId, claimIds);
   if (res.error) return res;
   revalidatePath(`/dashboard/fantasy/${leagueId}/roster`);
+  return {};
+}
+
+export async function proposeFantasyTrade(leagueId: string, receiverId: string, giveIds: string[], getIds: string[]): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  if (!Array.isArray(giveIds) || !Array.isArray(getIds)) return { error: "Pick the players to trade." };
+  const res = await proposeTrade(leagueId, me.accountId, receiverId, giveIds, getIds);
+  if (res.error) return res;
+  revalidatePath(`/dashboard/fantasy/${leagueId}/players`);
+  return {};
+}
+
+export async function acceptFantasyTrade(leagueId: string, tradeId: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const res = await acceptTrade(leagueId, me.accountId, tradeId);
+  if (res.error) {
+    revalidatePath(`/dashboard/fantasy/${leagueId}/players`);
+    return res;
+  }
+  refreshRosterMove(leagueId);
+  return {};
+}
+
+export async function rejectFantasyTrade(leagueId: string, tradeId: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const res = await rejectTrade(leagueId, me.accountId, tradeId);
+  if (res.error) return res;
+  revalidatePath(`/dashboard/fantasy/${leagueId}/players`);
+  return {};
+}
+
+export async function cancelFantasyTrade(leagueId: string, tradeId: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const res = await cancelTrade(leagueId, me.accountId, tradeId);
+  if (res.error) return res;
+  revalidatePath(`/dashboard/fantasy/${leagueId}/players`);
   return {};
 }
 

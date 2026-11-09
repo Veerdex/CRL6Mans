@@ -295,6 +295,12 @@ Free agent (instant add)
   reported and he unlocks. It stays pending until then.
 - Traded players arrive in their new manager's lineup carrying nothing — scores their old slots
   banked stay with the old manager.
+- A trade doesn't name slots. At acceptance each incoming player takes the slot of an outgoing
+  player of the same tier, pairing them in lineup order (Cap, 1st, 2nd, Flex, Bench).
+- If a player in a pending trade has since left either roster (dropped, claimed, or traded
+  elsewhere), accepting **calls the trade off** instead.
+- Accepting a trade cancels every other pending trade that includes one of its players.
+- Proposed, accepted and rejected trades land in the notification feed.
 - **No trade deadline.** A pending trade is cancelled automatically if either manager is
   eliminated, since eliminated managers are frozen *(assumed)*.
 
@@ -335,9 +341,10 @@ Modelled on fantasy football so it's familiar:
   points. No projections or next-game stats.
 - **Matchup** — the two lineups side by side with points per player (like Kotala's mockup).
 - **Players / Waiver wire** — free agents and waiver players, with tier, status
-  ("Free agent — Add" / "Waivers — clears in 14h — Claim") and trending.
+  ("Free agent — Add" / "Waivers — clears in 14h — Claim") and trending. Trades live here too,
+  so there's no Trades tab: another manager's player has a Trade button, and the manager's
+  pending trades, plus those resolved in the last week, sit above the table.
 - **Standings** — W-L, total points, waiver priority.
-- **Trades** — proposals sent and received.
 - **Draft room** — live board, queue, pick timer.
 - **League directory** — every league to join or view; create a league.
 
@@ -455,9 +462,25 @@ Modelled on fantasy football so it's familiar:
     won. The new order counts only the swaps that actually saved, so a claim that loses a
     race at write time doesn't cost its manager priority.
   - `rollbackFantasyTestRun` deletes both tables by league and nulls the two league columns.
-- **Not built yet:** the eliminated-manager freeze (§7), claim-result notifications (§12),
-  and putting a departing manager's players on waivers (§11).
-- Likely tables still to come: `fantasy_trades` + `fantasy_trade_items`.
+- **Trades** (`scripts/fantasy-trades-migration.sql`): `fantasy_trades` (`pending` →
+  `accepted`/`rejected`/`cancelled`/`failed`, with a `note`) and `fantasy_trade_items`
+  (trade, player, the manager giving him up). The like-for-like check and the slot pairing are
+  pure (`app/lib/fantasy-trades.ts`, `npm run test:fantasy-trades`). The database side is
+  `app/lib/fantasy-trades-server.ts`.
+  - Slots are paired at acceptance, from both lineups as they are then, so a pending trade
+    never goes stale over a bench swap.
+  - The `fantasy_accept_trade` function does the swap in one transaction. It locks the league
+    row so two accepts in the same league can't interleave. It checks that every outgoing
+    player is still in the slot the server read and returns `stale` if not. Then it deletes
+    all the traded rows before reinserting them, because the roster's unique keys would reject
+    a row-by-row move. In the same transaction it cancels every other pending trade that
+    includes a moved player.
+  - Locks are checked in the server action before the call, and a locked player leaves the
+    trade pending.
+  - `rollbackFantasyTestRun` deletes trades by league. Items cascade.
+- **Not built yet:** the eliminated-manager freeze (§7), and with it the trade auto-cancel
+  (§10). Also not built: claim-result notifications (§12), the fantasy notification toggles
+  (§12), and putting a departing manager's players on waivers (§11).
 
 ---
 

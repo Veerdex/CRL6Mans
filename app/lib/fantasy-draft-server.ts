@@ -373,6 +373,7 @@ export async function rollbackFantasyTestRun(): Promise<void> {
     await supabaseAdmin.from("fantasy_draft_picks").delete().in("league_id", ids);
     await supabaseAdmin.from("fantasy_waiver_claims").delete().in("league_id", ids);
     await supabaseAdmin.from("fantasy_waivers").delete().in("league_id", ids);
+    await supabaseAdmin.from("fantasy_trades").delete().in("league_id", ids);
     await supabaseAdmin
       .from("fantasy_leagues")
       .update({ status: "pre_draft", draft_order: null, current_pick: 0, pick_deadline: null, waiver_order: null, waivers_ran_at: null })

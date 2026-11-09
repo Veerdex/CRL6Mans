@@ -1,24 +1,42 @@
 "use client";
 
 import { use, useMemo } from "react";
-import type { PoolView } from "@/app/lib/fantasy-pool-data";
+import type { PoolPlayer, PoolView } from "@/app/lib/fantasy-pool-data";
 import { PoolTable } from "./pool-table";
 import { MoveAction, type RosterMoves } from "./move-action";
+import { TradesPanel } from "./trades";
 
 export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: Promise<RosterMoves> | null }) {
   const { players, hiddenForTest } = use(pool);
   const roster = moves ? use(moves) : null;
-  const nameOf = useMemo(() => {
-    const names = new Map(players.map((p) => [p.id, p.name]));
-    return (id: string) => names.get(id) ?? "Unknown player";
+  const { nameOf, playerOf, rosterOf } = useMemo(() => {
+    const byId = new Map(players.map((p) => [p.id, p]));
+    const byManager = new Map<string, PoolPlayer[]>();
+    for (const p of players) {
+      if (!p.manager) continue;
+      if (!byManager.has(p.manager.accountId)) byManager.set(p.manager.accountId, []);
+      byManager.get(p.manager.accountId)!.push(p);
+    }
+    return {
+      nameOf: (id: string) => byId.get(id)?.name ?? "Unknown player",
+      playerOf: (id: string) => byId.get(id),
+      rosterOf: (managerId: string) => byManager.get(managerId) ?? [],
+    };
   }, [players]);
 
   if (players.length > 0) {
     return (
-      <PoolTable
-        players={players}
-        renderAction={roster ? (p) => <MoveAction player={p} moves={roster} nameOf={nameOf} /> : undefined}
-      />
+      <div className="space-y-4">
+        {roster && <TradesPanel moves={roster} playerOf={playerOf} />}
+        <PoolTable
+          players={players}
+          renderAction={
+            roster
+              ? (p) => <MoveAction player={p} moves={roster} nameOf={nameOf} playerOf={playerOf} rosterOf={rosterOf} />
+              : undefined
+          }
+        />
+      </div>
     );
   }
   return (
