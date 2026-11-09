@@ -16,7 +16,7 @@ function format(d: Date, dateOnly: boolean, upcoming: boolean, weekday: boolean)
     ? {}
     : { hour: "numeric", minute: "2-digit", timeZoneName: "short" };
 
-  if (weekday) return d.toLocaleString(undefined, { weekday: "short", ...time });
+  if (weekday) return d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
 
   if (!upcoming) {
     return dateOnly
@@ -51,8 +51,9 @@ function format(d: Date, dateOnly: boolean, upcoming: boolean, weekday: boolean)
 // the date is dropped entirely - the next Saturday is the only Saturday anyone
 // could mean, so "Saturday, 7:00 PM CDT" says as much as a date would.
 //
-// `weekday` gives the short day and time alone ("Wed, 8:00 PM MST"), for a view
-// already scoped to one week, where the day is all a date would add.
+// `weekday` gives the short day and time alone ("Wed, 8:00 PM"), for a view
+// already scoped to one week, where the day is all a date would add. It drops
+// the zone too: the time is already the viewer's own.
 export function LocalTime({
   iso,
   className,
