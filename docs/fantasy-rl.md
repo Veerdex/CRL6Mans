@@ -493,7 +493,7 @@ Modelled on fantasy football so it's familiar:
   - Proposing a trade is refused if either side is frozen. Accepting one calls it off.
   - Pending trades with a frozen side are cancelled with a note by the daily run and on every
     Players-tab load, so nobody is shown an offer they can't accept.
-  - Lineup swaps stay open, and a frozen manager can still cancel a claim.
+  - Lineup swaps stay open, and a frozen manager can still withdraw a claim.
 - **Not built yet:** claim-result notifications (§12), the fantasy notification toggles
   (§12), and putting a departing manager's players on waivers (§11).
 
