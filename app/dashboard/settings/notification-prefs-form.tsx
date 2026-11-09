@@ -3,12 +3,16 @@
 import { useState, useTransition } from "react";
 import { saveNotificationPrefs } from "./actions";
 import type { NotificationCategory } from "@/app/lib/push";
-import { FANTASY_TRADES_ENABLED } from "@/app/lib/fantasy-rules";
-
 type Category = {
   key: NotificationCategory;
   label: string;
   description: string;
+};
+
+const TRADES_CATEGORY: Category = {
+  key: "fantasy_trades",
+  label: "Trades",
+  description: "Offers you receive, and your trades being accepted, rejected or cancelled",
 };
 
 const FANTASY_CATEGORIES: Category[] = [
@@ -22,15 +26,6 @@ const FANTASY_CATEGORIES: Category[] = [
     label: "Waiver claims",
     description: "Which of your claims won or lost, once a day after the 4 AM Pacific waiver run",
   },
-  ...(FANTASY_TRADES_ENABLED
-    ? [
-        {
-          key: "fantasy_trades" as const,
-          label: "Trades",
-          description: "Offers you receive, and your trades being accepted, rejected or cancelled",
-        },
-      ]
-    : []),
   {
     key: "fantasy_lineup",
     label: "Lineup alerts",
@@ -68,8 +63,10 @@ const CATEGORIES: Category[] = [
 
 export function NotificationPrefsForm({
   initialPrefs,
+  tradesEnabled,
 }: {
   initialPrefs: Record<string, boolean>;
+  tradesEnabled: boolean;
 }) {
   const [prefs, setPrefs] = useState<Record<string, boolean>>(initialPrefs);
   const [isPending, startTransition] = useTransition();
@@ -115,7 +112,7 @@ export function NotificationPrefsForm({
     <div className="space-y-2">
       {rows(CATEGORIES)}
       <h3 className="pt-3 px-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">Fantasy</h3>
-      {rows(FANTASY_CATEGORIES)}
+      {rows(tradesEnabled ? [...FANTASY_CATEGORIES.slice(0, 2), TRADES_CATEGORY, ...FANTASY_CATEGORIES.slice(2)] : FANTASY_CATEGORIES)}
       {saved && <p className="text-xs text-emerald-400 px-1">Preferences saved.</p>}
     </div>
   );

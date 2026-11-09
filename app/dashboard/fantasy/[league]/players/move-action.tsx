@@ -5,7 +5,6 @@ import type { PoolPlayer } from "@/app/lib/fantasy-pool-data";
 import type { LineupEntry } from "@/app/lib/fantasy-lineup";
 import { swapInProblem } from "@/app/lib/fantasy-waivers";
 import { SLOT_LABEL } from "@/app/lib/fantasy-draft";
-import { FANTASY_TRADES_ENABLED } from "@/app/lib/fantasy-rules";
 import { LocalTime } from "@/app/dashboard/local-time";
 import type { TradeView } from "@/app/lib/fantasy-trades";
 import { addFantasyFreeAgent, cancelFantasyClaim, claimFantasyPlayer } from "../../actions";
@@ -18,6 +17,8 @@ export type RosterMoves = {
   eliminated: string[];
   managerNames: Record<string, string>;
   trades: TradeView[];
+  /** league_settings.fantasy_trades_enabled, the director's switch. */
+  tradesEnabled: boolean;
   lineup: LineupEntry[];
   claims: { id: string; playerId: string; dropPlayerId: string }[];
   /** The viewer's place in the waiver order, 1 being first. */
@@ -45,7 +46,7 @@ export function MoveAction({
   const frozen = moves.eliminated.includes(moves.managerId);
   if (player.manager) {
     const mine = player.manager.accountId === moves.managerId;
-    return !FANTASY_TRADES_ENABLED || mine || frozen || moves.eliminated.includes(player.manager.accountId) ? null : (
+    return !moves.tradesEnabled || mine || frozen || moves.eliminated.includes(player.manager.accountId) ? null : (
       <TradeButton player={player} moves={moves} playerOf={playerOf} rosterOf={rosterOf} />
     );
   }

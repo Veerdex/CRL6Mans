@@ -6,12 +6,37 @@ import { lockedPlayerIds, managerLineup } from "./fantasy-lineup-server";
 import { tradeMoves, tradeShapeProblem, type TradeStatus, type TradeView } from "./fantasy-trades";
 import { eliminatedInLeague } from "./fantasy-matchup-server";
 import { FROZEN_NOTE } from "./fantasy-schedule";
-import { FANTASY_TRADES_ENABLED, TRADES_DISABLED_NOTE } from "./fantasy-rules";
+import { TRADES_DISABLED_NOTE } from "./fantasy-rules";
 
 // Trades (docs/fantasy-rl.md §10). The rules are in fantasy-trades.ts; the
 // move itself is fantasy_accept_trade (scripts/fantasy-trades-migration.sql).
 
 type Result = { error?: string };
+
+/** The director's switch for every league. A read error (pre-migration) is off. */
+export async function fantasyTradesEnabled(): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.from("league_settings").select("fantasy_trades_enabled").single();
+  return !error && data?.fantasy_trades_enabled === true;
+}
+
+/**
+ * Turning trades off cancels every pending one, so turning them back on later
+ * doesn't revive offers made against rosters that have since changed.
+ */
+export async function setFantasyTradesEnabledCore(on: boolean): Promise<Result> {
+  const { error } = await supabaseAdmin
+    .from("league_settings")
+    .update({ fantasy_trades_enabled: on, updated_at: new Date().toISOString() })
+    .not("id", "is", null);
+  if (error) return { error: "Couldn't save that. Has scripts/fantasy-trades-toggle-migration.sql been run?" };
+  if (!on) {
+    await supabaseAdmin
+      .from("fantasy_trades")
+      .update({ status: "cancelled", note: TRADES_DISABLED_NOTE, resolved_at: new Date().toISOString() })
+      .eq("status", "pending");
+  }
+  return {};
+}
 
 const RECENT_MS = 7 * 24 * 3600_000;
 
@@ -119,7 +144,7 @@ export async function proposeTrade(
   giveIds: string[],
   getIds: string[],
 ): Promise<Result> {
-  if (!FANTASY_TRADES_ENABLED) return { error: TRADES_DISABLED_NOTE };
+  if (!(await fantasyTradesEnabled())) return { error: TRADES_DISABLED_NOTE };
   if (proposerId === receiverId) return { error: "You can't trade with yourself." };
   const give = [...new Set(giveIds)];
   const get = [...new Set(getIds)];
@@ -230,7 +255,7 @@ export async function rejectTrade(leagueId: string, managerId: string, tradeId: 
 }
 
 export async function acceptTrade(leagueId: string, managerId: string, tradeId: string): Promise<Result> {
-  if (!FANTASY_TRADES_ENABLED) return { error: TRADES_DISABLED_NOTE };
+  if (!(await fantasyTradesEnabled())) return { error: TRADES_DISABLED_NOTE };
   const { data: trade } = await supabaseAdmin
     .from("fantasy_trades")
     .select("id, league_id, proposer_id, receiver_id, fantasy_trade_items(player_id, from_manager_id)")

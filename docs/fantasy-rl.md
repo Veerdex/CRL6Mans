@@ -287,13 +287,15 @@ Free agent (instant add)
 
 ## 10. Trades
 
-**Disabled (2026-11-09).** Every manager shares one Discord, so a lopsided trade is far more
-likely to be two friends teaming up than one manager outsmarting another, and waivers and free
-agency already cover fixing a roster. `FANTASY_TRADES_ENABLED` in `app/lib/fantasy-rules.ts`
-is off: proposing and accepting are refused server-side, and the Players tab's Trades view,
-the Trade button and the Trades notification setting are hidden. The code, the
-`fantasy_trades` tables and any pending rows are kept, so turning trades back on is that one
-line. The rules below are what it would restore.
+**A director's switch, off by default.** Every manager shares one Discord, so a lopsided trade
+is far more likely to be two friends teaming up than one manager outsmarting another, and
+waivers and free agency already cover fixing a roster. A director turns trades on or off for
+every league at once from the top of the Players tab (`league_settings.fantasy_trades_enabled`,
+read by `fantasyTradesEnabled()`). While they're off, proposing and accepting are refused
+server-side, and the Players tab's Trades view, the Trade button and the Trades notification
+setting are hidden. Turning them off cancels every pending trade, so turning them back on
+later doesn't revive offers made against rosters that have since changed. The rules below
+apply while trades are on.
 
 - **Any size**, as long as each side gives up the same tiers it receives (keeps both rosters
   at 2/3/3).

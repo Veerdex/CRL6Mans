@@ -24,7 +24,14 @@ import { autopickIfDue, startFantasyDrafts, submitPick } from "@/app/lib/fantasy
 import { openFantasySeason } from "@/app/lib/fantasy-season-end";
 import { moveLineupPlayer } from "@/app/lib/fantasy-lineup-server";
 import { addFreeAgent, cancelClaim, fileClaim, rankClaims } from "@/app/lib/fantasy-waivers-server";
-import { acceptTrade, cancelTrade, dismissTrade, proposeTrade, rejectTrade } from "@/app/lib/fantasy-trades-server";
+import {
+  acceptTrade,
+  cancelTrade,
+  dismissTrade,
+  proposeTrade,
+  rejectTrade,
+  setFantasyTradesEnabledCore,
+} from "@/app/lib/fantasy-trades-server";
 
 type Result = { error?: string };
 
@@ -575,5 +582,17 @@ export async function openNextFantasySeason(name: string): Promise<Result & { me
   }
   const res = await openFantasySeason(name);
   revalidatePath("/dashboard/fantasy", "layout");
+  return res;
+}
+
+export async function setFantasyTradesEnabled(on: boolean): Promise<Result> {
+  const session = await decrypt((await cookies()).get("session")?.value);
+  if (!session?.userId) return { error: "You need to be signed in." };
+  if (!(await isDirectorVerified(session.userId))) {
+    return { error: "Only directors with Discord 2FA on can turn trades on or off." };
+  }
+  const res = await setFantasyTradesEnabledCore(on === true);
+  revalidatePath("/dashboard/fantasy", "layout");
+  revalidatePath("/dashboard/settings");
   return res;
 }

@@ -6,7 +6,6 @@ import { PoolTable } from "./pool-table";
 import { MoveAction, type RosterMoves } from "./move-action";
 import { TradesPanel } from "./trades";
 import { FROZEN_NOTE } from "@/app/lib/fantasy-schedule";
-import { FANTASY_TRADES_ENABLED } from "@/app/lib/fantasy-rules";
 
 export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: Promise<RosterMoves> | null }) {
   const { players, hiddenForTest } = use(pool);
@@ -43,7 +42,7 @@ export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: P
             {FROZEN_NOTE}
           </p>
         )}
-        {FANTASY_TRADES_ENABLED && (
+        {roster.tradesEnabled && (
           <div role="tablist" aria-label="Players view" className="mx-auto flex w-fit rounded-lg border border-zinc-700 bg-zinc-900 p-1">
             <ViewTab active={view === "free"} onClick={() => setView("free")}>
               Available
@@ -56,7 +55,7 @@ export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: P
             </ViewTab>
           </div>
         )}
-        {view === "free" || !FANTASY_TRADES_ENABLED ? (
+        {view === "free" || !roster.tradesEnabled ? (
           <PoolTable key="free" players={players} include={unrostered} allLabel="All" renderAction={action} />
         ) : (
           <>

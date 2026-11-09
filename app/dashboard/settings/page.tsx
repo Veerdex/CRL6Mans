@@ -16,6 +16,7 @@ import { PATREON_BENEFITS } from "@/app/lib/patreon-benefits";
 import { normalizeGlintColors } from "@/app/lib/name-glint";
 import { benefitEnabled, benefitsForTier, getBenefitsByTier, type BenefitPrefRow } from "@/app/lib/patreon-entitlements";
 import { getSettingsTabTheme } from "@/app/lib/sponsors-public";
+import { fantasyTradesEnabled } from "@/app/lib/fantasy-trades-server";
 
 export default async function SettingsPage({
   searchParams,
@@ -31,7 +32,7 @@ export default async function SettingsPage({
   // status/theme/nav_layout/display_name are account-level (Tier 1) and exist
   // for every login; tracker/MMR/notification prefs only exist once someone has
   // a roster row, so those still come off `players`.
-  const [{ data: player }, sponsorTheme, { data: account }] = await Promise.all([
+  const [{ data: player }, sponsorTheme, { data: account }, tradesEnabled] = await Promise.all([
     supabaseAdmin
       .from("players")
       .select("id, tracker_url, peak_3v3, current_3v3, rv_adjustment, peak_2v2, current_2v2, sub_willing, notification_prefs")
@@ -43,6 +44,7 @@ export default async function SettingsPage({
       .select("status, is_guest, theme, nav_layout, display_name, patreon_status, patreon_tier_title, patreon_entitled_cents, patreon_public, patreon_benefit_prefs, patreon_name_color, patreon_name_outline, patreon_name_glint, patreon_connected_at, patreon_tier_override, patreon_avatar_border")
       .eq("discord_id", session.userId)
       .single(),
+    fantasyTradesEnabled(),
   ]);
 
   // An override-pinned account gets the card too, otherwise the per-benefit
@@ -213,6 +215,7 @@ export default async function SettingsPage({
             <NotificationButton />
             <NotificationPrefsForm
               initialPrefs={(player?.notification_prefs as Record<string, boolean> | null) ?? {}}
+              tradesEnabled={tradesEnabled}
             />
           </>
         ) : (

@@ -6,9 +6,8 @@ export const FANTASY_MIN_MANAGERS = 4;
 export const FANTASY_LEAGUE_NAME_MAX = 30;
 export const FANTASY_SEASON_NAME_MAX = 60;
 
-// docs/fantasy-rl.md §10: trades are off because they let friends team up. The
-// code and table stay, so this line is the whole switch back on.
-export const FANTASY_TRADES_ENABLED = false;
+// docs/fantasy-rl.md §10: trades are a director's switch,
+// league_settings.fantasy_trades_enabled, read by fantasyTradesEnabled().
 export const TRADES_DISABLED_NOTE = "Trades are turned off for fantasy leagues.";
 
 // docs/fantasy-rl.md §2: 4–6 managers, but at most 4 when the real season has 21
