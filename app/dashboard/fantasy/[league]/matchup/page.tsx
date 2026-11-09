@@ -331,7 +331,7 @@ function BoardRow({ label, left, right, hasRight }: { label: string; left: SlotL
         </div>
         <SlotNumber value={a} best={leftBest} align="right" />
       </div>
-      <span className="flex items-center justify-center border-x border-zinc-700/60 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+      <span className="flex items-center justify-center bg-black/25 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
         {label}
       </span>
       {hasRight && right ? (
