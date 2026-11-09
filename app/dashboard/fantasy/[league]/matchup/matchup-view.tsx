@@ -1,7 +1,14 @@
 import type { ReactNode } from "react";
 import { WeekSwitcher, MatchupSwitcher, type MatchupChip } from "./matchup-switcher";
 import type { ManagerWeek, SlotLine, SlotState } from "@/app/lib/fantasy-matchup-server";
-import { weekLabel, type Matchup as WeekMatchup, type Schedule, type ScheduleWeek } from "@/app/lib/fantasy-schedule";
+import {
+  weekLabel,
+  winChance,
+  type Matchup as WeekMatchup,
+  type Schedule,
+  type ScheduleWeek,
+  type SideOutlook,
+} from "@/app/lib/fantasy-schedule";
 import { SLOT_LABEL } from "@/app/lib/fantasy-draft";
 import type { MemberView } from "@/app/lib/fantasy-leagues";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
@@ -151,7 +158,7 @@ function Board({
 
   return (
     <section className="-mx-4 sm:mx-0 bg-zinc-800 border-y sm:border border-zinc-700 sm:rounded-xl overflow-hidden">
-      <header className="grid grid-cols-2 gap-3 px-4 pt-4 pb-3 border-b border-zinc-700">
+      <header className="grid grid-cols-[1fr_auto_1fr] gap-2 sm:gap-3 px-4 pt-4 pb-3 border-b border-zinc-700">
         <ManagerHeader
           side={left}
           viewerId={viewerId}
@@ -161,6 +168,11 @@ function Board({
           ahead={rightProjected === null || leftProjected >= rightProjected}
           align="left"
         />
+        {right && !week.closed ? (
+          <WinChance p={winChance(outlook(leftStarters), outlook(rightStarters))} />
+        ) : (
+          <span />
+        )}
         {right ? (
           <ManagerHeader
             side={right}
@@ -174,7 +186,7 @@ function Board({
         ) : (
           <div className="self-center text-right text-sm text-zinc-500">Bye week · no opponent</div>
         )}
-        <div className="col-span-2 text-center text-[11px] font-semibold uppercase tracking-wide">
+        <div className="col-span-3 text-center text-[11px] font-semibold uppercase tracking-wide">
           <span className="text-zinc-400">{weekLabel(week)}</span>
           <span className={week.closed ? "text-zinc-300" : "text-emerald-400"}> · {status}</span>
         </div>
@@ -225,6 +237,41 @@ function slotValue(line: SlotLine | null): { value: number; scored: boolean } | 
 // Points already banked plus the projection of every starter still to play.
 function projectedTotal(starters: SlotLine[]) {
   return starters.reduce((sum, line) => sum + (slotValue(line)?.value ?? 0), 0);
+}
+
+function outlook(starters: SlotLine[]): SideOutlook {
+  const side: SideOutlook = { banked: 0, remaining: [] };
+  for (const line of starters) {
+    const v = slotValue(line);
+    if (!v) continue;
+    if (v.scored) side.banked += v.value;
+    else side.remaining.push(v.value);
+  }
+  return side;
+}
+
+// The favourite's chance, with the arrow on their side. Never 100% while a
+// series is still to play, however lopsided.
+function WinChance({ p }: { p: number }) {
+  const settled = p === 0 || p === 1;
+  const raw = Math.round(Math.max(p, 1 - p) * 100);
+  const pct = settled ? raw : Math.min(99, raw);
+  const leftFav = p > 0.5 && pct > 50;
+  const rightFav = p < 0.5 && pct > 50;
+  const arrow = "text-emerald-400 text-sm";
+  return (
+    <div className="self-center flex flex-col items-center">
+      <div
+        className="flex items-center gap-1 text-lg sm:text-xl font-bold tabular-nums text-white"
+        aria-label={`${leftFav ? "Left" : rightFav ? "Right" : "Neither"} side favoured, ${pct}% to win`}
+      >
+        {leftFav && <span className={arrow}>◀</span>}
+        {pct}%
+        {rightFav && <span className={arrow}>▶</span>}
+      </div>
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Win odds</div>
+    </div>
+  );
 }
 
 function ManagerHeader({

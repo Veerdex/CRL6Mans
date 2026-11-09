@@ -184,6 +184,35 @@ export function currentWeek(weeks: ScheduleWeek[]): number | null {
   return (weeks.find((w) => !w.closed) ?? weeks[weeks.length - 1]).week;
 }
 
+/**
+ * A slot's spread as a share of its projection, for the win chance. A guess
+ * until there are scored weeks to fit it to.
+ */
+export const SLOT_SPREAD = 0.35;
+
+export type SideOutlook = { banked: number; remaining: number[] };
+
+// Abramowitz–Stegun 7.1.26, good to ~1e-7, which is far finer than a whole percent.
+function normalCdf(z: number): number {
+  const t = 1 / (1 + 0.3275911 * (Math.abs(z) / Math.SQRT2));
+  const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+  const erf = 1 - poly * Math.exp(-(z * z) / 2);
+  return z >= 0 ? (1 + erf) / 2 : (1 - erf) / 2;
+}
+
+/**
+ * The chance side a finishes the week ahead of side b: points already banked
+ * are fixed, and each slot still to play is its projection give or take
+ * SLOT_SPREAD of it. A dead heat counts as half.
+ */
+export function winChance(a: SideOutlook, b: SideOutlook): number {
+  const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
+  const lead = a.banked + sum(a.remaining) - b.banked - sum(b.remaining);
+  const sd = Math.sqrt(sum([...a.remaining, ...b.remaining].map((p) => (SLOT_SPREAD * p) ** 2)));
+  if (sd === 0) return lead > 0 ? 1 : lead < 0 ? 0 : 0.5;
+  return normalCdf(lead / sd);
+}
+
 export const WEEK_KIND_LABEL: Record<WeekKind, string> = { regular: "Week", semifinal: "Semifinals", final: "Final" };
 
 export function weekLabel(w: Pick<ScheduleWeek, "week" | "kind">): string {

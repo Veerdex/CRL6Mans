@@ -407,6 +407,9 @@ Modelled on fantasy football so it's familiar:
   that changes the regular-season standings reshuffles the bracket, even after the
   semifinals are played. That's acceptable while results are rarely edited. If it starts to
   matter, freeze the seeds into a `fantasy_matchups` table when the regular season closes.
+  The board's win odds (`winChance` in the same module) treat banked points as fixed and each
+  starter still to play as their projection ± `SLOT_SPREAD` (35%) of it, under a normal
+  approximation. That 35% is a guess and should be fitted once there are scored weeks.
 - Likely tables still to come: `fantasy_waiver_claims`, `fantasy_trades` + `fantasy_trade_items`.
 - The waiver run should be checked on every tick of the existing per-minute external pinger
   (like `clip-reset`), running once when 4 AM Pacific has passed and today's run hasn't happened.
