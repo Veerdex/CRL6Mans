@@ -8,8 +8,7 @@ import { pacificOffsetMs } from "./clip-schedule";
 
 /** The daily claims run, in Pacific wall-clock hours. */
 export const WAIVER_RUN_HOUR_PACIFIC = 4;
-/** The least time a player spends on waivers, so managers always get a chance to claim. */
-export const WAIVER_MIN_MS = 12 * 3600_000;
+export const WAIVER_PERIOD_MS = 24 * 3600_000;
 
 // The run on a Pacific calendar date. The offset is read at that day's noon:
 // a daylight saving change happens at 2 AM, so by 4 AM the day's own offset
@@ -41,13 +40,9 @@ export function nextWaiverRun(instant: Date): Date {
   return today.getTime() >= instant.getTime() ? today : runOnPacificDate(y, m, d + 1);
 }
 
-/**
- * A player put on waivers at `start` clears in the first run at least 12 hours
- * later: the next morning's run, or the one after if he went on within 12
- * hours of it. So 12 to 36 hours on waivers.
- */
+/** A player put on waivers at `start` clears in the first run once his 24 hours are up. */
 export function waiverClearsAt(start: Date): Date {
-  return nextWaiverRun(new Date(start.getTime() + WAIVER_MIN_MS));
+  return nextWaiverRun(new Date(start.getTime() + WAIVER_PERIOD_MS));
 }
 
 /**
