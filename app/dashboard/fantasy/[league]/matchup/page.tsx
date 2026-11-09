@@ -324,18 +324,18 @@ function BoardRow({ label, left, right, hasRight }: { label: string; left: SlotL
   const leftBest = bothScored && a!.value > b!.value;
   const rightBest = bothScored && b!.value > a!.value;
   return (
-    <li className="grid grid-cols-[1fr_2.5rem_1fr] sm:grid-cols-[1fr_3rem_1fr] items-stretch gap-1.5">
-      <div className="flex items-center gap-2 rounded-lg bg-zinc-900/60 px-2 sm:px-3 py-2.5 min-w-0">
+    <li className="grid grid-cols-[1fr_2.5rem_1fr] sm:grid-cols-[1fr_3rem_1fr] items-stretch rounded-lg bg-zinc-900/60 overflow-hidden">
+      <div className="flex items-center gap-2 px-2 sm:px-3 py-2.5 min-w-0">
         <div className="flex-1 min-w-0">
           <PlayerCell line={left} align="left" />
         </div>
         <SlotNumber value={a} best={leftBest} align="right" />
       </div>
-      <span className="flex items-center justify-center rounded-lg bg-zinc-900/30 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+      <span className="flex items-center justify-center border-x border-zinc-700/60 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
         {label}
       </span>
       {hasRight && right ? (
-        <div className="flex items-center gap-2 rounded-lg bg-zinc-900/60 px-2 sm:px-3 py-2.5 min-w-0">
+        <div className="flex items-center gap-2 px-2 sm:px-3 py-2.5 min-w-0">
           <SlotNumber value={b} best={rightBest} align="left" />
           <div className="flex-1 min-w-0">
             <PlayerCell line={right} align="right" />
