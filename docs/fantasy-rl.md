@@ -415,11 +415,34 @@ Modelled on fantasy football so it's familiar:
   A played week's projection is rebuilt from the history as it stood before it, by removing
   every game from that week on, so a scored slot is measured against what was predicted, not
   hindsight. Team ratings are today's, not that week's, which is the remaining drift.
-- Likely tables still to come: `fantasy_waiver_claims`, `fantasy_trades` + `fantasy_trade_items`.
-- The waiver run should be checked on every tick of the existing per-minute external pinger
-  (like `clip-reset`), running once when 4 AM Pacific has passed and today's run hasn't happened.
-  A fixed UTC Vercel cron would drift an hour across daylight saving. Fantasy shouldn't need
-  Vercel Pro outside draft week.
+- **Waivers** (`scripts/fantasy-waivers-migration.sql`): `fantasy_waivers` (one row per league
+  and player, with `clears_at`) and `fantasy_waiver_claims` (`pending` → `won`/`lost`/`failed`/
+  `cancelled`, one pending claim per manager per player), plus `waiver_order` and
+  `waivers_ran_at` on `fantasy_leagues`. The rules are in the pure `app/lib/fantasy-waivers.ts`
+  (`npm run test:fantasy-waivers`): `waiverClearsAt`, `waiverOrder`, `settleClaims` and
+  `swapInProblem`. The database side is in `app/lib/fantasy-waivers-server.ts`.
+  - `creditFantasySlots` puts the reported series' unrostered pool players on waivers. It
+    imports only the pure leaf, so `discord-bot.ts` still doesn't pull in league code.
+  - **A waiver row holds the player until the run deletes it, even after `clears_at`
+    passes.** Otherwise a free-agent add could slip in between 4:00 and the run and jump
+    every pending claim.
+  - An add or claim swaps the new player into the dropped player's slot with a single
+    `update … where player_id = drop`. The roster unique index makes a race lose cleanly
+    ("Another manager just got him"). Zero rows updated means the roster changed under the
+    manager. The dropped player goes on waivers.
+  - **Locks:** an instant add can't bring in or drop a player whose series has started.
+    A claim checks the locks only when the run settles it (`settleClaims` takes the locked
+    set), not when it's filed.
+  - **The run** rides the per-minute `/api/cron/clip-reset` pinger, with no new Vercel cron,
+    since a fixed UTC cron would drift an hour across daylight saving. Each tick computes the
+    last 4 AM Pacific boundary. For each active league it claims the run with a
+    compare-and-set on `waivers_ran_at`, so only one tick processes a league per day. It
+    settles every row with `clears_at <= boundary`, then rewrites `waiver_order` when anyone
+    won.
+  - `rollbackFantasyTestRun` deletes both tables by league and nulls the two league columns.
+- **Not built yet:** the eliminated-manager freeze (§7), claim-result notifications (§12),
+  and putting a departing manager's players on waivers (§11).
+- Likely tables still to come: `fantasy_trades` + `fantasy_trade_items`.
 
 ---
 
