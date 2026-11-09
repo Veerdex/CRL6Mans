@@ -16,7 +16,9 @@ const RECENT_MS = 7 * 24 * 3600_000;
 export async function managerTrades(leagueId: string, managerId: string): Promise<TradeView[]> {
   const { data } = await supabaseAdmin
     .from("fantasy_trades")
-    .select("id, proposer_id, receiver_id, status, note, created_at, resolved_at, fantasy_trade_items(player_id, from_manager_id)")
+    .select(
+      "id, proposer_id, receiver_id, status, note, created_at, resolved_at, proposer_dismissed, receiver_dismissed, fantasy_trade_items(player_id, from_manager_id)",
+    )
     .eq("league_id", leagueId)
     .or(`proposer_id.eq.${managerId},receiver_id.eq.${managerId}`)
     .order("created_at", { ascending: false })
@@ -29,9 +31,14 @@ export async function managerTrades(leagueId: string, managerId: string): Promis
     note: string | null;
     created_at: string;
     resolved_at: string | null;
+    proposer_dismissed: boolean;
+    receiver_dismissed: boolean;
     fantasy_trade_items: { player_id: string; from_manager_id: string }[];
   };
-  const trades = ((data ?? []) as Row[]).map((t) => ({
+  const visible = ((data ?? []) as Row[]).filter((t) =>
+    t.proposer_id === managerId ? !t.proposer_dismissed : !t.receiver_dismissed,
+  );
+  const trades = visible.map((t) => ({
     id: t.id,
     proposerId: t.proposer_id,
     receiverId: t.receiver_id,
@@ -148,6 +155,23 @@ async function settle(
 export async function cancelTrade(leagueId: string, managerId: string, tradeId: string): Promise<Result> {
   const res = await settle(leagueId, tradeId, "cancelled", null, { either: managerId });
   return "error" in res ? res : {};
+}
+
+/** Hides a settled trade from this manager's list; the other side still sees it. */
+export async function dismissTrade(leagueId: string, managerId: string, tradeId: string): Promise<Result> {
+  const { data } = await supabaseAdmin
+    .from("fantasy_trades")
+    .select("proposer_id, receiver_id")
+    .eq("id", tradeId)
+    .eq("league_id", leagueId)
+    .neq("status", "pending")
+    .maybeSingle();
+  if (!data || (data.proposer_id !== managerId && data.receiver_id !== managerId)) {
+    return { error: "That trade can't be dismissed." };
+  }
+  const column = data.proposer_id === managerId ? "proposer_dismissed" : "receiver_dismissed";
+  const { error } = await supabaseAdmin.from("fantasy_trades").update({ [column]: true }).eq("id", tradeId);
+  return error ? { error: "Couldn't dismiss that trade. Try again." } : {};
 }
 
 export async function rejectTrade(leagueId: string, managerId: string, tradeId: string): Promise<Result> {

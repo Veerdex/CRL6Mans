@@ -5,7 +5,13 @@ import type { PoolPlayer } from "@/app/lib/fantasy-pool-data";
 import { TIER_LABEL, TIER_NAME_CLASS, type FantasyTier } from "@/app/lib/fantasy-pool";
 import { LINEUP_SLOTS, SLOT_LABEL } from "@/app/lib/fantasy-draft";
 import { tradeShapeProblem, type TradeView } from "@/app/lib/fantasy-trades";
-import { acceptFantasyTrade, cancelFantasyTrade, proposeFantasyTrade, rejectFantasyTrade } from "../../actions";
+import {
+  acceptFantasyTrade,
+  cancelFantasyTrade,
+  dismissFantasyTrade,
+  proposeFantasyTrade,
+  rejectFantasyTrade,
+} from "../../actions";
 import type { RosterMoves } from "./move-action";
 
 const BUTTON = "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50";
@@ -180,6 +186,7 @@ export function TradesPanel({ moves, playerOf }: { moves: RosterMoves; playerOf:
 function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterMoves; playerOf: PlayerLookup }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(false);
   const incoming = trade.receiverId === moves.managerId;
   const other = moves.managerNames[incoming ? trade.proposerId : trade.receiverId] ?? "A manager";
   const gets = trade.items.filter((i) => i.fromManagerId !== moves.managerId).map((i) => i.playerId);
@@ -192,6 +199,19 @@ function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterM
       const res = await fn(moves.leagueId, trade.id);
       setError(res.error ?? null);
     });
+
+  const dismiss = () => {
+    setHidden(true);
+    start(async () => {
+      const res = await dismissFantasyTrade(moves.leagueId, trade.id);
+      if (res.error) {
+        setHidden(false);
+        setError(res.error);
+      }
+    });
+  };
+
+  if (hidden) return null;
 
   const list = (ids: string[]) =>
     ids.map((id, i) => (
@@ -228,6 +248,16 @@ function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterM
               </button>
             )}
           </span>
+        )}
+        {!open && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={dismiss}
+            className={`ml-auto ${BUTTON} text-zinc-400 hover:text-white`}
+          >
+            Dismiss
+          </button>
         )}
       </div>
       <p className="mt-1 text-xs text-zinc-400">

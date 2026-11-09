@@ -20,7 +20,7 @@ import { getStaffRole, isDirectorVerified } from "@/app/lib/players";
 import { autopickIfDue, startFantasyDrafts, submitPick } from "@/app/lib/fantasy-draft-server";
 import { moveLineupPlayer } from "@/app/lib/fantasy-lineup-server";
 import { addFreeAgent, cancelClaim, fileClaim, rankClaims } from "@/app/lib/fantasy-waivers-server";
-import { acceptTrade, cancelTrade, proposeTrade, rejectTrade } from "@/app/lib/fantasy-trades-server";
+import { acceptTrade, cancelTrade, dismissTrade, proposeTrade, rejectTrade } from "@/app/lib/fantasy-trades-server";
 
 type Result = { error?: string };
 
@@ -408,6 +408,15 @@ export async function cancelFantasyTrade(leagueId: string, tradeId: string): Pro
   const me = await requireManager();
   if ("error" in me) return me;
   const res = await cancelTrade(leagueId, me.accountId, tradeId);
+  if (res.error) return res;
+  revalidatePath(`/dashboard/fantasy/${leagueId}/players`);
+  return {};
+}
+
+export async function dismissFantasyTrade(leagueId: string, tradeId: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const res = await dismissTrade(leagueId, me.accountId, tradeId);
   if (res.error) return res;
   revalidatePath(`/dashboard/fantasy/${leagueId}/players`);
   return {};

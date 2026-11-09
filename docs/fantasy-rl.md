@@ -343,7 +343,8 @@ Modelled on fantasy football so it's familiar:
 - **Players / Waiver wire** — free agents and waiver players, with tier, status
   ("Free agent — Add" / "Waivers — clears in 14h — Claim") and trending. Trades live here too,
   so there's no Trades tab: another manager's player has a Trade button, and the manager's
-  pending trades, plus those resolved in the last week, sit above the table.
+  pending trades, plus those resolved in the last week, sit above the table. A resolved trade
+  can be dismissed, which hides it for that manager only.
 - **Standings** — W-L, total points, waiver priority.
 - **Draft room** — live board, queue, pick timer.
 - **League directory** — every league to join or view; create a league.

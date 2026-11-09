@@ -27,6 +27,9 @@ create table if not exists fantasy_trades (
   note        text,
   created_at  timestamptz not null default now(),
   resolved_at timestamptz,
+  -- Per side: hides a settled trade from that manager's Players tab only.
+  proposer_dismissed boolean not null default false,
+  receiver_dismissed boolean not null default false,
   check (proposer_id <> receiver_id)
 );
 
