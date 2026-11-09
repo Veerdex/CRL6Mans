@@ -18,6 +18,9 @@ export type FantasyTier = 1 | 2 | 3;
 
 export const TIER_LABEL: Record<FantasyTier, string> = { 1: "Cap", 2: "1st", 3: "2nd" };
 
+/** A player's name colour by tier: Cap gold, 1st soft blue, 2nd orange. */
+export const TIER_NAME_CLASS: Record<FantasyTier, string> = { 1: "text-tier-1", 2: "text-tier-2", 3: "text-tier-3" };
+
 /** A series is scored as this many points per unit of FP. */
 export const STAT_POINTS_PER_FP = 20;
 

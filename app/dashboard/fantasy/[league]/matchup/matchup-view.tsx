@@ -10,6 +10,7 @@ import {
   type SideOutlook,
 } from "@/app/lib/fantasy-schedule";
 import { SLOT_LABEL } from "@/app/lib/fantasy-draft";
+import { TIER_NAME_CLASS } from "@/app/lib/fantasy-pool";
 import type { MemberView } from "@/app/lib/fantasy-leagues";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
@@ -404,7 +405,7 @@ function PlayerCell({ line, align }: { line: SlotLine; align: "left" | "right" }
       </span>
       <div className="min-w-0">
         <div className={`flex whitespace-nowrap ${right ? "justify-end" : ""}`}>
-          <PlayerName displayName={player.name} username={player.username} discordId={player.discordId || null} className="text-sm text-white truncate" />
+          <PlayerName displayName={player.name} username={player.username} discordId={player.discordId || null} className={`text-sm font-medium truncate ${TIER_NAME_CLASS[player.tier]}`} />
         </div>
         <StateLine state={state} team={player.team?.name ?? null} />
       </div>

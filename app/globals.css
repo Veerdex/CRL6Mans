@@ -101,6 +101,12 @@
   --color-yellow-800: var(--c-yellow-800);
   --color-yellow-900: var(--c-yellow-900);
   --color-yellow-950: var(--c-yellow-950);
+
+  /* Fantasy player tiers: Cap gold, 1st soft blue, 2nd orange. Their own
+     tokens because amber and indigo both turn orange in the brand themes. */
+  --color-tier-1: var(--c-tier-1);
+  --color-tier-2: var(--c-tier-2);
+  --color-tier-3: var(--c-tier-3);
 }
 
 /* ── LIGHT (clean neutral light) ──────────────────────────────────────────── */
@@ -311,6 +317,10 @@ html[data-theme="dark"] {
   --patron-tier-2-fill: rgba(168, 85, 247, 0.14);
   --patron-tier-3-fill: rgba(255, 255, 255, 0.07);
   --patron-field-gamma: 1;
+
+  --c-tier-1: #facc15;
+  --c-tier-2: #7dd3fc;
+  --c-tier-3: #fb923c;
 }
 
 /* ── CRL6Mans (default) — blue (#3736ac) shell + orange (#e88a24) accents ──── */
@@ -386,6 +396,11 @@ html[data-theme="dark"] {
   --patron-tier-2-fill: rgba(168, 85, 247, 0.26);
   --patron-tier-3-fill: rgba(24, 24, 27, 0.10);
   --patron-field-gamma: 0.5;
+
+  /* Fantasy tiers, deepened to read on a white page; same inheritance as above. */
+  --c-tier-1: #b8860b;
+  --c-tier-2: #3b82c4;
+  --c-tier-3: #ea580c;
 }
 
 /* CRL6Mans shell: blue sidebar + mobile bottom-nav with light text & orange active.
@@ -564,6 +579,10 @@ html[data-theme="sponsor"][data-sponsor-mode="dark"] {
   --patron-tier-2-fill: rgba(168, 85, 247, 0.14);
   --patron-tier-3-fill: rgba(255, 255, 255, 0.07);
   --patron-field-gamma: 1;
+
+  --c-tier-1: #facc15;
+  --c-tier-2: #7dd3fc;
+  --c-tier-3: #fb923c;
 
   --c-indigo-50:  color-mix(in oklab, var(--sponsor-accent, #e88a24) 8%, white 92%);
   --c-indigo-100: color-mix(in oklab, var(--sponsor-accent, #e88a24) 15%, white 85%);
