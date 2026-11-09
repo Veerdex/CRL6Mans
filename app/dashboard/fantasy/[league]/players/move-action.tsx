@@ -102,6 +102,10 @@ export function MoveAction({
   );
 }
 
+// The run fires on the first cron tick after 4 AM Pacific, so its time can pass
+// before it has settled anything.
+const runIsDue = (iso: string | null) => iso !== null && Date.parse(iso) <= Date.now();
+
 function DropPicker({
   player,
   moves,
@@ -166,8 +170,14 @@ function DropPicker({
           <p className="text-xs text-zinc-400">
             {onWaivers ? (
               <>
-                He&apos;s on waivers until <LocalTime iso={player.waiverClearsAt} upcoming />. Claims settle then, in
-                waiver order, and winning one sends you to the back of it.
+                {runIsDue(player.waiverClearsAt) ? (
+                  <>His waiver run is due and hasn&apos;t finished yet. Claims settle in it,</>
+                ) : (
+                  <>
+                    He&apos;s on waivers until <LocalTime iso={player.waiverClearsAt} upcoming />. Claims settle then,
+                  </>
+                )}{" "}
+                in waiver order, and winning one sends you to the back of it.
                 {moves.priority && (
                   <>
                     {" "}

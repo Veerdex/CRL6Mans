@@ -199,7 +199,9 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
                         for <span className={drop ? `font-medium ${TIER_NAME_CLASS[drop.tier]}` : ""}>{drop?.name ?? "Unknown player"}</span>
                       </div>
                       <div className="text-xs text-zinc-400">
-                        {add?.waiverClearsAt ? (
+                        {add?.waiverClearsAt && runIsDue(add.waiverClearsAt) ? (
+                          "Settling now"
+                        ) : add?.waiverClearsAt ? (
                           <>Settles <LocalTime iso={add.waiverClearsAt} upcoming /></>
                         ) : (
                           "Settles at the next run"
@@ -221,6 +223,10 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
     </div>
   );
 }
+
+// The run fires on the first cron tick after 4 AM Pacific, so its time can pass
+// before it has settled anything.
+const runIsDue = (iso: string) => Date.parse(iso) <= Date.now();
 
 function ManagerChips({
   members,
