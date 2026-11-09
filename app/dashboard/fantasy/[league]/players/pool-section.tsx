@@ -36,7 +36,7 @@ export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: P
     const offers = roster.trades.filter((t) => t.status === "pending" && t.receiverId === roster.managerId).length;
     return (
       <div className="space-y-4">
-        <div role="tablist" aria-label="Players view" className="inline-flex rounded-lg border border-zinc-700 bg-zinc-900 p-1">
+        <div role="tablist" aria-label="Players view" className="mx-auto flex w-fit rounded-lg border border-zinc-700 bg-zinc-900 p-1">
           <ViewTab active={view === "free"} onClick={() => setView("free")}>
             Free agents &amp; waivers
           </ViewTab>
