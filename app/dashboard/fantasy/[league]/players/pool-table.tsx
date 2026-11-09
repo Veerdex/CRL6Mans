@@ -7,6 +7,7 @@ import { formatRating } from "@/app/lib/rating";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
 import { TeamLink } from "@/app/dashboard/team-link";
+import { LocalTime } from "@/app/dashboard/local-time";
 
 type SortKey = "name" | "tier" | "team" | "rating" | "projected" | "seasonPoints" | "average";
 type TierFilter = "all" | FantasyTier;
@@ -142,7 +143,7 @@ export function PoolTable({
                 </td>
                 <td className="px-3 py-2"><TierBadge tier={p.tier} /></td>
                 <td className="px-3 py-2"><TeamCell team={p.team} /></td>
-                <td className="px-3 py-2"><Availability manager={p.manager} /></td>
+                <td className="px-3 py-2"><Availability player={p} /></td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={ratingColor(p.rating)}>{formatRating(p.rating)}</td>
                 <td className="px-3 py-2 text-right"><Projection player={p} /></td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-200" style={seasonPointsColor(p)}>{fmt(p.seasonPoints)}</td>
@@ -182,7 +183,7 @@ export function PoolTable({
                   >
                     <div className="flex-1 min-w-0"><NameCell player={p} /></div>
                     <TierBadge tier={p.tier} />
-                    <Availability manager={p.manager} compact />
+                    <Availability player={p} compact />
                     <div className="w-14 text-right"><Projection player={p} /></div>
                     {renderAction && (
                       // Its own click target, so drafting doesn't also toggle the row.
@@ -194,7 +195,7 @@ export function PoolTable({
                   {open && (
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-xs">
                       <Detail label="Team"><TeamCell team={p.team} /></Detail>
-                      <Detail label="Fantasy"><Availability manager={p.manager} /></Detail>
+                      <Detail label="Fantasy"><Availability player={p} /></Detail>
                       <Detail label="RV"><span style={ratingColor(p.rating)}>{formatRating(p.rating)}</span></Detail>
                       <Detail label="Season points"><span style={seasonPointsColor(p)}>{fmt(p.seasonPoints)}</span></Detail>
                       <Detail label="Per series">
@@ -280,13 +281,23 @@ function OpponentCell({ team }: { team: PoolTeam | null }) {
   );
 }
 
-function Availability({ manager, compact = false }: { manager: PoolPlayer["manager"]; compact?: boolean }) {
+function Availability({ player, compact = false }: { player: PoolPlayer; compact?: boolean }) {
+  const { manager, waiverClearsAt } = player;
   if (manager) {
     const label = `On ${manager.name}'s roster`;
     return compact ? (
       <span className="w-2 h-2 rounded-full bg-zinc-500 shrink-0" title={label} aria-label={label} />
     ) : (
       <span className="text-xs text-zinc-400 truncate" title={label}>{manager.name}</span>
+    );
+  }
+  if (waiverClearsAt) {
+    return compact ? (
+      <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" title="On waivers" aria-label="On waivers" />
+    ) : (
+      <span className="text-xs text-amber-300 whitespace-nowrap">
+        Waivers · <LocalTime iso={waiverClearsAt} weekday />
+      </span>
     );
   }
   return compact ? (

@@ -1,12 +1,26 @@
 "use client";
 
-import { use } from "react";
+import { use, useMemo } from "react";
 import type { PoolView } from "@/app/lib/fantasy-pool-data";
 import { PoolTable } from "./pool-table";
+import { MoveAction, type RosterMoves } from "./move-action";
 
-export function PoolSection({ pool }: { pool: Promise<PoolView> }) {
+export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: Promise<RosterMoves> | null }) {
   const { players, hiddenForTest } = use(pool);
-  if (players.length > 0) return <PoolTable players={players} />;
+  const roster = moves ? use(moves) : null;
+  const nameOf = useMemo(() => {
+    const names = new Map(players.map((p) => [p.id, p.name]));
+    return (id: string) => names.get(id) ?? "Unknown player";
+  }, [players]);
+
+  if (players.length > 0) {
+    return (
+      <PoolTable
+        players={players}
+        renderAction={roster ? (p) => <MoveAction player={p} moves={roster} nameOf={nameOf} /> : undefined}
+      />
+    );
+  }
   return (
     <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-6 text-sm text-zinc-300 text-center">
       {hiddenForTest

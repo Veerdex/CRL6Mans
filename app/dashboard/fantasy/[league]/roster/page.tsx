@@ -11,6 +11,9 @@ import { TabSkeleton } from "../tab-skeleton";
 import { TierBadge } from "../players/pool-table";
 import { managerLineup } from "@/app/lib/fantasy-lineup-server";
 import { LineupEditor } from "./lineup-editor";
+import { leagueWaiverPriority, managerPendingClaims } from "@/app/lib/fantasy-waivers-server";
+import { LocalTime } from "@/app/dashboard/local-time";
+import { CancelClaimButton } from "./cancel-claim-button";
 
 export default function FantasyRosterPage({
   params,
@@ -65,10 +68,13 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
     (view.isMember ? viewer.accountId : view.members[0]?.accountId) ||
     null;
   const editable = view.league.status === "active" && view.isMember && shownId === viewer.accountId && !!viewer.accountId;
-  const [pool, slots, lineup] = await Promise.all([
+  const active = view.league.status === "active";
+  const [pool, slots, lineup, claims, priority] = await Promise.all([
     getPoolView(leagueId, viewer.isStaff),
     rosterSlots(leagueId),
     editable ? managerLineup(leagueId, view.league.fantasy_season_id, viewer.accountId!) : null,
+    editable ? managerPendingClaims(leagueId, viewer.accountId!) : [],
+    active ? leagueWaiverPriority(leagueId) : [],
   ]);
   const playerById = new Map(pool.players.map((p) => [p.id, p]));
   const filled = new Map<LineupSlot, PoolPlayer | undefined>(
@@ -117,6 +123,67 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
         />
       ) : (
         <RosterTable title={title} filled={filled} />
+      )}
+
+      {editable && (
+        <section className="bg-zinc-800 border border-zinc-700 rounded-xl overflow-hidden">
+          <header className="px-4 py-3 border-b border-zinc-700 flex items-baseline justify-between gap-3">
+            <h2 className="text-sm font-semibold text-white">Waiver claims</h2>
+            <Link href={`/dashboard/fantasy/${leagueId}/players`} className="text-xs text-indigo-300 hover:text-indigo-200 underline">
+              Find players
+            </Link>
+          </header>
+          {claims.length === 0 ? (
+            <p className="px-4 py-3 text-sm text-zinc-400">
+              No claims in. Claim a player on waivers from the Players tab, or add a free agent straight away.
+            </p>
+          ) : (
+            <ul className="divide-y divide-zinc-700/60">
+              {claims.map((c) => {
+                const add = playerById.get(c.playerId);
+                return (
+                  <li key={c.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-white truncate">
+                        {add?.name ?? "Unknown player"}{" "}
+                        <span className="text-zinc-400">for {playerById.get(c.dropPlayerId)?.name ?? "Unknown player"}</span>
+                      </div>
+                      <div className="text-xs text-zinc-400">
+                        {add?.waiverClearsAt ? (
+                          <>Settles <LocalTime iso={add.waiverClearsAt} upcoming /></>
+                        ) : (
+                          "Settles at the next run"
+                        )}
+                      </div>
+                    </div>
+                    <CancelClaimButton leagueId={leagueId} claimId={c.id} />
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {active && priority.length > 0 && (
+        <section className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-white">Waiver priority</h2>
+          <p className="text-xs text-zinc-400">
+            When managers claim the same player, the one highest here gets him and drops to the bottom.
+          </p>
+          <ol className="space-y-1 text-sm">
+            {priority.map((id, i) => {
+              const m = view.members.find((x) => x.accountId === id);
+              const you = id === viewer.accountId;
+              return (
+                <li key={id} className="flex items-center gap-2">
+                  <span className="w-5 text-right tabular-nums text-zinc-500">{i + 1}</span>
+                  <span className={you ? "font-semibold text-white" : "text-zinc-300"}>{you ? "You" : m?.name ?? "Unknown"}</span>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
       )}
     </div>
   );

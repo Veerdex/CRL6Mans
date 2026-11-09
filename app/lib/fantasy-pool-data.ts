@@ -23,6 +23,7 @@ import {
 } from "./fantasy-pool";
 import type { StatTotals } from "./rv-adjustment";
 import { GROUP_STAGE_PREFIX } from "./bracket";
+import { leagueWaivers } from "./fantasy-waivers-server";
 
 // The player pool a fantasy league drafts from: every player rostered in the
 // real season. The league's own managers are left out, since a manager can't
@@ -46,6 +47,8 @@ export type PoolPlayer = {
   nextOpponent: PoolTeam | null;
   /** The league manager who has this player, once the draft has started. */
   manager: { accountId: string; name: string } | null;
+  /** When an unrostered player is on waivers (§9), the run he clears in. Null means a free agent. */
+  waiverClearsAt: string | null;
   /**
    * Group-stage match id → the projection for that series as it stood before it
    * was played. Only built for the Matchup tab ({ byMatch: true }).
@@ -151,7 +154,7 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean, opts
   if (testEvent && !viewerIsStaff) return { players: [], hiddenForTest: true };
 
   const { data: leagueRow } = await supabaseAdmin.from("fantasy_leagues").select("fantasy_season_id").eq("id", leagueId).maybeSingle();
-  const [{ data: settings }, players, { data: memberRows }, { data: teamRows }, matches, statsOn, frozen, owners] = await Promise.all([
+  const [{ data: settings }, players, { data: memberRows }, { data: teamRows }, matches, statsOn, frozen, owners, waivers] = await Promise.all([
     supabaseAdmin.from("league_settings").select("season_active, draft_active, season_format").maybeSingle(),
     fetchPoolPlayers(),
     supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId),
@@ -166,6 +169,7 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean, opts
     isStatsTrackingEnabled(),
     leagueRow ? frozenTiers(leagueRow.fantasy_season_id as string) : Promise.resolve(null),
     fetchRosterOwners(leagueId),
+    leagueWaivers(leagueId),
   ]);
 
   const typedTeams = (teamRows ?? []) as { id: string; name: string; season_rating: number | string | null }[];
@@ -356,6 +360,7 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean, opts
       seriesPlayed,
       nextOpponent: opponentId ? teams.get(opponentId) ?? null : null,
       manager: ownerId ? { accountId: ownerId, name: owner?.display_name || owner?.username || "Unknown" } : null,
+      waiverClearsAt: ownerId ? null : waivers.get(p.id) ?? null,
       matchProjected,
     };
   });
