@@ -76,7 +76,7 @@ function boardTeamNames(lineups: Map<number, Map<string, ManagerWeek>>): string[
     for (const side of week.values())
       for (const line of [...side.starters, ...side.bench]) {
         if (line.player?.team) names.push(line.player.team.name);
-        if (line.state.kind === "upcoming" && line.state.opponent) names.push(line.state.opponent);
+        if ((line.state.kind === "upcoming" || line.state.kind === "scored") && line.state.opponent) names.push(line.state.opponent);
       }
   return names;
 }
@@ -446,25 +446,31 @@ function PlayerCell({ line, align, abbr }: { line: SlotLine; align: "left" | "ri
   );
 }
 
+function Versus({ opponent, abbr }: { opponent: string; abbr: Map<string, string> }) {
+  return (
+    <>
+      {/* Shortened only where a phone's row has no room for the full name. */}
+      vs <abbr title={opponent} className="no-underline sm:hidden">{abbr.get(opponent) ?? opponent}</abbr>
+      <span className="hidden sm:inline">{opponent}</span>
+    </>
+  );
+}
+
 function StateLine({ state, team, abbr }: { state: SlotState; team: string | null; abbr: Map<string, string> }) {
   const cls = "block text-[11px] truncate";
   switch (state.kind) {
     case "scored":
-      return <span className={`${cls} text-zinc-400`}>{state.forfeit ? "Series forfeited" : team ?? "Final"}</span>;
+      return (
+        <span className={`${cls} text-zinc-400`}>
+          {state.forfeit ? "Series forfeited" : state.opponent ? <Versus opponent={state.opponent} abbr={abbr} /> : team ?? "Final"}
+        </span>
+      );
     case "live":
       return <span className={`${cls} text-amber-400`}>Playing now · locked</span>;
     case "upcoming":
       return (
         <span className={`${cls} text-zinc-400`}>
-          {state.opponent ? (
-            <>
-              {/* Shortened only where a phone's row has no room for the full name. */}
-              vs <abbr title={state.opponent} className="no-underline sm:hidden">{abbr.get(state.opponent) ?? state.opponent}</abbr>
-              <span className="hidden sm:inline">{state.opponent}</span>
-            </>
-          ) : (
-            "Opponent TBD"
-          )}
+          {state.opponent ? <Versus opponent={state.opponent} abbr={abbr} /> : "Opponent TBD"}
           {state.at ? (
             <>
               {" · "}

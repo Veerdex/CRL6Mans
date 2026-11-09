@@ -12,7 +12,7 @@ import { buildSchedule, currentWeek, type Schedule } from "./fantasy-schedule";
 // read, so a stat edit or a re-reported series flows through on the next load.
 
 export type SlotState =
-  | { kind: "scored"; points: number; forfeit: boolean }
+  | { kind: "scored"; points: number; forfeit: boolean; opponent: string | null }
   | { kind: "live" }
   | { kind: "upcoming"; opponent: string | null; at: string | null }
   | { kind: "bye" }
@@ -218,10 +218,12 @@ export async function getMatchupData(leagueId: string, viewerIsStaff: boolean, w
         if (credit) {
           const { points, forfeit } = creditPoints(credit);
           const player = playerById.get(credit.player_id) ?? null;
+          const m = matchById.get(credit.match_id);
+          const opponentId = m ? (m.home_team_id === credit.team_id ? m.away_team_id : m.home_team_id) : null;
           starters.push({
             slot,
             player,
-            state: { kind: "scored", points, forfeit },
+            state: { kind: "scored", points, forfeit, opponent: opponentId ? teamName.get(opponentId) ?? null : null },
             projected: player?.matchProjected?.[credit.match_id] ?? null,
           });
         } else if (closed) {
