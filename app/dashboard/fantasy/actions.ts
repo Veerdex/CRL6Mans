@@ -185,6 +185,9 @@ async function requireCommissioner(leagueId: string, preDraft: boolean) {
   if (!league) return { error: "That league doesn't exist." };
   if ("error" in league) return league;
   if (league.commissioner_id !== me.accountId) return { error: "Only the league owner can do that." };
+  // An owner who left with nobody to pass the league to stays on record but
+  // can't run it (§11). Before the draft nobody is ever orphaned.
+  if (league.status !== "pre_draft" && !(await isMember(leagueId, me.accountId))) return { error: "You've left this league." };
   return { me, league };
 }
 

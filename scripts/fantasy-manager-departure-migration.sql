@@ -42,6 +42,11 @@ begin
     return 'rostered';
   end if;
 
+  -- A manager leaves the pool, so a claim filed on them as a player can't settle.
+  update fantasy_waiver_claims
+    set status = 'cancelled', note = 'That player became a manager in this league.', resolved_at = now()
+    where league_id = p_league and player_id = p_to and status = 'pending';
+
   update fantasy_league_members set account_id = p_to, orphaned_at = null where league_id = p_league and account_id = p_from;
   update fantasy_roster_slots   set manager_id = p_to where league_id = p_league and manager_id = p_from;
   update fantasy_slot_credits   set manager_id = p_to where league_id = p_league and manager_id = p_from;

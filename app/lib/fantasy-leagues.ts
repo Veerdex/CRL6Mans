@@ -286,7 +286,7 @@ export async function getLeagueView(leagueId: string, viewer: FantasyViewer): Pr
     members: memberIds.map(toView),
     invites: inviteList.map((i) => ({ ...toView(i.account_id), takeoverOf: i.takeover_of })),
     isMember: !!viewer.accountId && memberIds.includes(viewer.accountId) && !orphaned.has(viewer.accountId),
-    isCommissioner: !!viewer.accountId && viewer.accountId === league.commissioner_id,
+    isCommissioner: !!viewer.accountId && viewer.accountId === league.commissioner_id && !orphaned.has(viewer.accountId),
     isInvited: !!viewer.accountId && inviteIds.includes(viewer.accountId),
     isRemoved: ((removalRows ?? []) as unknown[]).length > 0,
   };
