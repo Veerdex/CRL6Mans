@@ -19,6 +19,7 @@ import { normalizeLeagueName } from "@/app/lib/fantasy-rules";
 import { getStaffRole, isDirectorVerified } from "@/app/lib/players";
 import { autopickIfDue, startFantasyDrafts, submitPick } from "@/app/lib/fantasy-draft-server";
 import { moveLineupPlayer } from "@/app/lib/fantasy-lineup-server";
+import { addFreeAgent, cancelClaim, fileClaim } from "@/app/lib/fantasy-waivers-server";
 
 type Result = { error?: string };
 
@@ -328,6 +329,37 @@ export async function moveLineupSlot(leagueId: string, from: string, to: string)
   const res = await moveLineupPlayer(leagueId, me.accountId, from, to);
   if (res.error) return res;
   revalidatePath(`/dashboard/fantasy/${leagueId}/roster`);
+  return {};
+}
+
+function refreshRosterMove(leagueId: string) {
+  for (const tab of ["roster", "players", "matchup"]) revalidatePath(`/dashboard/fantasy/${leagueId}/${tab}`);
+}
+
+export async function addFantasyFreeAgent(leagueId: string, addId: string, dropId: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const res = await addFreeAgent(leagueId, me.accountId, addId, dropId);
+  if (res.error) return res;
+  refreshRosterMove(leagueId);
+  return {};
+}
+
+export async function claimFantasyPlayer(leagueId: string, playerId: string, dropId: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const res = await fileClaim(leagueId, me.accountId, playerId, dropId);
+  if (res.error) return res;
+  refreshRosterMove(leagueId);
+  return {};
+}
+
+export async function cancelFantasyClaim(leagueId: string, claimId: string): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const res = await cancelClaim(leagueId, me.accountId, claimId);
+  if (res.error) return res;
+  refreshRosterMove(leagueId);
   return {};
 }
 

@@ -61,12 +61,10 @@ test("a successful claim sends the manager to the back", () => {
   assert.deepEqual(moveToBack(["a", "b", "c", "d"], "b"), ["a", "c", "d", "b"]);
 });
 
-test("status: rostered, then waivers until they clear, then a free agent", () => {
-  const now = at("2026-07-15T12:00:00Z");
-  assert.deepEqual(playerStatus(true, "2026-07-16T11:00:00Z", now), { kind: "rostered" });
-  assert.deepEqual(playerStatus(false, "2026-07-16T11:00:00Z", now), { kind: "waivers", clearsAt: "2026-07-16T11:00:00Z" });
-  assert.deepEqual(playerStatus(false, "2026-07-15T11:00:00Z", now), { kind: "free_agent" });
-  assert.deepEqual(playerStatus(false, null, now), { kind: "free_agent" });
+test("status: rostered, then on waivers until the run settles him, then a free agent", () => {
+  assert.deepEqual(playerStatus(true, "2026-07-16T11:00:00Z"), { kind: "rostered" });
+  assert.deepEqual(playerStatus(false, "2026-07-16T11:00:00Z"), { kind: "waivers", clearsAt: "2026-07-16T11:00:00Z" });
+  assert.deepEqual(playerStatus(false, null), { kind: "free_agent" });
 });
 
 test("a move is like for like, and neither player may be mid-match", () => {

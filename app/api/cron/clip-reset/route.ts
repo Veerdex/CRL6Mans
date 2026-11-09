@@ -7,6 +7,7 @@ import { fetchClipThumbnail } from "@/app/lib/link-preview";
 import { mostRecentSundayMidnightPacific } from "@/app/lib/clip-schedule";
 import { stampCronHeartbeat } from "@/app/lib/cron-heartbeat";
 import { deleteExpiredNotifications } from "@/app/lib/notifications";
+import { runWaivers } from "@/app/lib/fantasy-waivers-server";
 
 export const runtime = "nodejs";
 
@@ -47,6 +48,11 @@ export async function GET(request: Request) {
   // past-weeks view.
   const purged = await deleteExpiredNotifications().catch(() => 0);
   if (purged) fired.push(`notifications_purged:${purged}`);
+
+  // The fantasy waiver run is due once a day at 4 AM Pacific, and each league
+  // records the run it last settled, so riding this per-minute pinger costs
+  // one query on the ticks where nothing is due.
+  fired.push(...(await runWaivers(now).catch(() => [])));
 
   const boundary = mostRecentSundayMidnightPacific(now);
 

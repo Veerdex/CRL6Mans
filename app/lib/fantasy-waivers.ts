@@ -65,9 +65,14 @@ export function moveToBack(order: readonly string[], managerId: string): string[
 
 export type PlayerStatus = { kind: "rostered" } | { kind: "waivers"; clearsAt: string } | { kind: "free_agent" };
 
-export function playerStatus(rostered: boolean, clearsAt: string | null, now: Date): PlayerStatus {
+/**
+ * A waiver row holds a player until the run that settles it deletes the row,
+ * even once its clear time has passed: otherwise the minutes between the clear
+ * time and the run would let a free-agent add jump every pending claim.
+ */
+export function playerStatus(rostered: boolean, clearsAt: string | null): PlayerStatus {
   if (rostered) return { kind: "rostered" };
-  if (clearsAt && new Date(clearsAt).getTime() > now.getTime()) return { kind: "waivers", clearsAt };
+  if (clearsAt) return { kind: "waivers", clearsAt };
   return { kind: "free_agent" };
 }
 
