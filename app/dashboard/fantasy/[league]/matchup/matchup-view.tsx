@@ -458,7 +458,9 @@ function StateLine({ state, team, abbr }: { state: SlotState; team: string | nul
         <span className={`${cls} text-zinc-400`}>
           {state.opponent ? (
             <>
-              vs <abbr title={state.opponent} className="no-underline">{abbr.get(state.opponent) ?? state.opponent}</abbr>
+              {/* Shortened only where a phone's row has no room for the full name. */}
+              vs <abbr title={state.opponent} className="no-underline sm:hidden">{abbr.get(state.opponent) ?? state.opponent}</abbr>
+              <span className="hidden sm:inline">{state.opponent}</span>
             </>
           ) : (
             "Opponent TBD"
