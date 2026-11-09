@@ -12,6 +12,8 @@ export type RosterMoves = {
   leagueId: string;
   lineup: LineupEntry[];
   claims: { id: string; playerId: string; dropPlayerId: string }[];
+  /** The viewer's place in the waiver order, 1 being first. */
+  priority: { spot: number; of: number } | null;
 };
 
 const BUTTON = "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50";
@@ -145,6 +147,16 @@ function DropPicker({
               <>
                 He&apos;s on waivers until <LocalTime iso={player.waiverClearsAt} upcoming />. Claims settle then, in
                 waiver priority order, and a successful claim sends you to the back of it.
+                {moves.priority && (
+                  <>
+                    {" "}
+                    You&apos;re{" "}
+                    <strong className="text-white">
+                      #{moves.priority.spot} of {moves.priority.of}
+                    </strong>
+                    .
+                  </>
+                )}
               </>
             ) : (
               "He's a free agent, so he joins your roster straight away."

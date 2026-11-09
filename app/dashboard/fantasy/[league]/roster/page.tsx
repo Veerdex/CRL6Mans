@@ -15,6 +15,7 @@ import { LineupEditor } from "./lineup-editor";
 import { leagueWaiverPriority, managerPendingClaims } from "@/app/lib/fantasy-waivers-server";
 import { LocalTime } from "@/app/dashboard/local-time";
 import { CancelClaimButton } from "./cancel-claim-button";
+import { WaiverOrder } from "../waiver-order";
 
 export default function FantasyRosterPage({
   params,
@@ -167,26 +168,7 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
         </section>
       )}
 
-      {active && priority.length > 0 && (
-        <section className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-2">
-          <h2 className="text-sm font-semibold text-white">Waiver priority</h2>
-          <p className="text-xs text-zinc-400">
-            When managers claim the same player, the one highest here gets him and drops to the bottom.
-          </p>
-          <ol className="space-y-1 text-sm">
-            {priority.map((id, i) => {
-              const m = view.members.find((x) => x.accountId === id);
-              const you = id === viewer.accountId;
-              return (
-                <li key={id} className="flex items-center gap-2">
-                  <span className="w-5 text-right tabular-nums text-zinc-500">{i + 1}</span>
-                  <span className={you ? "font-semibold text-white" : "text-zinc-300"}>{you ? "You" : m?.name ?? "Unknown"}</span>
-                </li>
-              );
-            })}
-          </ol>
-        </section>
-      )}
+      {active && <WaiverOrder order={priority} members={view.members} viewerId={viewer.accountId} />}
     </div>
   );
 }
