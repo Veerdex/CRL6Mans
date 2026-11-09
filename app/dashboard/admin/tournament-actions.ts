@@ -13,6 +13,7 @@ import { fetchEventWinner } from "@/app/lib/bracket-server";
 import { computeFullArchive } from "./tournament-archive";
 import { recordEventResults } from "@/app/lib/event-results";
 import { resetSeason } from "./league-actions";
+import { cancelFantasyForEvent, endFantasySeason, snapshotFantasySeason } from "@/app/lib/fantasy-season-end";
 import { pushToAllApproved, pushToAdmins, pushToTournamentEntrants } from "@/app/lib/push";
 import { DEFAULT_TEAM_SIZE, normalizeTeamSize } from "@/app/lib/team-size";
 import { prizePoolTotal } from "@/app/lib/career-points";
@@ -706,7 +707,9 @@ export async function completeTournament() {
   // indexed into player_event_results, so a fake placement can't reach a real
   // player's profile. rebuildEventResults() skips is_test for the same reason.
   const endedAt = new Date().toISOString();
-  const [summary, fullArchive] = await Promise.all([
+  // The fantasy season played on this event ends with it, snapshotted here for
+  // the same reason. A test event never ends a real fantasy season.
+  const [summary, eventArchive, fantasy] = await Promise.all([
     computeSummary(tournament?.stats_enabled ?? true),
     computeFullArchive({
       kind: "tournament",
@@ -721,7 +724,9 @@ export async function completeTournament() {
       startedAt: tournament!.started_at ?? null,
       endedAt,
     }),
+    isTest ? null : snapshotFantasySeason(),
   ]);
+  const fullArchive = fantasy ? { ...eventArchive, fantasy: fantasy.archive } : eventArchive;
   await supabaseAdmin
     .from("tournaments")
     .update({
@@ -744,6 +749,9 @@ export async function completeTournament() {
       console.error("[completeTournament] failed to record player event results", e);
     }
   }
+
+  // Before the reset, which would otherwise cancel it as an event ended unarchived.
+  if (fantasy) await endFantasySeason(fantasy, "tournament", activeId);
 
   // Reuse the existing season-reset (wipes matches, unassigns players, strips roles).
   await resetSeason();
@@ -774,6 +782,7 @@ export async function deleteEvent(
     if (t.status === "scheduled") return { error: "Cancel the tournament before deleting it." };
     const { error } = await supabaseAdmin.from("tournaments").delete().eq("id", id);
     if (error) return { error: error.message };
+    await cancelFantasyForEvent("tournament", id);
     revalidatePath("/dashboard/admin");
     revalidatePath("/dashboard");
     return { ok: true, message: `Deleted "${(t as { name: string }).name}".` };
@@ -782,6 +791,7 @@ export async function deleteEvent(
     if (!s) return { error: "Season not found." };
     const { error } = await supabaseAdmin.from("seasons").delete().eq("id", id);
     if (error) return { error: error.message };
+    await cancelFantasyForEvent("season", id);
     revalidatePath("/dashboard/admin");
     revalidatePath("/dashboard");
     return { ok: true, message: `Deleted "${(s as { name: string }).name}".` };

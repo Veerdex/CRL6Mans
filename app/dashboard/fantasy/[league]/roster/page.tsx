@@ -17,6 +17,9 @@ import { LocalTime } from "@/app/dashboard/local-time";
 import { CancelClaimButton } from "./cancel-claim-button";
 import { ClaimRankButtons } from "./claim-rank-buttons";
 import { WaiverOrder } from "../waiver-order";
+import { ComingSoon } from "../coming-soon";
+import { getLeagueSummary, type MemberView } from "@/app/lib/fantasy-leagues";
+import { isFinalLeague } from "@/app/lib/fantasy-rules";
 
 export default function FantasyRosterPage({
   params,
@@ -70,6 +73,49 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
     (requested && view.members.some((m) => m.accountId === requested) && requested) ||
     (view.isMember ? viewer.accountId : view.members[0]?.accountId) ||
     null;
+
+  if (isFinalLeague(view.league.status)) {
+    const detail = (await getLeagueSummary(leagueId))?.detail;
+    if (!detail) {
+      return <ComingSoon title="Roster">The season is over. Final standings are on the League tab.</ComingSoon>;
+    }
+    const shown = view.members.find((m) => m.accountId === shownId);
+    const bySlot = new Map(detail.rosters.filter((r) => r.managerId === shownId).map((r) => [r.slot, r]));
+    return (
+      <div className="max-w-3xl mx-auto space-y-4">
+        <ManagerChips members={view.members} shownId={shownId} viewerId={viewer.accountId} base={`/dashboard/fantasy/${leagueId}/roster`} />
+        <section className="bg-zinc-800 border border-zinc-700 rounded-xl overflow-hidden">
+          <header className="px-4 py-3 border-b border-zinc-700 flex items-baseline justify-between gap-3">
+            <h2 className="text-sm font-semibold text-white">
+              Final roster{shown ? ` · ${shown.accountId === viewer.accountId ? "You" : shown.name}` : ""}
+            </h2>
+            <span className="text-xs text-zinc-400">Season points</span>
+          </header>
+          <ul className="divide-y divide-zinc-700/60">
+            {LINEUP_SLOTS.map((slot) => {
+              const r = bySlot.get(slot);
+              return (
+                <li key={slot} className="flex items-center gap-3 px-4 py-2.5">
+                  <span className={`w-12 shrink-0 text-xs font-semibold uppercase tracking-wide ${isStarterSlot(slot) ? "text-zinc-300" : "text-zinc-500"}`}>
+                    {SLOT_LABEL[slot]}
+                  </span>
+                  <div className="flex-1 min-w-0 flex whitespace-nowrap">
+                    {r ? (
+                      <PlayerName displayName={r.player.name} username={r.player.username ?? r.player.name} discordId={r.player.discordId} className="text-sm text-white" />
+                    ) : (
+                      <span className="text-sm text-zinc-500">Empty</span>
+                    )}
+                  </div>
+                  {r && <span className="text-sm tabular-nums text-zinc-300">{r.seasonPoints.toFixed(1)}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      </div>
+    );
+  }
+
   const editable = view.league.status === "active" && view.isMember && shownId === viewer.accountId && !!viewer.accountId;
   const active = view.league.status === "active";
   const [pool, slots, lineup, claims, priority] = await Promise.all([
@@ -89,24 +135,7 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <nav aria-label="Managers" className="flex flex-wrap justify-center gap-2">
-        {view.members.map((m) => {
-          const active = m.accountId === shownId;
-          return (
-            <Link
-              key={m.accountId}
-              href={`${base}?manager=${m.accountId}`}
-              aria-current={active ? "page" : undefined}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                active ? "bg-indigo-500 border-indigo-500 text-on-accent" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
-              }`}
-            >
-              <PlayerAvatar discordId={m.discordId} avatar={m.avatar} username={m.username ?? m.name} className="w-4 h-4" cdnSize={32} />
-              {m.accountId === viewer.accountId ? "You" : m.name}
-            </Link>
-          );
-        })}
-      </nav>
+      <ManagerChips members={view.members} shownId={shownId} viewerId={viewer.accountId} base={base} />
 
       {view.league.status === "drafting" && (
         <p className="text-sm text-zinc-400 text-center">
@@ -181,6 +210,39 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
 
       {active && <WaiverOrder order={priority} members={view.members} viewerId={viewer.accountId} />}
     </div>
+  );
+}
+
+function ManagerChips({
+  members,
+  shownId,
+  viewerId,
+  base,
+}: {
+  members: MemberView[];
+  shownId: string | null;
+  viewerId: string | null;
+  base: string;
+}) {
+  return (
+    <nav aria-label="Managers" className="flex flex-wrap justify-center gap-2">
+      {members.map((m) => {
+        const active = m.accountId === shownId;
+        return (
+          <Link
+            key={m.accountId}
+            href={`${base}?manager=${m.accountId}`}
+            aria-current={active ? "page" : undefined}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              active ? "bg-indigo-500 border-indigo-500 text-on-accent" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
+            }`}
+          >
+            <PlayerAvatar discordId={m.discordId} avatar={m.avatar} username={m.username ?? m.name} className="w-4 h-4" cdnSize={32} />
+            {m.accountId === viewerId ? "You" : m.name}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 

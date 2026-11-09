@@ -15,7 +15,7 @@ export const loadLeague = cache(async (leagueId: string) => {
   if (!(await fantasyAccessOpen(viewer))) redirect("/dashboard/fantasy");
 
   const view = await getLeagueView(leagueId, viewer);
-  if (!view || view.league.status === "disbanded") notFound();
+  if (!view || view.league.status === "disbanded" || view.league.status === "cancelled") notFound();
   return { viewer, view };
 });
 

@@ -12,6 +12,8 @@ import { attachForfeits } from "@/app/lib/forfeits";
 import { computePlacementTiers, placementsFromTiers } from "@/app/lib/placement";
 import { prizePoolTotal } from "@/app/lib/career-points";
 import { ARCHIVE_SCHEMA_VERSION } from "./archive-schema";
+import { completeFantasyForEvent } from "@/app/lib/fantasy-season-end";
+import type { FantasyArchive } from "@/app/lib/fantasy-archive";
 
 export type TournamentArchive = {
   schemaVersion: 2;
@@ -88,6 +90,8 @@ export type TournamentArchive = {
     demos: number;
     demoed: number;
   }[];
+  /** The fantasy season this event ended, when one was running on it. */
+  fantasy?: FantasyArchive;
 };
 
 async function assertAdmin() {
@@ -327,5 +331,9 @@ export async function purgeExportedArchive(
     .eq("id", id)
     .not("full_archive", "is", null);
 
+  // The export is what completes the fantasy season the event ended (§15).
+  await completeFantasyForEvent(kind, id);
+
   revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/fantasy", "layout");
 }

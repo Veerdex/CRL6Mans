@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { fantasyAccessOpen, getFantasyViewer, getHubData, type LeagueCard } from "@/app/lib/fantasy-leagues";
-import { CreateLeagueForm, JoinLeagueButton, StartDraftsButton } from "./fantasy-client";
+import { CreateLeagueForm, JoinLeagueButton, OpenSeasonForm, StartDraftsButton } from "./fantasy-client";
 import { isDirectorVerified } from "@/app/lib/players";
 import { StatusBadge } from "./status-badge";
 import { HubTabs, type HubTab } from "./hub-tabs";
@@ -23,21 +23,28 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
     );
   }
 
-  const [hub, canStartDrafts] = await Promise.all([getHubData(viewer), isDirectorVerified(session.userId)]);
+  const [hub, isDirector] = await Promise.all([getHubData(viewer), isDirectorVerified(session.userId)]);
   if (!hub.season) {
     return (
       <Shell>
         <p className="text-sm text-zinc-400 text-center">There&apos;s no fantasy season running right now.</p>
+        {isDirector && (
+          <StaffSection>
+            <OpenSeasonForm />
+          </StaffSection>
+        )}
       </Shell>
     );
   }
 
   // A manager in exactly one league lands straight in it; ?all=1 or an explicit
-  // tab is the way back. Not while staff can start the drafts, since that
-  // control lives only here.
+  // tab is the way back. Not while staff have a control here, since it lives
+  // only on this page.
   const { all, tab: tabParam } = await searchParams;
-  const showStartDrafts = canStartDrafts && hub.season.status === "open";
-  if (hub.myLeagues.length === 1 && all !== "1" && !tabParam && !showStartDrafts) {
+  const seasonOver = hub.season.status === "ended" || hub.season.status === "complete";
+  const showStartDrafts = isDirector && hub.season.status === "open";
+  const showOpenSeason = isDirector && seasonOver;
+  if (hub.myLeagues.length === 1 && all !== "1" && !tabParam && !showStartDrafts && !showOpenSeason) {
     redirect(`/dashboard/fantasy/${hub.myLeagues[0].id}`);
   }
 
@@ -48,8 +55,12 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
   const joinedLeagues = hub.myLeagues.filter((l) => !l.isOwner);
 
   return (
-    <Shell subtitle={hub.season.name}>
-      {!viewer.approved && (
+    <Shell subtitle={seasonOver ? `${hub.season.name} · Final` : hub.season.name}>
+      {hub.season.status === "ended" && (
+        <p className="text-xs text-zinc-500 text-center">The season is over. Final results go out once the event&apos;s archive is exported.</p>
+      )}
+
+      {!viewer.approved && !seasonOver && (
         <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-sm text-zinc-300 text-center">
           You can look around, but only approved players can create or join a league.{" "}
           <Link href="/dashboard/register" className="text-indigo-400 hover:underline">
@@ -58,12 +69,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
         </div>
       )}
 
-      {showStartDrafts && (
-        <section className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 flex flex-col items-center gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Staff</h2>
-          <StartDraftsButton />
-        </section>
-      )}
+      {(showStartDrafts || showOpenSeason) && <StaffSection>{showStartDrafts ? <StartDraftsButton /> : <OpenSeasonForm />}</StaffSection>}
 
       <HubTabs
         key={tab}
@@ -135,6 +141,15 @@ function Shell({ children, subtitle }: { children: React.ReactNode; subtitle?: s
       </div>
       {children}
     </div>
+  );
+}
+
+function StaffSection({ children }: { children: React.ReactNode }) {
+  return (
+    <section className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 flex flex-col items-center gap-2">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Staff</h2>
+      {children}
+    </section>
   );
 }
 

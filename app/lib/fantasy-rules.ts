@@ -4,6 +4,7 @@
 
 export const FANTASY_MIN_MANAGERS = 4;
 export const FANTASY_LEAGUE_NAME_MAX = 30;
+export const FANTASY_SEASON_NAME_MAX = 60;
 
 // docs/fantasy-rl.md §2: 4–6 managers, but at most 4 when the real season has 21
 // or fewer teams. num_teams is the admin's configured count, which can still
@@ -22,12 +23,22 @@ export function normalizeLeagueName(raw: string): string | { error: string } {
   return name;
 }
 
-export type FantasyLeagueStatus = "pre_draft" | "drafting" | "active" | "complete" | "disbanded";
+// ended → complete is docs/fantasy-rl.md §15: the real event is over, and then
+// its archive has been exported.
+export type FantasyLeagueStatus = "pre_draft" | "drafting" | "active" | "ended" | "complete" | "disbanded" | "cancelled";
 
 export const LEAGUE_STATUS_LABEL: Record<FantasyLeagueStatus, string> = {
   pre_draft: "Pre-draft",
   drafting: "Drafting",
   active: "In season",
+  ended: "Final",
   complete: "Complete",
   disbanded: "Disbanded",
+  cancelled: "Cancelled",
 };
+
+/** A league whose season is over and is drawn from its stored summary. */
+export const isFinalLeague = (status: FantasyLeagueStatus) => status === "ended" || status === "complete";
+
+/** Nothing about the league can change any more, its name and visibility included. */
+export const isClosedLeague = (status: FantasyLeagueStatus) => isFinalLeague(status) || status === "disbanded" || status === "cancelled";

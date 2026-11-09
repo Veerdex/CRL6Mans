@@ -7,6 +7,8 @@ import { eliminatedInLeague } from "@/app/lib/fantasy-matchup-server";
 import type { MemberView } from "@/app/lib/fantasy-leagues";
 import { leagueFromParams, type LeagueAccess } from "../league-access";
 import { WaiverOrder } from "../waiver-order";
+import { ComingSoon } from "../coming-soon";
+import { isFinalLeague } from "@/app/lib/fantasy-rules";
 import { PoolSection, PoolSkeleton } from "./pool-section";
 import type { RosterMoves } from "./move-action";
 
@@ -27,6 +29,9 @@ export default function FantasyPlayerPoolPage({ params }: { params: Promise<{ le
 async function Pool({ league }: { league: Promise<LeagueAccess> }) {
   const { viewer, view } = await league;
   const leagueId = view.league.id;
+  if (isFinalLeague(view.league.status)) {
+    return <ComingSoon title="Players">The season is over, so there are no more moves to make.</ComingSoon>;
+  }
   const active = view.league.status === "active";
   const canMove = active && view.isMember && !!viewer.accountId;
   const priority = active ? leagueWaiverPriority(leagueId) : Promise.resolve([]);

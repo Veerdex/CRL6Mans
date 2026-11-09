@@ -31,7 +31,7 @@ export async function creditFantasySlots(matchIds: string[]): Promise<void> {
   );
   if (!played.length) return;
 
-  const { data: seasons } = await supabaseAdmin.from("fantasy_seasons").select("id").neq("status", "complete");
+  const { data: seasons } = await supabaseAdmin.from("fantasy_seasons").select("id").eq("status", "active");
   const seasonIds = ((seasons ?? []) as { id: string }[]).map((s) => s.id);
   if (!seasonIds.length) return;
   const { data: leagues } = await supabaseAdmin

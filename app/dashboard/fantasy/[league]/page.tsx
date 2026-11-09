@@ -1,9 +1,10 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { type MemberView } from "@/app/lib/fantasy-leagues";
+import { getLeagueSummary, type MemberView } from "@/app/lib/fantasy-leagues";
+import type { FantasyLeagueSummary } from "@/app/lib/fantasy-archive";
 import { leagueFromParams, type LeagueAccess } from "./league-access";
 import { TabSkeleton } from "./tab-skeleton";
-import { FANTASY_MIN_MANAGERS } from "@/app/lib/fantasy-rules";
+import { FANTASY_MIN_MANAGERS, isClosedLeague, isFinalLeague } from "@/app/lib/fantasy-rules";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
 import {
@@ -29,6 +30,7 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
   const { viewer, view } = await access;
   const { league, members, invites, cap, isMember, isCommissioner, isInvited, isRemoved } = view;
   const preDraft = league.status === "pre_draft";
+  const summary = isFinalLeague(league.status) ? await getLeagueSummary(league.id) : null;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -78,6 +80,8 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
         </div>
       )}
 
+      {summary && <FinalStandings summary={summary} pendingExport={league.status === "ended"} viewerId={viewer.accountId} />}
+
       <section className="bg-zinc-800 border border-zinc-700 rounded-xl">
         <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
           <h2 className="text-sm font-semibold text-white">Managers</h2>
@@ -125,7 +129,7 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
         </section>
       )}
 
-      {isCommissioner && league.status !== "complete" && (
+      {isCommissioner && !isClosedLeague(league.status) && (
         <section className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
           <h2 className="text-sm font-semibold text-white">League settings</h2>
           <CommissionerSettings leagueId={league.id} name={league.name} visibility={league.visibility} />
@@ -142,6 +146,65 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
         </div>
       )}
     </div>
+  );
+}
+
+function FinalStandings({
+  summary,
+  pendingExport,
+  viewerId,
+}: {
+  summary: FantasyLeagueSummary;
+  pendingExport: boolean;
+  viewerId: string | null;
+}) {
+  const person = new Map(summary.managers.map((m) => [m.id, m]));
+  const champion = summary.champion ? person.get(summary.champion) : undefined;
+  return (
+    <section className="bg-zinc-800 border border-zinc-700 rounded-xl overflow-hidden">
+      <header className="px-4 py-3 border-b border-zinc-700 text-center space-y-1">
+        <h2 className="text-sm font-semibold text-white">Final standings</h2>
+        {champion ? (
+          <p className="text-sm text-yellow-400">
+            Champion: <span className="font-semibold">{champion.id === viewerId ? "You" : champion.name}</span>
+          </p>
+        ) : (
+          <p className="text-xs text-zinc-400">The playoffs didn&apos;t finish before the season ended.</p>
+        )}
+        {pendingExport && <p className="text-xs text-zinc-500">Final once the event&apos;s archive is exported.</p>}
+      </header>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-xs text-zinc-400">
+            <th className="px-4 py-2 text-left font-medium w-10">#</th>
+            <th className="py-2 text-left font-medium">Manager</th>
+            <th className="py-2 text-center font-medium w-20">W-L-T</th>
+            <th className="px-4 py-2 text-right font-medium w-20">PF</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-700/60">
+          {summary.standings.map((r) => {
+            const m = person.get(r.managerId);
+            return (
+              <tr key={r.managerId} className={r.managerId === viewerId ? "bg-indigo-500/10" : undefined}>
+                <td className={`px-4 py-2 tabular-nums ${r.place <= 3 ? "text-amber-400" : "text-zinc-500"}`}>{r.place}</td>
+                <td className="py-2 whitespace-nowrap">
+                  {m ? (
+                    <PlayerName displayName={m.name} username={m.username ?? m.name} discordId={m.discordId} className="text-sm text-white" />
+                  ) : (
+                    <span className="text-zinc-400">Unknown</span>
+                  )}
+                </td>
+                <td className="py-2 text-center tabular-nums text-zinc-300">
+                  {r.wins}-{r.losses}-{r.ties}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums text-zinc-300">{r.pointsFor.toFixed(1)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
   );
 }
 

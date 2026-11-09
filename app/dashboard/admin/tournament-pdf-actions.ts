@@ -6,6 +6,8 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { supabaseAdmin } from "@/app/lib/supabase";
 import type { TournamentArchive } from "./tournament-archive";
+import { fantasySummariesForEvent } from "@/app/lib/fantasy-season-end";
+import type { FantasyLeagueSummary } from "@/app/lib/fantasy-archive";
 
 export type PdfStanding = {
   place: number;
@@ -26,6 +28,28 @@ export type PdfMatch = {
 
 export type PdfPlayer = { username: string; displayName: string | null };
 
+export type PdfFantasyLeague = {
+  name: string;
+  champion: string | null;
+  standings: { place: number; manager: string; wins: number; losses: number; ties: number; pointsFor: number }[];
+};
+
+function pdfFantasyLeague(name: string, summary: FantasyLeagueSummary): PdfFantasyLeague {
+  const nameOf = new Map(summary.managers.map((m) => [m.id, m.name]));
+  return {
+    name,
+    champion: summary.champion ? (nameOf.get(summary.champion) ?? null) : null,
+    standings: summary.standings.map((r) => ({
+      place: r.place,
+      manager: nameOf.get(r.managerId) ?? "Unknown",
+      wins: r.wins,
+      losses: r.losses,
+      ties: r.ties,
+      pointsFor: r.pointsFor,
+    })),
+  };
+}
+
 export type TournamentPdfData = {
   name: string;
   format: string;
@@ -40,6 +64,7 @@ export type TournamentPdfData = {
   runnerUpPlayers: PdfPlayer[];
   standings: PdfStanding[];
   matches: PdfMatch[];
+  fantasy: PdfFantasyLeague[];
 };
 
 const PRESET_NAMES: Record<string, string> = {
@@ -154,6 +179,12 @@ export async function fetchEventExport(
   const champion = summary?.champion ?? null;
   const runnerUp = summary?.runnerUp ?? null;
 
+  // The archive's copy until it is purged; the leagues keep their summaries after.
+  const fantasyLeagues = archive
+    ? (archive.fantasy?.leagues ?? []).map((l) => ({ name: l.name, summary: l.summary }))
+    : await fantasySummariesForEvent(kind, id);
+  const fantasy = fantasyLeagues.map((l) => pdfFantasyLeague(l.name, l.summary));
+
   return {
     name: row.name,
     archive,
@@ -179,6 +210,7 @@ export async function fetchEventExport(
       runnerUpPlayers: summary?.runnerUpPlayers ?? [],
       standings,
       matches,
+      fantasy,
     },
   };
 }

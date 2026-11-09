@@ -8,6 +8,8 @@ export function StatusBadge({ status }: { status: FantasyLeagueStatus }) {
         ? "bg-amber-500/20 text-amber-300"
         : status === "active"
           ? "bg-emerald-500/20 text-emerald-300"
-          : "bg-zinc-700 text-zinc-400";
+          : status === "ended" || status === "complete"
+            ? "bg-indigo-500/20 text-indigo-300"
+            : "bg-zinc-700 text-zinc-400";
   return <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tone}`}>{LEAGUE_STATUS_LABEL[status]}</span>;
 }

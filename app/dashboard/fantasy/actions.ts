@@ -15,9 +15,10 @@ import {
   getManagerCap,
   type LeagueRow,
 } from "@/app/lib/fantasy-leagues";
-import { normalizeLeagueName } from "@/app/lib/fantasy-rules";
+import { isClosedLeague, normalizeLeagueName } from "@/app/lib/fantasy-rules";
 import { getStaffRole, isDirectorVerified } from "@/app/lib/players";
 import { autopickIfDue, startFantasyDrafts, submitPick } from "@/app/lib/fantasy-draft-server";
+import { openFantasySeason } from "@/app/lib/fantasy-season-end";
 import { moveLineupPlayer } from "@/app/lib/fantasy-lineup-server";
 import { addFreeAgent, cancelClaim, fileClaim, rankClaims } from "@/app/lib/fantasy-waivers-server";
 import { acceptTrade, cancelTrade, dismissTrade, proposeTrade, rejectTrade } from "@/app/lib/fantasy-trades-server";
@@ -184,7 +185,7 @@ async function requireCommissioner(leagueId: string, preDraft: boolean) {
 export async function renameLeague(leagueId: string, rawName: string): Promise<Result> {
   const ctx = await requireCommissioner(leagueId, false);
   if ("error" in ctx) return ctx;
-  if (ctx.league.status === "complete" || ctx.league.status === "disbanded") return { error: "This league is closed." };
+  if (isClosedLeague(ctx.league.status)) return { error: "This league is closed." };
   const name = normalizeLeagueName(rawName);
   if (typeof name !== "string") return name;
   await supabaseAdmin.from("fantasy_leagues").update({ name }).eq("id", leagueId);
@@ -195,7 +196,7 @@ export async function renameLeague(leagueId: string, rawName: string): Promise<R
 export async function setLeagueVisibility(leagueId: string, visibility: "public" | "private"): Promise<Result> {
   const ctx = await requireCommissioner(leagueId, false);
   if ("error" in ctx) return ctx;
-  if (ctx.league.status === "complete" || ctx.league.status === "disbanded") return { error: "This league is closed." };
+  if (isClosedLeague(ctx.league.status)) return { error: "This league is closed." };
   if (visibility !== "public" && visibility !== "private") return { error: "Pick public or private." };
   await supabaseAdmin.from("fantasy_leagues").update({ visibility }).eq("id", leagueId);
   refresh(leagueId);
@@ -438,6 +439,17 @@ export async function startAllFantasyDrafts(): Promise<Result & { message?: stri
     return { error: "Only directors with Discord 2FA on can start the fantasy drafts." };
   }
   const res = await startFantasyDrafts();
+  revalidatePath("/dashboard/fantasy", "layout");
+  return res;
+}
+
+export async function openNextFantasySeason(name: string): Promise<Result & { message?: string }> {
+  const session = await decrypt((await cookies()).get("session")?.value);
+  if (!session?.userId) return { error: "You need to be signed in." };
+  if (!(await isDirectorVerified(session.userId))) {
+    return { error: "Only directors with Discord 2FA on can open a fantasy season." };
+  }
+  const res = await openFantasySeason(name);
   revalidatePath("/dashboard/fantasy", "layout");
   return res;
 }

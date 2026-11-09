@@ -52,6 +52,7 @@ const s = StyleSheet.create({
   colLogo: { width: 22 },
   colName: { flex: 1 },
   colStat: { width: 32, textAlign: "center" },
+  colPoints: { width: 48, textAlign: "right" },
   logoThumb: { width: 18, height: 18, borderRadius: 2 },
   teamNameRow: { flexDirection: "row", alignItems: "center" },
   roundLabel: { fontSize: 9, fontFamily: "Helvetica-Bold", color: LIGHT, marginTop: 10, marginBottom: 4 },
@@ -189,6 +190,34 @@ export function TournamentReportDocument({ data }: { data: TournamentPdfData }) 
             })}
           </View>
         ) : null}
+
+        {/* Fantasy */}
+        {data.fantasy.map((league, li) => (
+          <View key={league.name + li} style={s.section} wrap={false}>
+            <Text style={s.sectionTitle}>
+              Fantasy · {league.name}
+              {league.champion ? `  —  Champion: ${league.champion}` : ""}
+            </Text>
+            <View style={s.tableHead}>
+              <Text style={[s.headText, s.colPlace]}>#</Text>
+              <Text style={[s.headText, s.colName]}>Manager</Text>
+              <Text style={[s.headText, s.colStat]}>W</Text>
+              <Text style={[s.headText, s.colStat]}>L</Text>
+              <Text style={[s.headText, s.colStat]}>T</Text>
+              <Text style={[s.headText, s.colPoints]}>PF</Text>
+            </View>
+            {league.standings.map((row, i) => (
+              <View key={row.place} style={i % 2 === 1 ? s.tableRowAlt : s.tableRow}>
+                <Text style={[s.colPlace, { color: row.place <= 3 ? ORANGE : LIGHT }]}>{row.place}</Text>
+                <Text style={[s.colName, row.place === 1 ? { fontFamily: "Helvetica-Bold" } : {}]}>{row.manager}</Text>
+                <Text style={[s.colStat, { color: "#16a34a", fontFamily: "Helvetica-Bold" }]}>{row.wins}</Text>
+                <Text style={[s.colStat, { color: "#dc2626" }]}>{row.losses}</Text>
+                <Text style={[s.colStat, { color: LIGHT }]}>{row.ties}</Text>
+                <Text style={s.colPoints}>{row.pointsFor.toFixed(1)}</Text>
+              </View>
+            ))}
+          </View>
+        ))}
 
         <Text
           style={s.pageNumber}

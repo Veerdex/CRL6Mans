@@ -520,7 +520,7 @@ Modelled on fantasy football so it's familiar:
 
 ---
 
-## 15. Season end *(designed, not built)*
+## 15. Season end
 
 A fantasy season is **officially complete when its event's archive is exported** from the
 admin tab. It gets there in two steps, because the data fantasy scores from is destroyed
@@ -532,43 +532,55 @@ Statuses (`scripts/fantasy-season-end-migration.sql`), on both the season and it
 `active → ended → complete`, or `→ cancelled`.
 
 **1. Event completed → `ended`.**
-- `snapshotFantasySeason()` runs beside `computeFullArchive`, before the reset. For each
-  active league it captures:
-  - the final standings and champion;
-  - every week's matchups and points;
-  - the final rosters and each slot's points per week;
+- `snapshotFantasySeason()` (`app/lib/fantasy-season-end.ts`) runs beside
+  `computeFullArchive`, before the reset. For each active league it captures:
+  - the final standings, in finishing order (`placedStandings`: the finalists lead), and the
+    champion;
+  - every week's matchups and lineups, exactly as the Matchup tab drew them;
+  - the final rosters with each player's season points;
   - the draft board, so the league's history is complete.
 - Managers and players carry their `discordId`, as the event archive does, since usernames
   change.
 - The snapshot goes into the event's `full_archive` as `fantasy`. That way the Export
   button's JSON carries it, and the purge drops it, with no extra plumbing.
-- Each league also gets a small permanent `summary` (standings and champion).
-- The season records `event_kind`/`event_id`, and it and its leagues move to `ended`.
+- Each league's copy is also written to `fantasy_leagues.summary`, with the weekly detail
+  under `detail`, so the league pages never load the event's whole archive. The export
+  strips `detail` (`withoutDetail`), leaving the permanent standings and champion.
+- The season records `event_kind`/`event_id`, and it and its leagues move to `ended`. This
+  happens before `resetSeason`, whose own cancel step only touches what is still running.
   - Leaving `active` is required, not cosmetic: `groupMatches()` reads every group-stage
     match in the database, so a still-active league would score the next event's Round 1.
   - Every mutator, the waiver run, the notice sweep and autopick already require
     `active`, so `ended` freezes them all.
-- League pages show "Final — results pending export" and read from the snapshot. The Roster
-  tab most of all: with teams cleared, every player would otherwise read as ineligible.
-- A test event carries no snapshot: `rollbackFantasyTestRun` has already undone its run.
+- League pages read from the snapshot (`isFinalLeague`). The League tab shows final standings
+  with a "final once the archive is exported" note; Matchup browses every week, ending on the
+  final; Roster shows each manager's final roster and season points (with teams cleared, the
+  live view would read every player as ineligible); Players is closed. Once the detail is
+  dropped at export, Matchup and Roster point back to the League tab.
+- A test event carries no snapshot and ends nothing: `rollbackFantasyTestRun` has already
+  undone its run, and `resetSeason` skips the cancel while a test event is active.
 
 **2. Archive exported → `complete`.**
 - `purgeExportedArchive` moves the linked season and leagues from `ended` to `complete` in
   the same step that clears the archive. That step only runs once the JSON download is
   confirmed, so "complete" means the data is on disk, and a later PDF-only re-export changes
   nothing.
-- The PDF report gains a fantasy page: each league's champion and final standings, from
-  `summary`.
-- Managers get one "season complete" notice under Results and playoffs.
+- The PDF report gains a fantasy section per league: its champion and final standings, from
+  the archive's copy (or the stored summaries once the archive is purged).
+- Managers get one "Fantasy season complete" notice under Results and playoffs
+  (`completionNotices`).
 
 **Ending without an archive.** Cancel Tournament on an active event, or the manual Reset
 Season button, marks a running (non-test) fantasy season and its leagues `cancelled`. No
-record is kept.
+record is kept. Deleting an event whose archive was never exported cancels its `ended`
+season the same way (`cancelFantasyForEvent`), since nothing could complete it any more.
 
-**The next season** is opened by staff with an **Open fantasy season** control (a name) in the
-admin panel. It's allowed once no season is `open`, `drafting` or `active`. An `ended` season
-doesn't block it, since that season only waits on an export. `getCurrentFantasySeason` must
-then skip `ended` and `cancelled` as well as `complete`.
+**The next season** is opened by a director with the **Open season** control (a name) in the
+Staff box on the fantasy hub, beside Start fantasy drafts. It shows once no season is
+running. It's allowed once no season is `open`, `drafting` or `active`. An `ended` season
+doesn't block it, since that season only waits on an export. `getCurrentFantasySeason` reads
+only `open`, `drafting` and `active`; the hub falls back to the newest `ended` or `complete`
+season (`getHubSeason`) so the last results stay visible until the next one opens.
 
 **Profiles:** fantasy results are not shown on player profiles for now. They can be added
 later from the stored summaries.

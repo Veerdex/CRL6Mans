@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "./supabase";
 import { getStaffRole } from "./players";
 import { fantasyManagerCap, type FantasyLeagueStatus } from "./fantasy-rules";
+import type { FantasyLeagueSummary } from "./fantasy-archive";
 
 // Server-side reads for the fantasy pages and the access checks the actions
 // share. Every read here tolerates the tables not existing yet (a deploy that
@@ -88,16 +89,24 @@ export async function fantasyOpenToAll(): Promise<boolean> {
   return overrides.fantasy === "shown";
 }
 
-export async function getCurrentFantasySeason(): Promise<FantasySeason | null> {
+const newestSeason = async (statuses: string[]): Promise<FantasySeason | null> => {
   const { data, error } = await supabaseAdmin
     .from("fantasy_seasons")
     .select("id, name, status")
-    .neq("status", "complete")
+    .in("status", statuses)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error || !data) return null;
   return data as FantasySeason;
+};
+
+/** The season leagues form, draft and play in. An ended one only waits on its export (§15). */
+export const getCurrentFantasySeason = () => newestSeason(["open", "drafting", "active"]);
+
+/** What the hub shows: the live season, or else the last one to finish, so its leagues stay findable. */
+export async function getHubSeason(): Promise<FantasySeason | null> {
+  return (await getCurrentFantasySeason()) ?? (await newestSeason(["ended", "complete"]));
 }
 
 export async function getManagerCap(): Promise<number> {
@@ -110,6 +119,12 @@ export async function getLeague(leagueId: string): Promise<LeagueRow | null> {
   const { data, error } = await supabaseAdmin.from("fantasy_leagues").select(LEAGUE_COLS).eq("id", leagueId).maybeSingle();
   if (error || !data) return null;
   return data as LeagueRow;
+}
+
+/** An ended or complete league's stored result (§15); its detail is gone once the event is exported. */
+export async function getLeagueSummary(leagueId: string): Promise<FantasyLeagueSummary | null> {
+  const { data } = await supabaseAdmin.from("fantasy_leagues").select("summary").eq("id", leagueId).maybeSingle();
+  return (data?.summary as FantasyLeagueSummary | null | undefined) ?? null;
 }
 
 async function fetchAccounts(ids: string[]): Promise<Map<string, AccountLite>> {
@@ -132,7 +147,7 @@ export type HubData = {
 };
 
 export async function getHubData(viewer: FantasyViewer): Promise<HubData> {
-  const season = await getCurrentFantasySeason();
+  const season = await getHubSeason();
   const cap = await getManagerCap();
   if (!season) return { season, cap, myLeagues: [], invitedLeagues: [], otherLeagues: [], hasCreated: false };
 
@@ -140,7 +155,7 @@ export async function getHubData(viewer: FantasyViewer): Promise<HubData> {
     .from("fantasy_leagues")
     .select(LEAGUE_COLS)
     .eq("fantasy_season_id", season.id)
-    .neq("status", "disbanded")
+    .not("status", "in", "(disbanded,cancelled)")
     .order("created_at", { ascending: true });
   const leagues = (leagueRows ?? []) as LeagueRow[];
   const ids = leagues.map((l) => l.id);

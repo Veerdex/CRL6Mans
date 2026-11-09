@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
-import { FANTASY_LEAGUE_NAME_MAX } from "@/app/lib/fantasy-rules";
+import { FANTASY_LEAGUE_NAME_MAX, FANTASY_SEASON_NAME_MAX } from "@/app/lib/fantasy-rules";
 import {
   cancelInvite,
   createLeague,
@@ -11,6 +11,7 @@ import {
   invitePlayer,
   joinLeague,
   leaveLeague,
+  openNextFantasySeason,
   removeManager,
   renameLeague,
   searchInvitablePlayers,
@@ -378,6 +379,44 @@ export function StartDraftsButton() {
       </div>
       <ErrorLine error={error} />
     </div>
+  );
+}
+
+export function OpenSeasonForm() {
+  const [name, setName] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const { error, pending, run } = useAction();
+
+  if (message) return <p className="text-sm text-emerald-300 text-center">{message}</p>;
+  return (
+    <form
+      className="w-full max-w-md"
+      onSubmit={(e) => {
+        e.preventDefault();
+        run(
+          async () => {
+            const res = await openNextFantasySeason(name);
+            if (!res.error) setMessage(res.message ?? "Season opened.");
+            return res;
+          },
+        );
+      }}
+    >
+      <label className="block text-xs text-zinc-400 mb-1">Next fantasy season</label>
+      <div className="flex gap-2">
+        <input
+          className={INPUT}
+          value={name}
+          maxLength={FANTASY_SEASON_NAME_MAX}
+          placeholder="Season name"
+          onChange={(e) => setName(e.target.value)}
+        />
+        <button type="submit" className={`${PRIMARY} whitespace-nowrap`} disabled={pending || !name.trim()}>
+          {pending ? "Opening…" : "Open season"}
+        </button>
+      </div>
+      <ErrorLine error={error} />
+    </form>
   );
 }
 

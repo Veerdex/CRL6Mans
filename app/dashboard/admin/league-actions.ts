@@ -14,6 +14,7 @@ import { APP_NAME } from "@/app/lib/constants";
 import { computeTopStats } from "@/app/lib/game-stats";
 import { rollUpCareerStats } from "@/app/lib/career-stats";
 import { rollbackFantasyTestRun } from "@/app/lib/fantasy-draft-server";
+import { cancelRunningFantasySeason, endFantasySeason, snapshotFantasySeason } from "@/app/lib/fantasy-season-end";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { fetchEventWinner } from "@/app/lib/bracket-server";
 import { computeFullArchive } from "./tournament-archive";
@@ -611,6 +612,9 @@ export async function resetSeason() {
   // Keyed on the fantasy season's own test_run flag rather than the event, so
   // a test run is undone even if the event's test flag is already gone.
   await rollbackFantasyTestRun();
+  // A completion has already moved its fantasy season to `ended`, so whatever
+  // is still running here belongs to an event ending with no archive.
+  if (!(await isTestEventActive())) await cancelRunningFantasySeason();
 
   await supabaseAdmin.from("sub_requests").delete().not("id", "is", null);
   await supabaseAdmin.from("matches").delete().not("id", "is", null);
@@ -749,7 +753,8 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
   }
 
   const endedAt = new Date().toISOString();
-  const fullArchive = await computeFullArchive({
+  const fantasy = await snapshotFantasySeason();
+  const eventArchive = await computeFullArchive({
     kind: "season",
     name,
     formatPreset: null,
@@ -762,6 +767,7 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
     startedAt: null,
     endedAt,
   });
+  const fullArchive = fantasy ? { ...eventArchive, fantasy: fantasy.archive } : eventArchive;
 
   const { data: archivedSeason, error: archiveError } = await supabaseAdmin.from("seasons").insert({
     name,
@@ -806,6 +812,9 @@ export async function completeSeason(): Promise<{ ok?: boolean; error?: string; 
       .upsert({ event_id: archivedSeason.id as string, ...accoladePrizeColumns }, { onConflict: "event_id" });
     if (prizeError) console.error("[completeSeason] failed to record accolade prizes", prizeError);
   }
+
+  // Before the reset, which would otherwise cancel it as an event ended unarchived.
+  if (fantasy && archivedSeason?.id) await endFantasySeason(fantasy, "season", archivedSeason.id as string);
 
   // Only wipe once the archive is safely written.
   await resetSeason();
