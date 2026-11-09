@@ -233,8 +233,9 @@ function Board({
         </>
       )}
 
+      {/* relative here and on each row: paints above the site's fixed logo watermark, so the dark parts read solid. */}
       {!week.closed && (
-        <div className="grid grid-cols-[1fr_auto_1fr] border-t border-zinc-700 bg-zinc-900/50">
+        <div className="relative grid grid-cols-[1fr_auto_1fr] border-t border-zinc-700 bg-zinc-900/50">
           <span className="self-center px-4 py-4 text-center text-3xl font-bold tabular-nums text-white">{leftProjected.toFixed(1)}</span>
           <span className="flex items-center justify-center bg-black/50 px-3 text-center text-sm font-bold leading-tight text-zinc-200">
             Projected
@@ -359,7 +360,7 @@ function BoardRow({
   const leftBest = bothScored && a!.points > b!.points;
   const rightBest = bothScored && b!.points > a!.points;
   return (
-    <li className="grid grid-cols-[1fr_2.5rem_1fr] sm:grid-cols-[1fr_3rem_1fr] items-stretch rounded-lg bg-zinc-900/60 overflow-hidden">
+    <li className="relative grid grid-cols-[1fr_2.5rem_1fr] sm:grid-cols-[1fr_3rem_1fr] items-stretch rounded-lg bg-zinc-900/60 overflow-hidden">
       <div className="flex items-center gap-2 px-2 sm:px-3 py-2.5 min-w-0">
         <div className="flex-1 min-w-0">
           <PlayerCell line={left} align="left" abbr={abbr} />
