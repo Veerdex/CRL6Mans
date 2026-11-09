@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import type { PoolPlayer, PoolTeam } from "@/app/lib/fantasy-pool-data";
-import { TIER_LABEL, type FantasyTier } from "@/app/lib/fantasy-pool";
+import { TIER_LABEL, TIER_NAME_CLASS, type FantasyTier } from "@/app/lib/fantasy-pool";
 import { formatRating } from "@/app/lib/rating";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
@@ -248,7 +248,7 @@ function NameCell({ player }: { player: PoolPlayer }) {
     <div className="flex items-center gap-2 min-w-0">
       <PlayerAvatar discordId={player.discordId} avatar={player.avatar} username={player.username} className="w-7 h-7" cdnSize={64} />
       <div className="min-w-0 flex whitespace-nowrap">
-        <PlayerName displayName={player.name} username={player.username} discordId={player.discordId || null} className="text-sm text-white" />
+        <PlayerName displayName={player.name} username={player.username} discordId={player.discordId || null} className={`text-sm font-medium ${TIER_NAME_CLASS[player.tier]}`} />
       </div>
     </div>
   );

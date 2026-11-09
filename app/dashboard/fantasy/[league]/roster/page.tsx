@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { getPoolView, type PoolPlayer } from "@/app/lib/fantasy-pool-data";
+import { TIER_NAME_CLASS } from "@/app/lib/fantasy-pool";
 import { rosterSlots } from "@/app/lib/fantasy-draft-server";
 import { LINEUP_SLOTS, SLOT_LABEL, isStarterSlot, slotTier, type LineupSlot } from "@/app/lib/fantasy-draft";
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
@@ -141,12 +142,13 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
             <ul className="divide-y divide-zinc-700/60">
               {claims.map((c) => {
                 const add = playerById.get(c.playerId);
+                const drop = playerById.get(c.dropPlayerId);
                 return (
                   <li key={c.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                     <div className="flex-1 min-w-0">
-                      <div className="text-white truncate">
-                        {add?.name ?? "Unknown player"}{" "}
-                        <span className="text-zinc-400">for {playerById.get(c.dropPlayerId)?.name ?? "Unknown player"}</span>
+                      <div className="text-zinc-400 truncate">
+                        <span className={add ? `font-medium ${TIER_NAME_CLASS[add.tier]}` : "text-white"}>{add?.name ?? "Unknown player"}</span>{" "}
+                        for <span className={drop ? `font-medium ${TIER_NAME_CLASS[drop.tier]}` : ""}>{drop?.name ?? "Unknown player"}</span>
                       </div>
                       <div className="text-xs text-zinc-400">
                         {add?.waiverClearsAt ? (
@@ -243,7 +245,7 @@ function SlotPlayer({ player, empty, hint }: { player: PoolPlayer | undefined; e
       <PlayerAvatar discordId={player.discordId} avatar={player.avatar} username={player.username} className="w-8 h-8" cdnSize={64} />
       <div className="flex-1 min-w-0">
         <div className="flex whitespace-nowrap">
-          <PlayerName displayName={player.name} username={player.username} discordId={player.discordId || null} className="text-sm text-white" />
+          <PlayerName displayName={player.name} username={player.username} discordId={player.discordId || null} className={`text-sm font-medium ${TIER_NAME_CLASS[player.tier]}`} />
         </div>
         <div className="text-xs text-zinc-400 truncate">
           {player.team ? (
