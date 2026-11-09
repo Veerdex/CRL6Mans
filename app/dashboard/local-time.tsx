@@ -11,10 +11,12 @@ function calendarDaysUntil(target: Date, now: Date): number {
   return Math.round((b - a) / 86_400_000);
 }
 
-function format(d: Date, dateOnly: boolean, upcoming: boolean): string {
+function format(d: Date, dateOnly: boolean, upcoming: boolean, weekday: boolean): string {
   const time: Intl.DateTimeFormatOptions = dateOnly
     ? {}
     : { hour: "numeric", minute: "2-digit", timeZoneName: "short" };
+
+  if (weekday) return d.toLocaleString(undefined, { weekday: "short", ...time });
 
   if (!upcoming) {
     return dateOnly
@@ -48,17 +50,22 @@ function format(d: Date, dateOnly: boolean, upcoming: boolean): string {
 // year only when it differs from the current one, and inside the next six days
 // the date is dropped entirely - the next Saturday is the only Saturday anyone
 // could mean, so "Saturday, 7:00 PM CDT" says as much as a date would.
+//
+// `weekday` gives the short day and time alone ("Wed, 8:00 PM MST"), for a view
+// already scoped to one week, where the day is all a date would add.
 export function LocalTime({
   iso,
   className,
   dateOnly = false,
   upcoming = false,
+  weekday = false,
   suffix,
 }: {
   iso: string | null | undefined;
   className?: string;
   dateOnly?: boolean;
   upcoming?: boolean;
+  weekday?: boolean;
   suffix?: string;
 }) {
   const [formatted, setFormatted] = useState<string | null>(null);
@@ -67,8 +74,8 @@ export function LocalTime({
     if (!iso) return;
     const d = new Date(iso);
     if (isNaN(d.getTime())) return;
-    setFormatted(format(d, dateOnly, upcoming) + (suffix ?? ""));
-  }, [iso, dateOnly, upcoming, suffix]);
+    setFormatted(format(d, dateOnly, upcoming, weekday) + (suffix ?? ""));
+  }, [iso, dateOnly, upcoming, weekday, suffix]);
 
   if (!iso) return <span className={className}>—</span>;
   return (

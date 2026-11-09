@@ -427,7 +427,7 @@ function StateLine({ state, team }: { state: SlotState; team: string | null }) {
           {state.at ? (
             <>
               {" · "}
-              <LocalTime iso={state.at} upcoming />
+              <LocalTime iso={state.at} weekday />
             </>
           ) : (
             " · not scheduled"
