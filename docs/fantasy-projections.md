@@ -100,11 +100,18 @@ This replaces the spec's ±10% per-stat dominance (§10), which barely moved a h
 favourite. All five projected stats are multiplied by one factor taken from `pSeries`, the
 player's team's chance of winning their next series:
 ```
-pSeries ≥ 0.5:  multiplier = 1 + 0.5 × (2·pSeries − 1)     1.0 → 1.5
-pSeries < 0.5:  multiplier = 0.1 + 0.9 × 2·pSeries          0.1 → 1.0
+edge  = 2·pSeries − 1                       −1 … 1
+swing = |edge|^1.75
+edge ≥ 0:  multiplier = 1 + 0.5 × swing     1.0 → 1.5
+edge < 0:  multiplier = 1 − 0.9 × swing     1.0 → 0.1
 ```
-The two lines meet at 1 for an even series. A single line from 0.1 to 1.5 would put an even
-series at 0.8, so every player in the league would be projected low. The win bonus is not
+| pSeries | 0% | 10% | 25% | 50% | 75% | 90% | 100% |
+|---|---|---|---|---|---|---|---|
+| multiplier | 0.10 | 0.39 | 0.73 | 1.00 | 1.15 | 1.34 | 1.50 |
+
+It is pinned at 1 for an even series, so the league isn't projected low on average. A single
+line from 0.1 to 1.5 would put an even series at 0.8. The curve is flat near even, so a modest
+favourite barely moves, and it swings hard only when a series is lopsided. The win bonus is not
 multiplied, since it already depends on the matchup.
 
 The **RV update applies the same multiplier** to the FP it measures a series against. Each

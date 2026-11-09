@@ -75,9 +75,9 @@ test("the same player projects lower against a stronger team", () => {
 
 test("the matchup multiplier runs 0.1 at a certain loss, 1 at an even series, 1.5 at a certain win", () => {
   close(matchupMultiplier(0), 0.1);
-  close(matchupMultiplier(0.25), 0.55);
+  close(matchupMultiplier(0.25), 1 - 0.9 * 0.5 ** 1.75);
   close(matchupMultiplier(0.5), 1);
-  close(matchupMultiplier(0.75), 1.25);
+  close(matchupMultiplier(0.75), 1.15, 0.005);
   close(matchupMultiplier(1), 1.5);
   close(matchupMultiplier(-1), 0.1);
   close(matchupMultiplier(2), 1.5);

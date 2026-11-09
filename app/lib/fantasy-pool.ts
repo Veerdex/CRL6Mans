@@ -57,6 +57,8 @@ export type Matchup = { ownRating: number; oppRating: number; winsNeeded: number
 /** Stat points are multiplied by this when a team is certain to lose its series, and by MATCHUP_CEILING when certain to win it. */
 export const MATCHUP_FLOOR = 0.1;
 export const MATCHUP_CEILING = 1.5;
+/** How slowly the multiplier leaves 1: a 75% favourite gets 1 + 0.5 × 0.5^1.75 ≈ 1.15. */
+const MATCHUP_CURVE = 1.75;
 
 function projectedPerGameLine(rating: number | null, history: StatTotals | null): StatLine {
   const games = history?.games ?? 0;
@@ -81,15 +83,16 @@ export function seriesWinChance({ ownRating, oppRating, winsNeeded }: Matchup): 
 }
 
 /**
- * docs/fantasy-projections.md §2 step 3. Two straight lines meeting at 1 for an
- * even series rather than one line from floor to ceiling, which would put an even
- * series at 0.8 and project every player in the league low. Both the projection
- * and the RV update apply it, so a favourite's padded stats aren't read as the
- * player outplaying their rating.
+ * docs/fantasy-projections.md §2 step 3. Pinned at 1 for an even series, so the
+ * league isn't projected low on average, and flat near it, so a modest favourite
+ * barely moves while a lopsided series swings toward the floor or ceiling. Both
+ * the projection and the RV update apply it, so a favourite's padded stats
+ * aren't read as the player outplaying their rating.
  */
 export function matchupMultiplier(pSeries: number): number {
-  const p = Math.min(1, Math.max(0, pSeries));
-  return p >= 0.5 ? 1 + (MATCHUP_CEILING - 1) * (2 * p - 1) : MATCHUP_FLOOR + (1 - MATCHUP_FLOOR) * 2 * p;
+  const edge = 2 * Math.min(1, Math.max(0, pSeries)) - 1;
+  const swing = Math.abs(edge) ** MATCHUP_CURVE;
+  return edge >= 0 ? 1 + (MATCHUP_CEILING - 1) * swing : 1 - (1 - MATCHUP_FLOOR) * swing;
 }
 
 /** docs/fantasy-projections.md §3: Σ over the team's winning scorelines of P × (winsNeeded − games lost). */
