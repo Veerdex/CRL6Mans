@@ -4,6 +4,8 @@ import { accountName, getLeague, type LeagueRow } from "./fantasy-leagues";
 import { lockedPlayerIds, managerLineup } from "./fantasy-lineup-server";
 import { tradeMoves, tradeShapeProblem, type TradeStatus, type TradeView } from "./fantasy-trades";
 import { recordNotification } from "./notifications";
+import { eliminatedInLeague } from "./fantasy-matchup-server";
+import { FROZEN_NOTE } from "./fantasy-schedule";
 
 // Trades (docs/fantasy-rl.md §10). The rules are in fantasy-trades.ts; the
 // move itself is fantasy_accept_trade (scripts/fantasy-trades-migration.sql).
@@ -68,6 +70,28 @@ async function activeLeagueWithMembers(leagueId: string, managerIds: string[]): 
   return league;
 }
 
+const FROZEN_TRADE_NOTE = "One side's season is over, and its roster is frozen.";
+
+/** §7/§10: a pending trade is called off once either side is eliminated. */
+export async function cancelFrozenTrades(leagueId: string, eliminated: Set<string>): Promise<void> {
+  if (!eliminated.size) return;
+  const ids = [...eliminated].join(",");
+  const { error } = await supabaseAdmin
+    .from("fantasy_trades")
+    .update({ status: "cancelled", note: FROZEN_TRADE_NOTE, resolved_at: new Date().toISOString() })
+    .eq("league_id", leagueId)
+    .eq("status", "pending")
+    .or(`proposer_id.in.(${ids}),receiver_id.in.(${ids})`);
+  if (error) console.error(`[fantasy] cancelling frozen trades in ${leagueId} failed: ${error.message}`);
+}
+
+async function frozenProblem(leagueId: string, viewerId: string, otherId: string): Promise<string | null> {
+  const eliminated = await eliminatedInLeague(leagueId);
+  if (eliminated.has(viewerId)) return FROZEN_NOTE;
+  if (eliminated.has(otherId)) return "Their season is over, so their roster is frozen.";
+  return null;
+}
+
 async function notify(accountIds: string[], title: string, body: string, leagueId: string): Promise<void> {
   const { data } = await supabaseAdmin.from("accounts").select("discord_id").in("id", accountIds);
   const discordIds = ((data ?? []) as { discord_id: string }[]).map((a) => a.discord_id);
@@ -91,6 +115,8 @@ export async function proposeTrade(
   const get = [...new Set(getIds)];
   const league = await activeLeagueWithMembers(leagueId, [proposerId, receiverId]);
   if ("error" in league) return league;
+  const frozen = await frozenProblem(leagueId, proposerId, receiverId);
+  if (frozen) return { error: frozen };
 
   const [mine, theirs] = await Promise.all([
     managerLineup(leagueId, league.fantasy_season_id, proposerId),
@@ -198,6 +224,10 @@ export async function acceptTrade(leagueId: string, managerId: string, tradeId: 
 
   const league = await activeLeagueWithMembers(leagueId, [proposerId, managerId]);
   if ("error" in league) return league;
+  if (await frozenProblem(leagueId, managerId, proposerId)) {
+    await settle(leagueId, tradeId, "cancelled", FROZEN_TRADE_NOTE, { receiver: managerId });
+    return { error: `${FROZEN_TRADE_NOTE} The trade has been called off.` };
+  }
 
   const [theirs, mine, locked] = await Promise.all([
     managerLineup(leagueId, league.fantasy_season_id, proposerId),

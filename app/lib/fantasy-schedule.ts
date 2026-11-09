@@ -178,6 +178,26 @@ export function buildSchedule(input: {
   return { weeks, standings, champion };
 }
 
+/**
+ * Managers frozen by §7: outside the playoff seeds once the regular season
+ * closes, the semifinal losers once the semis close, and everyone once the
+ * season's last week closes, since nothing is left to play for.
+ */
+export const FROZEN_NOTE = "Your season is over, so your roster is frozen: no adds, claims or trades.";
+
+export function eliminatedManagers(schedule: Schedule): Set<string> {
+  const { weeks, standings } = schedule;
+  const out = new Set<string>();
+  if (!weeks.length || weeks.every((w) => w.closed)) return new Set(standings.map((s) => s.managerId));
+  const playoffs = weeks.filter((w) => w.kind !== "regular");
+  if (!playoffs.length || playoffs[0].pending) return out;
+  const alive = new Set(playoffs[0].matchups.flatMap((m) => [m.a, m.b!]));
+  for (const s of standings) if (!alive.has(s.managerId)) out.add(s.managerId);
+  const semis = playoffs.find((w) => w.kind === "semifinal");
+  if (semis?.closed) for (const m of semis.matchups) out.add(m.winner === m.a ? m.b! : m.a);
+  return out;
+}
+
 /** The earliest week still open, or the last week once the season is over. */
 export function currentWeek(weeks: ScheduleWeek[]): number | null {
   if (!weeks.length) return null;

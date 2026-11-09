@@ -13,6 +13,8 @@ import { TradeButton, type PlayerLookup } from "./trades";
 export type RosterMoves = {
   leagueId: string;
   managerId: string;
+  /** Managers frozen by §7, the viewer possibly among them. */
+  eliminated: string[];
   managerNames: Record<string, string>;
   trades: TradeView[];
   lineup: LineupEntry[];
@@ -39,21 +41,26 @@ export function MoveAction({
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const frozen = moves.eliminated.includes(moves.managerId);
   if (player.manager) {
-    return player.manager.accountId === moves.managerId ? null : (
+    const mine = player.manager.accountId === moves.managerId;
+    return mine || frozen || moves.eliminated.includes(player.manager.accountId) ? null : (
       <TradeButton player={player} moves={moves} playerOf={playerOf} rosterOf={rosterOf} />
     );
   }
 
   const claim = moves.claims.find((c) => c.playerId === player.id);
   const onWaivers = player.waiverClearsAt !== null;
+  if (frozen && !claim) return null;
 
-  if (claim && !open) {
+  if (claim && (!open || frozen)) {
     return (
       <span className="inline-flex items-center gap-1.5">
-        <button type="button" onClick={() => setOpen(true)} className={`${BUTTON} bg-amber-500/15 text-amber-300 hover:bg-amber-500/25`}>
-          Claimed
-        </button>
+        {!frozen && (
+          <button type="button" onClick={() => setOpen(true)} className={`${BUTTON} bg-amber-500/15 text-amber-300 hover:bg-amber-500/25`}>
+            Claimed
+          </button>
+        )}
         <button
           type="button"
           disabled={pending}

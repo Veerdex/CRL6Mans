@@ -2,7 +2,8 @@ import { Suspense } from "react";
 import { getPoolView } from "@/app/lib/fantasy-pool-data";
 import { managerLineup } from "@/app/lib/fantasy-lineup-server";
 import { leagueWaiverPriority, managerPendingClaims } from "@/app/lib/fantasy-waivers-server";
-import { managerTrades } from "@/app/lib/fantasy-trades-server";
+import { cancelFrozenTrades, managerTrades } from "@/app/lib/fantasy-trades-server";
+import { eliminatedInLeague } from "@/app/lib/fantasy-matchup-server";
 import type { MemberView } from "@/app/lib/fantasy-leagues";
 import { leagueFromParams, type LeagueAccess } from "../league-access";
 import { WaiverOrder } from "../waiver-order";
@@ -63,18 +64,25 @@ async function rosterMoves(
   priority: Promise<string[]>,
   members: MemberView[],
 ): Promise<RosterMoves> {
-  const [lineup, claims, order, trades] = await Promise.all([
+  // The run sweeps frozen trades daily; doing it here too means nobody is
+  // shown an offer they can no longer accept.
+  const trades = eliminatedInLeague(leagueId).then(async (eliminated) => {
+    await cancelFrozenTrades(leagueId, eliminated);
+    return { eliminated, list: await managerTrades(leagueId, managerId) };
+  });
+  const [lineup, claims, order, { eliminated, list }] = await Promise.all([
     managerLineup(leagueId, fantasySeasonId, managerId),
     managerPendingClaims(leagueId, managerId),
     priority,
-    managerTrades(leagueId, managerId),
+    trades,
   ]);
   const spot = order.indexOf(managerId);
   return {
     leagueId,
     managerId,
+    eliminated: [...eliminated],
+    trades: list,
     managerNames: Object.fromEntries(members.map((m) => [m.accountId, m.name])),
-    trades,
     lineup,
     claims: claims.map((c) => ({ id: c.id, playerId: c.playerId, dropPlayerId: c.dropPlayerId })),
     priority: spot >= 0 ? { spot: spot + 1, of: order.length } : null,

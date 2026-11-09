@@ -5,7 +5,7 @@ import { GROUP_STAGE_PREFIX } from "./bracket";
 import { getPoolView, type PoolPlayer } from "./fantasy-pool-data";
 import { seriesPointsFromGames } from "./fantasy-pool";
 import { LINEUP_SLOTS, isStarterSlot, type LineupSlot } from "./fantasy-draft";
-import { buildSchedule, currentWeek, type Schedule } from "./fantasy-schedule";
+import { buildSchedule, currentWeek, eliminatedManagers, playoffWeekCount, type Schedule } from "./fantasy-schedule";
 
 // The Matchup tab's data (docs/fantasy-rl.md §5–§7). A slot's score comes from
 // its credit (fantasy-credits.ts), and the points behind it are computed here on
@@ -59,55 +59,9 @@ type Credit = { manager_id: string; week: number; slot: LineupSlot; player_id: s
 
 const FINAL_STATUSES = new Set(["completed", "cancelled"]);
 
-export async function getMatchupData(leagueId: string, viewerIsStaff: boolean, week: number | null): Promise<MatchupData> {
-  const [{ data: league }, { data: memberRows }, pool, matches, credits, { data: slotRows }, { data: teamRows }] = await Promise.all([
-    supabaseAdmin.from("fantasy_leagues").select("draft_order").eq("id", leagueId).maybeSingle(),
-    supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId).order("joined_at"),
-    getPoolView(leagueId, viewerIsStaff, { byMatch: true }),
-    fetchAllRows<GroupMatch>((from, to) =>
-      supabaseAdmin
-        .from("matches")
-        .select("id, round, status, forfeit, home_team_id, away_team_id, home_score, away_score, scheduled_at")
-        .like("stage", `${GROUP_STAGE_PREFIX}%`)
-        .order("id")
-        .range(from, to),
-    ),
-    fetchAllRows<Credit>((from, to) =>
-      supabaseAdmin
-        .from("fantasy_slot_credits")
-        .select("manager_id, week, slot, player_id, match_id, team_id")
-        .eq("league_id", leagueId)
-        .order("week")
-        .order("manager_id")
-        .order("slot")
-        .range(from, to),
-    ).catch(() => [] as Credit[]),
-    supabaseAdmin.from("fantasy_roster_slots").select("manager_id, slot, player_id").eq("league_id", leagueId),
-    supabaseAdmin.from("teams").select("id, name"),
-  ]);
-
-  const members = ((memberRows ?? []) as { account_id: string }[]).map((m) => m.account_id);
-  const order = ((league?.draft_order as string[] | null) ?? []).filter((id) => members.includes(id));
-  const managers = [...order, ...members.filter((id) => !order.includes(id))];
-
-  const empty: MatchupData = {
-    hiddenForTest: pool.hiddenForTest,
-    schedule: { weeks: [], standings: [], champion: null },
-    currentWeek: null,
-    shownWeek: null,
-    managers,
-    lineups: new Map(),
-  };
-  if (pool.hiddenForTest) return empty;
-
+/** Each credit's series points, and every manager's total per week keyed `week:manager`. */
+async function scoreCredits(matches: GroupMatch[], credits: Credit[]) {
   const matchById = new Map(matches.map((m) => [m.id, m]));
-  const totalWeeks = matches.reduce((max, m) => Math.max(max, m.round ?? 0), 0);
-  const closedWeeks = new Set<number>();
-  for (let w = 1; w <= totalWeeks; w++) {
-    const round = matches.filter((m) => m.round === w);
-    if (round.length && round.every((m) => FINAL_STATUSES.has(m.status))) closedWeeks.add(w);
-  }
-
   const creditedMatches = [...new Set(credits.map((c) => c.match_id))];
   const creditedPlayers = [...new Set(credits.map((c) => c.player_id))];
   const stats = creditedMatches.length
@@ -146,12 +100,94 @@ export async function getMatchupData(leagueId: string, viewerIsStaff: boolean, w
   };
 
   const weekTotals = new Map<string, number>();
-  const creditAt = new Map<string, Credit>();
   for (const c of credits) {
-    creditAt.set(`${c.week}:${c.manager_id}:${c.slot}`, c);
     const key = `${c.week}:${c.manager_id}`;
     weekTotals.set(key, (weekTotals.get(key) ?? 0) + creditPoints(c).points);
   }
+  return { matchById, creditPoints, weekTotals };
+}
+
+/** The league's managers in draft order, which is the round robin's seating. */
+async function leagueManagers(leagueId: string): Promise<string[]> {
+  const [{ data: league }, { data: memberRows }] = await Promise.all([
+    supabaseAdmin.from("fantasy_leagues").select("draft_order").eq("id", leagueId).maybeSingle(),
+    supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId).order("joined_at"),
+  ]);
+  const members = ((memberRows ?? []) as { account_id: string }[]).map((m) => m.account_id);
+  const order = ((league?.draft_order as string[] | null) ?? []).filter((id) => members.includes(id));
+  return [...order, ...members.filter((id) => !order.includes(id))];
+}
+
+const groupMatches = () =>
+  fetchAllRows<GroupMatch>((from, to) =>
+    supabaseAdmin
+      .from("matches")
+      .select("id, round, status, forfeit, home_team_id, away_team_id, home_score, away_score, scheduled_at")
+      .like("stage", `${GROUP_STAGE_PREFIX}%`)
+      .order("id")
+      .range(from, to),
+  );
+
+const leagueCredits = (leagueId: string) =>
+  fetchAllRows<Credit>((from, to) =>
+    supabaseAdmin
+      .from("fantasy_slot_credits")
+      .select("manager_id, week, slot, player_id, match_id, team_id")
+      .eq("league_id", leagueId)
+      .order("week")
+      .order("manager_id")
+      .order("slot")
+      .range(from, to),
+  ).catch(() => [] as Credit[]);
+
+function weeksOf(matches: GroupMatch[]): { totalWeeks: number; closedWeeks: Set<number> } {
+  const totalWeeks = matches.reduce((max, m) => Math.max(max, m.round ?? 0), 0);
+  const closedWeeks = new Set<number>();
+  for (let w = 1; w <= totalWeeks; w++) {
+    const round = matches.filter((m) => m.round === w);
+    if (round.length && round.every((m) => FINAL_STATUSES.has(m.status))) closedWeeks.add(w);
+  }
+  return { totalWeeks, closedWeeks };
+}
+
+/**
+ * The managers §7 freezes. Nobody is out before the regular season closes, so
+ * that common case skips reading any scores.
+ */
+export async function eliminatedInLeague(leagueId: string): Promise<Set<string>> {
+  const [managers, matches] = await Promise.all([leagueManagers(leagueId), groupMatches()]);
+  const { totalWeeks, closedWeeks } = weeksOf(matches);
+  const regularWeeks = totalWeeks - playoffWeekCount(totalWeeks, managers.length);
+  for (let w = 1; w <= regularWeeks; w++) if (!closedWeeks.has(w)) return new Set();
+  const { weekTotals } = await scoreCredits(matches, await leagueCredits(leagueId));
+  return eliminatedManagers(
+    buildSchedule({ managers, totalWeeks, closedWeeks, points: (w, m) => weekTotals.get(`${w}:${m}`) ?? 0 }),
+  );
+}
+
+export async function getMatchupData(leagueId: string, viewerIsStaff: boolean, week: number | null): Promise<MatchupData> {
+  const [managers, pool, matches, credits, { data: slotRows }, { data: teamRows }] = await Promise.all([
+    leagueManagers(leagueId),
+    getPoolView(leagueId, viewerIsStaff, { byMatch: true }),
+    groupMatches(),
+    leagueCredits(leagueId),
+    supabaseAdmin.from("fantasy_roster_slots").select("manager_id, slot, player_id").eq("league_id", leagueId),
+    supabaseAdmin.from("teams").select("id, name"),
+  ]);
+
+  const empty: MatchupData = {
+    hiddenForTest: pool.hiddenForTest,
+    schedule: { weeks: [], standings: [], champion: null },
+    currentWeek: null,
+    shownWeek: null,
+    managers,
+    lineups: new Map(),
+  };
+  if (pool.hiddenForTest) return empty;
+
+  const { totalWeeks, closedWeeks } = weeksOf(matches);
+  const { matchById, creditPoints, weekTotals } = await scoreCredits(matches, credits);
+  const creditAt = new Map(credits.map((c) => [`${c.week}:${c.manager_id}:${c.slot}`, c]));
 
   const schedule = buildSchedule({
     managers,

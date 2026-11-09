@@ -5,6 +5,7 @@ import type { PoolPlayer, PoolView } from "@/app/lib/fantasy-pool-data";
 import { PoolTable } from "./pool-table";
 import { MoveAction, type RosterMoves } from "./move-action";
 import { TradesPanel } from "./trades";
+import { FROZEN_NOTE } from "@/app/lib/fantasy-schedule";
 
 export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: Promise<RosterMoves> | null }) {
   const { players, hiddenForTest } = use(pool);
@@ -36,6 +37,11 @@ export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: P
     const offers = roster.trades.filter((t) => t.status === "pending" && t.receiverId === roster.managerId).length;
     return (
       <div className="space-y-4">
+        {roster.eliminated.includes(roster.managerId) && (
+          <p className="rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-zinc-300 text-center">
+            {FROZEN_NOTE}
+          </p>
+        )}
         <div role="tablist" aria-label="Players view" className="mx-auto flex w-fit rounded-lg border border-zinc-700 bg-zinc-900 p-1">
           <ViewTab active={view === "free"} onClick={() => setView("free")}>
             Free agents &amp; waivers

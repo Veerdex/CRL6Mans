@@ -302,7 +302,7 @@ Free agent (instant add)
 - Accepting a trade cancels every other pending trade that includes one of its players.
 - Proposed, accepted and rejected trades land in the notification feed.
 - **No trade deadline.** A pending trade is cancelled automatically if either manager is
-  eliminated, since eliminated managers are frozen *(assumed)*.
+  eliminated, since eliminated managers are frozen.
 
 ---
 
@@ -481,8 +481,20 @@ Modelled on fantasy football so it's familiar:
   - Locks are checked in the server action before the call, and a locked player leaves the
     trade pending.
   - `rollbackFantasyTestRun` deletes trades by league. Items cascade.
-- **Not built yet:** the eliminated-manager freeze (§7), and with it the trade auto-cancel
-  (§10). Also not built: claim-result notifications (§12), the fantasy notification toggles
+- **The freeze** (§7) is derived on read like the rest of the schedule, so it needs no
+  table. `eliminatedManagers` in `app/lib/fantasy-schedule.ts` (pure, `npm run
+  test:fantasy-schedule`) reads a built schedule: nobody before the regular season closes,
+  then everyone outside the first playoff week's matchups, then the semifinal losers, and
+  everyone once the last week closes, champion included, since nothing is left to play for.
+  `eliminatedInLeague` in `app/lib/fantasy-matchup-server.ts` feeds it the same inputs as the
+  Matchup tab, and skips reading any scores until the regular season has closed.
+  - Adds and claims are refused in `checkMove`. At the run, a frozen manager's claims fail
+    with a note rather than being settled, so they can't win a player.
+  - Proposing a trade is refused if either side is frozen. Accepting one calls it off.
+  - Pending trades with a frozen side are cancelled with a note by the daily run and on every
+    Players-tab load, so nobody is shown an offer they can't accept.
+  - Lineup swaps stay open, and a frozen manager can still cancel a claim.
+- **Not built yet:** claim-result notifications (§12), the fantasy notification toggles
   (§12), and putting a departing manager's players on waivers (§11).
 
 ---
@@ -505,4 +517,3 @@ Modelled on fantasy football so it's familiar:
 
 Items marked *(assumed)* above are worth confirming before build:
 - A forfeited series doesn't fill its slot; a player whose sub covered every game does (with 0).
-- A pending trade is cancelled when either manager is eliminated.

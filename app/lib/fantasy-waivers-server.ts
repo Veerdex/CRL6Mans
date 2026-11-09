@@ -3,6 +3,9 @@ import { supabaseAdmin } from "./supabase";
 import { getLeague } from "./fantasy-leagues";
 import type { FantasyTier } from "./fantasy-pool";
 import { lockedPlayerIds } from "./fantasy-lineup-server";
+import { eliminatedInLeague } from "./fantasy-matchup-server";
+import { cancelFrozenTrades } from "./fantasy-trades-server";
+import { FROZEN_NOTE as FROZEN } from "./fantasy-schedule";
 import {
   byPreference,
   latestWaiverRun,
@@ -11,6 +14,7 @@ import {
   swapInProblem,
   waiverClearsAt,
   waiverOrder,
+  type ClaimOutcome,
   type PendingClaim,
 } from "./fantasy-waivers";
 
@@ -98,7 +102,7 @@ async function checkMove(
   if (!league) return { error: "That league doesn't exist." };
   if (league.status !== "active") return { error: "Adds and claims open once the league's draft is finished." };
 
-  const [{ data: tiers }, { data: members }, { data: slots }, { data: waiver }, locked] = await Promise.all([
+  const [{ data: tiers }, { data: members }, { data: slots }, { data: waiver }, locked, eliminated] = await Promise.all([
     supabaseAdmin
       .from("fantasy_player_tiers")
       .select("player_id, tier")
@@ -109,9 +113,11 @@ async function checkMove(
     supabaseAdmin.from("fantasy_waivers").select("clears_at").eq("league_id", leagueId).eq("player_id", addId).maybeSingle(),
     // A claim settles at the run, which checks the locks then.
     kind === "add" ? lockedPlayerIds([addId, dropId]) : Promise.resolve(new Set<string>()),
+    eliminatedInLeague(leagueId),
   ]);
   const memberIds = new Set(((members ?? []) as { account_id: string }[]).map((m) => m.account_id));
   if (!memberIds.has(managerId)) return { error: "You aren't a manager in this league." };
+  if (eliminated.has(managerId)) return { error: FROZEN };
 
   const tierOf = new Map(((tiers ?? []) as { player_id: string; tier: number }[]).map((t) => [t.player_id, Number(t.tier) as FantasyTier]));
   const addTier = tierOf.get(addId);
@@ -238,7 +244,11 @@ export async function runWaivers(now: Date): Promise<string[]> {
       : claim.is("waivers_ran_at", null)
     ).select("id");
     if (!claimed?.length) continue;
-    const line = await settleLeague(league, boundary, now).catch((e: unknown) => {
+    const line = await (async () => {
+      const eliminated = await eliminatedInLeague(league.id);
+      await cancelFrozenTrades(league.id, eliminated);
+      return settleLeague(league, boundary, now, eliminated);
+    })().catch((e: unknown) => {
       console.error(`[fantasy] waiver run for ${league.id} failed: ${e instanceof Error ? e.message : String(e)}`);
       return null;
     });
@@ -247,7 +257,7 @@ export async function runWaivers(now: Date): Promise<string[]> {
   return fired;
 }
 
-async function settleLeague(league: RunLeague, boundary: string, now: Date): Promise<string | null> {
+async function settleLeague(league: RunLeague, boundary: string, now: Date, eliminated: Set<string>): Promise<string | null> {
   const { data: dueRows } = await supabaseAdmin
     .from("fantasy_waivers")
     .select("player_id")
@@ -267,7 +277,9 @@ async function settleLeague(league: RunLeague, boundary: string, now: Date): Pro
     supabaseAdmin.from("fantasy_roster_slots").select("manager_id, player_id").eq("league_id", league.id),
     supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", league.id).order("joined_at"),
   ]);
-  const claims: PendingClaim[] = ((claimRows ?? []) as ClaimRow[]).map(toClaim);
+  const allClaims = ((claimRows ?? []) as ClaimRow[]).map(toClaim);
+  const frozen = allClaims.filter((c) => eliminated.has(c.managerId));
+  const claims: PendingClaim[] = allClaims.filter((c) => !eliminated.has(c.managerId));
 
   const rosters = new Map<string, Set<string>>();
   for (const s of (slotRows ?? []) as { manager_id: string; player_id: string }[]) {
@@ -293,7 +305,10 @@ async function settleLeague(league: RunLeague, boundary: string, now: Date): Pro
 
   // Applied in the order they were settled, since a later award can depend on
   // an earlier one having freed its player.
-  const outcomes = new Map(result.outcomes.map((o) => [o.id, o]));
+  const outcomes = new Map([
+    ...frozen.map((c): [string, ClaimOutcome] => [c.id, { id: c.id, status: "failed", note: FROZEN }]),
+    ...result.outcomes.map((o): [string, ClaimOutcome] => [o.id, o]),
+  ]);
   const dropped: string[] = [];
   const winners: string[] = [];
   for (const award of result.awards) {

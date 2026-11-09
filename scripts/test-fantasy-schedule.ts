@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildSchedule, currentWeek, playoffWeekCount, roundRobinWeek } from "../app/lib/fantasy-schedule";
+import { buildSchedule, currentWeek, eliminatedManagers, playoffWeekCount, roundRobinWeek } from "../app/lib/fantasy-schedule";
 
 const pairKey = (a: string, b: string | null) => [a, b ?? "BYE"].sort().join("-");
 
@@ -77,6 +77,24 @@ test("a regular-season tie counts as a tie, and an open week decides nothing", (
   assert.equal(s.standings[0].ties, 1);
   assert.equal(s.weeks[1].matchups[0].winner, null);
   assert.equal(s.weeks[1].matchups[0].aPoints, 99);
+});
+
+test("elimination: nobody mid-season, non-seeds after it, semifinal losers, then everyone", () => {
+  const managers = ["a", "b", "c", "d", "e", "f"];
+  const regular = { a: 60, b: 50, c: 40, d: 30, e: 20, f: 10 };
+  const pts = pointsTable({ 1: regular, 2: regular, 3: regular, 4: { a: 5, d: 9, b: 15, c: 10 }, 5: { d: 1, b: 2 } });
+  const at = (closed: number[]) =>
+    [...eliminatedManagers(buildSchedule({ managers, totalWeeks: 5, closedWeeks: new Set(closed), points: pts }))].sort();
+  assert.deepEqual(at([1, 2]), []);
+  assert.deepEqual(at([1, 2, 3]), ["e", "f"]);
+  assert.deepEqual(at([1, 2, 3, 4]), ["a", "c", "e", "f"]);
+  assert.deepEqual(at([1, 2, 3, 4, 5]), managers);
+});
+
+test("elimination with a lone final freezes everyone outside the top two", () => {
+  const managers = ["a", "b", "c"];
+  const s = buildSchedule({ managers, totalWeeks: 4, closedWeeks: new Set([1, 2, 3]), points: (_, m) => ({ a: 3, b: 2, c: 1 })[m]! });
+  assert.deepEqual([...eliminatedManagers(s)], ["c"]);
 });
 
 test("a bye earns no record and no tiebreak points", () => {
