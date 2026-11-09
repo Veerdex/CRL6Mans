@@ -36,6 +36,11 @@ const FANTASY_CATEGORIES: Category[] = [
     label: "Results and playoffs",
     description: "Your weekly matchup result, playoff seeding, elimination and the champion",
   },
+  {
+    key: "fantasy_league",
+    label: "League changes",
+    description: "A manager leaving or being removed, the owner removing you, and a new league owner",
+  },
 ];
 
 const CATEGORIES: Category[] = [

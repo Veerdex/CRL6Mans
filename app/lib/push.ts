@@ -21,7 +21,8 @@ export type NotificationCategory =
   | "fantasy_waivers"
   | "fantasy_trades"
   | "fantasy_lineup"
-  | "fantasy_results";
+  | "fantasy_results"
+  | "fantasy_league";
 
 export type PushPayload = {
   title: string;

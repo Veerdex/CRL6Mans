@@ -145,7 +145,8 @@ export async function leaveLeague(leagueId: string): Promise<Result> {
   if ("error" in league) return league;
 
   // An owner passes the league on rather than disbanding it.
-  await dropBeforeDraft(league, me.accountId, "left");
+  const res = await dropBeforeDraft(league, me.accountId, "left");
+  if (res.error) return res;
   refresh(leagueId);
   return {};
 }
@@ -196,7 +197,8 @@ export async function removeManager(leagueId: string, accountId: string): Promis
     const res = await orphanTeam(league, accountId, "removed", ctx.me.accountId);
     if (res.error) return res;
   } else if (league.status === "pre_draft") {
-    await dropBeforeDraft(league, accountId, "removed", ctx.me.accountId);
+    const res = await dropBeforeDraft(league, accountId, "removed", ctx.me.accountId);
+    if (res.error) return res;
   } else {
     return { error: "This league is closed." };
   }

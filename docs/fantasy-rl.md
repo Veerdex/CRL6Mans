@@ -337,10 +337,16 @@ the earliest-joined manager left. A league left with nobody in it is deleted.
   manager whose team isn't orphaned, so there is still someone to look after orphans. Only if
   every other team is orphaned does the departed owner stay on record, unable to act.
 
-**Every departure is announced.** Each manager still running a team gets a feed notice naming
-who left or was removed (the owner who did the removing doesn't). If ownership passed, the
-notice says who the new owner is, and the new owner gets their own version saying so.
-Written by `tellManagers` in `app/lib/fantasy-departure-server.ts`.
+**Every departure is announced** under the League changes toggle (§12). Each manager still
+running a team is told who left or was removed (the owner who did the removing isn't). If
+ownership passed, the notice says who the new owner is, and the new owner gets their own
+version saying so. A manager the owner removed is told too. A kick or ban isn't, since the
+moderation is its own notice. Written by `tellManagers` in `app/lib/fantasy-departure-server.ts`.
+
+Before the draft, leaving runs through `fantasy_leave_pre_draft`
+(`scripts/fantasy-leave-pre-draft-migration.sql`). It locks the league while it is still
+`pre_draft`, the same way joining does, so a leave can't land after the draft start has seated
+the draft order.
 
 **The owner looks after an orphan** until someone takes it over.
 - They can set its lineup from the Roster tab. It can't make waiver claims or trades.
@@ -354,8 +360,8 @@ Written by `tellManagers` in `app/lib/fantasy-departure-server.ts`.
 
 ## 12. Notifications
 
-Fantasy has its **own section** in Settings → Notifications, with five toggles. Each one
-covers both the push and the feed entry, and all five default to on.
+Fantasy has its **own section** in Settings → Notifications, with six toggles. Each one
+covers both the push and the feed entry, and all six default to on.
 
 | Toggle | Category | Sent when |
 |---|---|---|
@@ -364,11 +370,12 @@ covers both the push and the feed entry, and all five default to on.
 | Trades | `fantasy_trades` | A trade is proposed, accepted, rejected, withdrawn or cancelled. It is also sent when a trade is called off by a freeze, or by a roster change (a player left a roster, or was traded first in another deal). |
 | Lineup alerts | `fantasy_lineup` | A starter won't score in the current week, either because their team has a bye in that round or because they aren't on a team. Only sent while the week is open, for managers who have an opponent that week. |
 | Results and playoffs | `fantasy_results` | A week closes: each manager gets their result. Semifinal winners and losers, the champion and runner-up, and everyone else in the league hear about the final. Seeding is sent once the regular season closes: who made the playoffs and whom they face, and who is out. |
+| League changes | `fantasy_league` | A manager in their league left, was removed, or was kicked or banned. It names the new owner if ownership passed, and the new owner gets their own notice. The owner removed them. (§11) |
 
 How it works:
-- Membership notices (invites, team offers, a manager leaving or being removed, a change of
-  owner, §11) sit outside the toggles. They go to the feed only, through `recordNotification`.
-- Event notices (draft, trades, waivers) are sent where the event happens, through
+- Invites and team offers sit outside the toggles. They go to the feed only, through
+  `recordNotification`.
+- Event notices (draft, trades, waivers, league changes) are sent where the event happens, through
   `notifyManagers` in `app/lib/fantasy-notify.ts`. Sending runs in `after()`, so it never
   slows down the action.
 - Each on-the-clock notice carries the tag `fantasy-clock-{league}`, so a newer one replaces

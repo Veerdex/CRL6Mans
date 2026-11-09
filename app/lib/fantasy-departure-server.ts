@@ -1,8 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "./supabase";
 import { autopickIfDue } from "./fantasy-draft-server";
-import { accountName } from "./fantasy-leagues";
-import { recordNotification } from "./notifications";
+import { accountNames, notifyManagers } from "./fantasy-notify";
 
 // A manager leaving (docs/fantasy-rl.md §11). Before the draft they simply drop
 // out. After it their team stays: it keeps its roster, seat and schedule, and
@@ -82,24 +81,27 @@ export async function orphanTeam(
   return {};
 }
 
-/** Before the draft: the manager is just gone, and an owner passes the league on. */
-export async function dropBeforeDraft(league: LeagueLite, accountId: string, how: Departure, actorId?: string) {
-  const heir = await passOwnership(league, accountId);
-  await supabaseAdmin.from("fantasy_league_members").delete().eq("league_id", league.id).eq("account_id", accountId);
-  const { count } = await supabaseAdmin
-    .from("fantasy_league_members")
-    .select("account_id", { count: "exact", head: true })
-    .eq("league_id", league.id);
-  // Nobody left to own it: the league is empty, so it goes.
-  if (count === 0) {
-    await supabaseAdmin.from("fantasy_leagues").delete().eq("id", league.id).eq("status", "pre_draft");
-    return;
-  }
-  await tellManagers(league.id, accountId, how, heir, actorId);
+/**
+ * Before the draft: the manager is just gone, and an owner passes the league on.
+ * Done in one locked call so a draft starting at the same moment can't seat them.
+ */
+export async function dropBeforeDraft(
+  league: LeagueLite,
+  accountId: string,
+  how: Departure,
+  actorId?: string,
+): Promise<{ error?: string }> {
+  const { data, error } = await supabaseAdmin.rpc("fantasy_leave_pre_draft", { p_league: league.id, p_account: accountId });
+  if (error) return { error: "Couldn't update the league. Has scripts/fantasy-leave-pre-draft-migration.sql been run?" };
+  const res = data as { outcome: string; heir?: string | null };
+  if (res.outcome === "closed") return { error: "The draft has started, so this can't be changed any more." };
+  if (res.outcome === "ok") await tellManagers(league.id, accountId, how, res.heir ?? null, actorId);
+  return {};
 }
 
-// Every manager still running a team hears about each departure, except
-// whoever did the removing. The new owner gets their own version.
+// Every manager still running a team hears about each departure, except the
+// owner who did the removing. The new owner gets their own version, and a
+// manager the owner removed is told too.
 async function tellManagers(leagueId: string, departed: string, how: Departure, heir: string | null, actorId?: string) {
   const { data: league } = await supabaseAdmin.from("fantasy_leagues").select("name, status").eq("id", leagueId).maybeSingle();
   if (!league) return;
@@ -111,42 +113,40 @@ async function tellManagers(leagueId: string, departed: string, how: Departure, 
   const recipients = ((memberRows ?? []) as { account_id: string }[])
     .map((m) => m.account_id)
     .filter((id) => id !== departed && id !== actorId);
-  if (!recipients.length) return;
 
-  const { data: rows } = await supabaseAdmin
-    .from("accounts")
-    .select("id, discord_id, username, display_name")
-    .in("id", [...recipients, departed]);
-  const accounts = (rows ?? []) as { id: string; discord_id: string; username: string | null; display_name: string | null }[];
-  const byId = new Map(accounts.map((a) => [a.id, a]));
-  const name = accountName(byId.get(departed));
+  const names = await accountNames([...recipients, departed]);
+  const name = names.get(departed) ?? "A manager";
   const what = how === "left" ? `${name} left ${league.name}.` : `${name} was removed from ${league.name}.`;
   const afterDraft = league.status !== "pre_draft";
   const later = league.status === "drafting" ? " once the draft is finished" : "";
   const url = `/dashboard/fantasy/${leagueId}`;
 
-  const sends: Promise<unknown>[] = [];
-  const others = recipients.filter((id) => id !== heir).map((id) => byId.get(id)?.discord_id).filter((d): d is string => !!d);
+  const others = recipients.filter((id) => id !== heir);
   if (others.length) {
     const parts = [what];
-    if (heir) parts.push(`${accountName(byId.get(heir))} is now the league owner.`);
-    if (afterDraft) parts.push(`Their team plays on with its current lineup until the owner hands it to someone new.`);
-    sends.push(
-      recordNotification(
-        { kind: "users", discordIds: others },
-        { title: heir ? "Fantasy league owner changed" : "A manager left your fantasy league", body: parts.join(" "), url },
-      ),
-    );
+    if (heir) parts.push(`${names.get(heir) ?? "Another manager"} is now the league owner.`);
+    if (afterDraft) parts.push("Their team plays on with its current lineup until the owner hands it to someone new.");
+    notifyManagers(others, "fantasy_league", {
+      title: heir ? "Fantasy league owner changed" : how === "left" ? "A manager left your fantasy league" : "A manager was removed from your fantasy league",
+      body: parts.join(" "),
+      url,
+    });
   }
-  const heirDiscord = heir ? byId.get(heir)?.discord_id : undefined;
-  if (heirDiscord) {
+  if (heir && recipients.includes(heir)) {
     const parts = [what, "You're now the league owner."];
     if (afterDraft) parts.push(`Their team plays on with its current lineup, and you can hand it to someone new${later}.`);
-    sends.push(
-      recordNotification({ kind: "users", discordIds: [heirDiscord] }, { title: "You're now a fantasy league owner", body: parts.join(" "), url }),
-    );
+    notifyManagers([heir], "fantasy_league", { title: "You're now a fantasy league owner", body: parts.join(" "), url });
   }
-  await Promise.all(sends);
+  // A kick or ban has no actor here: the moderation itself is the notice.
+  if (how === "removed" && actorId) {
+    notifyManagers([departed], "fantasy_league", {
+      title: "Removed from a fantasy league",
+      body: `The owner removed you from ${league.name}.${
+        afterDraft ? " Your team stays in the league with its current lineup until the owner hands it to someone new." : ""
+      }`,
+      url: "/dashboard/fantasy",
+    });
+  }
 }
 
 /**
