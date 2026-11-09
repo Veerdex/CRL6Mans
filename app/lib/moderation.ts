@@ -6,6 +6,7 @@ import { revokedPatronFields } from "./patreon-sync";
 import { syncDiscordSupporterRole } from "./patreon-discord-role";
 import { addRole, removeRole, removeRoleById, timeoutMember, banMember } from "./discord-api";
 import { tournamentRoleIdsToStrip } from "./solo-team";
+import { orphanFantasyTeams } from "./fantasy-departure-server";
 
 // The kick/ban rules themselves, with no session in sight, so the Discord bot
 // and the admin panel's server actions can share one implementation instead of
@@ -44,6 +45,8 @@ export async function removeFromActivePlay(accountId: string) {
       .eq("player_id", accountId)
       .in("tournament_id", activeTournaments.map((t) => t.id));
   }
+
+  await orphanFantasyTeams(accountId);
 }
 
 // Surfaced to the admin after a ban so they know a pledge is still live.

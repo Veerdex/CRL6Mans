@@ -6,7 +6,7 @@ import { isStatsTrackingEnabled } from "./career-stats";
 import { isTestEventActive } from "./test-tournament";
 import { normalizeTeamSize } from "./team-size";
 import { developerDiscordIds } from "./players";
-import { getCurrentFantasySeason } from "./fantasy-leagues";
+import { getCurrentFantasySeason, orphanedManagers } from "./fantasy-leagues";
 import { currentSeasonTiers, frozenTiers } from "./fantasy-pool-data";
 import { FANTASY_MIN_MANAGERS } from "./fantasy-rules";
 import { TIER_LABEL, type FantasyTier } from "./fantasy-pool";
@@ -132,7 +132,11 @@ export async function submitPick({ leagueId, managerId, playerId, auto }: PickIn
   if (outcome === "stale") return { error: "That pick has already been made." };
   if (outcome === "taken") return { error: "That player has already been drafted." };
   if (outcome === "done") await finishSeasonIfDrafted(league.fantasy_season_id);
-  await announcePick(league, pick, managerId, playerId, auto, outcome === "done", pickSeconds(testRun));
+  const orphans = await orphanedManagers(leagueId);
+  await announcePick(league, pick, managerId, playerId, auto, outcome === "done", pickSeconds(testRun), orphans);
+  // §11: nobody can pick for an orphaned team, so its turn doesn't wait out the clock.
+  const next = order[managerIndexForPick(pick + 1, order.length)];
+  if (outcome !== "done" && orphans.has(next)) await autopickIfDue(leagueId);
   return { done: outcome === "done" };
 }
 
@@ -147,12 +151,14 @@ async function announcePick(
   auto: boolean,
   done: boolean,
   seconds: number,
+  orphans: Set<string>,
 ) {
   const order = league.draft_order ?? [];
-  const next = done ? null : order[managerIndexForPick(pick + 1, order.length)];
+  const upNext = done ? null : order[managerIndexForPick(pick + 1, order.length)];
+  const next = upNext && !orphans.has(upNext) ? upNext : null;
   const url = `/dashboard/fantasy/${league.id}/draft`;
   const tag = `fantasy-clock-${league.id}`;
-  if (auto) {
+  if (auto && !orphans.has(managerId)) {
     const names = await accountNames([playerId]);
     const again = next === managerId ? ` You're on the clock again, with ${clockLabel(seconds)} to pick.` : "";
     notifyManagers([managerId], "fantasy_draft", {
@@ -176,7 +182,9 @@ async function announcePick(
 export async function autopickIfDue(leagueId: string): Promise<boolean> {
   const league = await getDraftLeague(leagueId);
   const managerId = league ? managerOnClock(league) : null;
-  if (!league || !managerId || !league.pick_deadline || new Date(league.pick_deadline).getTime() > Date.now()) return false;
+  if (!league || !managerId) return false;
+  const due = !!league.pick_deadline && new Date(league.pick_deadline).getTime() <= Date.now();
+  if (!due && !(await orphanedManagers(leagueId)).has(managerId)) return false;
 
   const [tiers, members, slots] = await Promise.all([
     frozenTiers(league.fantasy_season_id),

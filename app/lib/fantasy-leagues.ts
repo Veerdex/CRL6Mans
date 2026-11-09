@@ -52,7 +52,12 @@ export type MemberView = {
   username: string | null;
   avatar: string | null;
   isCommissioner: boolean;
+  /** §11: the manager left after the draft, and the team plays on without one. */
+  orphaned: boolean;
 };
+
+/** A pending invite. takeoverOf is the orphaned team it offers, or null for an invite to join. */
+export type InviteView = MemberView & { takeoverOf: string | null };
 
 type AccountLite = { id: string; discord_id: string; username: string | null; display_name: string | null; avatar: string | null };
 
@@ -127,6 +132,28 @@ export async function getLeagueSummary(leagueId: string): Promise<FantasyLeagueS
   return (data?.summary as FantasyLeagueSummary | null | undefined) ?? null;
 }
 
+/** §11: teams whose manager left after the draft. Only the owner acts for them. */
+export async function orphanedManagers(leagueId: string): Promise<Set<string>> {
+  const { data } = await supabaseAdmin
+    .from("fantasy_league_members")
+    .select("account_id")
+    .eq("league_id", leagueId)
+    .not("orphaned_at", "is", null);
+  return new Set(((data ?? []) as { account_id: string }[]).map((m) => m.account_id));
+}
+
+/** A member who can still act in the league: one whose team isn't orphaned. */
+export async function isActiveManager(leagueId: string, accountId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from("fantasy_league_members")
+    .select("account_id")
+    .eq("league_id", leagueId)
+    .eq("account_id", accountId)
+    .is("orphaned_at", null)
+    .maybeSingle();
+  return !!data;
+}
+
 async function fetchAccounts(ids: string[]): Promise<Map<string, AccountLite>> {
   const unique = [...new Set(ids)];
   if (!unique.length) return new Map();
@@ -162,7 +189,7 @@ export async function getHubData(viewer: FantasyViewer): Promise<HubData> {
 
   const [{ data: memberRows }, { data: inviteRows }, { data: removalRows }] = ids.length
     ? await Promise.all([
-        supabaseAdmin.from("fantasy_league_members").select("league_id, account_id").in("league_id", ids),
+        supabaseAdmin.from("fantasy_league_members").select("league_id, account_id, orphaned_at").in("league_id", ids),
         viewer.accountId
           ? supabaseAdmin.from("fantasy_league_invites").select("league_id").eq("account_id", viewer.accountId).in("league_id", ids)
           : Promise.resolve({ data: [] }),
@@ -172,7 +199,7 @@ export async function getHubData(viewer: FantasyViewer): Promise<HubData> {
       ])
     : [{ data: [] }, { data: [] }, { data: [] }];
 
-  const members = (memberRows ?? []) as { league_id: string; account_id: string }[];
+  const members = (memberRows ?? []) as { league_id: string; account_id: string; orphaned_at: string | null }[];
   const invited = new Set(((inviteRows ?? []) as { league_id: string }[]).map((r) => r.league_id));
   const removed = new Set(((removalRows ?? []) as { league_id: string }[]).map((r) => r.league_id));
   const accounts = await fetchAccounts(leagues.map((l) => l.commissioner_id));
@@ -189,7 +216,7 @@ export async function getHubData(viewer: FantasyViewer): Promise<HubData> {
       commissionerName: accountName(accounts.get(l.commissioner_id)),
       commissionerUsername: accounts.get(l.commissioner_id)?.username ?? accountName(accounts.get(l.commissioner_id)),
       commissionerDiscordId: accounts.get(l.commissioner_id)?.discord_id ?? null,
-      isMember: !!viewer.accountId && roster.some((m) => m.account_id === viewer.accountId),
+      isMember: !!viewer.accountId && roster.some((m) => m.account_id === viewer.accountId && !m.orphaned_at),
       isOwner: !!viewer.accountId && l.created_by === viewer.accountId,
       isInvited: invited.has(l.id),
       isRemoved: removed.has(l.id),
@@ -211,7 +238,7 @@ export type LeagueView = {
   season: FantasySeason | null;
   cap: number;
   members: MemberView[];
-  invites: MemberView[];
+  invites: InviteView[];
   isMember: boolean;
   isCommissioner: boolean;
   isInvited: boolean;
@@ -226,15 +253,18 @@ export async function getLeagueView(leagueId: string, viewer: FantasyViewer): Pr
     await Promise.all([
       supabaseAdmin.from("fantasy_seasons").select("id, name, status").eq("id", league.fantasy_season_id).maybeSingle(),
       getManagerCap(),
-      supabaseAdmin.from("fantasy_league_members").select("account_id, joined_at").eq("league_id", league.id).order("joined_at"),
-      supabaseAdmin.from("fantasy_league_invites").select("account_id, created_at").eq("league_id", league.id).order("created_at"),
+      supabaseAdmin.from("fantasy_league_members").select("account_id, joined_at, orphaned_at").eq("league_id", league.id).order("joined_at"),
+      supabaseAdmin.from("fantasy_league_invites").select("account_id, takeover_of, created_at").eq("league_id", league.id).order("created_at"),
       viewer.accountId
         ? supabaseAdmin.from("fantasy_league_removals").select("account_id").eq("league_id", league.id).eq("account_id", viewer.accountId)
         : Promise.resolve({ data: [] }),
     ]);
 
-  const memberIds = ((memberRows ?? []) as { account_id: string }[]).map((m) => m.account_id);
-  const inviteIds = ((inviteRows ?? []) as { account_id: string }[]).map((m) => m.account_id);
+  const memberList = (memberRows ?? []) as { account_id: string; orphaned_at: string | null }[];
+  const memberIds = memberList.map((m) => m.account_id);
+  const orphaned = new Set(memberList.filter((m) => m.orphaned_at).map((m) => m.account_id));
+  const inviteList = (inviteRows ?? []) as { account_id: string; takeover_of: string | null }[];
+  const inviteIds = inviteList.map((m) => m.account_id);
   const accounts = await fetchAccounts([...memberIds, ...inviteIds]);
   const toView = (id: string): MemberView => {
     const a = accounts.get(id);
@@ -245,6 +275,7 @@ export async function getLeagueView(leagueId: string, viewer: FantasyViewer): Pr
       username: a?.username ?? null,
       avatar: a?.avatar ?? null,
       isCommissioner: id === league.commissioner_id,
+      orphaned: orphaned.has(id),
     };
   };
 
@@ -253,8 +284,8 @@ export async function getLeagueView(leagueId: string, viewer: FantasyViewer): Pr
     season: (season as FantasySeason | null) ?? null,
     cap,
     members: memberIds.map(toView),
-    invites: inviteIds.map(toView),
-    isMember: !!viewer.accountId && memberIds.includes(viewer.accountId),
+    invites: inviteList.map((i) => ({ ...toView(i.account_id), takeoverOf: i.takeover_of })),
+    isMember: !!viewer.accountId && memberIds.includes(viewer.accountId) && !orphaned.has(viewer.accountId),
     isCommissioner: !!viewer.accountId && viewer.accountId === league.commissioner_id,
     isInvited: !!viewer.accountId && inviteIds.includes(viewer.accountId),
     isRemoved: ((removalRows ?? []) as unknown[]).length > 0,

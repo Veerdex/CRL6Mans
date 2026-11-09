@@ -8,9 +8,11 @@ import { FANTASY_MIN_MANAGERS, isClosedLeague, isFinalLeague } from "@/app/lib/f
 import { PlayerAvatar } from "@/app/dashboard/player-avatar";
 import { PlayerName } from "@/app/dashboard/player-name";
 import {
+  AcceptTakeoverButton,
   CancelInviteButton,
   CommissionerSettings,
   DeclineInviteButton,
+  HandOverButton,
   InvitePanel,
   JoinLeagueButton,
   LeaveLeagueButton,
@@ -31,6 +33,8 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
   const { league, members, invites, cap, isMember, isCommissioner, isInvited, isRemoved } = view;
   const preDraft = league.status === "pre_draft";
   const summary = isFinalLeague(league.status) ? await getLeagueSummary(league.id) : null;
+  const nameOf = (id: string) => members.find((m) => m.accountId === id)?.name ?? "a departed manager";
+  const myOffer = invites.find((i) => i.accountId === viewer.accountId)?.takeoverOf ?? null;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -65,6 +69,19 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
         </div>
       )}
 
+      {myOffer && !isMember && league.status === "active" && (
+        <div className="bg-emerald-500/10 border border-emerald-500/40 rounded-xl p-4 text-sm text-emerald-200 text-center space-y-3">
+          <p>
+            You&apos;ve been offered {nameOf(myOffer)}&apos;s old team. You take over its roster, lineup, record and place in the
+            waiver order as they stand.
+          </p>
+          <div className="flex items-start justify-center gap-2">
+            <AcceptTakeoverButton leagueId={league.id} />
+            <DeclineInviteButton leagueId={league.id} />
+          </div>
+        </div>
+      )}
+
       {preDraft && (
         <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-sm text-zinc-300 text-center">
           Waiting for an admin to start the fantasy draft. Leagues need at least {FANTASY_MIN_MANAGERS} managers to draft.
@@ -94,9 +111,13 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
             <PersonRow
               key={m.accountId}
               person={m}
-              tag={m.isCommissioner ? "Owner" : m.accountId === viewer.accountId ? "You" : undefined}
+              tag={m.orphaned ? "No manager" : m.isCommissioner ? "Owner" : m.accountId === viewer.accountId ? "You" : undefined}
               action={
-                isCommissioner && preDraft && !m.isCommissioner ? (
+                !isCommissioner || isClosedLeague(league.status) || league.status === "drafting" ? undefined : m.orphaned ? (
+                  league.status === "active" ? (
+                    <HandOverButton leagueId={league.id} teamId={m.accountId} name={m.name} />
+                  ) : undefined
+                ) : !m.isCommissioner ? (
                   <RemoveManagerButton leagueId={league.id} accountId={m.accountId} name={m.name} />
                 ) : undefined
               }
@@ -115,7 +136,12 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
               <PersonRow
                 key={p.accountId}
                 person={p}
-                action={isCommissioner && preDraft ? <CancelInviteButton leagueId={league.id} accountId={p.accountId} /> : undefined}
+                note={p.takeoverOf ? `Offered ${nameOf(p.takeoverOf)}'s team` : undefined}
+                action={
+                  isCommissioner && (preDraft || (p.takeoverOf && league.status === "active")) ? (
+                    <CancelInviteButton leagueId={league.id} accountId={p.accountId} offer={!!p.takeoverOf} />
+                  ) : undefined
+                }
               />
             ))}
           </ul>
@@ -136,12 +162,14 @@ async function LeagueOverview({ league: access }: { league: Promise<LeagueAccess
         </section>
       )}
 
-      {isMember && preDraft && (
+      {isMember && (preDraft || league.status === "active") && (
         <div className="flex justify-center">
           <LeaveLeagueButton
             leagueId={league.id}
             isCreator={viewer.accountId === league.created_by}
             managerCount={members.length}
+            afterDraft={!preDraft}
+            isOwner={isCommissioner}
           />
         </div>
       )}
@@ -208,19 +236,20 @@ function FinalStandings({
   );
 }
 
-function PersonRow({ person, tag, action }: { person: MemberView; tag?: string; action?: React.ReactNode }) {
+function PersonRow({ person, tag, note, action }: { person: MemberView; tag?: string; note?: string; action?: React.ReactNode }) {
   return (
-    <li className="flex items-center gap-3 px-4 py-2.5">
+    <li className="flex flex-wrap items-center gap-3 px-4 py-2.5">
       <PlayerAvatar discordId={person.discordId} avatar={person.avatar} username={person.username} className="w-8 h-8" cdnSize={64} />
-      <div className="flex-1 min-w-0 flex whitespace-nowrap">
+      <div className={`flex-1 min-w-0 flex flex-col whitespace-nowrap ${person.orphaned ? "opacity-60" : ""}`}>
         <PlayerName
           displayName={person.name}
           username={person.username ?? person.name}
           discordId={person.discordId || null}
           className="text-sm text-white"
         />
+        {note && <span className="text-xs text-zinc-400">{note}</span>}
       </div>
-      {tag && <span className="text-[10px] uppercase tracking-wide text-indigo-300">{tag}</span>}
+      {tag && <span className={`text-[10px] uppercase tracking-wide ${person.orphaned ? "text-amber-300" : "text-indigo-300"}`}>{tag}</span>}
       {action}
     </li>
   );

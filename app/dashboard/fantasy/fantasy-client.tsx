@@ -15,6 +15,9 @@ import {
   removeManager,
   renameLeague,
   searchInvitablePlayers,
+  searchTakeoverCandidates,
+  offerTeam,
+  acceptTakeover,
   setLeagueVisibility,
   startAllFantasyDrafts,
   type InviteCandidate,
@@ -193,17 +196,34 @@ export function DeclineInviteButton({ leagueId }: { leagueId: string }) {
   );
 }
 
-export function LeaveLeagueButton({ leagueId, isCreator, managerCount }: { leagueId: string; isCreator: boolean; managerCount: number }) {
+export function LeaveLeagueButton({
+  leagueId,
+  isCreator,
+  managerCount,
+  afterDraft = false,
+  isOwner = false,
+}: {
+  leagueId: string;
+  isCreator: boolean;
+  managerCount: number;
+  afterDraft?: boolean;
+  isOwner?: boolean;
+}) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const others = managerCount - 1;
-  const warning = isCreator
-    ? `You created this league, so leaving disbands it. The league is deleted${
-        others > 0 ? ` and ${others === 1 ? "the other manager is" : `all ${others} other managers are`} removed` : ""
-      }. This can't be undone.`
-    : null;
+  const disbands = isCreator && !afterDraft;
+  const warning = afterDraft
+    ? `Your team stays in the league without a manager and keeps scoring with its current lineup${
+        isOwner ? ". Ownership passes to the next manager, who" : ". The owner"
+      } can hand it to someone new. You can't come back to it.`
+    : disbands
+      ? `You created this league, so leaving disbands it. The league is deleted${
+          others > 0 ? ` and ${others === 1 ? "the other manager is" : `all ${others} other managers are`} removed` : ""
+        }. This can't be undone.`
+      : null;
 
   if (!confirming) {
     return (
@@ -230,7 +250,7 @@ export function LeaveLeagueButton({ leagueId, isCreator, managerCount }: { leagu
             });
           }}
         >
-          {pending ? (isCreator ? "Disbanding…" : "Leaving…") : isCreator ? "Leave and disband" : "Confirm leave"}
+          {pending ? (disbands ? "Disbanding…" : "Leaving…") : disbands ? "Leave and disband" : "Confirm leave"}
         </button>
         <button className={LEAVE_SECONDARY} disabled={pending} onClick={() => setConfirming(false)}>
           Cancel
@@ -265,19 +285,54 @@ export function RemoveManagerButton({ leagueId, accountId, name }: { leagueId: s
   );
 }
 
-export function CancelInviteButton({ leagueId, accountId }: { leagueId: string; accountId: string }) {
+export function CancelInviteButton({ leagueId, accountId, offer = false }: { leagueId: string; accountId: string; offer?: boolean }) {
   const { error, pending, run } = useAction();
   return (
     <div className="flex flex-col items-end">
       <button className={SECONDARY} disabled={pending} onClick={() => run(() => cancelInvite(leagueId, accountId))}>
-        Cancel invite
+        {offer ? "Withdraw offer" : "Cancel invite"}
       </button>
       <ErrorLine error={error} />
     </div>
   );
 }
 
-export function InvitePanel({ leagueId }: { leagueId: string }) {
+export function HandOverButton({ leagueId, teamId, name }: { leagueId: string; teamId: string; name: string }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <button className={SECONDARY} onClick={() => setOpen(true)}>
+        Hand over
+      </button>
+    );
+  }
+  return (
+    <div className="basis-full space-y-2 pt-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-zinc-400">Offer {name}&apos;s old team to a player outside the league.</p>
+        <button className={SECONDARY} onClick={() => setOpen(false)}>
+          Close
+        </button>
+      </div>
+      <InvitePanel leagueId={leagueId} takeoverOf={teamId} />
+    </div>
+  );
+}
+
+export function AcceptTakeoverButton({ leagueId }: { leagueId: string }) {
+  const { error, pending, run } = useAction();
+  return (
+    <div>
+      <button className={PRIMARY} disabled={pending} onClick={() => run(() => acceptTakeover(leagueId))}>
+        {pending ? "Taking over…" : "Take over the team"}
+      </button>
+      <ErrorLine error={error} />
+    </div>
+  );
+}
+
+/** With takeoverOf set, the panel offers that orphaned team (§11) instead of inviting to join. */
+export function InvitePanel({ leagueId, takeoverOf }: { leagueId: string; takeoverOf?: string }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<InviteCandidate[]>([]);
   const [searched, setSearched] = useState(false);
@@ -288,7 +343,7 @@ export function InvitePanel({ leagueId }: { leagueId: string }) {
   const search = () => {
     setSearchError(null);
     startSearch(async () => {
-      const res = await searchInvitablePlayers(leagueId, query);
+      const res = takeoverOf ? await searchTakeoverCandidates(leagueId, query) : await searchInvitablePlayers(leagueId, query);
       setResults(res.results);
       setSearchError(res.error ?? null);
       setSearched(true);
@@ -320,9 +375,14 @@ export function InvitePanel({ leagueId }: { leagueId: string }) {
               <button
                 className={SECONDARY}
                 disabled={pending}
-                onClick={() => run(() => invitePlayer(leagueId, p.accountId), () => setResults((r) => r.filter((x) => x.accountId !== p.accountId)))}
+                onClick={() =>
+                  run(
+                    () => (takeoverOf ? offerTeam(leagueId, takeoverOf, p.accountId) : invitePlayer(leagueId, p.accountId)),
+                    () => setResults((r) => r.filter((x) => x.accountId !== p.accountId)),
+                  )
+                }
               >
-                Invite
+                {takeoverOf ? "Offer team" : "Invite"}
               </button>
             </li>
           ))}

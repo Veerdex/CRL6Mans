@@ -118,10 +118,13 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
 
   const editable = view.league.status === "active" && view.isMember && shownId === viewer.accountId && !!viewer.accountId;
   const active = view.league.status === "active";
+  const shown = view.members.find((m) => m.accountId === shownId);
+  // §11: until someone takes over, the owner sets an orphaned team's lineup.
+  const orphanEdit = active && view.isCommissioner && !!shown?.orphaned;
   const [pool, slots, lineup, claims, priority] = await Promise.all([
     getPoolView(leagueId, viewer.isStaff),
     rosterSlots(leagueId),
-    editable ? managerLineup(leagueId, view.league.fantasy_season_id, viewer.accountId!) : null,
+    editable || orphanEdit ? managerLineup(leagueId, view.league.fantasy_season_id, (editable ? viewer.accountId : shownId)!) : null,
     editable ? managerPendingClaims(leagueId, viewer.accountId!) : [],
     active ? leagueWaiverPriority(leagueId) : [],
   ]);
@@ -129,9 +132,14 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
   const filled = new Map<LineupSlot, PoolPlayer | undefined>(
     slots.filter((s) => s.manager_id === shownId).map((s) => [s.slot, playerById.get(s.player_id)]),
   );
-  const shown = view.members.find((m) => m.accountId === shownId);
   const base = `/dashboard/fantasy/${leagueId}/roster`;
-  const title = shown ? (shown.accountId === viewer.accountId ? "Your roster" : `${shown.name}'s roster`) : "Roster";
+  const title = shown
+    ? shown.orphaned
+      ? `${shown.name}'s old team · no manager`
+      : shown.accountId === viewer.accountId
+        ? "Your roster"
+        : `${shown.name}'s roster`
+    : "Roster";
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -149,6 +157,7 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
       {lineup ? (
         <LineupEditor
           leagueId={leagueId}
+          orphanTeamId={orphanEdit ? shownId! : undefined}
           title={title}
           lineup={lineup}
           cells={Object.fromEntries(LINEUP_SLOTS.map((slot) => [slot, slotCell(slot, filled)])) as Record<LineupSlot, React.ReactNode>}

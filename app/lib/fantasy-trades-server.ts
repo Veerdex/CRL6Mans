@@ -66,7 +66,8 @@ async function activeLeagueWithMembers(leagueId: string, managerIds: string[]): 
     .from("fantasy_league_members")
     .select("account_id")
     .eq("league_id", leagueId)
-    .in("account_id", managerIds);
+    .in("account_id", managerIds)
+    .is("orphaned_at", null);
   if ((data ?? []).length !== new Set(managerIds).size) return { error: "Both managers have to be in this league." };
   return league;
 }

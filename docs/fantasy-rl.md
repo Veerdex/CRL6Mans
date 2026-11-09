@@ -47,7 +47,8 @@ Commissioners cannot force-close weeks or override results — that is staff onl
 
 ### Leaving a league
 - **Before the draft:** allowed.
-- **During the draft:** not allowed.
+- **During the draft:** not allowed, and the owner can't remove anyone either. A kick or ban
+  still applies (§11).
 - **After the draft:** allowed. See [Manager departure](#11-manager-departure).
 
 ---
@@ -316,14 +317,31 @@ line. The rules below are what it would restore.
 
 ## 11. Manager departure
 
-Leaving after the draft, or being kicked or banned from the site:
-- That manager's team **scores 0 every week** for the rest of the season. Opponents still play
-  it.
-- All his players **go on waivers.**
-- He no longer counts toward playoff spots:
-  - **3 managers left** at the semifinals → the top seed has a bye.
-  - **2 left** → both have a bye in the semifinals and meet in the final.
-  - **1 left** → that manager **wins the league automatically**, at any point in the season.
+A kick or ban from the site counts the same as leaving. It applies to every league the player
+manages in, and it withdraws every invite and team offer they hold.
+
+**Before the draft** the manager just drops out. If they were the owner, the league passes to
+the earliest-joined manager left. A league left with nobody in it is deleted. (Leaving on
+purpose as the creator still disbands the league, as in §2.)
+
+**After the draft** (or during it, for a kick or ban), the team becomes an **orphan**:
+- It keeps its roster, seat, schedule, record and place in the waiver order. It **keeps scoring
+  with its current lineup** and stays in the playoff race. There is no automatic champion and
+  the playoffs don't shrink.
+- Its pending waiver claims and trades are cancelled. The departed manager can't act for it
+  any more, and gets no more notices about it.
+- During the draft, its picks are made automatically straight away rather than waiting out the
+  clock.
+- If the owner left, ownership passes to the earliest-joined manager still active. With nobody
+  left, the owner stays on record and the league plays out on the lineups it has.
+
+**The owner looks after an orphan** until someone takes it over:
+- They can set its lineup from the Roster tab. It can't make waiver claims or trades.
+- Once the draft is finished, they can **hand it over**: offer the team to any approved player
+  who isn't already in the league and isn't on one of its rosters. The offer arrives as an
+  invite. Accepting it makes that player the team's manager, with everything it had. The first
+  player to accept takes the team, and any other offers for it are withdrawn.
+- The owner can also remove a manager after the draft. That orphans the team the same way.
 
 ---
 
@@ -523,7 +541,18 @@ Modelled on fantasy football so it's familiar:
   - Pending trades with a frozen side are cancelled with a note by the daily run and on every
     Players-tab load, so nobody is shown an offer they can't accept.
   - Lineup swaps stay open, and a frozen manager can still withdraw a claim.
-- **Not built yet:** putting a departing manager's players on waivers (§11).
+- **Manager departure (§11)** is `app/lib/fantasy-departure-server.ts`, with
+  `scripts/fantasy-manager-departure-migration.sql`.
+  - An orphan is a `fantasy_league_members` row with `orphaned_at` set. The row stays, so the
+    schedule's seats (members by `joined_at`) and the pool exclusion don't move.
+  - `removeFromActivePlay` calls `orphanFantasyTeams`, so every kick and ban path covers it.
+  - The act-checks treat an orphan as not a member: `isActiveManager`, `checkMove`, and the
+    trades' member check.
+  - A hand-over is an invite with `takeover_of` set. Accepting it runs
+    `fantasy_hand_over_team`, which re-keys every manager-id column from the old account to
+    the new one in one transaction.
+  - It is refused while the league is drafting, because `fantasy_draft_pick` reads its
+    manager before taking its lock.
 
 ---
 

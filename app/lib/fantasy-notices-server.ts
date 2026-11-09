@@ -52,20 +52,26 @@ export async function runFantasyNotices(): Promise<string[]> {
   const [matches, { data: sentRows, error: sentError }, { data: memberRows }] = await Promise.all([
     groupMatches(),
     supabaseAdmin.from("fantasy_notices").select("league_id, key").in("league_id", ids),
-    supabaseAdmin.from("fantasy_league_members").select("league_id, account_id").in("league_id", ids).order("joined_at"),
+    supabaseAdmin.from("fantasy_league_members").select("league_id, account_id, orphaned_at").in("league_id", ids).order("joined_at"),
   ]);
   if (sentError) return [];
   const sent = new Map<string, Set<string>>(ids.map((id) => [id, new Set()]));
   for (const r of (sentRows ?? []) as { league_id: string; key: string }[]) sent.get(r.league_id)?.add(r.key);
   const membersOf = new Map<string, string[]>(ids.map((id) => [id, []]));
-  for (const m of (memberRows ?? []) as { league_id: string; account_id: string }[]) membersOf.get(m.league_id)?.push(m.account_id);
+  // §11: an orphaned team still plays, so it keeps its seat, but its departed
+  // manager hears nothing more about it.
+  const orphansOf = new Map<string, Set<string>>(ids.map((id) => [id, new Set()]));
+  for (const m of (memberRows ?? []) as { league_id: string; account_id: string; orphaned_at: string | null }[]) {
+    membersOf.get(m.league_id)?.push(m.account_id);
+    if (m.orphaned_at) orphansOf.get(m.league_id)?.add(m.account_id);
+  }
 
   const { totalWeeks, closedWeeks } = weeksOf(matches);
   if (!totalWeeks) return [];
   const fired: string[] = [];
   for (const league of leagues) {
     const managers = seatOrder(league.draft_order, membersOf.get(league.id)!);
-    await sweepLeague(league, managers, matches, totalWeeks, closedWeeks, sent.get(league.id)!)
+    await sweepLeague(league, managers, orphansOf.get(league.id)!, matches, totalWeeks, closedWeeks, sent.get(league.id)!)
       .then((lines) => fired.push(...lines))
       .catch((e: unknown) => console.error(`[fantasy] notices for ${league.id} failed: ${e instanceof Error ? e.message : String(e)}`));
   }
@@ -75,6 +81,7 @@ export async function runFantasyNotices(): Promise<string[]> {
 async function sweepLeague(
   league: League,
   managers: string[],
+  orphans: Set<string>,
   matches: GroupMatch[],
   totalWeeks: number,
   closedWeeks: Set<number>,
@@ -100,18 +107,21 @@ async function sweepLeague(
     const due = scheduleNotices(schedule, league.name, (id) => names.get(id) ?? "Unknown").filter((k) => !sent.has(k.key));
     const won = await claim(league.id, due.map((k) => k.key));
     for (const k of due.filter((k) => won.has(k.key))) {
-      send(league, k);
+      send(league, k, orphans);
       fired.push(`notices:${league.id}:${k.key}`);
     }
   }
 
-  fired.push(...(await lineupAlerts(league, shape.weeks, matches, sent)));
+  fired.push(...(await lineupAlerts(league, shape.weeks, matches, sent, orphans)));
   return fired;
 }
 
-function send(league: League, k: KeyedNotices) {
+function send(league: League, k: KeyedNotices, orphans: Set<string>) {
   const url = `/dashboard/fantasy/${league.id}/matchup`;
-  for (const n of k.notices) notifyManagers(n.to, "fantasy_results", { title: n.title, body: n.body, url });
+  for (const n of k.notices) {
+    const to = n.to.filter((id) => !orphans.has(id));
+    if (to.length) notifyManagers(to, "fantasy_results", { title: n.title, body: n.body, url });
+  }
 }
 
 // §12: a starter who won't score this week, while there's still time to swap
@@ -122,6 +132,7 @@ async function lineupAlerts(
   weeks: ReturnType<typeof buildSchedule>["weeks"],
   matches: GroupMatch[],
   sent: Set<string>,
+  orphans: Set<string>,
 ): Promise<string[]> {
   const w = currentWeek(weeks);
   const week = weeks.find((x) => x.week === w);
@@ -139,7 +150,8 @@ async function lineupAlerts(
   ]);
   const credited = new Set(((creditRows ?? []) as { manager_id: string; slot: string }[]).map((c) => `${c.manager_id}:${c.slot}`));
   const starters = ((slotRows ?? []) as { manager_id: string; slot: LineupSlot; player_id: string }[]).filter(
-    (s) => isStarterSlot(s.slot) && playing.has(s.manager_id) && !credited.has(`${s.manager_id}:${s.slot}`),
+    (s) =>
+      isStarterSlot(s.slot) && playing.has(s.manager_id) && !orphans.has(s.manager_id) && !credited.has(`${s.manager_id}:${s.slot}`),
   );
   if (!starters.length) return [];
   const { data: playerRows } = await supabaseAdmin

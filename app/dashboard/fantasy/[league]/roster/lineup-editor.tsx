@@ -3,7 +3,7 @@
 import { useState, useTransition, type ReactNode } from "react";
 import { LINEUP_SLOTS, SLOT_LABEL, isStarterSlot, type LineupSlot } from "@/app/lib/fantasy-draft";
 import { moveTargets, type LineupEntry } from "@/app/lib/fantasy-lineup";
-import { moveLineupSlot } from "../../actions";
+import { moveLineupSlot, moveOrphanLineupSlot } from "../../actions";
 
 // Tap a position to pick its player up, then tap where they should go. A tap
 // beats dragging on a phone, and the targets come from the same rules the
@@ -13,8 +13,11 @@ export function LineupEditor({
   title,
   lineup,
   cells,
+  orphanTeamId,
 }: {
   leagueId: string;
+  /** §11: the owner is setting an orphaned team's lineup rather than their own. */
+  orphanTeamId?: string;
   title: string;
   lineup: LineupEntry[];
   cells: Record<LineupSlot, ReactNode>;
@@ -32,7 +35,9 @@ export function LineupEditor({
     if (selected && targets.has(slot)) {
       const from = selected;
       startTransition(async () => {
-        const res = await moveLineupSlot(leagueId, from, slot);
+        const res = orphanTeamId
+          ? await moveOrphanLineupSlot(leagueId, orphanTeamId, from, slot)
+          : await moveLineupSlot(leagueId, from, slot);
         if (res.error) setError(res.error);
         setSelected(null);
       });

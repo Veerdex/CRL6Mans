@@ -110,15 +110,17 @@ async function checkMove(
       .select("player_id, tier")
       .eq("fantasy_season_id", league.fantasy_season_id)
       .in("player_id", [addId, dropId]),
-    supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId),
+    supabaseAdmin.from("fantasy_league_members").select("account_id, orphaned_at").eq("league_id", leagueId),
     supabaseAdmin.from("fantasy_roster_slots").select("manager_id, player_id").eq("league_id", leagueId).in("player_id", [addId, dropId]),
     supabaseAdmin.from("fantasy_waivers").select("clears_at").eq("league_id", leagueId).eq("player_id", addId).maybeSingle(),
     // A claim settles at the run, which checks the locks then.
     kind === "add" ? lockedPlayerIds([addId, dropId]) : Promise.resolve(new Set<string>()),
     eliminatedInLeague(leagueId),
   ]);
-  const memberIds = new Set(((members ?? []) as { account_id: string }[]).map((m) => m.account_id));
-  if (!memberIds.has(managerId)) return { error: "You aren't a manager in this league." };
+  const memberRows = (members ?? []) as { account_id: string; orphaned_at: string | null }[];
+  // A departed manager stays out of the pool until the team is handed over (§11).
+  const memberIds = new Set(memberRows.map((m) => m.account_id));
+  if (!memberRows.some((m) => m.account_id === managerId && !m.orphaned_at)) return { error: "You aren't a manager in this league." };
   if (eliminated.has(managerId)) return { error: FROZEN };
 
   const tierOf = new Map(((tiers ?? []) as { player_id: string; tier: number }[]).map((t) => [t.player_id, Number(t.tier) as FantasyTier]));
