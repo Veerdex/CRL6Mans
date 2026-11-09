@@ -169,7 +169,15 @@ export async function orphanFantasyTeams(accountId: string): Promise<void> {
     .select("id, status, commissioner_id")
     .in("id", memberships.map((m) => m.league_id));
   for (const league of (leagueRows ?? []) as LeagueLite[]) {
-    if (league.status === "pre_draft") await dropBeforeDraft(league, accountId, "removed");
-    else if (league.status === "drafting" || league.status === "active") await orphanTeam(league, accountId, "removed");
+    if (league.status === "pre_draft") {
+      const res = await dropBeforeDraft(league, accountId, "removed");
+      if (!res.error) continue;
+      // The draft started between the read and the leave, so the seat is already
+      // in the order: orphan it instead, which a kick may do mid-draft.
+      const { data: now } = await supabaseAdmin.from("fantasy_leagues").select("id, status, commissioner_id").eq("id", league.id).maybeSingle();
+      if (now?.status === "drafting" || now?.status === "active") await orphanTeam(now as LeagueLite, accountId, "removed");
+    } else if (league.status === "drafting" || league.status === "active") {
+      await orphanTeam(league, accountId, "removed");
+    }
   }
 }

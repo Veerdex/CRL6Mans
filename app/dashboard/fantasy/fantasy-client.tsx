@@ -213,7 +213,7 @@ export function LeaveLeagueButton({
   const [pending, startTransition] = useTransition();
   const others = managerCount - 1;
   const deletes = !afterDraft && others <= 0;
-  const handOff = isOwner && others > 0 ? "You own this league, so it passes to the manager who joined earliest after you. " : "";
+  const handOff = isOwner && others > 0 ? "You own this league, so it passes to the longest-standing manager left. " : "";
   const warning = deletes
     ? "You're the only manager, so leaving deletes the league. This can't be undone."
     : afterDraft
