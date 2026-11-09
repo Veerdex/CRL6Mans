@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "./supabase";
 import { GROUP_STAGE_PREFIX } from "./bracket";
 import { isStarterSlot, type LineupSlot } from "./fantasy-draft";
+import { waiverClearsAt } from "./fantasy-waivers";
 
 // Fantasy slot credits (docs/fantasy-rl.md §6): when a group-stage series is
 // reported, every rostered starter whose team played it fills the slot they
@@ -35,10 +36,11 @@ export async function creditFantasySlots(matchIds: string[]): Promise<void> {
   if (!seasonIds.length) return;
   const { data: leagues } = await supabaseAdmin
     .from("fantasy_leagues")
-    .select("id")
+    .select("id, fantasy_season_id")
     .in("fantasy_season_id", seasonIds)
     .eq("status", "active");
-  const leagueIds = ((leagues ?? []) as { id: string }[]).map((l) => l.id);
+  const leagueRows = (leagues ?? []) as { id: string; fantasy_season_id: string }[];
+  const leagueIds = leagueRows.map((l) => l.id);
   if (!leagueIds.length) return;
 
   const matchOfTeam = new Map<string, CreditMatch>();
@@ -56,7 +58,10 @@ export async function creditFantasySlots(matchIds: string[]): Promise<void> {
     .in("league_id", leagueIds)
     .in("player_id", [...teamOf.keys()]);
 
-  const credits = ((slots ?? []) as { league_id: string; manager_id: string; slot: LineupSlot; player_id: string }[])
+  const slotRows = (slots ?? []) as { league_id: string; manager_id: string; slot: LineupSlot; player_id: string }[];
+  await putReportedOnWaivers(leagueRows, [...teamOf.keys()], slotRows);
+
+  const credits = slotRows
     .filter((s) => isStarterSlot(s.slot))
     .map((s) => {
       const teamId = teamOf.get(s.player_id)!;
@@ -77,4 +82,33 @@ export async function creditFantasySlots(matchIds: string[]): Promise<void> {
     .from("fantasy_slot_credits")
     .upsert(credits, { onConflict: "league_id,manager_id,week,slot", ignoreDuplicates: true });
   if (error) console.error(`[fantasy] slot credits for ${matchIds.join(",")} failed: ${error.message}`);
+}
+
+/**
+ * §9: a player goes on waivers when his series is reported, and playing again
+ * restarts his 24 hours. Only players in a league's frozen pool and on nobody's
+ * roster there; a rostered player goes on waivers only when he's dropped.
+ */
+async function putReportedOnWaivers(
+  leagues: { id: string; fantasy_season_id: string }[],
+  playerIds: string[],
+  slots: { league_id: string; player_id: string }[],
+): Promise<void> {
+  const seasonIds = [...new Set(leagues.map((l) => l.fantasy_season_id))];
+  const { data: tiers } = await supabaseAdmin
+    .from("fantasy_player_tiers")
+    .select("fantasy_season_id, player_id")
+    .in("fantasy_season_id", seasonIds)
+    .in("player_id", playerIds);
+  const pool = new Set(((tiers ?? []) as { fantasy_season_id: string; player_id: string }[]).map((t) => `${t.fantasy_season_id}:${t.player_id}`));
+  const rostered = new Set(slots.map((s) => `${s.league_id}:${s.player_id}`));
+  const clearsAt = waiverClearsAt(new Date()).toISOString();
+  const rows = leagues.flatMap((l) =>
+    playerIds
+      .filter((p) => pool.has(`${l.fantasy_season_id}:${p}`) && !rostered.has(`${l.id}:${p}`))
+      .map((p) => ({ league_id: l.id, player_id: p, clears_at: clearsAt })),
+  );
+  if (!rows.length) return;
+  const { error } = await supabaseAdmin.from("fantasy_waivers").upsert(rows, { onConflict: "league_id,player_id" });
+  if (error) console.error(`[fantasy] waivers for reported players failed: ${error.message}`);
 }
