@@ -203,8 +203,8 @@ export function PoolTable({
                     }}
                     className="flex items-center gap-2 px-3 py-2.5 cursor-pointer"
                   >
-                    <div className="flex-1 min-w-0"><NameCell player={p} badge /></div>
                     <Availability player={p} compact />
+                    <div className="flex-1 min-w-0"><NameCell player={p} badge /></div>
                     <div className="w-14 text-right"><Projection player={p} /></div>
                     {renderAction && (
                       // Its own click target, so drafting doesn't also toggle the row.
