@@ -15,6 +15,7 @@ import { LineupEditor } from "./lineup-editor";
 import { leagueWaiverPriority, managerPendingClaims } from "@/app/lib/fantasy-waivers-server";
 import { LocalTime } from "@/app/dashboard/local-time";
 import { CancelClaimButton } from "./cancel-claim-button";
+import { ClaimRankButtons } from "./claim-rank-buttons";
 import { WaiverOrder } from "../waiver-order";
 
 export default function FantasyRosterPage({
@@ -140,12 +141,20 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
               No claims in. Claim a player on waivers from the Players tab, or add a free agent straight away.
             </p>
           ) : (
-            <ul className="divide-y divide-zinc-700/60">
-              {claims.map((c) => {
+            <>
+            {claims.length > 1 && (
+              <p className="px-4 pt-3 text-xs text-zinc-400">
+                Ranked most wanted first. Each round of the run gives you the highest one still open, so put the player
+                you want most at the top.
+              </p>
+            )}
+            <ol className="divide-y divide-zinc-700/60">
+              {claims.map((c, i) => {
                 const add = playerById.get(c.playerId);
                 const drop = playerById.get(c.dropPlayerId);
                 return (
                   <li key={c.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                    <span className="w-4 shrink-0 text-center text-xs tabular-nums text-zinc-500">{i + 1}</span>
                     <div className="flex-1 min-w-0">
                       <div className="text-zinc-400 truncate">
                         <span className={add ? `font-medium ${TIER_NAME_CLASS[add.tier]}` : "text-white"}>{add?.name ?? "Unknown player"}</span>{" "}
@@ -159,11 +168,13 @@ async function Roster({ league, manager }: { league: Promise<LeagueAccess>; mana
                         )}
                       </div>
                     </div>
+                    {claims.length > 1 && <ClaimRankButtons leagueId={leagueId} ids={claims.map((x) => x.id)} index={i} />}
                     <CancelClaimButton leagueId={leagueId} claimId={c.id} />
                   </li>
                 );
               })}
-            </ul>
+            </ol>
+            </>
           )}
         </section>
       )}

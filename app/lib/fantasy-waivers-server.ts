@@ -4,7 +4,9 @@ import { getLeague } from "./fantasy-leagues";
 import type { FantasyTier } from "./fantasy-pool";
 import { lockedPlayerIds } from "./fantasy-lineup-server";
 import {
+  byPreference,
   latestWaiverRun,
+  orderAfterRun,
   settleClaims,
   swapInProblem,
   waiverClearsAt,
@@ -38,21 +40,48 @@ export async function leagueWaiverPriority(leagueId: string): Promise<string[]> 
   );
 }
 
+type ClaimRow = { id: string; manager_id: string; player_id: string; drop_player_id: string; rank: number | null; created_at: string };
+const CLAIM_COLUMNS = "id, manager_id, player_id, drop_player_id, rank, created_at";
+const toClaim = (c: ClaimRow): PendingClaim => ({
+  id: c.id,
+  managerId: c.manager_id,
+  playerId: c.player_id,
+  dropPlayerId: c.drop_player_id,
+  rank: c.rank,
+  createdAt: c.created_at,
+});
+
+/** The manager's pending claims, most wanted first. */
 export async function managerPendingClaims(leagueId: string, managerId: string): Promise<PendingClaim[]> {
   const { data } = await supabaseAdmin
     .from("fantasy_waiver_claims")
-    .select("id, player_id, drop_player_id, created_at")
+    .select(CLAIM_COLUMNS)
     .eq("league_id", leagueId)
     .eq("manager_id", managerId)
-    .eq("status", "pending")
-    .order("created_at");
-  return ((data ?? []) as { id: string; player_id: string; drop_player_id: string; created_at: string }[]).map((c) => ({
-    id: c.id,
-    managerId,
-    playerId: c.player_id,
-    dropPlayerId: c.drop_player_id,
-    createdAt: c.created_at,
-  }));
+    .eq("status", "pending");
+  return ((data ?? []) as ClaimRow[]).map(toClaim).sort(byPreference);
+}
+
+/** Saves the manager's preference across their pending claims, `claimIds` most wanted first. */
+export async function rankClaims(leagueId: string, managerId: string, claimIds: string[]): Promise<Result> {
+  const pending = await managerPendingClaims(leagueId, managerId);
+  const ids = new Set(pending.map((c) => c.id));
+  if (claimIds.length !== ids.size || new Set(claimIds).size !== ids.size || claimIds.some((id) => !ids.has(id))) {
+    return { error: "Your claims changed in the meantime. Refresh and try again." };
+  }
+  const results = await Promise.all(
+    claimIds.map((id, i) =>
+      supabaseAdmin
+        .from("fantasy_waiver_claims")
+        .update({ rank: i + 1 })
+        .eq("id", id)
+        .eq("league_id", leagueId)
+        .eq("manager_id", managerId)
+        .eq("status", "pending"),
+    ),
+  );
+  if (results.some((r) => r.error)) return { error: "Couldn't save that order. Try again." };
+  return {};
 }
 
 // Everything a page could have drawn wrong is re-derived here: the league is
@@ -155,9 +184,12 @@ export async function fileClaim(leagueId: string, managerId: string, playerId: s
     .select("id");
   if (updated?.length) return {};
 
+  // A new claim goes last in the manager's preference until they reorder.
+  const pending = await managerPendingClaims(leagueId, managerId);
+  const rank = pending.reduce((max, c, i) => Math.max(max, c.rank ?? i + 1), 0) + 1;
   const { error } = await supabaseAdmin
     .from("fantasy_waiver_claims")
-    .insert({ league_id: leagueId, manager_id: managerId, player_id: playerId, drop_player_id: dropId });
+    .insert({ league_id: leagueId, manager_id: managerId, player_id: playerId, drop_player_id: dropId, rank });
   if (error?.code === "23505") return { error: "You already have a claim in for him." };
   if (error) return { error: "Couldn't save that claim. Try again." };
   return {};
@@ -228,16 +260,14 @@ async function settleLeague(league: RunLeague, boundary: string, now: Date): Pro
   const [{ data: claimRows }, { data: slotRows }, { data: members }] = await Promise.all([
     supabaseAdmin
       .from("fantasy_waiver_claims")
-      .select("id, manager_id, player_id, drop_player_id, created_at")
+      .select(CLAIM_COLUMNS)
       .eq("league_id", league.id)
       .eq("status", "pending")
       .in("player_id", due),
     supabaseAdmin.from("fantasy_roster_slots").select("manager_id, player_id").eq("league_id", league.id),
     supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", league.id).order("joined_at"),
   ]);
-  const claims: PendingClaim[] = (
-    (claimRows ?? []) as { id: string; manager_id: string; player_id: string; drop_player_id: string; created_at: string }[]
-  ).map((c) => ({ id: c.id, managerId: c.manager_id, playerId: c.player_id, dropPlayerId: c.drop_player_id, createdAt: c.created_at }));
+  const claims: PendingClaim[] = ((claimRows ?? []) as ClaimRow[]).map(toClaim);
 
   const rosters = new Map<string, Set<string>>();
   for (const s of (slotRows ?? []) as { manager_id: string; player_id: string }[]) {
@@ -251,10 +281,11 @@ async function settleLeague(league: RunLeague, boundary: string, now: Date): Pro
   ]);
   const tierOf = new Map(((tiers ?? []) as { player_id: string; tier: number }[]).map((t) => [t.player_id, Number(t.tier) as FantasyTier]));
 
+  const order = waiverOrder(league.waiver_order, league.draft_order, ((members ?? []) as { account_id: string }[]).map((m) => m.account_id));
   const result = settleClaims({
     due,
     claims,
-    order: waiverOrder(league.waiver_order, league.draft_order, ((members ?? []) as { account_id: string }[]).map((m) => m.account_id)),
+    order,
     rosters,
     tierOf: (id) => tierOf.get(id),
     locked,
@@ -264,10 +295,14 @@ async function settleLeague(league: RunLeague, boundary: string, now: Date): Pro
   // an earlier one having freed its player.
   const outcomes = new Map(result.outcomes.map((o) => [o.id, o]));
   const dropped: string[] = [];
+  const winners: string[] = [];
   for (const award of result.awards) {
     const failure = await swapIntoSlot(league.id, award.managerId, award.playerId, award.dropPlayerId);
     if (failure) outcomes.set(award.id, { id: award.id, status: "failed", note: failure });
-    else dropped.push(award.dropPlayerId);
+    else {
+      dropped.push(award.dropPlayerId);
+      winners.push(award.managerId);
+    }
   }
   await putOnWaivers(league.id, dropped, now);
 
@@ -286,7 +321,9 @@ async function settleLeague(league: RunLeague, boundary: string, now: Date): Pro
   if (result.cleared.length) {
     await supabaseAdmin.from("fantasy_waivers").delete().eq("league_id", league.id).in("player_id", result.cleared).lte("clears_at", boundary);
   }
-  if (dropped.length) await supabaseAdmin.from("fantasy_leagues").update({ waiver_order: result.order }).eq("id", league.id);
+  // From the swaps that actually landed, so a claim that lost a race at write
+  // time doesn't cost its manager priority.
+  if (winners.length) await supabaseAdmin.from("fantasy_leagues").update({ waiver_order: orderAfterRun(order, winners) }).eq("id", league.id);
 
   return `waivers:${league.id}:${dropped.length}/${result.cleared.length}`;
 }

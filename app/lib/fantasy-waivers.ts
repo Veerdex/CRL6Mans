@@ -58,9 +58,14 @@ export function waiverOrder(stored: readonly string[] | null, draftOrder: readon
   return order;
 }
 
-/** A successful claim sends that manager to the back; everyone behind them moves up. */
-export function moveToBack(order: readonly string[], managerId: string): string[] {
-  return [...order.filter((id) => id !== managerId), managerId];
+/**
+ * The order after a run. Managers who won nothing move up in their current
+ * order; the winners go behind them reversed, so whoever started highest ends
+ * up last. Four managers who each win once come out in the opposite order.
+ */
+export function orderAfterRun(order: readonly string[], winners: Iterable<string>): string[] {
+  const won = new Set(winners);
+  return [...order.filter((id) => !won.has(id)), ...order.filter((id) => won.has(id)).reverse()];
 }
 
 export type PlayerStatus = { kind: "rostered" } | { kind: "waivers"; clearsAt: string } | { kind: "free_agent" };
@@ -93,15 +98,32 @@ export function swapInProblem(add: MovePlayer, drop: (MovePlayer & { onRoster: b
   return null;
 }
 
-export type PendingClaim = { id: string; managerId: string; playerId: string; dropPlayerId: string; createdAt: string };
+export type PendingClaim = {
+  id: string;
+  managerId: string;
+  playerId: string;
+  dropPlayerId: string;
+  /** The manager's preference, 1 first. Null on claims filed before ranking existed. */
+  rank: number | null;
+  createdAt: string;
+};
 export type ClaimOutcome = { id: string; status: "won" | "lost" | "failed"; note: string | null };
 
+/** A manager's claims in the order they want them, unranked ones last by filing time. */
+export function byPreference(a: PendingClaim, b: PendingClaim): number {
+  return (a.rank ?? Infinity) - (b.rank ?? Infinity) || a.createdAt.localeCompare(b.createdAt);
+}
+
 /**
- * Settles one run. `due` is every player whose waivers have cleared, oldest
- * first. Each goes to the highest-priority manager whose claim is still good
- * against the rosters as they stand after the claims settled before it, and
- * that manager moves to the back. A player who is mid-match at the run is
- * skipped: his claims stay pending and he stays on waivers until the next run.
+ * Settles one run. `due` is every player whose waivers have cleared. A player
+ * mid-match at the run is skipped: his claims stay pending and he stays on
+ * waivers until the next run.
+ *
+ * Claims go in rounds. In each, every manager from the top of the order down
+ * gets their most preferred claim that still works, so nobody wins a second
+ * player before everyone has had a shot at a first. Claims passed over on the
+ * way are settled as lost (someone above took him) or failed (the swap no
+ * longer works). The order doesn't move mid-run; `orderAfterRun` applies once.
  */
 export function settleClaims(input: {
   due: readonly string[];
@@ -114,59 +136,60 @@ export function settleClaims(input: {
 }): { outcomes: ClaimOutcome[]; awards: PendingClaim[]; order: string[]; cleared: string[] } {
   const rosters = new Map([...input.rosters].map(([m, set]) => [m, new Set(set)]));
   const rostered = new Set([...rosters.values()].flatMap((s) => [...s]));
-  let order = [...input.order];
+  const cleared = input.due.filter((p) => !input.locked.has(p));
+  const settling = new Set(cleared);
   const outcomes: ClaimOutcome[] = [];
   const awards: PendingClaim[] = [];
-  const cleared: string[] = [];
 
-  for (const playerId of input.due) {
-    if (input.locked.has(playerId)) continue;
-    cleared.push(playerId);
-    const claims = input.claims
-      .filter((c) => c.playerId === playerId)
-      .sort((a, b) => rank(order, a.managerId) - rank(order, b.managerId) || a.createdAt.localeCompare(b.createdAt));
-    let winner: PendingClaim | null = null;
-    for (const c of claims) {
-      if (winner) {
-        outcomes.push({ id: c.id, status: "lost", note: null });
-        continue;
+  const queues = new Map<string, PendingClaim[]>();
+  for (const c of input.claims) {
+    if (!settling.has(c.playerId)) continue;
+    if (!input.order.includes(c.managerId)) {
+      outcomes.push({ id: c.id, status: "failed", note: "You're no longer in the league." });
+      continue;
+    }
+    queues.set(c.managerId, [...(queues.get(c.managerId) ?? []), c]);
+  }
+  for (const q of queues.values()) q.sort(byPreference);
+
+  while ([...queues.values()].some((q) => q.length)) {
+    for (const managerId of input.order) {
+      const queue = queues.get(managerId) ?? [];
+      while (queue.length) {
+        const c = queue.shift()!;
+        if (awards.some((a) => a.playerId === c.playerId)) {
+          outcomes.push({ id: c.id, status: "lost", note: null });
+          continue;
+        }
+        const note = rostered.has(c.playerId)
+          ? "He was already on a roster."
+          : claimFailure(c, { rosters, tierOf: input.tierOf, locked: input.locked });
+        if (note) {
+          outcomes.push({ id: c.id, status: "failed", note });
+          continue;
+        }
+        outcomes.push({ id: c.id, status: "won", note: null });
+        awards.push(c);
+        const roster = rosters.get(c.managerId)!;
+        roster.delete(c.dropPlayerId);
+        roster.add(c.playerId);
+        rostered.delete(c.dropPlayerId);
+        rostered.add(c.playerId);
+        break;
       }
-      const note = claimFailure(c, { rosters, rostered, tierOf: input.tierOf, locked: input.locked, order });
-      if (note) {
-        outcomes.push({ id: c.id, status: "failed", note });
-        continue;
-      }
-      winner = c;
-      outcomes.push({ id: c.id, status: "won", note: null });
-      awards.push(c);
-      const roster = rosters.get(c.managerId)!;
-      roster.delete(c.dropPlayerId);
-      roster.add(playerId);
-      rostered.delete(c.dropPlayerId);
-      rostered.add(playerId);
-      order = moveToBack(order, c.managerId);
     }
   }
-  return { outcomes, awards, order, cleared };
+  return { outcomes, awards, order: orderAfterRun(input.order, awards.map((a) => a.managerId)), cleared };
 }
-
-const rank = (order: readonly string[], managerId: string) => {
-  const i = order.indexOf(managerId);
-  return i === -1 ? order.length : i;
-};
 
 function claimFailure(
   c: PendingClaim,
   s: {
     rosters: Map<string, Set<string>>;
-    rostered: Set<string>;
     tierOf: (id: string) => FantasyTier | undefined;
     locked: ReadonlySet<string>;
-    order: readonly string[];
   },
 ): string | null {
-  if (!s.order.includes(c.managerId)) return "You're no longer in the league.";
-  if (s.rostered.has(c.playerId)) return "He was already on a roster.";
   const tier = s.tierOf(c.playerId);
   const dropTier = s.tierOf(c.dropPlayerId);
   if (!tier || !dropTier) return "That player isn't in the pool.";

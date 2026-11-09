@@ -273,8 +273,14 @@ Free agent (instant add)
 
 ### Waiver priority (rolling)
 - Starts as the **reverse of the draft order**.
-- A successful claim moves that manager to the **back** of the order. Everyone else moves up.
-- When several managers claim the same player, the highest priority wins.
+- Each manager **ranks their pending claims**, most wanted first.
+- **Claims go in rounds.** In each round, every manager from the top of the order down gets
+  their highest-ranked claim that still works. Nobody wins a second player until everyone has
+  had a shot at a first. Rounds repeat until no claims are left.
+- The order **doesn't move during a run**. Afterwards, managers who won nothing move up in
+  their current order, and the winners go behind them **reversed**: whoever started highest ends
+  up last. If all four managers in a league win, the order comes out exactly reversed. Winning
+  two players in one run still moves a manager only once.
 
 ---
 
@@ -418,9 +424,17 @@ Modelled on fantasy football so it's familiar:
 - **Waivers** (`scripts/fantasy-waivers-migration.sql`): `fantasy_waivers` (one row per league
   and player, with `clears_at`) and `fantasy_waiver_claims` (`pending` → `won`/`lost`/`failed`/
   `cancelled`, one pending claim per manager per player), plus `waiver_order` and
-  `waivers_ran_at` on `fantasy_leagues`. The rules are in the pure `app/lib/fantasy-waivers.ts`
-  (`npm run test:fantasy-waivers`): `waiverClearsAt`, `waiverOrder`, `settleClaims` and
-  `swapInProblem`. The database side is in `app/lib/fantasy-waivers-server.ts`.
+  `waivers_ran_at` on `fantasy_leagues`. `scripts/fantasy-claim-rank-migration.sql` adds
+  `fantasy_waiver_claims.rank`. Claims filed before it have a null rank and sort after ranked
+  ones, by filing time. The rules are in the pure `app/lib/fantasy-waivers.ts`
+  (`npm run test:fantasy-waivers`): `waiverClearsAt`, `waiverOrder`, `settleClaims`,
+  `orderAfterRun` and `swapInProblem`. The database side is in `app/lib/fantasy-waivers-server.ts`.
+  - **Players are not settled one at a time.** Every claim in a run shares the same 4 AM
+    `clears_at`, so "oldest first" was a tie broken by row order. That order decided who got
+    which player and how the waiver order moved. The rounds-by-manager run makes the result
+    independent of the order players are returned in.
+  - A new claim gets the next rank after the manager's other pending claims. The Roster tab's
+    arrows rewrite all of them (`rankClaims`).
   - `creditFantasySlots` puts the reported series' unrostered pool players on waivers. It
     imports only the pure leaf, so `discord-bot.ts` still doesn't pull in league code.
   - **A waiver row holds the player until the run deletes it, even after `clears_at`
@@ -438,7 +452,8 @@ Modelled on fantasy football so it's familiar:
     last 4 AM Pacific boundary. For each active league it claims the run with a
     compare-and-set on `waivers_ran_at`, so only one tick processes a league per day. It
     settles every row with `clears_at <= boundary`, then rewrites `waiver_order` when anyone
-    won.
+    won. The new order counts only the swaps that actually saved, so a claim that loses a
+    race at write time doesn't cost its manager priority.
   - `rollbackFantasyTestRun` deletes both tables by league and nulls the two league columns.
 - **Not built yet:** the eliminated-manager freeze (§7), claim-result notifications (§12),
   and putting a departing manager's players on waivers (§11).

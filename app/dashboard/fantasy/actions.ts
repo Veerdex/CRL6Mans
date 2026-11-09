@@ -19,7 +19,7 @@ import { normalizeLeagueName } from "@/app/lib/fantasy-rules";
 import { getStaffRole, isDirectorVerified } from "@/app/lib/players";
 import { autopickIfDue, startFantasyDrafts, submitPick } from "@/app/lib/fantasy-draft-server";
 import { moveLineupPlayer } from "@/app/lib/fantasy-lineup-server";
-import { addFreeAgent, cancelClaim, fileClaim } from "@/app/lib/fantasy-waivers-server";
+import { addFreeAgent, cancelClaim, fileClaim, rankClaims } from "@/app/lib/fantasy-waivers-server";
 
 type Result = { error?: string };
 
@@ -360,6 +360,15 @@ export async function cancelFantasyClaim(leagueId: string, claimId: string): Pro
   const res = await cancelClaim(leagueId, me.accountId, claimId);
   if (res.error) return res;
   refreshRosterMove(leagueId);
+  return {};
+}
+
+export async function rankFantasyClaims(leagueId: string, claimIds: string[]): Promise<Result> {
+  const me = await requireManager();
+  if ("error" in me) return me;
+  const res = await rankClaims(leagueId, me.accountId, claimIds);
+  if (res.error) return res;
+  revalidatePath(`/dashboard/fantasy/${leagueId}/roster`);
   return {};
 }
 

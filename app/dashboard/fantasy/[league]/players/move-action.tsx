@@ -146,7 +146,7 @@ function DropPicker({
             {onWaivers ? (
               <>
                 He&apos;s on waivers until <LocalTime iso={player.waiverClearsAt} upcoming />. Claims settle then, in
-                waiver priority order, and a successful claim sends you to the back of it.
+                waiver order, and winning one sends you to the back of it.
                 {moves.priority && (
                   <>
                     {" "}

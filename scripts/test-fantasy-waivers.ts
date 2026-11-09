@@ -5,8 +5,8 @@ import assert from "node:assert/strict";
 
 import {
   latestWaiverRun,
-  moveToBack,
   nextWaiverRun,
+  orderAfterRun,
   playerStatus,
   settleClaims,
   swapInProblem,
@@ -57,8 +57,11 @@ test("waiver order drops managers who left and puts unlisted members last", () =
   assert.deepEqual(waiverOrder(["b", "a", "c"], null, ["a", "c", "d"]), ["a", "c", "d"]);
 });
 
-test("a successful claim sends the manager to the back", () => {
-  assert.deepEqual(moveToBack(["a", "b", "c", "d"], "b"), ["a", "c", "d", "b"]);
+test("after a run the winners go to the back, the highest furthest", () => {
+  assert.deepEqual(orderAfterRun(["a", "b", "c", "d"], ["b"]), ["a", "c", "d", "b"]);
+  assert.deepEqual(orderAfterRun(["a", "b", "c", "d"], ["c", "a"]), ["b", "d", "c", "a"]);
+  assert.deepEqual(orderAfterRun(["a", "b", "c", "d"], ["a", "b", "c", "d"]), ["d", "c", "b", "a"]);
+  assert.deepEqual(orderAfterRun(["a", "b", "c", "d"], []), ["a", "b", "c", "d"]);
 });
 
 test("status: rostered, then on waivers until the run settles him, then a free agent", () => {
@@ -78,9 +81,14 @@ test("a move is like for like, and neither player may be mid-match", () => {
 });
 
 const tiers: Record<string, FantasyTier> = { x: 2, y: 2, z: 3, a2: 2, b2: 2, c2: 2, b3: 3 };
-const claim = (id: string, managerId: string, playerId: string, dropPlayerId: string, createdAt = "2026-07-15T00:00:00Z"): PendingClaim => ({
-  id, managerId, playerId, dropPlayerId, createdAt,
-});
+const claim = (
+  id: string,
+  managerId: string,
+  playerId: string,
+  dropPlayerId: string,
+  rank: number | null = null,
+  createdAt = "2026-07-15T00:00:00Z",
+): PendingClaim => ({ id, managerId, playerId, dropPlayerId, rank, createdAt });
 const base = () => ({
   order: ["a", "b", "c"],
   rosters: new Map([
@@ -103,20 +111,63 @@ test("the highest priority claim wins and that manager goes to the back", () => 
   assert.deepEqual(r.cleared, ["x"]);
 });
 
-test("a winner's new priority applies to the next player in the same run", () => {
+test("each manager gets their most wanted claim, whatever order the players come in", () => {
+  // a wants y over x; b only wants y. Settling x first used to hand a both.
+  const claims = [claim("1", "a", "x", "a2", 2), claim("2", "a", "y", "a2", 1), claim("3", "b", "y", "b2", 1)];
+  for (const due of [["x", "y"], ["y", "x"]]) {
+    const r = settleClaims({ ...base(), due, claims });
+    assert.deepEqual(r.awards.map((c) => c.id), ["2"]);
+    assert.equal(r.outcomes.find((o) => o.id === "3")!.status, "lost");
+    assert.equal(r.outcomes.find((o) => o.id === "1")!.status, "failed");
+    assert.deepEqual(r.order, ["b", "c", "a"]);
+  }
+});
+
+test("nobody wins a second player until everyone has had a shot at a first", () => {
+  const r = settleClaims({
+    ...base(),
+    rosters: new Map([
+      ["a", new Set(["a2", "x2"])],
+      ["b", new Set(["b2", "b3"])],
+      ["c", new Set(["c2"])],
+    ]),
+    tierOf: (id: string) => ({ ...tiers, x2: 2 as FantasyTier })[id],
+    due: ["x", "y"],
+    claims: [claim("1", "a", "x", "a2", 1), claim("2", "a", "y", "x2", 2), claim("3", "b", "y", "b2", 1)],
+  });
+  // Round one: a takes x, b takes y. a's second claim then finds y gone.
+  assert.deepEqual(r.awards.map((c) => c.id), ["1", "3"]);
+  assert.equal(r.outcomes.find((o) => o.id === "2")!.status, "lost");
+  assert.deepEqual(r.order, ["c", "b", "a"]);
+});
+
+test("a manager can win a second player in a later round", () => {
+  const r = settleClaims({
+    ...base(),
+    rosters: new Map([
+      ["a", new Set(["a2", "x2"])],
+      ["b", new Set(["b2", "b3"])],
+      ["c", new Set(["c2"])],
+    ]),
+    tierOf: (id: string) => ({ ...tiers, x2: 2 as FantasyTier })[id],
+    due: ["x", "y"],
+    claims: [claim("1", "a", "x", "a2", 1), claim("2", "a", "y", "x2", 2)],
+  });
+  assert.deepEqual(r.awards.map((c) => c.id), ["1", "2"]);
+  assert.deepEqual(r.order, ["b", "c", "a"]);
+});
+
+test("unranked claims go after ranked ones, by filing time", () => {
   const r = settleClaims({
     ...base(),
     due: ["x", "y"],
-    claims: [claim("1", "a", "x", "a2"), claim("2", "b", "x", "b2"), claim("3", "a", "y", "a2"), claim("4", "b", "y", "b2")],
+    claims: [claim("1", "a", "x", "a2", null, "2026-07-14T00:00:00Z"), claim("2", "a", "y", "a2", 1, "2026-07-15T00:00:00Z")],
   });
-  // a won x and went to the back, so b outranks a for y.
-  assert.deepEqual(r.awards.map((c) => c.id), ["1", "4"]);
-  assert.equal(r.outcomes.find((o) => o.id === "3")!.status, "lost");
-  assert.deepEqual(r.order, ["c", "a", "b"]);
+  assert.deepEqual(r.awards.map((c) => c.id), ["2"]);
 });
 
 test("a claim whose drop went in an earlier award of the same run fails", () => {
-  const r = settleClaims({ ...base(), due: ["x", "y"], claims: [claim("1", "a", "x", "a2"), claim("2", "a", "y", "a2")] });
+  const r = settleClaims({ ...base(), due: ["x", "y"], claims: [claim("1", "a", "x", "a2", 1), claim("2", "a", "y", "a2", 2)] });
   assert.deepEqual(r.awards.map((c) => c.id), ["1"]);
   assert.equal(r.outcomes[1].status, "failed");
   assert.match(r.outcomes[1].note!, /already left/);

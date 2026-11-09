@@ -20,7 +20,7 @@ export function WaiverOrder({
           Waiver order
         </h2>
         <p className="text-xs text-zinc-400">
-          When managers claim the same player, the highest gets him and drops to the back.
+          Claims go top down. After each run, managers who won a claim drop to the back, the highest furthest.
         </p>
       </div>
       <ol className="flex flex-wrap gap-1.5">
