@@ -203,8 +203,7 @@ export function PoolTable({
                     }}
                     className="flex items-center gap-2 px-3 py-2.5 cursor-pointer"
                   >
-                    <div className="flex-1 min-w-0"><NameCell player={p} /></div>
-                    <TierBadge tier={p.tier} />
+                    <div className="flex-1 min-w-0"><NameCell player={p} badge /></div>
                     <Availability player={p} compact />
                     <div className="w-14 text-right"><Projection player={p} /></div>
                     {renderAction && (
@@ -265,13 +264,14 @@ function SortButton({
   );
 }
 
-function NameCell({ player }: { player: PoolPlayer }) {
+function NameCell({ player, badge = false }: { player: PoolPlayer; badge?: boolean }) {
   return (
     <div className="flex items-center gap-2 min-w-0">
       <PlayerAvatar discordId={player.discordId} avatar={player.avatar} username={player.username} className="w-7 h-7" cdnSize={64} />
       <div className="min-w-0 flex whitespace-nowrap">
         <PlayerName displayName={player.name} username={player.username} discordId={player.discordId || null} className={`text-sm font-medium ${TIER_NAME_CLASS[player.tier]}`} />
       </div>
+      {badge && <span className="shrink-0"><TierBadge tier={player.tier} /></span>}
     </div>
   );
 }
