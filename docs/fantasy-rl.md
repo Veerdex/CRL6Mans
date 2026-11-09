@@ -597,7 +597,9 @@ later from the stored summaries.
      rounds are played out of order.
    - A short review window (a day or two) in which the league's other managers can veto an
      accepted trade.
-2. **Waivers before elimination is known.** Managers aren't eliminated until Week 6 closes,
-   but a Round 7 series can be played before then. In that window a soon-to-be-eliminated
-   manager can still drop players onto waivers for a playoff manager. Option: freeze waivers
-   and free agency from the first Round 7 lock until Week 6 closes.
+
+**Decided: no freeze for waivers before elimination is known.** Managers aren't eliminated
+until Week 6 closes, but a Round 7 series can be played before then, so in that window a
+soon-to-be-eliminated manager can still drop players onto waivers. Freezing waivers from the
+first Round 7 lock was rejected: Round 7 starts early enough that the freeze would block
+ordinary moves for days, and a manager who claims a dropped player has played it smart.
