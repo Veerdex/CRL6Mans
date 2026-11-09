@@ -9,6 +9,7 @@ import {
   projectedStatPoints,
   projectionBasis,
   seriesFantasyPoints,
+  seriesPointsFromGames,
   seriesWinChance,
   tierFromDraftRound,
 } from "../app/lib/fantasy-pool";
@@ -96,6 +97,15 @@ test("a 3-1 win played in full: stats over 4 games plus the 2-game bonus", () =>
   const stats = { score: 1600, goals: 4, assists: 4, saves: 4, shots: 8 };
   const pts = seriesFantasyPoints({ forfeit: false, ownScore: 3, oppScore: 1, stats, gamesPlayed: 4 });
   close(pts, 20 * fantasyPoints({ score: 400, goals: 1, assists: 1, saves: 1, shots: 2 }) + 2);
+});
+
+test("per-game rows sum into the same series score", () => {
+  const game = { score: 400, goals: 1, assists: 1, saves: 1, shots: 2 };
+  close(
+    seriesPointsFromGames([game, game, game, game], { forfeit: false, ownScore: 3, oppScore: 1 }),
+    seriesFantasyPoints({ forfeit: false, ownScore: 3, oppScore: 1, stats: { score: 1600, goals: 4, assists: 4, saves: 4, shots: 8 }, gamesPlayed: 4 }),
+  );
+  assert.equal(seriesPointsFromGames([], { forfeit: false, ownScore: 3, oppScore: 0 }), 0);
 });
 
 test("the bonus is prorated by games played, and a loss earns none", () => {

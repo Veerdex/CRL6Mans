@@ -368,6 +368,7 @@ export async function rollbackFantasyTestRun(): Promise<void> {
     .in("status", ["drafting", "active"]);
   const ids = ((leagueRows ?? []) as { id: string }[]).map((l) => l.id);
   if (ids.length) {
+    await supabaseAdmin.from("fantasy_slot_credits").delete().in("league_id", ids);
     await supabaseAdmin.from("fantasy_roster_slots").delete().in("league_id", ids);
     await supabaseAdmin.from("fantasy_draft_picks").delete().in("league_id", ids);
     await supabaseAdmin

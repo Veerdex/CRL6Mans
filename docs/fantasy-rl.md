@@ -393,8 +393,21 @@ Modelled on fantasy football so it's familiar:
   table built later (slot credits, matchups, waivers, trades) needs a delete in the
   rollback too. The rollback leaves league memberships alone, so test accounts left in a
   league will join the real draft.
-- Likely tables still to come: `fantasy_slot_credits`, `fantasy_matchups`,
-  `fantasy_waiver_claims`, `fantasy_trades` + `fantasy_trade_items`.
+- **Matchups** (`scripts/fantasy-matchup-migration.sql`): `fantasy_slot_credits` is the one
+  stored table. `creditFantasySlots` (`app/lib/fantasy-credits.ts`, its own module so
+  `discord-bot.ts` doesn't import the league code) runs from `execReportMatchResult` on every
+  non-forfeit group-stage result, and from Simulate's batch hook too, since Simulate writes
+  `completed` directly and bypasses the reporter. It credits each starter on either team
+  from the lineups as they stand at that moment, and `ignoreDuplicates` keeps the first
+  credit. The credit cascades on `match_id`, and `rollbackFantasyTestRun` deletes it by league.
+  The schedule is not stored: `app/lib/fantasy-schedule.ts` (pure,
+  `npm run test:fantasy-schedule`) builds the round robin from `draft_order`, then the
+  standings and playoffs from weekly totals, on every read (`app/lib/fantasy-matchup-server.ts`).
+  **So the playoff seeding is also derived on read**, and a stat edit or re-reported series
+  that changes the regular-season standings reshuffles the bracket, even after the
+  semifinals are played. That's acceptable while results are rarely edited. If it starts to
+  matter, freeze the seeds into a `fantasy_matchups` table when the regular season closes.
+- Likely tables still to come: `fantasy_waiver_claims`, `fantasy_trades` + `fantasy_trade_items`.
 - The waiver run should be checked on every tick of the existing per-minute external pinger
   (like `clip-reset`), running once when 4 AM Pacific has passed and today's run hasn't happened.
   A fixed UTC Vercel cron would drift an hour across daylight saving. Fantasy shouldn't need

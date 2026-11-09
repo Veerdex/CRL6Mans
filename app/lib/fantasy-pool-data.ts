@@ -16,7 +16,7 @@ import {
   freeAgentTier,
   projectedSeriesPoints,
   projectionBasis,
-  seriesFantasyPoints,
+  seriesPointsFromGames,
   tierFromDraftRound,
   type FantasyTier,
   type ProjectionBasis,
@@ -266,21 +266,10 @@ export async function getPoolView(leagueId: string, viewerIsStaff: boolean): Pro
         const rows = statsByPlayerMatch.get(`${p.id}:${m.id}`);
         if (!rows?.length) continue;
         const home = m.home_team_id === p.team_id;
-        seasonPoints += seriesFantasyPoints({
+        seasonPoints += seriesPointsFromGames(rows, {
           forfeit: false,
           ownScore: (home ? m.home_score : m.away_score) ?? 0,
           oppScore: (home ? m.away_score : m.home_score) ?? 0,
-          gamesPlayed: rows.length,
-          stats: rows.reduce(
-            (s, r) => ({
-              score: s.score + r.score,
-              goals: s.goals + r.goals,
-              assists: s.assists + r.assists,
-              saves: s.saves + r.saves,
-              shots: s.shots + r.shots,
-            }),
-            { score: 0, goals: 0, assists: 0, saves: 0, shots: 0 },
-          ),
         });
         seriesPlayed += 1;
       }

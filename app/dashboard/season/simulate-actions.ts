@@ -11,6 +11,7 @@ import { deleteChannel } from "@/app/lib/discord-api";
 import { isTestEventActive } from "@/app/lib/test-tournament";
 import { isStatsTrackingEnabled } from "@/app/lib/career-stats";
 import { fakeSeriesStats } from "@/app/lib/fake-series-stats";
+import { creditFantasySlots } from "@/app/lib/fantasy-credits";
 import {
   DE_WINNERS, DE_LOSERS, DE_GF,
   getDEWBRounds, getDELBRounds,
@@ -672,6 +673,7 @@ export async function simulateMatch(): Promise<{ error?: string; ok?: boolean }>
 // real player-reported matches do.
 async function deleteChannelsForBatch(matchIds: string[]): Promise<void> {
   await writeFakeStats(matchIds);
+  await creditFantasySlots(matchIds);
   if (matchIds.length) {
     const { data: ms } = await supabaseAdmin
       .from("matches").select("id, stage, round, discord_channel_id").in("id", matchIds);

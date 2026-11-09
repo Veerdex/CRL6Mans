@@ -7,6 +7,7 @@ import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from ".
 import { isActiveTournamentTest, isTestTournament, isTestEventActive } from "./test-tournament";
 import { applySeriesResult, fantasyPoints, projectedFantasyPoints, type StatTotals } from "./rv-adjustment";
 import { matchupMultiplier, seriesWinChance } from "./fantasy-pool";
+import { creditFantasySlots } from "./fantasy-credits";
 import { ptDate, ptWallToUtc } from "./pt-time";
 import { addRole, removeRole, addRoleById, removeRoleById, ensureRoles, ensureRolesWithList, editRole, sendChannelMessage, editChannelMessage, getGuildRoles, stripRolesFromUsers, stripRoleIdsFromMembers, reconcileManagedRoles, getGuildChannels, createTextChannel, deleteChannel, createCategory, positionCategoryAfter, banMember, timeoutMember, setChannelRoleView, type DiscordEmbed } from "./discord-api";
 import {
@@ -5449,6 +5450,13 @@ export async function execReportMatchResult(
   // rather than in the admin reporter so a forfeit and the bot clear it too, and
   // so a disputed match drops off the staff list the moment it's settled.
   await clearScoreDispute(matchId);
+
+  // Taken from the lineups as they stand at the report (fantasy-rl.md §6), so
+  // it runs before anything slower can give a manager time to swap.
+  if (!forfeit) {
+    await creditFantasySlots([matchId]).catch((e) =>
+      console.error(`[match ${matchId}] fantasy slot credits failed: ${e instanceof Error ? e.message : e}`));
+  }
 
   const winnerId = homeScore > awayScore ? homeTeam.id : awayScore > homeScore ? awayTeam.id : null;
   const loserId  = homeScore > awayScore ? awayTeam.id : awayScore > homeScore ? homeTeam.id : null;

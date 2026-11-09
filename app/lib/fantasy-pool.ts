@@ -139,3 +139,21 @@ export function seriesFantasyPoints(s: SeriesForScoring): number {
   const bonus = won ? s.ownScore - s.oppScore : 0;
   return STAT_POINTS_PER_FP * fantasyPoints(perSeriesGame) + bonus * (s.gamesPlayed / n);
 }
+
+/** A player's series points from their per-game stat rows in it, one row per game played for their own team. */
+export function seriesPointsFromGames(
+  games: StatLine[],
+  series: { forfeit: boolean; ownScore: number; oppScore: number },
+): number {
+  const stats = games.reduce(
+    (s, r) => ({
+      score: s.score + r.score,
+      goals: s.goals + r.goals,
+      assists: s.assists + r.assists,
+      saves: s.saves + r.saves,
+      shots: s.shots + r.shots,
+    }),
+    { score: 0, goals: 0, assists: 0, saves: 0, shots: 0 },
+  );
+  return seriesFantasyPoints({ ...series, stats, gamesPlayed: games.length });
+}
