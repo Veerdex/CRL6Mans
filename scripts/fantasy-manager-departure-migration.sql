@@ -17,7 +17,7 @@ alter table fantasy_league_invites add column if not exists takeover_of uuid ref
 -- Re-keys the team from p_from to p_to in one transaction, so a team is never
 -- half under each id. joined_at is kept: the round robin is seated from it.
 -- Every column that holds a manager id is here; the commissioner never needs
--- moving, since an orphan can't be the owner.
+-- moving, since only an active owner can offer a team, never their own.
 create or replace function public.fantasy_hand_over_team(p_league uuid, p_from uuid, p_to uuid)
 returns text
 language plpgsql
