@@ -236,7 +236,7 @@ function Board({
       {!week.closed && (
         <div className="grid grid-cols-[1fr_auto_1fr] border-t border-zinc-700 bg-zinc-900/50">
           <span className="self-center px-4 py-4 text-center text-3xl font-bold tabular-nums text-white">{leftProjected.toFixed(1)}</span>
-          <span className="flex items-center justify-center bg-black/25 px-3 text-center text-sm font-bold leading-tight text-zinc-200">
+          <span className="flex items-center justify-center bg-black/50 px-3 text-center text-sm font-bold leading-tight text-zinc-200">
             Projected
             <br />
             Totals
@@ -366,7 +366,7 @@ function BoardRow({
         </div>
         <SlotNumber value={a} best={leftBest} align="right" />
       </div>
-      <span className="flex items-center justify-center bg-black/25 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+      <span className="flex items-center justify-center bg-black/50 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
         {label}
       </span>
       {hasRight && right ? (
