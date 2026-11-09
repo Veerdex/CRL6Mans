@@ -126,8 +126,10 @@ async function lineupAlerts(
   const w = currentWeek(weeks);
   const week = weeks.find((x) => x.week === w);
   if (!week || week.closed || week.pending) return [];
-  const round = matches.filter((m) => m.round === week.week);
-  if (!round.length) return [];
+  const round = matches.filter((m) => m.round === week.week && m.status !== "cancelled");
+  // Until every match is seated, a team missing from the round isn't on a bye
+  // yet, and an alert can't be taken back once sent.
+  if (!round.length || round.some((m) => !m.home_team_id || !m.away_team_id)) return [];
   const playing = new Set(week.matchups.filter((m) => m.b !== null).flatMap((m) => [m.a, m.b!]));
   if (!playing.size) return [];
 
@@ -147,9 +149,8 @@ async function lineupAlerts(
   const teamOf = new Map(((playerRows ?? []) as { id: string; team_id: string | null }[]).map((p) => [p.id, p.team_id]));
   const liveMatch = new Map<string, GroupMatch>();
   for (const m of round) {
-    if (m.status === "cancelled") continue;
-    if (m.home_team_id) liveMatch.set(m.home_team_id, m);
-    if (m.away_team_id) liveMatch.set(m.away_team_id, m);
+    liveMatch.set(m.home_team_id!, m);
+    liveMatch.set(m.away_team_id!, m);
   }
 
   const items = starters.flatMap((s) => {
