@@ -44,7 +44,7 @@ export function PoolSection({ pool, moves }: { pool: Promise<PoolView>; moves: P
         )}
         <div role="tablist" aria-label="Players view" className="mx-auto flex w-fit rounded-lg border border-zinc-700 bg-zinc-900 p-1">
           <ViewTab active={view === "free"} onClick={() => setView("free")}>
-            Free agents &amp; waivers
+            Available
           </ViewTab>
           <ViewTab active={view === "trade"} onClick={() => setView("trade")}>
             Trades
