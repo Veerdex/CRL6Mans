@@ -301,8 +301,11 @@ apply while trades are on.
   at 2/3/3).
 - One manager proposes; the other **accepts or rejects**.
 - **An accepted trade goes to the league for review** for 24 hours (`REVIEW_MS`) before it
-  moves anyone. Every other manager still running a team can vote **Accept** or **Reject**, and
-  change their vote until it settles. The thresholds are `reviewOutcome` in
+  moves anyone. Every other manager still running a team whose season isn't over (§7) can vote
+  **Accept** or **Reject**, and change their vote until it settles. Votes are anonymous while it
+  runs, as a tally; once the league settles it (declined or put through), the two managers' card
+  shows who voted which way until they dismiss it. Voters who haven't voted are reminded
+  `REVIEW_REMINDER_MS` (4 hours) before it ends. The thresholds are `reviewOutcome` in
   `app/lib/fantasy-trades.ts`:
   - **Half or more reject** → it's declined (`vetoed`). Both managers' cards read "Declined by
     the league" with a Dismiss button.
@@ -310,13 +313,14 @@ apply while trades are on.
   - Otherwise it goes through when the 24 hours are up. With nobody else to vote, it goes
     through as soon as it's accepted.
   - Only managers who are still eligible count, on both sides of the fraction, so a manager
-    who leaves mid-review takes their vote with them.
+    who leaves or is eliminated mid-review takes their vote with them.
 - A player can be in only one trade under review at a time; accepting a second is refused
   until the first settles.
 - **Either manager can cancel** a trade until it goes through — pending or in review.
 - **Every player in the trade must be unlocked** (not mid-match) when it goes through. A trade
   that's due while one is locked waits in review until his series is reported, then goes
-  through on the next cron tick.
+  through on the next cron tick. Every card in review tags a locked player "In a match", and a
+  passed trade held that way says so in place of its end time.
 - Traded players arrive in their new manager's lineup carrying nothing — scores their old slots
   banked stay with the old manager.
 - A trade doesn't name slots. At acceptance each incoming player takes the slot of an outgoing
@@ -373,17 +377,20 @@ the draft order.
 
 ## 12. Notifications
 
-Fantasy has its **own section** in Settings → Notifications, with six toggles. Each one
-covers both the push and the feed entry, and all six default to on.
+Fantasy has its **own section** in Settings → Notifications, with two toggles split by weight
+rather than by feature: **Major updates** for what changes a manager's season, and **Minor
+updates** for day-to-day roster activity. Each covers both the push and the feed entry, and
+both default to on.
 
-| Toggle | Category | Sent when |
-|---|---|---|
-| Fantasy draft | `fantasy_draft` | The draft starts (each manager learns their seat, and the first picker also sees their clock). They're on the clock. They were autopicked. Their league was disbanded at the start for having too few managers. |
-| Waiver claims | `fantasy_waivers` | One summary per manager per daily run (about 4 AM Pacific), listing each claim as won, lost to a manager higher in the order, or failed with its reason. |
-| Trades | `fantasy_trades` | A trade is proposed, accepted (into review), rejected, withdrawn or cancelled, and when the league's review declines it or it goes through. Every other manager is told when a trade comes up for review. It is also sent when a trade is called off by a freeze, or by a roster change (a player left a roster, or was traded first in another deal). |
-| Lineup alerts | `fantasy_lineup` | A starter won't score in the current week, either because their team has a bye in that round or because they aren't on a team. Only sent while the week is open, for managers who have an opponent that week. |
-| Results and playoffs | `fantasy_results` | A week closes: each manager gets their result. Semifinal winners and losers, the champion and runner-up, and everyone else in the league hear about the final. Seeding is sent once the regular season closes: who made the playoffs and whom they face, and who is out. |
-| League changes | `fantasy_league` | A manager in their league left, was removed, or was kicked or banned. It names the new owner if ownership passed, and the new owner gets their own notice. The owner removed them. (§11) |
+| Toggle | Category | Notice | Sent when |
+|---|---|---|---|
+| Major | `fantasy_major` | Draft | The draft starts (each manager learns their seat, and the first picker also sees their clock). They're on the clock. They were autopicked. Their league was disbanded at the start for having too few managers. |
+| Major | `fantasy_major` | Results and playoffs | A week closes: each manager gets their result. Semifinal winners and losers, the champion and runner-up, and everyone else in the league hear about the final. Seeding is sent once the regular season closes: who made the playoffs and whom they face, and who is out. |
+| Major | `fantasy_major` | Their own place in a league | The owner removed them, or ownership passed to them. (§11) |
+| Minor | `fantasy_minor` | Trades | A trade is proposed, accepted (into review), rejected, withdrawn or cancelled, and when the league's review declines it or it goes through. Every voter is told when a trade comes up for review, and reminded a few hours before it closes if they haven't voted. It is also sent when a trade is called off by a freeze, or by a roster change (a player left a roster, or was traded first in another deal). |
+| Minor | `fantasy_minor` | Waiver claims | One summary per manager per daily run (about 4 AM Pacific), listing each claim as won, lost to a manager higher in the order, or failed with its reason. |
+| Minor | `fantasy_minor` | Lineup alerts | A starter won't score in the current week, either because their team has a bye in that round or because they aren't on a team. Only sent while the week is open, for managers who have an opponent that week. |
+| Minor | `fantasy_minor` | Another manager leaving | A manager in their league left, was removed, or was kicked or banned. It names the new owner if ownership passed. (§11) |
 
 How it works:
 - Invites and team offers sit outside the toggles. They go to the feed only, through
@@ -426,8 +433,8 @@ Modelled on fantasy football so it's familiar:
   Matchup tab's (`trendingByTier` in `fantasy-pool.ts`, `lastSeries` in `getPoolView`). Trades
   live here too,
   so there's no Trades tab. A toggle splits the page into **Available** (unrostered
-  players only) and **Trades**, which has the manager's open trades, plus those resolved in
-  the last week, then other managers' trades up for league review with Accept/Reject votes and
+  players only) and **Trades**, which has the manager's open trades, plus resolved ones they
+  haven't dismissed, then other managers' trades up for league review with Accept/Reject votes and
   the running tally, above a table of other managers' players, each with a Trade button. The
   toggle carries a count of incoming offers plus reviews the manager hasn't voted on. A resolved trade can be dismissed, which hides it for that
   manager only. A visitor who isn't a manager sees the whole pool with no toggle.
@@ -571,7 +578,9 @@ Modelled on fantasy football so it's familiar:
   The tick re-evaluates every trade in review, not just expired ones, so a passed trade held up
   by a lock goes through as soon as the lock clears. Each way out of review is pinned to
   `status = 'review'`, so a vote and the tick racing notify once. `fantasy_accept_trade` takes a
-  trade from `pending` or `review`, and cancels overlapping trades in either.
+  trade from `pending` or `review`, and cancels overlapping trades in either. The tick also sends
+  the reminder, once per trade, claimed in `fantasy_notices` under `trade_reminder:{trade}`, and
+  only to a review still undecided: a passed trade held by a lock isn't waiting on anyone's vote.
 - **The freeze** (§7) is derived on read like the rest of the schedule, so it needs no
   table. `eliminatedManagers` in `app/lib/fantasy-schedule.ts` (pure, `npm run
   test:fantasy-schedule`) reads a built schedule: nobody before the regular season closes,

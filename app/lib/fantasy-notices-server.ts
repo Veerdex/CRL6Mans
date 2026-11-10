@@ -120,7 +120,7 @@ function send(league: League, k: KeyedNotices, orphans: Set<string>) {
   const url = `/dashboard/fantasy/${league.id}/matchup`;
   for (const n of k.notices) {
     const to = n.to.filter((id) => !orphans.has(id));
-    if (to.length) notifyManagers(to, "fantasy_results", { title: n.title, body: n.body, url });
+    if (to.length) notifyManagers(to, "fantasy_major", { title: n.title, body: n.body, url });
   }
 }
 
@@ -185,7 +185,7 @@ async function lineupAlerts(
       weekLabel(week),
       list.map((i) => ({ player: names.get(i.player_id) ?? "A player", reason: i.reason })),
     );
-    notifyManagers([managerId], "fantasy_lineup", { title, body, url: `/dashboard/fantasy/${league.id}/roster` });
+    notifyManagers([managerId], "fantasy_minor", { title, body, url: `/dashboard/fantasy/${league.id}/roster` });
   }
   return [...byManager.keys()].map((m) => `lineup:${league.id}:${m}`);
 }

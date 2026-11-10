@@ -22,13 +22,33 @@ export type TradeView = {
   resolvedAt: string | null;
   items: { playerId: string; fromManagerId: string }[];
   /** Set while the trade is in league review. */
-  review: (ReviewTally & { endsAt: string; myVote: TradeVote | null }) | null;
+  review:
+    | (ReviewTally & {
+        endsAt: string;
+        myVote: TradeVote | null;
+        /** Players in the trade whose series is under way, which holds a passed trade. */
+        inMatch: string[];
+        /** The league has let it through, so only a match in progress is holding it. */
+        passed: boolean;
+      })
+    | null;
+  /** Who voted which way, shown once the league's review has settled it. */
+  votes: { accountId: string; vote: TradeVote }[] | null;
 };
 
 /** How long the rest of the league has to review an accepted trade. */
 export const REVIEW_MS = 24 * 3600_000;
 
-/** Counts the votes of managers who can still vote: everyone else still running a team. */
+/** Voters who haven't voted are reminded this long before the review ends. */
+export const REVIEW_REMINDER_MS = 4 * 3600_000;
+
+export const reviewReminderDue = (endsAt: Date, now: Date) =>
+  now.getTime() < endsAt.getTime() && now.getTime() >= endsAt.getTime() - REVIEW_REMINDER_MS;
+
+/**
+ * Counts the votes of managers who can still vote: everyone else still running
+ * a team whose season isn't over.
+ */
 export function tallyVotes(votes: readonly { accountId: string; vote: TradeVote }[], eligible: ReadonlySet<string>): ReviewTally {
   let accepts = 0;
   let rejects = 0;

@@ -161,7 +161,7 @@ async function announcePick(
   if (auto && !orphans.has(managerId)) {
     const names = await accountNames([playerId]);
     const again = next === managerId ? ` You're on the clock again, with ${clockLabel(seconds)} to pick.` : "";
-    notifyManagers([managerId], "fantasy_draft", {
+    notifyManagers([managerId], "fantasy_major", {
       title: "Autopicked for you",
       body: `Time ran out in the ${league.name} draft, so you drafted ${names.get(playerId) ?? "a player"}.${again}`,
       url,
@@ -169,7 +169,7 @@ async function announcePick(
     });
   }
   if (next && next !== managerId) {
-    notifyManagers([next], "fantasy_draft", {
+    notifyManagers([next], "fantasy_major", {
       title: "You're on the clock",
       body: `It's your pick in the ${league.name} draft. You have ${clockLabel(seconds)}.`,
       url,
@@ -343,7 +343,7 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
   for (const l of drafting) {
     const order = orders.get(l.id)!;
     order.forEach((managerId, i) =>
-      notifyManagers([managerId], "fantasy_draft", {
+      notifyManagers([managerId], "fantasy_major", {
         title: "Fantasy draft started",
         body:
           i === 0
@@ -355,7 +355,7 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
     );
   }
   for (const l of disbanding) {
-    notifyManagers(membersOf.get(l.id)!, "fantasy_draft", {
+    notifyManagers(membersOf.get(l.id)!, "fantasy_major", {
       title: "Fantasy league disbanded",
       body: `${l.name} had fewer than ${FANTASY_MIN_MANAGERS} managers when the drafts started, so it was disbanded.`,
       url: "/dashboard/fantasy",

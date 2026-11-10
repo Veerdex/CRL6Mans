@@ -5,7 +5,9 @@ import { accountNames, notifyManagers } from "./fantasy-notify";
 import { lockedPlayerIds, managerLineup } from "./fantasy-lineup-server";
 import {
   REVIEW_MS,
+  REVIEW_REMINDER_MS,
   reviewOutcome,
+  reviewReminderDue,
   tallyVotes,
   tradeMoves,
   tradeShapeProblem,
@@ -52,8 +54,6 @@ export async function setFantasyTradesEnabledCore(on: boolean): Promise<Result> 
   return {};
 }
 
-const RECENT_MS = 7 * 24 * 3600_000;
-
 const TRADE_COLUMNS =
   "id, proposer_id, receiver_id, status, note, created_at, resolved_at, review_ends_at, proposer_dismissed, receiver_dismissed, fantasy_trade_items(player_id, from_manager_id)";
 
@@ -71,16 +71,16 @@ type TradeRow = {
   fantasy_trade_items: { player_id: string; from_manager_id: string }[];
 };
 
-async function activeManagerIds(leagueId: string): Promise<string[]> {
-  const { data } = await supabaseAdmin
-    .from("fantasy_league_members")
-    .select("account_id")
-    .eq("league_id", leagueId)
-    .is("orphaned_at", null);
-  return ((data ?? []) as { account_id: string }[]).map((m) => m.account_id);
+/** Who can review a league's trades: managers still running a team whose season isn't over. */
+async function reviewerIds(leagueId: string): Promise<string[]> {
+  const [{ data }, eliminated] = await Promise.all([
+    supabaseAdmin.from("fantasy_league_members").select("account_id").eq("league_id", leagueId).is("orphaned_at", null),
+    eliminatedInLeague(leagueId),
+  ]);
+  return ((data ?? []) as { account_id: string }[]).map((m) => m.account_id).filter((id) => !eliminated.has(id));
 }
 
-/** Who reviews a trade: every manager still running a team, other than the two in it. */
+/** Who reviews a trade: every reviewer other than the two in it. */
 const votersOf = (managers: string[], t: { proposer_id: string; receiver_id: string }) =>
   new Set(managers.filter((id) => id !== t.proposer_id && id !== t.receiver_id));
 
@@ -96,13 +96,20 @@ async function votesFor(tradeIds: string[]): Promise<Map<string, { accountId: st
   return byTrade;
 }
 
+/** A settled trade the league reviewed, whose votes are shown once it's decided. */
+const reviewed = (status: TradeStatus) => status === "accepted" || status === "vetoed";
+
 async function toViews(leagueId: string, rows: TradeRow[], viewerId: string): Promise<TradeView[]> {
   const inReview = rows.filter((t) => t.status === "review");
-  const [managers, votes] = inReview.length
-    ? await Promise.all([activeManagerIds(leagueId), votesFor(inReview.map((t) => t.id))])
-    : [[], new Map<string, { accountId: string; vote: TradeVote }[]>()];
+  const [managers, votes, locked] = await Promise.all([
+    inReview.length ? reviewerIds(leagueId) : Promise.resolve([]),
+    votesFor(rows.filter((t) => t.status === "review" || reviewed(t.status)).map((t) => t.id)),
+    lockedPlayerIds(inReview.flatMap((t) => t.fantasy_trade_items.map((i) => i.player_id))),
+  ]);
+  const now = new Date();
   return rows.map((t) => {
     const cast = votes.get(t.id) ?? [];
+    const tally = tallyVotes(cast, votersOf(managers, t));
     return {
       id: t.id,
       proposerId: t.proposer_id,
@@ -115,37 +122,36 @@ async function toViews(leagueId: string, rows: TradeRow[], viewerId: string): Pr
       review:
         t.status === "review" && t.review_ends_at
           ? {
-              ...tallyVotes(cast, votersOf(managers, t)),
+              ...tally,
               endsAt: t.review_ends_at,
               myVote: cast.find((v) => v.accountId === viewerId)?.vote ?? null,
+              inMatch: t.fantasy_trade_items.map((i) => i.player_id).filter((id) => locked.has(id)),
+              passed: reviewOutcome(tally, new Date(t.review_ends_at), now) === "execute",
             }
           : null,
+      votes: reviewed(t.status) && cast.length ? cast : null,
     };
   });
 }
 
-/** The manager's open trades, then the last week's settled ones, newest first. */
+/** The manager's open trades, then the settled ones they haven't dismissed, newest first. */
 export async function managerTrades(leagueId: string, managerId: string): Promise<TradeView[]> {
   const { data } = await supabaseAdmin
     .from("fantasy_trades")
     .select(TRADE_COLUMNS)
     .eq("league_id", leagueId)
-    .or(`proposer_id.eq.${managerId},receiver_id.eq.${managerId}`)
+    .or(
+      `and(proposer_id.eq.${managerId},proposer_dismissed.eq.false),and(receiver_id.eq.${managerId},receiver_dismissed.eq.false)`,
+    )
     .order("created_at", { ascending: false })
     .limit(40);
-  const visible = ((data ?? []) as TradeRow[]).filter((t) =>
-    t.proposer_id === managerId ? !t.proposer_dismissed : !t.receiver_dismissed,
-  );
-  const trades = await toViews(leagueId, visible, managerId);
-  const since = Date.now() - RECENT_MS;
-  return [
-    ...trades.filter((t) => OPEN.includes(t.status)),
-    ...trades.filter((t) => !OPEN.includes(t.status) && t.resolvedAt && new Date(t.resolvedAt).getTime() >= since),
-  ];
+  const trades = await toViews(leagueId, (data ?? []) as TradeRow[], managerId);
+  return [...trades.filter((t) => OPEN.includes(t.status)), ...trades.filter((t) => !OPEN.includes(t.status))];
 }
 
 /** Trades between two other managers that this one gets a vote on. */
 export async function leagueReviews(leagueId: string, managerId: string): Promise<TradeView[]> {
+  if (!(await reviewerIds(leagueId)).includes(managerId)) return [];
   const { data } = await supabaseAdmin
     .from("fantasy_trades")
     .select(TRADE_COLUMNS)
@@ -206,7 +212,7 @@ async function frozenProblem(leagueId: string, viewerId: string, otherId: string
 }
 
 function notify(accountIds: string[], title: string, body: string, leagueId: string): void {
-  notifyManagers(accountIds, "fantasy_trades", { title, body, url: `/dashboard/fantasy/${leagueId}/players` });
+  notifyManagers(accountIds, "fantasy_minor", { title, body, url: `/dashboard/fantasy/${leagueId}/players` });
 }
 
 const names = accountNames;
@@ -409,7 +415,7 @@ export async function acceptTrade(leagueId: string, managerId: string, tradeId: 
   if (error) return { error: "Couldn't accept that trade. Has scripts/fantasy-trade-review-migration.sql been run?" };
   if (!moved?.length) return { error: "That trade isn't pending any more." };
 
-  const voters = votersOf(await activeManagerIds(leagueId), { proposer_id: proposerId, receiver_id: managerId });
+  const voters = votersOf(await reviewerIds(leagueId), { proposer_id: proposerId, receiver_id: managerId });
   // With nobody to vote it goes straight through, and that path tells both sides.
   if (!voters.size) {
     await settleReview(tradeId);
@@ -450,8 +456,8 @@ export async function voteOnTrade(leagueId: string, voterId: string, tradeId: st
     .eq("status", "review")
     .maybeSingle();
   if (!trade) return { error: "That trade isn't up for review any more." };
-  if (!votersOf(await activeManagerIds(leagueId), trade).has(voterId)) {
-    return { error: "Only the other managers in this league can vote on that trade." };
+  if (!votersOf(await reviewerIds(leagueId), trade).has(voterId)) {
+    return { error: "Only the other managers still in the season can vote on that trade." };
   }
   const { error } = await supabaseAdmin
     .from("fantasy_trade_votes")
@@ -465,7 +471,7 @@ export async function voteOnTrade(leagueId: string, voterId: string, tradeId: st
  * Decides a trade in review: declined, put through, or left waiting. Safe to
  * race, since every way out of review is pinned to the trade still being in it.
  */
-async function settleReview(tradeId: string, now = new Date()): Promise<"veto" | "execute" | "wait" | "gone"> {
+async function settleReview(tradeId: string, now = new Date()): Promise<"veto" | "execute" | "wait" | "held" | "gone"> {
   const { data } = await supabaseAdmin
     .from("fantasy_trades")
     .select("id, league_id, proposer_id, receiver_id, review_ends_at, fantasy_trade_items(player_id, from_manager_id)")
@@ -489,7 +495,7 @@ async function settleReview(tradeId: string, now = new Date()): Promise<"veto" |
     return "gone";
   }
 
-  const [managers, votes] = await Promise.all([activeManagerIds(leagueId), votesFor([tradeId])]);
+  const [managers, votes] = await Promise.all([reviewerIds(leagueId), votesFor([tradeId])]);
   const tally = tallyVotes(votes.get(tradeId) ?? [], votersOf(managers, trade));
   const outcome = reviewOutcome(tally, new Date(trade.review_ends_at), now);
   if (outcome === "wait") return "wait";
@@ -521,7 +527,7 @@ async function settleReview(tradeId: string, now = new Date()): Promise<"veto" |
     return "gone";
   }
   // §10: a player mid-match holds it until his series is reported; the next tick retries.
-  if ((await lockedPlayerIds(moves.map((m) => m.playerId))).size) return "wait";
+  if ((await lockedPlayerIds(moves.map((m) => m.playerId))).size) return "held";
 
   // The RPC cancels these itself, so they're read first to tell both sides.
   const { data: overlapping } = await supabaseAdmin
@@ -542,7 +548,7 @@ async function settleReview(tradeId: string, now = new Date()): Promise<"veto" |
     p_to_slots: moves.map((m) => m.toSlot),
   });
   // A roster that changed under it is re-read on the next tick.
-  if (error || result === "stale") return "wait";
+  if (error || result === "stale") return "held";
   if (result !== "ok") return "gone";
 
   tellParties("Fantasy trade completed", (id) => `Your trade with ${other(id)} in ${league.name} went through.`);
@@ -564,11 +570,43 @@ async function settleReview(tradeId: string, now = new Date()): Promise<"veto" |
  */
 export async function runTradeReviews(now = new Date()): Promise<string[]> {
   if (!(await fantasyTradesEnabled())) return [];
-  const { data } = await supabaseAdmin.from("fantasy_trades").select("id").eq("status", "review");
+  const { data } = await supabaseAdmin
+    .from("fantasy_trades")
+    .select("id, league_id, proposer_id, receiver_id, review_ends_at")
+    .eq("status", "review");
   const fired: string[] = [];
-  for (const { id } of (data ?? []) as { id: string }[]) {
-    const outcome = await settleReview(id, now);
-    if (outcome === "veto" || outcome === "execute") fired.push(`trade_${outcome}:${id}`);
+  for (const t of (data ?? []) as ReviewRow[]) {
+    const outcome = await settleReview(t.id, now);
+    if (outcome === "veto" || outcome === "execute") fired.push(`trade_${outcome}:${t.id}`);
+    if (outcome === "wait" && reviewReminderDue(new Date(t.review_ends_at), now) && (await remindVoters(t))) {
+      fired.push(`trade_reminder:${t.id}`);
+    }
   }
   return fired;
+}
+
+type ReviewRow = { id: string; league_id: string; proposer_id: string; receiver_id: string; review_ends_at: string };
+
+/**
+ * Once per trade, nudges the voters who haven't voted. The fantasy_notices
+ * sent log is the dedupe, so a tick that races another sends nothing.
+ */
+async function remindVoters(t: ReviewRow): Promise<boolean> {
+  const [managers, votes, league] = await Promise.all([reviewerIds(t.league_id), votesFor([t.id]), getLeague(t.league_id)]);
+  const voted = new Set((votes.get(t.id) ?? []).map((v) => v.accountId));
+  const quiet = [...votersOf(managers, t)].filter((id) => !voted.has(id));
+  if (!quiet.length || !league) return false;
+  const { data: claimed, error } = await supabaseAdmin
+    .from("fantasy_notices")
+    .upsert({ league_id: t.league_id, key: `trade_reminder:${t.id}` }, { onConflict: "league_id,key", ignoreDuplicates: true })
+    .select("key");
+  if (error || !claimed?.length) return false;
+  const n = await names([t.proposer_id, t.receiver_id]);
+  notify(
+    quiet,
+    "Fantasy trade review closing soon",
+    `The league's review of ${n.get(t.proposer_id) ?? "a manager"} and ${n.get(t.receiver_id) ?? "a manager"}'s trade in ${league.name} ends in under ${REVIEW_REMINDER_MS / 3600_000} hours, and you haven't voted. If not enough managers reject it by then, it goes through.`,
+    t.league_id,
+  );
+  return true;
 }

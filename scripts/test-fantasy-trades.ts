@@ -3,7 +3,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { reviewOutcome, tallyVotes, tradeMoves, tradeShapeProblem } from "../app/lib/fantasy-trades";
+import {
+  REVIEW_REMINDER_MS,
+  reviewOutcome,
+  reviewReminderDue,
+  tallyVotes,
+  tradeMoves,
+  tradeShapeProblem,
+} from "../app/lib/fantasy-trades";
 import type { LineupEntry } from "../app/lib/fantasy-lineup";
 
 const t = (tier: 1 | 2 | 3) => ({ tier });
@@ -112,6 +119,15 @@ test("a trade the league hasn't declined goes through when the window ends", () 
   assert.equal(reviewOutcome(tally(0, 0, 3), ends, before), "wait");
   assert.equal(reviewOutcome(tally(0, 0, 3), ends, after), "execute");
   assert.equal(reviewOutcome(tally(0, 1, 3), ends, after), "execute");
+});
+
+test("voters are reminded only in the last stretch of a review that hasn't ended", () => {
+  const end = new Date("2026-11-10T12:00:00Z");
+  const at = (msBeforeEnd: number) => new Date(end.getTime() - msBeforeEnd);
+  assert.equal(reviewReminderDue(end, at(REVIEW_REMINDER_MS + 1)), false);
+  assert.equal(reviewReminderDue(end, at(REVIEW_REMINDER_MS)), true);
+  assert.equal(reviewReminderDue(end, at(1)), true);
+  assert.equal(reviewReminderDue(end, at(0)), false);
 });
 
 test("only managers still eligible to vote are counted", () => {

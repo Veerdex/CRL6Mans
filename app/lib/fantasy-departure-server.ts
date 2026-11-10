@@ -126,7 +126,7 @@ async function tellManagers(leagueId: string, departed: string, how: Departure, 
     const parts = [what];
     if (heir) parts.push(`${names.get(heir) ?? "Another manager"} is now the league owner.`);
     if (afterDraft) parts.push("Their team plays on with its current lineup until the owner hands it to someone new.");
-    notifyManagers(others, "fantasy_league", {
+    notifyManagers(others, "fantasy_minor", {
       title: heir ? "Fantasy league owner changed" : how === "left" ? "A manager left your fantasy league" : "A manager was removed from your fantasy league",
       body: parts.join(" "),
       url,
@@ -135,11 +135,11 @@ async function tellManagers(leagueId: string, departed: string, how: Departure, 
   if (heir && recipients.includes(heir)) {
     const parts = [what, "You're now the league owner."];
     if (afterDraft) parts.push(`Their team plays on with its current lineup, and you can hand it to someone new${later}.`);
-    notifyManagers([heir], "fantasy_league", { title: "You're now a fantasy league owner", body: parts.join(" "), url });
+    notifyManagers([heir], "fantasy_major", { title: "You're now a fantasy league owner", body: parts.join(" "), url });
   }
   // A kick or ban has no actor here: the moderation itself is the notice.
   if (how === "removed" && actorId) {
-    notifyManagers([departed], "fantasy_league", {
+    notifyManagers([departed], "fantasy_major", {
       title: "Removed from a fantasy league",
       body: `The owner removed you from ${league.name}.${
         afterDraft ? " Your team stays in the league with its current lineup until the owner hands it to someone new." : ""

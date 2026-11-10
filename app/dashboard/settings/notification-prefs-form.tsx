@@ -9,37 +9,17 @@ type Category = {
   description: string;
 };
 
-const TRADES_CATEGORY: Category = {
-  key: "fantasy_trades",
-  label: "Trades",
-  description: "Offers you receive, trades up for league review, and how your trades turn out",
-};
-
-const FANTASY_CATEGORIES: Category[] = [
+const fantasyCategories = (trades: boolean): Category[] => [
   {
-    key: "fantasy_draft",
-    label: "Fantasy draft",
-    description: "Your draft starting, being on the clock, and picks made for you when time ran out",
+    key: "fantasy_major",
+    label: "Major updates",
+    description:
+      "Your draft starting, being on the clock and picks made for you, your weekly result, playoff seeding, elimination and the champion, being removed from a league, and becoming its owner",
   },
   {
-    key: "fantasy_waivers",
-    label: "Waiver claims",
-    description: "Which of your claims won or lost, once a day after the 4 AM Pacific waiver run",
-  },
-  {
-    key: "fantasy_lineup",
-    label: "Lineup alerts",
-    description: "A starter of yours with a bye or no team this week",
-  },
-  {
-    key: "fantasy_results",
-    label: "Results and playoffs",
-    description: "Your weekly matchup result, playoff seeding, elimination and the champion",
-  },
-  {
-    key: "fantasy_league",
-    label: "League changes",
-    description: "A manager leaving or being removed, the owner removing you, and a new league owner",
+    key: "fantasy_minor",
+    label: "Minor updates",
+    description: `${trades ? "Trade offers, trades up for league review and how yours turn out, " : ""}waiver claims won or lost, a starter with a bye or no team this week, and another manager leaving`,
   },
 ];
 
@@ -117,7 +97,7 @@ export function NotificationPrefsForm({
     <div className="space-y-2">
       {rows(CATEGORIES)}
       <h3 className="pt-3 px-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">Fantasy</h3>
-      {rows(tradesEnabled ? [...FANTASY_CATEGORIES.slice(0, 2), TRADES_CATEGORY, ...FANTASY_CATEGORIES.slice(2)] : FANTASY_CATEGORIES)}
+      {rows(fantasyCategories(tradesEnabled))}
       {saved && <p className="text-xs text-emerald-400 px-1">Preferences saved.</p>}
     </div>
   );

@@ -276,7 +276,7 @@ async function announceClaims(league: RunLeague, claims: PendingClaim[], outcome
   }
   for (const [managerId, lines] of byManager) {
     const { title, body } = waiverNotice(league.name, lines);
-    notifyManagers([managerId], "fantasy_waivers", { title, body, url: `/dashboard/fantasy/${league.id}/players` });
+    notifyManagers([managerId], "fantasy_minor", { title, body, url: `/dashboard/fantasy/${league.id}/players` });
   }
 }
 

@@ -17,12 +17,9 @@ export type NotificationCategory =
   | "draft"
   | "season"
   | "announcement"
-  | "fantasy_draft"
-  | "fantasy_waivers"
-  | "fantasy_trades"
-  | "fantasy_lineup"
-  | "fantasy_results"
-  | "fantasy_league";
+  // Fantasy has two toggles, by weight rather than by feature (docs/fantasy-rl.md §12).
+  | "fantasy_major"
+  | "fantasy_minor";
 
 export type PushPayload = {
   title: string;

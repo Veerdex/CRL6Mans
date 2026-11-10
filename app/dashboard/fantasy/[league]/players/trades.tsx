@@ -212,17 +212,46 @@ function Tally({ review }: { review: NonNullable<TradeView["review"]> }) {
   return (
     <p className="mt-1 text-xs text-zinc-400">
       <span className="text-emerald-400">{review.accepts} accept</span> ·{" "}
-      <span className="text-red-400">{review.rejects} reject</span> of {review.eligible} · review ends{" "}
-      <LocalTime iso={review.endsAt} upcoming />
+      <span className="text-red-400">{review.rejects} reject</span> of {review.eligible} ·{" "}
+      {review.passed && review.inMatch.length ? (
+        <span className="text-amber-300">passed, and goes through once the match in progress is reported</span>
+      ) : (
+        <>
+          review ends <LocalTime iso={review.endsAt} upcoming />
+        </>
+      )}
     </p>
   );
 }
 
-const playerList = (ids: string[], playerOf: PlayerLookup) =>
+/** Who voted which way, once the league's review has settled the trade. */
+function Votes({ votes, names }: { votes: NonNullable<TradeView["votes"]>; names: Record<string, string> }) {
+  const by = (v: "accept" | "reject") =>
+    votes
+      .filter((x) => x.vote === v)
+      .map((x) => names[x.accountId] ?? "A former manager")
+      .join(", ");
+  const accepted = by("accept");
+  const rejected = by("reject");
+  return (
+    <p className="mt-1 text-xs text-zinc-400">
+      {accepted && <span className="text-emerald-400">Accepted by {accepted}</span>}
+      {accepted && rejected && " · "}
+      {rejected && <span className="text-red-400">Rejected by {rejected}</span>}
+    </p>
+  );
+}
+
+const playerList = (ids: string[], playerOf: PlayerLookup, inMatch: string[] = []) =>
   ids.map((id, i) => (
     <span key={id}>
       {i > 0 && ", "}
       <PlayerName id={id} playerOf={playerOf} />
+      {inMatch.includes(id) && (
+        <span className="ml-1 rounded bg-amber-500/15 px-1 py-px text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+          In a match
+        </span>
+      )}
     </span>
   ));
 
@@ -265,8 +294,8 @@ function ReviewRow({ trade, moves, playerOf }: { trade: TradeView; moves: Roster
         </span>
       </div>
       <p className="mt-1 text-xs text-zinc-400">
-        {proposer} gets {playerList(from(trade.receiverId), playerOf)} · {receiver} gets{" "}
-        {playerList(from(trade.proposerId), playerOf)}
+        {proposer} gets {playerList(from(trade.receiverId), playerOf, review?.inMatch)} · {receiver} gets{" "}
+        {playerList(from(trade.proposerId), playerOf, review?.inMatch)}
       </p>
       {review && <Tally review={review} />}
       {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
@@ -305,7 +334,7 @@ function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterM
 
   if (hidden) return null;
 
-  const list = (ids: string[]) => playerList(ids, playerOf);
+  const list = (ids: string[]) => playerList(ids, playerOf, trade.review?.inMatch);
 
   return (
     <li className={`rounded-lg border border-zinc-700 px-3 py-2 text-sm ${open ? "bg-zinc-900/40" : "opacity-70"}`}>
@@ -354,6 +383,7 @@ function TradeRow({ trade, moves, playerOf }: { trade: TradeView; moves: RosterM
       )}
       {trade.review && <Tally review={trade.review} />}
       {trade.note && !open && <p className="mt-1 text-xs text-zinc-500">{trade.note}</p>}
+      {trade.votes && <Votes votes={trade.votes} names={moves.managerNames} />}
       {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
     </li>
   );

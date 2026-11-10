@@ -191,7 +191,7 @@ export async function completeFantasyForEvent(eventKind: EventKind, eventId: str
       .eq("id", l.id);
     if (!l.summary) continue;
     for (const n of completionNotices(l.name, l.summary)) {
-      notifyManagers([n.to], "fantasy_results", { title: n.title, body: n.body, url: `/dashboard/fantasy/${l.id}` });
+      notifyManagers([n.to], "fantasy_major", { title: n.title, body: n.body, url: `/dashboard/fantasy/${l.id}` });
     }
   }
 }
