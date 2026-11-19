@@ -225,7 +225,7 @@ export async function TournamentDetailView({
               tab === tb.id ? "border-amber-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"
             }`}
           >
-            {tb.label}
+            {tb.id === "draft" && t.join_mode === "teams" ? "Teams" : tb.label}
           </Link>
         ))}
       </div>
@@ -412,7 +412,7 @@ export async function TournamentDetailView({
 
       {tab === "draft" &&
         (t.join_mode === "teams" ? (
-          <TeamsDraftPool tournamentId={tournamentId} />
+          <RegisteredTeams tournamentId={tournamentId} />
         ) : (
           <PlayersDraftPool tournamentId={tournamentId} />
         ))}
@@ -720,7 +720,7 @@ type RawSignupRowWithPlayers = {
   }[];
 };
 
-async function TeamsDraftPool({ tournamentId }: { tournamentId: string }) {
+async function RegisteredTeams({ tournamentId }: { tournamentId: string }) {
   const { data: signupsRaw } = await supabaseAdmin
     .from("team_signups")
     .select("id, name, team_signup_members(player_id, status, players(discord_id, username, display_name, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment))")
@@ -744,7 +744,7 @@ async function TeamsDraftPool({ tournamentId }: { tournamentId: string }) {
 
   return (
     <div>
-      <h3 className="text-sm font-semibold text-zinc-300 mb-2">In the Draft</h3>
+      <h3 className="text-sm font-semibold text-zinc-300 mb-2">Registered Teams</h3>
       {ratedTeams.length === 0 ? (
         <p className="text-sm text-zinc-500">No teams have registered yet.</p>
       ) : (
