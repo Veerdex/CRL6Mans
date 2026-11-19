@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { removePlayerFromDraft } from "./league-actions";
 import { removeTournamentEntry, removeTeamSignup } from "./tournament-actions";
@@ -38,6 +38,8 @@ export type TournamentSignupTeam = {
 export type DraftPoolTournamentGroup = {
   tournamentId: string;
   tournamentName: string;
+  /** Activated: its pool is the live draft's, so sign-ups can no longer be edited. */
+  running: boolean;
   joinMode: "players" | "teams";
   playerEntries: TournamentSignupPlayer[];
   teamSignups: TournamentSignupTeam[];
@@ -113,7 +115,7 @@ function DraftPoolRow({ entry }: { entry: DraftPoolEntry }) {
   );
 }
 
-function TournamentEntryRow({ tournamentId, entry }: { tournamentId: string; entry: TournamentSignupPlayer }) {
+function TournamentEntryRow({ tournamentId, entry, readOnly }: { tournamentId: string; entry: TournamentSignupPlayer; readOnly: boolean }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [isPending, startTx] = useTransition();
@@ -135,7 +137,7 @@ function TournamentEntryRow({ tournamentId, entry }: { tournamentId: string; ent
       <span className="flex-1 text-sm text-zinc-200 whitespace-nowrap min-w-0">
         <PlayerName displayName={entry.displayName} username={entry.username} discordId={entry.discordId} />
       </span>
-      {confirming ? (
+      {readOnly ? null : confirming ? (
         <div className="flex items-center gap-2 shrink-0">
           {error && <span className="text-xs text-red-400">{error}</span>}
           <button
@@ -165,7 +167,7 @@ function TournamentEntryRow({ tournamentId, entry }: { tournamentId: string; ent
   );
 }
 
-function TeamSignupRow({ team }: { team: TournamentSignupTeam }) {
+function TeamSignupRow({ team, readOnly }: { team: TournamentSignupTeam; readOnly: boolean }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [isPending, startTx] = useTransition();
@@ -185,7 +187,7 @@ function TeamSignupRow({ team }: { team: TournamentSignupTeam }) {
     <div className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg px-3 py-2 space-y-1.5">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="flex-1 text-sm font-medium text-zinc-200 truncate min-w-0">{team.name}</span>
-        {confirming ? (
+        {readOnly ? null : confirming ? (
           <div className="flex items-center gap-2 shrink-0">
             {error && <span className="text-xs text-red-400">{error}</span>}
             <button
@@ -244,21 +246,24 @@ export function DraftPoolPanel({
   tournamentGroups?: DraftPoolTournamentGroup[];
 }) {
   const [search, setSearch] = useState("");
+  const searching = search.trim() !== "";
 
   const filteredEntries = entries.filter((e) => matchesSearch(search, e.username, e.display_name));
 
-  const filteredGroups = tournamentGroups
-    .map((g) => ({
-      ...g,
-      playerEntries: g.playerEntries.filter((e) => matchesSearch(search, e.username, e.displayName)),
-      teamSignups: g.teamSignups.filter((t) =>
-        matchesSearch(search, t.name) || t.members.some((m) => matchesSearch(search, m.username, m.displayName))
-      ),
-    }))
-    .filter((g) => g.playerEntries.length > 0 || g.teamSignups.length > 0);
+  const filteredGroups = tournamentGroups.map((g) => ({
+    ...g,
+    playerEntries: g.playerEntries.filter((e) => matchesSearch(search, e.username, e.displayName)),
+    teamSignups: g.teamSignups.filter((t) =>
+      matchesSearch(search, t.name) || t.members.some((m) => matchesSearch(search, m.username, m.displayName))
+    ),
+  }));
 
-  const isEmpty = filteredEntries.length === 0 && filteredGroups.length === 0;
-  const hasMultipleSources = entries.length > 0 && tournamentGroups.length > 0;
+  // While searching, an event with no match is noise; otherwise every event
+  // keeps its section, so an empty one reads as "nobody yet" rather than missing.
+  const visibleGroups = searching
+    ? filteredGroups.filter((g) => g.playerEntries.length > 0 || g.teamSignups.length > 0)
+    : filteredGroups;
+  const showSeason = !searching || filteredEntries.length > 0;
 
   return (
     <div className="space-y-4">
@@ -270,36 +275,76 @@ export function DraftPoolPanel({
         className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
       />
 
-      {isEmpty ? (
+      {!showSeason && visibleGroups.length === 0 ? (
         <p className="text-zinc-500 text-sm">No sign-ups found.</p>
       ) : (
-        <div className="space-y-5">
-          {filteredEntries.length > 0 && (
-            <div className="space-y-2">
-              {hasMultipleSources && (
-                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">Season Pool</p>
-              )}
+        <div className="space-y-6">
+          {showSeason && (
+            <PoolSection title="Season" detail="Player sign-ups" count={entries.length} countLabel="player" empty={filteredEntries.length === 0}>
               {filteredEntries.map(e => <DraftPoolRow key={e.id} entry={e} />)}
-            </div>
+            </PoolSection>
           )}
 
-          {filteredGroups.map((g) => (
-            <div key={g.tournamentId} className="space-y-2">
-              <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
-                {g.tournamentName} · {g.joinMode === "teams" ? "Team Sign-ups" : "Player Sign-ups"}
-              </p>
-              <div className="space-y-2">
+          {visibleGroups.map((g) => {
+            const original = tournamentGroups.find((o) => o.tournamentId === g.tournamentId)!;
+            const teams = g.joinMode === "teams";
+            return (
+              <PoolSection
+                key={g.tournamentId}
+                title={g.tournamentName}
+                detail={teams ? "Team sign-ups" : "Player sign-ups"}
+                count={teams ? original.teamSignups.length : original.playerEntries.length}
+                countLabel={teams ? "team" : "player"}
+                running={g.running}
+                empty={g.playerEntries.length === 0 && g.teamSignups.length === 0}
+              >
                 {g.playerEntries.map((e) => (
-                  <TournamentEntryRow key={e.playerId} tournamentId={g.tournamentId} entry={e} />
+                  <TournamentEntryRow key={e.playerId} tournamentId={g.tournamentId} entry={e} readOnly={g.running} />
                 ))}
                 {g.teamSignups.map((t) => (
-                  <TeamSignupRow key={t.id} team={t} />
+                  <TeamSignupRow key={t.id} team={t} readOnly={g.running} />
                 ))}
-              </div>
-            </div>
-          ))}
+              </PoolSection>
+            );
+          })}
         </div>
       )}
     </div>
+  );
+}
+
+function PoolSection({
+  title,
+  detail,
+  count,
+  countLabel,
+  running = false,
+  empty,
+  children,
+}: {
+  title: string;
+  detail: string;
+  count: number;
+  countLabel: string;
+  running?: boolean;
+  empty: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap border-b border-zinc-800 pb-1.5">
+        <h3 className="text-sm font-semibold text-zinc-200">{title}</h3>
+        <span className="text-xs text-zinc-500">{detail}</span>
+        {running && (
+          <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-900/30 border border-emerald-700/40 text-emerald-300">
+            Running · read-only
+          </span>
+        )}
+        <span className="ml-auto text-xs text-zinc-500 tabular-nums">
+          {count} {countLabel}{count === 1 ? "" : "s"}
+        </span>
+      </div>
+      {empty ? <p className="text-xs text-zinc-500">No sign-ups yet.</p> : <div className="space-y-2">{children}</div>}
+    </section>
   );
 }

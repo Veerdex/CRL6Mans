@@ -265,8 +265,12 @@ export default async function AdminPage() {
     };
   }
 
+  // The running tournament first, then scheduled ones in the order they start.
   const scheduledTournamentIds = (tournaments ?? [])
-    .filter((t) => t.status === "scheduled")
+    .filter((t) => t.status === "active" || t.status === "scheduled")
+    .sort((a, b) =>
+      (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1) ||
+      String(a.draft_start_at ?? a.created_at).localeCompare(String(b.draft_start_at ?? b.created_at)))
     .map((t) => t.id as string);
 
   type RawTeamSignupRow = { id: string; tournament_id: string; name: string; team_signup_members: { id: string; player_id: string; status: string }[] };
@@ -294,7 +298,7 @@ export default async function AdminPage() {
       .select("id, player_id, platform, platform_account_id, verification_status")
       .order("platform"),
     scheduledTournamentIds.length
-      ? supabaseAdmin.from("tournament_entries").select("tournament_id, player_id").in("tournament_id", scheduledTournamentIds)
+      ? supabaseAdmin.from("tournament_entries").select("tournament_id, player_id").in("tournament_id", scheduledTournamentIds).order("created_at", { ascending: true })
       : Promise.resolve({ data: [] as { tournament_id: string; player_id: string }[] }),
     scheduledTournamentIds.length
       ? supabaseAdmin.from("team_signups").select("id, tournament_id, name, team_signup_members(id, player_id, status)").in("tournament_id", scheduledTournamentIds)
@@ -344,6 +348,7 @@ export default async function AdminPage() {
     return {
       tournamentId: tid,
       tournamentName: t?.name ?? "Tournament",
+      running: t?.status === "active",
       joinMode: (t?.join_mode ?? "players") as "players" | "teams",
       playerEntries: (entryRows ?? [])
         .filter((r) => r.tournament_id === tid)
@@ -374,7 +379,7 @@ export default async function AdminPage() {
           }),
         })),
     };
-  }).filter((g) => g.playerEntries.length > 0 || g.teamSignups.length > 0);
+  });
 
   const platformClaimCards: PlatformAccountClaimCardData[] = await Promise.all(
     (pendingPlatformClaimRows ?? []).map(async (row) => {
@@ -1635,7 +1640,7 @@ export default async function AdminPage() {
           title="Draft Pool"
           value={draftPoolEntries.length + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0)}
           defaultOpen={false}
-          description="Everyone currently signed up to play — the season's 'Enter Draft' pool plus sign-ups for any scheduled standalone tournaments (player or team mode). Remove an entrant before its draft/tournament starts if they need to be pulled from signups."
+          description="Sign-ups for each event, kept separate: the season's 'Enter Draft' list, the running tournament's pool, and every scheduled tournament (player or team mode). Remove an entrant before their event starts; a running tournament's pool is read-only."
         >
           <DraftPoolPanel entries={draftPoolEntries} tournamentGroups={draftPoolTournamentGroups} />
         </AdminSubSection>
