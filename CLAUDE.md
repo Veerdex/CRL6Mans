@@ -141,6 +141,9 @@ unregistered → (submits register form) → pending → (admin approves) → ap
 - Close on **every** path that ends a draft — `execEndDraft`, `completePick` on the last pick, both of `execAutoPick`'s terminal guards, `adminWipe`, `resetSeason`, `forceResetDraftState`. The overwrite lives in Discord, not the DB, so a missed close leaves the channel open to whoever holds the event role next.
 - Closing writes an **explicit deny** rather than deleting the overwrite, so the channel keeps the permission shape an admin set up by hand, and it denies every ID from `tournamentRoleIdsToStrip()` — relinking the role mid-draft would otherwise strand the overwrite the channel was opened on.
 
+### Season sign-ups (`season_entries`)
+Seasons keep their own sign-up list in `season_entries`, written only through `app/lib/season-pool.ts`. `players.draft_entered` is the **live** pool (draft, autopick, subs, pushes read it) and mirrors `season_entries` while no tournament is active. A tournament's activation takes it over. `resetSeason` tells the two teardowns apart by `active_tournament_id`, which is still set when it runs: a tournament ending calls `restoreSeasonPool` and leaves `draft_open` alone, and a season ending clears the list. `draft_open` is solely the season's switch, so no tournament path writes it. A season's draft still can't run during a tournament, and a tournament can't activate while a season holds the runtime.
+
 ### Activating a tournament
 `activateTournamentRuntime` in `lib/tournament-runtime.ts`:
 - Copies `tournament_entries` → `players.draft_entered` to bridge the player pool into the legacy runtime.

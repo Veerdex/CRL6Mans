@@ -3,6 +3,7 @@ import { creditCoins, creditManyCoins } from "./coins";
 import { getTierPrices, getTierRoleIds, numberedPaidTiers } from "./patreon-entitlements";
 import { fetchAllRows } from "./paginate";
 import { isModerator, isDirector, isCEO, isCurrentlyKicked, getStaffRole, hasMfaEnabled, type StaffRole } from "./players";
+import { clearSeasonPool, restoreSeasonPool } from "./season-pool";
 import { pushToAllApproved, pushToTeam, pushToAdmins, pushToDiscordIds } from "./push";
 import { isActiveTournamentTest, isTestTournament, isTestEventActive } from "./test-tournament";
 import { applySeriesResult, fantasyPoints, projectedFantasyPoints, type StatTotals } from "./rv-adjustment";
@@ -1237,7 +1238,9 @@ export async function execStartDraft(maxTeams?: number | "max" | null): Promise<
 
   const { data: activateRows, error: activateError } = await supabaseAdmin
     .from("league_settings").update({
-      draft_active: true, draft_open: false, current_pick: 0,
+      draft_active: true, current_pick: 0,
+      // draft_open is the season's sign-up switch, which a tournament's draft leaves alone.
+      ...(settings.active_tournament_id ? {} : { draft_open: false }),
       draft_phase: "picking", num_teams: numTeams,
       // First pick gets an extra 2 minutes on top of the usual 45s so everyone
       // has time to get to the draft channel before the clock is really live.
@@ -1469,7 +1472,8 @@ export async function execAutoBalanceTeams(maxTeams?: number | "max" | null): Pr
   await Promise.all(teamsToUse.map(t => syncSoloTeamIdentity(t.id, teamSize)));
 
   await supabaseAdmin.from("league_settings").update({
-    draft_open: false, draft_active: false, draft_phase: null,
+    ...(settings.active_tournament_id ? {} : { draft_open: false }),
+    draft_active: false, draft_phase: null,
     num_teams: numTeams, updated_at: new Date().toISOString(),
   }).not("id", "is", null);
 
@@ -1569,6 +1573,7 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
       updated_at: new Date().toISOString(),
     }).eq("id", tid);
     await supabaseAdmin.from("team_signups").delete().eq("tournament_id", tid);
+    await restoreSeasonPool();
     await supabaseAdmin.from("league_settings")
       .update({ active_tournament_id: null, team_size: DEFAULT_TEAM_SIZE, updated_at: new Date().toISOString() })
       .not("id", "is", null);
@@ -1642,7 +1647,7 @@ export async function execFinalizeTeamSignups(): Promise<{ ok: boolean; message:
   await Promise.all(teamsToUse.map(t => syncSoloTeamIdentity(t.id, teamSize)));
 
   await supabaseAdmin.from("league_settings")
-    .update({ num_teams: kept.length, draft_open: false, updated_at: new Date().toISOString() })
+    .update({ num_teams: kept.length, updated_at: new Date().toISOString() })
     .not("id", "is", null);
 
   // Sign-up records are no longer needed once rosters are committed.
@@ -3164,6 +3169,7 @@ async function adminWipe(userId: string, confirm: string, clearHistory: boolean)
     team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null,
     in_active_draft: false, must_update_tracker: false,
   }).not("id", "is", null);
+  await clearSeasonPool();
   await supabaseAdmin.from("accounts").update({
     coin_grant_pending_start: false, coin_grant_pending_weekly: false,
   }).not("id", "is", null);

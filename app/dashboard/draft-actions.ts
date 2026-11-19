@@ -11,6 +11,7 @@ import { logAnalyticsEvent } from "@/app/lib/analytics";
 import { hasActiveVerifiedPlatformAccount, joinGateApplies } from "@/app/lib/platform-account-gate";
 import { isCurrentlyKicked } from "@/app/lib/players";
 import { hasMmrOnFile, MMR_REQUIRED_MESSAGE } from "@/app/lib/mmr-on-file";
+import { enterSeasonPool, isInSeasonPool, leaveSeasonPool } from "@/app/lib/season-pool";
 
 export async function triggerAutoPick(): Promise<{ done: boolean }> {
   // Fired by the draft client when a pick deadline passes. execAutoPick is
@@ -29,28 +30,30 @@ export async function enterDraft(confirmedMmr = false): Promise<{ error?: string
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("id, status, draft_entered, kick_reason, kicked_until, peak_2v2, peak_3v3")
+    .select("id, status, kick_reason, kicked_until, peak_2v2, peak_3v3")
     .eq("discord_id", session.userId)
     .single();
 
   if (!player) return { error: "You are not registered." };
   if (player.status !== "approved") return { error: "Your registration must be approved first." };
   if (isCurrentlyKicked(player.kick_reason, player.kicked_until)) return { error: "You are not eligible to join the draft." };
-  if (player.draft_entered) return { error: "You are already in the draft." };
+  if (await isInSeasonPool(player.id)) return { error: "You are already in the draft." };
 
   const inServer = await isGuildMember(session.userId);
   if (!inServer) return { inviteRequired: true };
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("draft_open, min_mmr_2v2, min_mmr_3v3, stats_enabled")
+    .select("draft_open, min_mmr_2v2, min_mmr_3v3, stats_enabled, active_tournament_id")
     .single();
 
   if (!settings?.draft_open) return { error: "Draft signups are not currently open." };
 
   // The season draft has no tournament of its own, so the runtime mirror is the
-  // event being joined.
-  if ((await joinGateApplies(settings.stats_enabled ?? true)) && !(await hasActiveVerifiedPlatformAccount(player.id, new Date())))
+  // event being joined. While a tournament holds the runtime, that mirror is the
+  // tournament's, and seasons always run with stats on.
+  const seasonStats = settings.active_tournament_id ? true : settings.stats_enabled ?? true;
+  if ((await joinGateApplies(seasonStats)) && !(await hasActiveVerifiedPlatformAccount(player.id, new Date())))
     return { error: "You need a verified platform account before joining the draft. Add one in Settings → Platform Accounts." };
 
   // A player who has never reported their ranks is asked before the MMR gate
@@ -80,15 +83,12 @@ export async function enterDraft(confirmedMmr = false): Promise<{ error?: string
   if (!confirmedMmr) return { confirmMmr: true };
 
   const now = new Date().toISOString();
-  const update: Record<string, unknown> = {
-    draft_entered: true,
-    draft_entered_at: now,
-    updated_at: now,
-    tracker_confirmed_at: now,
-    must_update_tracker: false,
-  };
-
-  await supabaseAdmin.from("players").update(update).eq("id", player.id);
+  await supabaseAdmin
+    .from("players")
+    .update({ updated_at: now, tracker_confirmed_at: now, must_update_tracker: false })
+    .eq("id", player.id);
+  const entered = await enterSeasonPool([player.id]);
+  if (entered.error) return { error: entered.error };
 
   logAnalyticsEvent("draft_join").catch(() => {});
 
@@ -103,26 +103,25 @@ export async function leaveDraft(): Promise<{ error?: string; ok?: boolean }> {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("draft_active, season_active")
+    .select("draft_active, season_active, active_tournament_id")
     .single();
 
-  if (settings?.draft_active || settings?.season_active) {
+  // With a tournament active, a running draft or season is the tournament's,
+  // and the season hasn't started.
+  if (!settings?.active_tournament_id && (settings?.draft_active || settings?.season_active)) {
     return { error: "You cannot leave the draft once the draft or season has started." };
   }
 
   const { data: player } = await supabaseAdmin
     .from("players")
-    .select("id, draft_entered")
+    .select("id")
     .eq("discord_id", session.userId)
     .single();
 
   if (!player) return { error: "You are not registered." };
-  if (!player.draft_entered) return { error: "You are not in the draft." };
+  if (!(await isInSeasonPool(player.id))) return { error: "You are not in the draft." };
 
-  await supabaseAdmin
-    .from("players")
-    .update({ draft_entered: false, updated_at: new Date().toISOString() })
-    .eq("id", player.id);
+  await leaveSeasonPool([player.id]);
 
   revalidatePath("/dashboard");
   return { ok: true };

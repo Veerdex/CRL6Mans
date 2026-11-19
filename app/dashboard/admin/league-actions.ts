@@ -7,7 +7,7 @@ import { decrypt } from "@/app/lib/session";
 import { isDirectorVerified } from "@/app/lib/players";
 import { execStartDraft, execEndDraft, execStartSeason, execAutoBalanceTeams, deleteMatchChannels, execSyncRoles, voidAllPendingWagers, setDraftChannelVisibility } from "@/app/lib/discord-bot";
 import { editRole, getGuildRoles, removeRoleById, getMemberRoleIds } from "@/app/lib/discord-api";
-import { pushToAllApproved, pushToAdmins, pushToEnteredDraft, pushToRosteredPlayers } from "@/app/lib/push";
+import { pushToAllApproved, pushToAdmins, pushToEnteredDraft, pushToPlayerIds, pushToRosteredPlayers } from "@/app/lib/push";
 import { isActiveTournamentTest, isTestEventActive } from "@/app/lib/test-tournament";
 import { ADMIN_NOTIFICATION_CATEGORIES } from "@/app/lib/admin-notification-prefs";
 import { APP_NAME } from "@/app/lib/constants";
@@ -22,6 +22,7 @@ import { recordEventResults } from "@/app/lib/event-results";
 import { ACCOLADE_PRIZE_COLUMNS, SEASON_ACCOLADES } from "@/app/lib/accolades";
 import { normalizeTeamSize, resolveTeamSize } from "@/app/lib/team-size";
 import { tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "@/app/lib/solo-team";
+import { clearSeasonPool, enterSeasonPool, isInSeasonPool, leaveSeasonPool, restoreSeasonPool, tournamentIsActive } from "@/app/lib/season-pool";
 
 const TEAM_ROLE_COLOR = 0x3498db; // blue
 import { supabaseAdmin } from "@/app/lib/supabase";
@@ -98,7 +99,6 @@ async function createTestAccounts(
         username: s.username,
         avatar: null,
         status: "approved",
-        draft_entered: opts.draftEntered,
         sub_willing: opts.subWilling ?? false,
         tracker_url: "https://rocketleague.tracker.network",
         peak_3v3: s.peak_3v3,
@@ -110,6 +110,11 @@ async function createTestAccounts(
     }))
     .select("id");
   if (playerError || !players) return { ids: [], usernames: [], error: playerError?.message ?? "Failed to create players." };
+
+  if (opts.draftEntered) {
+    const entered = await enterSeasonPool(players.map((p: { id: string }) => p.id));
+    if (entered.error) return { ids: [], usernames: [], error: entered.error };
+  }
 
   return { ids: players.map((p: { id: string }) => p.id), usernames: specs.map(s => s.username) };
 }
@@ -296,20 +301,13 @@ export async function removePlayerFromDraft(playerId: string): Promise<{ ok?: bo
   await verifyAdmin();
 
   const { data: settings } = await supabaseAdmin
-    .from("league_settings").select("draft_active, season_active").single();
-  if (settings?.draft_active || settings?.season_active) {
+    .from("league_settings").select("draft_active, season_active, active_tournament_id").single();
+  if (!settings?.active_tournament_id && (settings?.draft_active || settings?.season_active)) {
     return { error: "Cannot remove players from the pool once the draft or season has started." };
   }
 
-  const { data: player } = await supabaseAdmin
-    .from("players").select("id, draft_entered").eq("id", playerId).single();
-  if (!player) return { error: "Player not found." };
-  if (!player.draft_entered) return { error: "Player is not in the draft pool." };
-
-  await supabaseAdmin
-    .from("players")
-    .update({ draft_entered: false, draft_entered_at: null, updated_at: new Date().toISOString() })
-    .eq("id", playerId);
+  if (!(await isInSeasonPool(playerId))) return { error: "Player is not in the draft pool." };
+  await leaveSeasonPool([playerId]);
 
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
@@ -480,13 +478,16 @@ export async function openDraftSignups() {
 
   const { data: settings } = await supabaseAdmin
     .from("league_settings")
-    .select("draft_active, season_active")
+    .select("draft_active, season_active, active_tournament_id")
     .single();
 
-  if (settings?.draft_active) {
+  // A tournament's draft or season doesn't block the season's sign-ups, which
+  // keep their own list in season_entries.
+  const seasonHoldsRuntime = !settings?.active_tournament_id;
+  if (seasonHoldsRuntime && settings?.draft_active) {
     return { error: "Signups cannot be reopened while the draft is in progress." };
   }
-  if (settings?.season_active) {
+  if (seasonHoldsRuntime && settings?.season_active) {
     return { error: "Signups cannot be reopened while a season is active." };
   }
 
@@ -517,7 +518,10 @@ export async function closeDraftSignups() {
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
 
-  pushToEnteredDraft({
+  // The season's own entrants: while a tournament holds the live pool,
+  // draft_entered is the tournament's.
+  const { data: seasonEntrants } = await supabaseAdmin.from("season_entries").select("player_id");
+  pushToPlayerIds((seasonEntrants ?? []).map((e) => e.player_id as string), {
     title: "Season Signups Closed",
     body: "Season signups have closed. The draft will begin soon.",
     url: "/dashboard",
@@ -622,11 +626,16 @@ export async function resetSeason() {
     .update({ wins: 0, losses: 0, is_locked: false, season_rating: null, initial_rating: null })
     .not("id", "is", null);
 
-  // Reset all player assignments and draft entries
+  // Reset all player assignments and draft entries. A tournament ending hands the
+  // live pool back to the season's sign-ups, which outlive it; a season ending
+  // takes its sign-up list with it.
   await supabaseAdmin
     .from("players")
     .update({ team_id: null, is_captain: false, draft_entered: false, draft_entered_at: null, in_active_draft: false, must_update_tracker: false })
     .not("id", "is", null);
+  const tournamentEnding = await tournamentIsActive();
+  if (tournamentEnding) await restoreSeasonPool();
+  else await clearSeasonPool();
 
   // Pending coin grants live on accounts (Tier 1) — clear for everyone, not just
   // roster players, since unregistered/pending guests can accrue them too.
@@ -641,8 +650,7 @@ export async function resetSeason() {
 
   // Reset ALL draft/season state so nothing looks active or in-progress
   await supabaseAdmin.from("league_settings").update({
-    draft_open: false,
-    draft_signups_closed: false,
+    ...(tournamentEnding ? {} : { draft_open: false, draft_signups_closed: false }),
     draft_active: false,
     season_active: false,
     is_test_season: false,

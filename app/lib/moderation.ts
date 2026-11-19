@@ -33,6 +33,7 @@ export async function removeFromActivePlay(accountId: string) {
     in_active_draft: false,
     updated_at: new Date().toISOString(),
   }).eq("account_id", accountId);
+  await supabaseAdmin.from("season_entries").delete().eq("player_id", accountId);
 
   const { data: activeTournaments } = await supabaseAdmin
     .from("tournaments")

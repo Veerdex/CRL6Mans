@@ -46,16 +46,16 @@ export default async function DashboardPage({
   const [playerRes, settingsRes, draftQueueRes, tournamentsRes, seasonsRes, matchStagesRes, publicSponsors, publicDesigns, moderator] = await Promise.all([
     supabaseAdmin
       .from("players")
-      .select("id, status, draft_entered, display_name, must_update_tracker")
+      .select("id, status, display_name, must_update_tracker")
       .eq("discord_id", session.userId)
       .single(),
-    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, num_teams, team_size, season_format, announcement_text, announcement_destination, clip_of_week_id").single(),
+    supabaseAdmin.from("league_settings").select("draft_open, draft_active, season_active, active_tournament_id, num_teams, team_size, season_format, announcement_text, announcement_destination, clip_of_week_id").single(),
+    // The season's own sign-ups: while a tournament runs, players.draft_entered
+    // is that tournament's pool.
     supabaseAdmin
-      .from("players")
-      .select("id")
-      .eq("status", "approved")
-      .eq("draft_entered", true)
-      .order("draft_entered_at", { ascending: true, nullsFirst: false }),
+      .from("season_entries")
+      .select("player_id, players!inner(status)")
+      .eq("players.status", "approved"),
     supabaseAdmin
       .from("tournaments")
       .select("id, name, status, signups_open, signups_closed, summary, season_format, ended_at, join_mode, team_assignment, draft_open_at, draft_close_at, draft_start_at, season_start_at, hidden_from_home, stage_starts, min_teams, team_limit, team_size, sponsor_id, design_id, prize_1st, prize_2nd, prize_3rd4th, is_test")
@@ -295,11 +295,15 @@ export default async function DashboardPage({
     return projectedEndIso(row.stage_starts ?? null, row.season_format ?? null, teams);
   };
 
+  // draft_open is always the season's switch, but draft_active and season_active
+  // belong to whichever event holds the runtime — a tournament, when one is active.
+  const seasonHoldsRuntime = !settings?.active_tournament_id;
   const draftCount = draftQueue.length;
-  const draftOpen = !hideTestEvent && (settings?.draft_open ?? false);
-  const draftActive = !hideTestEvent && (settings?.draft_active ?? false);
-  const signupsOpen = draftOpen && !draftActive && !(settings?.season_active ?? false);
-  const inDraft = player?.draft_entered ?? false;
+  const draftOpen = settings?.draft_open ?? false;
+  const draftActive = seasonHoldsRuntime && (settings?.draft_active ?? false);
+  const seasonDraftRunning = seasonHoldsRuntime && (settings?.season_active ?? false);
+  const signupsOpen = draftOpen && !draftActive && !seasonDraftRunning;
+  const inDraft = !!player && draftQueue.some((e) => e.player_id === player.id);
 
   // Compute current season stage label from active matches.
   const allMatchStages = matchStagesRes.data ?? [];
@@ -464,7 +468,7 @@ export default async function DashboardPage({
       {/* Season draft block — only when no season is active yet (the active-event card above
           covers it once it is), and only while the draft is actually something you can act on.
           With signups closed and no draft running it was a dead card and an empty pool count. */}
-      {isApproved && activeTournament?.join_mode !== "teams" && !seasonActive && (draftOpen || draftActive) && (
+      {isApproved && !seasonDraftRunning && (draftOpen || draftActive) && (
         <div className="space-y-3">
           <h2 className="text-[21px] font-semibold text-zinc-300">Season</h2>
           <DraftCard

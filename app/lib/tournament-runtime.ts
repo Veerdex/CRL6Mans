@@ -33,6 +33,9 @@ export async function activateTournamentRuntime(
     return { ok: false, error: "Tournament is not joinable." };
 
   const midRun = settings?.draft_active || settings?.season_active;
+  // A season's draft or season holds the runtime with no tournament pointer.
+  if (!activeId && midRun)
+    return { ok: false, error: "A season is running. Finish it before starting a tournament." };
 
   await supabaseAdmin.from("tournaments").update({
     status: "active",
@@ -42,15 +45,19 @@ export async function activateTournamentRuntime(
   }).eq("id", tournamentId);
 
   // Bridge the player pool into the runtime — only when nothing is mid-run yet.
+  // The live pool is cleared for team-mode events too: until now it mirrored the
+  // season's sign-ups (season_entries, which this leaves alone), and teardown
+  // hands it back through restoreSeasonPool.
+  if (!midRun) {
+    await supabaseAdmin.from("players")
+      .update({ draft_entered: false, in_active_draft: false })
+      .eq("status", "approved");
+  }
   if (t.join_mode === "players" && !midRun) {
     const { data: entries } = await supabaseAdmin
       .from("tournament_entries")
       .select("player_id, created_at")
       .eq("tournament_id", tournamentId);
-
-    await supabaseAdmin.from("players")
-      .update({ draft_entered: false, in_active_draft: false })
-      .eq("status", "approved");
 
     await Promise.all(
       (entries ?? []).map((e) =>
@@ -90,7 +97,8 @@ export async function activateTournamentRuntime(
     match_deadline_day: t.match_deadline_day,
     match_play_day: t.match_play_day,
     match_play_hour: t.match_play_hour,
-    draft_open: false, // the active tournament's pool is now locked in
+    // draft_open is left alone: it is the season's sign-up switch, and the
+    // season keeps its own list in season_entries.
     updated_at: new Date().toISOString(),
   }).not("id", "is", null);
 

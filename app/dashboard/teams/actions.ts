@@ -11,6 +11,7 @@ import { validateImageUpload } from "@/app/lib/uploads";
 import { applyPlayerRVChangeToTeamRating, execDisqualifyTeam } from "@/app/lib/discord-bot";
 import { rulesRatingFromRow } from "@/app/lib/rating";
 import { resolveTeamSize } from "@/app/lib/team-size";
+import { enterSeasonPool, leaveSeasonPool } from "@/app/lib/season-pool";
 import { resolveTournamentRole, tournamentRoleIdsToStrip, syncSoloTeamIdentity } from "@/app/lib/solo-team";
 
 async function getSession() {
@@ -34,29 +35,28 @@ async function enrollInEvent(playerId: string) {
     .from("league_settings").select("active_tournament_id").single();
   const tournamentId = (settings?.active_tournament_id as string | null) ?? null;
 
-  let isNewEntry: boolean;
   if (tournamentId) {
     const { error } = await supabaseAdmin
       .from("tournament_entries").insert({ tournament_id: tournamentId, player_id: playerId });
     if (error && !error.message.toLowerCase().includes("duplicate")) return { error: error.message };
-    isNewEntry = !error;
-  } else {
-    const { data: p } = await supabaseAdmin
-      .from("players").select("draft_entered").eq("id", playerId).single();
-    isNewEntry = !p?.draft_entered;
-  }
+    const isNewEntry = !error;
 
-  // Both formation paths order the pool by draft_entered_at and cut the tail, so
-  // a genuinely new entry has to be stamped now. A timestamp left over from an
-  // earlier event would seat them ahead of people who signed up on time — and
-  // send one of those the "yours came in after the last spot was taken" notice,
-  // which would be false. Someone already entered keeps their real place.
-  await supabaseAdmin
-    .from("players")
-    .update(isNewEntry
-      ? { draft_entered: true, draft_entered_at: new Date().toISOString() }
-      : { draft_entered: true })
-    .eq("id", playerId);
+    // Both formation paths order the pool by draft_entered_at and cut the tail, so
+    // a genuinely new entry has to be stamped now. A timestamp left over from an
+    // earlier event would seat them ahead of people who signed up on time — and
+    // send one of those the "yours came in after the last spot was taken" notice,
+    // which would be false. Someone already entered keeps their real place.
+    await supabaseAdmin
+      .from("players")
+      .update(isNewEntry
+        ? { draft_entered: true, draft_entered_at: new Date().toISOString() }
+        : { draft_entered: true })
+      .eq("id", playerId);
+  } else {
+    // The season's list stamps a new entry and keeps an existing one's place.
+    const entered = await enterSeasonPool([playerId]);
+    if (entered.error) return { error: entered.error };
+  }
 
   // Own statement: pre-migration this column doesn't exist, and folding it in
   // would take draft_entered down with it.
@@ -135,8 +135,10 @@ export async function removePlayerFromEvent(playerId: string) {
   if (tournamentId) {
     await supabaseAdmin.from("tournament_entries").delete()
       .eq("tournament_id", tournamentId).eq("player_id", playerId);
+    await supabaseAdmin.from("players").update({ draft_entered: false }).eq("id", playerId);
+  } else {
+    await leaveSeasonPool([playerId]);
   }
-  await supabaseAdmin.from("players").update({ draft_entered: false }).eq("id", playerId);
 
   revalidatePath("/dashboard/teams");
   revalidatePath("/dashboard/subs");
@@ -571,9 +573,10 @@ export async function createTeam(playerIds: string[]) {
   // seated by slot number before pick 0, which a slot appearing mid-draft would
   // shift the picks already made off.
   const { data: settings } = await supabaseAdmin
-    .from("league_settings").select("draft_active, draft_open").single();
+    .from("league_settings").select("draft_active, draft_open, active_tournament_id").single();
   if (settings?.draft_active) return { error: "Finish or end the draft before adding a team." };
-  if (settings?.draft_open) return { error: "Close draft sign-ups first — starting the draft would wipe a hand-built team." };
+  // draft_open is the season's sign-ups, which say nothing about a tournament's draft.
+  if (settings?.draft_open && !settings.active_tournament_id) return { error: "Close draft sign-ups first — starting the draft would wipe a hand-built team." };
 
   // Once a bracket exists the field is settled. The only way to give a new team a
   // seed is buildAndSaveBracket, which opens by deleting every bracket match, so

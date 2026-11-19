@@ -205,7 +205,7 @@ export default async function AdminPage() {
   const testingMode           = userIsDirector && cookieStore.get("testing_mode")?.value === "1";
   const notificationsEnabled  = cookieStore.get("notifications_disabled")?.value !== "1";
 
-  const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors, publicDesigns] = await Promise.all([
+  const [pending, { data: settings }, { data: draftPoolRows }, { data: teamSlots }, { data: scheduledMatches }, { data: pendingSubRequests }, { data: pendingEditRequests }, { data: tournaments }, { data: seasons }, { data: allAccounts }, { data: allMatchStages }, { data: playerRows }, publicSponsors, publicDesigns, { data: seasonEntryRows }] = await Promise.all([
     getAllPendingPlayers(),
     supabaseAdmin.from("league_settings").select("season_format, season_participants, num_teams, team_size, draft_open, draft_active, draft_phase, pick_deadline, season_active, is_test_season, subs_enabled, match_deadline_day, match_play_day, match_play_hour, min_mmr_2v2, min_mmr_3v3, season_prize_1st, season_prize_2nd, season_prize_3rd4th, accolade_prize_mvp, accolade_prize_offensive, accolade_prize_defensive, accolade_prize_rookie, patreon_url, admin_notification_prefs, active_tournament_id, announcement_channel_id, announcement_text, announcement_destination, announcement_posted_at, round1_manual_start_pending, betting_mode, season_sponsor_id, season_design_id, replay_analysis_mode, stats_enabled, join_gate_enabled").maybeSingle(),
     supabaseAdmin.from("players").select("id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, draft_entered_at").eq("status", "approved").eq("draft_entered", true).order("draft_entered_at", { ascending: true }),
@@ -220,6 +220,7 @@ export default async function AdminPage() {
     supabaseAdmin.from("players").select("account_id, team_id, tracker_url, peak_3v3, current_3v3, rv_adjustment, peak_2v2, current_2v2"),
     getPublicSponsors(),
     getPublicDesigns(),
+    supabaseAdmin.from("season_entries").select("created_at, players!inner(id, discord_id, username, display_name, avatar, peak_2v2, current_2v2, peak_3v3, current_3v3, rv_adjustment, status)").eq("players.status", "approved").order("created_at", { ascending: true }),
   ]);
   // Signed here rather than in the card so the stored object path never reaches
   // the client. One short-lived URL per pending registration.
@@ -885,10 +886,13 @@ export default async function AdminPage() {
       : Promise.resolve({ data: [] as { id: string; stage: string; round: number; match_number: number; home_team_id: string | null; away_team_id: string | null; scheduled_at: string | null; admin_scheduled: boolean; schedule_proposed_by_team_id: string | null; discord_channel_id: string | null; home_checked_in: boolean | null; away_checked_in: boolean | null }[] }),
   ]);
 
-  const draftPoolEntries: DraftPoolEntry[] = ((draftPoolRows ?? []) as DraftPoolEntry[]).map((r) =>
-    withTier1Identity(r, r.id),
+  // The panel lists the season's sign-ups; the team counts below size the live
+  // pool, which is a tournament's while one is active. The two agree otherwise.
+  type SeasonEntryRow = { created_at: string; players: Omit<DraftPoolEntry, "draft_entered_at"> };
+  const draftPoolEntries: DraftPoolEntry[] = ((seasonEntryRows ?? []) as unknown as SeasonEntryRow[]).map(({ created_at, players: p }) =>
+    withTier1Identity({ ...p, draft_entered_at: created_at }, p.id),
   );
-  const enteredCount = draftPoolEntries.length;
+  const enteredCount = (draftPoolRows ?? []).length;
 
   type MatchStageRow = { stage: string; round: number; discord_channel_id: string | null; home_checked_in: boolean | null; away_checked_in: boolean | null };
   const matchStageRows = (allMatchStages ?? []) as MatchStageRow[];
@@ -1151,7 +1155,7 @@ export default async function AdminPage() {
         ...(schedulingVisible ? [{ id: "scheduling", label: "Scheduling", level: "director" as const, notification: schedulingUnscheduledCount || undefined }] : []),
         { id: "tournaments", label: "Tournaments", level: "director", value: (tournaments ?? []).filter((t) => t.status === "scheduled" || t.status === "active").length },
         { id: "season-settings", label: "Season Settings", level: "director" },
-        { id: "draft-pool", label: "Draft Pool", level: "director", value: enteredCount + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0) },
+        { id: "draft-pool", label: "Draft Pool", level: "director", value: draftPoolEntries.length + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0) },
         { id: "league-controls", label: "League Controls", level: "director" },
         { id: "fantasy", label: "Fantasy", level: "director" },
       ],
@@ -1629,7 +1633,7 @@ export default async function AdminPage() {
           sectionId="season-league"
           tabId="draft-pool"
           title="Draft Pool"
-          value={enteredCount + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0)}
+          value={draftPoolEntries.length + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0)}
           defaultOpen={false}
           description="Everyone currently signed up to play — the season's 'Enter Draft' pool plus sign-ups for any scheduled standalone tournaments (player or team mode). Remove an entrant before its draft/tournament starts if they need to be pulled from signups."
         >
