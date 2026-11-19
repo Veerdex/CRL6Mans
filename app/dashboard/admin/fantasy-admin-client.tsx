@@ -172,7 +172,7 @@ function VisibilitySwitch({ openToAll }: { openToAll: boolean }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-zinc-300">
           Fantasy is{" "}
-          <strong className={openToAll ? "text-emerald-400" : "text-zinc-100"}>{openToAll ? "open to everyone" : "staff only"}</strong>
+          <strong className={openToAll ? "text-emerald-400" : "text-red-400"}>{openToAll ? "open to everyone" : "staff only"}</strong>
           <p className="text-xs text-zinc-500">
             {openToAll
               ? "Every approved player sees the tab and can create or join a league."
@@ -200,7 +200,7 @@ function TradesSwitch({ enabled }: { enabled: boolean }) {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-zinc-300">
-          Trades are <strong className={enabled ? "text-emerald-400" : "text-zinc-100"}>{enabled ? "on" : "off"}</strong> in every
+          Trades are <strong className={enabled ? "text-emerald-400" : "text-red-400"}>{enabled ? "on" : "off"}</strong> in every
           league
           <p className="text-xs text-zinc-500">Accepted trades go to league review before they land.</p>
         </div>
