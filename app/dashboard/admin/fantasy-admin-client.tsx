@@ -81,7 +81,7 @@ export function FantasyAdminClient({
     <div className="space-y-6">
       <section className={`${CARD} space-y-4`}>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-sm font-semibold text-zinc-100">Season</h3>
+          <h3 className="text-sm font-semibold text-zinc-100">Fantasy season</h3>
           <span className="text-sm text-zinc-300">
             {season ? (
               <>
@@ -96,7 +96,8 @@ export function FantasyAdminClient({
         {season?.status === "open" && gates && (
           <div className="space-y-3">
             <p className="text-xs text-zinc-400">
-              Leagues form while the season is open. Start the drafts once the real season draft is done and before Round 1.
+              The fantasy season is its own record: while it&apos;s open, players can create and join leagues. Fantasy drafts
+              start after the real season&apos;s draft has rostered everyone, and before its Round 1.
             </p>
             <ul className="space-y-1">
               {gates.map((g) => (

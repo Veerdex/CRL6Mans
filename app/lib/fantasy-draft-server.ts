@@ -243,19 +243,31 @@ export async function fantasyDraftGates() {
   // Round 1. A test event gets a test run: see rollbackFantasyTestRun.
   const gates: DraftGate[] = [
     {
-      label: "A fantasy season is open",
+      label: "Fantasy: a fantasy season is taking leagues",
       ok: season?.status === "open",
       error: season ? "This fantasy season's drafts have already started." : "There's no fantasy season.",
     },
-    { label: "The season is 3v3", ok: normalizeTeamSize(settings?.team_size) === 3, error: "Fantasy only runs alongside a 3v3 season." },
-    { label: "Stats tracking is on", ok: statsOn, error: "Turn stats tracking on first. Fantasy scores come from replay stats." },
-    { label: "No season draft is running", ok: !settings?.draft_active, error: "Finish the season draft first." },
     {
-      label: "Round 1 hasn't started",
+      label: "Fantasy: stats tracking is on",
+      ok: statsOn,
+      error: "Turn stats tracking on first. Fantasy scores come from replay stats.",
+    },
+    {
+      label: "Real season: team size is 3v3",
+      ok: normalizeTeamSize(settings?.team_size) === 3,
+      error: "Fantasy only runs alongside a 3v3 season.",
+    },
+    { label: "Real season: the season draft isn't still running", ok: !settings?.draft_active, error: "Finish the season draft first." },
+    {
+      label: "Real season: the season draft has rostered players onto teams",
+      ok: tiers.length > 0,
+      error: "Nobody is rostered yet. Run the season draft first.",
+    },
+    {
+      label: "Real season: Round 1 hasn't started",
       ok: !settings?.season_active,
       error: "The season has already started. Fantasy drafts run before Round 1.",
     },
-    { label: "Players are rostered on teams", ok: tiers.length > 0, error: "Nobody is rostered yet. Run the season draft first." },
   ];
   return { season, gates, tiers, testRun };
 }
