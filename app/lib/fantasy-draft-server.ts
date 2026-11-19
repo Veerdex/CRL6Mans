@@ -253,9 +253,10 @@ export async function fantasyDraftGates() {
       error: "Turn stats tracking on first. Fantasy scores come from replay stats.",
     },
     {
-      label: "Real season: team size is 3v3",
+      // Seasons are always 3v3; only an active 2v2 or 1v1 tournament fails this.
+      label: "Real season: no 2v2 or 1v1 tournament is active",
       ok: normalizeTeamSize(settings?.team_size) === 3,
-      error: "Fantasy only runs alongside a 3v3 season.",
+      error: "Fantasy only runs alongside a 3v3 event, and a 2v2 or 1v1 tournament is active.",
     },
     { label: "Real season: the season draft isn't still running", ok: !settings?.draft_active, error: "Finish the season draft first." },
     {
