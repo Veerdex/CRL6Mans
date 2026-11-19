@@ -1,6 +1,7 @@
 # Fantasy Rocket League — Design Spec
 
-Status: **design agreed, not yet built.** Living document — edit as decisions change.
+Status: **built, not yet run for real** — no league has drafted or played a week. Living
+document — edit as decisions change.
 Origin: Kotala's proposal + the design discussion of 2026-11-05/06. Anything in
 [Open questions](#open-questions) is still undecided.
 
@@ -214,8 +215,8 @@ before the report to keep the slot open. Teams scheduling their matches closes t
 ### Playoffs
 - Top 4: **1 v 4, 2 v 3** in the semifinals, winners meet in the final.
 - A tied playoff matchup → **higher seed advances**.
-- **Eliminated managers are frozen:** no adds, drops, waiver claims or trades (trades are
-  disabled for everyone, §10).
+- **Eliminated managers are frozen:** no adds, drops, waiver claims or trades (trades are a
+  director's switch, off by default, §10).
 
 | | Regular season | Playoffs, still alive | Eliminated |
 |---|---|---|---|
@@ -238,8 +239,9 @@ playoffs (by trade or by dropping them onto waivers).
 - **Snake draft, order randomized** when the draft starts.
 - **1:30 per pick**, except the draft's opening pick, which gets **5 minutes** so every
   manager has time to arrive.
-- **Autopick** when the clock runs out: the manager's queue first, otherwise the best
-  available by **tier, then rating**, respecting the tier limits.
+- **Autopick** when the clock runs out: the best available by **tier, then rating**,
+  respecting the tier limits. There is no pick queue: tiers are cut from rating, so a queue
+  would mostly restate the order autopick already follows.
 - Live updates: each open page **polls every 10 seconds**, pausing while the tab is hidden and
   checking immediately when it returns. Same pattern as the season draft's
   `/api/draft/pulse` (`app/dashboard/draft/draft-live.tsx`).
@@ -439,7 +441,7 @@ Modelled on fantasy football so it's familiar:
   toggle carries a count of incoming offers plus reviews the manager hasn't voted on. A resolved trade can be dismissed, which hides it for that
   manager only. A visitor who isn't a manager sees the whole pool with no toggle.
 - **Standings** — W-L, total points, waiver priority.
-- **Draft room** — live board, queue, pick timer.
+- **Draft room** — live board, pick timer.
 - **League directory** — every league to join or view; create a league.
 
 ### Navigation
@@ -486,8 +488,7 @@ Modelled on fantasy football so it's familiar:
   slot assignment and autopick choice are pure (`app/lib/fantasy-draft.ts`,
   `npm run test:fantasy-draft`); the server side is `app/lib/fantasy-draft-server.ts`.
   Autopick fires from the open draft room when the clock hits 0, with the
-  `draft-autopick` cron as the backstop. The pick queue isn't built yet, so autopick goes
-  straight to tier then rating.
+  `draft-autopick` cron as the backstop.
 - **Test runs** (`scripts/fantasy-test-run-migration.sql`): starting the drafts during a test
   event sets `fantasy_seasons.test_run`. A test run drafts only leagues whose managers are
   all staff or `test_` accounts, disbands nothing (every other league stays in `pre_draft`),
@@ -680,11 +681,11 @@ later from the stored summaries.
 
 None at the moment.
 
-**Decided: trades are disabled** rather than given a deadline or a veto window (§10). If they
-are ever turned back on, the dumping problem returns: a manager out of contention but not yet
-eliminated can send their best players to a friend, which the elimination freeze doesn't
-cover. A deadline after Week 4 of 6, or a day-or-two veto window for the other managers, are
-the options considered.
+**Decided: trades sit behind a director's switch, off by default, and go to league review
+when on** (§10). The review is the veto window that was considered against the dumping
+problem: a manager out of contention but not yet eliminated sending their best players to a
+friend, which the elimination freeze doesn't cover. A deadline after Week 4 of 6 was the other
+option and was not taken.
 
 **Decided: no freeze for waivers before elimination is known.** Managers aren't eliminated
 until Week 6 closes, but a Round 7 series can be played before then, so in that window a
