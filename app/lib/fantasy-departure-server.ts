@@ -12,8 +12,8 @@ const LEFT_NOTE = "The manager left the league.";
 
 type LeagueLite = { id: string; status: string; commissioner_id: string };
 
-/** How the manager went: on their own, or taken out by the owner or staff. */
-export type Departure = "left" | "removed";
+/** How the manager went: on their own, taken out by the owner, or by league staff. */
+export type Departure = "left" | "removed" | "staff_removed";
 
 /** The earliest-joined manager still in the league, other than `except`. */
 async function nextOwner(leagueId: string, except: string): Promise<string | null> {
@@ -138,10 +138,10 @@ async function tellManagers(leagueId: string, departed: string, how: Departure, 
     notifyManagers([heir], "fantasy_major", { title: "You're now a fantasy league owner", body: parts.join(" "), url });
   }
   // A kick or ban has no actor here: the moderation itself is the notice.
-  if (how === "removed" && actorId) {
+  if (how !== "left" && actorId) {
     notifyManagers([departed], "fantasy_major", {
       title: "Removed from a fantasy league",
-      body: `The owner removed you from ${league.name}.${
+      body: `${how === "staff_removed" ? "League staff" : "The owner"} removed you from ${league.name}.${
         afterDraft ? " Your team stays in the league with its current lineup until the owner hands it to someone new." : ""
       }`,
       url: "/dashboard/fantasy",

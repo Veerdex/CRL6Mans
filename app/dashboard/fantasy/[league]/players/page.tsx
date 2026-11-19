@@ -3,7 +3,6 @@ import { getPoolView } from "@/app/lib/fantasy-pool-data";
 import { managerLineup } from "@/app/lib/fantasy-lineup-server";
 import { leagueWaiverPriority, managerPendingClaims } from "@/app/lib/fantasy-waivers-server";
 import { cancelFrozenTrades, fantasyTradesEnabled, leagueReviews, managerTrades } from "@/app/lib/fantasy-trades-server";
-import { isDirectorVerified } from "@/app/lib/players";
 import { eliminatedInLeague } from "@/app/lib/fantasy-matchup-server";
 import type { MemberView } from "@/app/lib/fantasy-leagues";
 import { leagueFromParams, type LeagueAccess } from "../league-access";
@@ -13,7 +12,6 @@ import { isFinalLeague } from "@/app/lib/fantasy-rules";
 import { PoolSection, PoolSkeleton } from "./pool-section";
 import { TrendingPlayers } from "./trending";
 import type { RosterMoves } from "./move-action";
-import { TradesToggle } from "./trades-toggle";
 
 export default function FantasyPlayerPoolPage({ params }: { params: Promise<{ league: string }> }) {
   const trades = fantasyTradesEnabled();
@@ -45,10 +43,7 @@ function IntroText({ trades }: { trades: boolean }) {
 async function Pool({ league, trades }: { league: Promise<LeagueAccess>; trades: Promise<boolean> }) {
   const { viewer, view } = await league;
   const leagueId = view.league.id;
-  const [tradesEnabled, isDirector] = await Promise.all([
-    trades,
-    viewer.isStaff ? isDirectorVerified(viewer.discordId) : Promise.resolve(false),
-  ]);
+  const tradesEnabled = await trades;
   if (isFinalLeague(view.league.status)) {
     return <ComingSoon title="Players">The season is over, so there are no more moves to make.</ComingSoon>;
   }
@@ -58,7 +53,6 @@ async function Pool({ league, trades }: { league: Promise<LeagueAccess>; trades:
   const pool = getPoolView(leagueId, viewer.isStaff);
   return (
     <div className="space-y-4">
-      {isDirector && <TradesToggle enabled={tradesEnabled} />}
       <Suspense fallback={null}>
         <TrendingPlayers pool={pool} />
       </Suspense>

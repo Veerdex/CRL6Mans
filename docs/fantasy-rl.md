@@ -34,6 +34,23 @@ season is a round robin; the top 4 enter a two-week playoff.
 | Undersized | A league with **fewer than 4 managers** when the admin starts the drafts is **disbanded** |
 | End of season | League is archived read-only (§15) |
 
+### Staff powers
+Directors run fantasy from **Admin → Season & League → Fantasy**: the season's status, the
+launch checklist and Start fantasy drafts (§8), Open season (§15), the Shown/Staff-only
+switch (§13) and the trades switch (§10). The checklist is drawn from
+`fantasyDraftGates()`, the same list `startFantasyDrafts` refuses on, so it can't go green on
+something Start would refuse. Each pre-draft league also shows whether it will be disbanded
+or whose pool can't fill its rosters. For any league, a director can:
+- **Rename it**, unless it's closed.
+- **Remove a manager**, on the owner's terms: they drop out before the draft, their team is
+  orphaned after it, and nobody is removed mid-draft. The removed manager is told "League
+  staff removed you" (`Departure` `staff_removed`).
+- **Make a manager the owner.** The new owner must still be managing in the league and not
+  own another league this season. The change is pinned to the owner it was read with.
+- **Delete a league before its draft.** It's pinned to `pre_draft` so it can't race the draft
+  start. Once a league has drafted, deleting it would drop its results from the season-end
+  snapshot.
+
 ### Commissioner (league creator) powers
 - Rename the league
 - Set public / private
@@ -292,7 +309,7 @@ Free agent (instant add)
 **A director's switch, off by default.** Every manager shares one Discord, so a lopsided trade
 is far more likely to be two friends teaming up than one manager outsmarting another, and
 waivers and free agency already cover fixing a roster. A director turns trades on or off for
-every league at once from the top of the Players tab (`league_settings.fantasy_trades_enabled`,
+every league at once from the admin Fantasy tab (`league_settings.fantasy_trades_enabled`,
 read by `fantasyTradesEnabled()`). While they're off, proposing and accepting are refused
 server-side, and the Players tab's Trades view, the Trade button and the Trades notification
 setting are hidden. Turning them off cancels every open trade (pending or in review), so turning them back on
@@ -454,7 +471,8 @@ Modelled on fantasy football so it's familiar:
   several leagues gets a league switcher in the header. Later slices hang the pages above
   off it as tabs.
 - Until fantasy launches, the tab and pages are open only to staff, or to everyone when an
-  admin sets Fantasy to **shown** in the nav tab overrides.
+  admin sets Fantasy to **shown** in the nav tab overrides — the admin Fantasy tab's
+  switch, which writes the same override as the Tab Manager.
 
 ---
 
@@ -665,8 +683,8 @@ Season button, marks a running (non-test) fantasy season and its leagues `cancel
 record is kept. Deleting an event whose archive was never exported cancels its `ended`
 season the same way (`cancelFantasyForEvent`), since nothing could complete it any more.
 
-**The next season** is opened by a director with the **Open season** control (a name) in the
-Staff box on the fantasy hub, beside Start fantasy drafts. It shows once no season is
+**The next season** is opened by a director with the **Open season** control (a name) on the
+admin Fantasy tab, where Start fantasy drafts also lives. It shows once no season is
 running. It's allowed once no season is `open`, `drafting` or `active`. An `ended` season
 doesn't block it, since that season only waits on an export. `getCurrentFantasySeason` reads
 only `open`, `drafting` and `active`; the hub falls back to the newest `ended` or `complete`

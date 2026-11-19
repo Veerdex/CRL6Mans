@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decrypt } from "@/app/lib/session";
 import { fantasyAccessOpen, getFantasyViewer, getHubData, type LeagueCard } from "@/app/lib/fantasy-leagues";
-import { CreateLeagueForm, JoinLeagueButton, OpenSeasonForm, StartDraftsButton } from "./fantasy-client";
+import { CreateLeagueForm, JoinLeagueButton } from "./fantasy-client";
 import { isDirectorVerified } from "@/app/lib/players";
 import { StatusBadge } from "./status-badge";
 import { HubTabs, type HubTab } from "./hub-tabs";
@@ -28,23 +28,16 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
     return (
       <Shell>
         <p className="text-sm text-zinc-400 text-center">There&apos;s no fantasy season running right now.</p>
-        {isDirector && (
-          <StaffSection>
-            <OpenSeasonForm />
-          </StaffSection>
-        )}
+        {isDirector && <AdminLink />}
       </Shell>
     );
   }
 
   // A manager in exactly one league lands straight in it; ?all=1 or an explicit
-  // tab is the way back. Not while staff have a control here, since it lives
-  // only on this page.
+  // tab is the way back.
   const { all, tab: tabParam } = await searchParams;
   const seasonOver = hub.season.status === "ended" || hub.season.status === "complete";
-  const showStartDrafts = isDirector && hub.season.status === "open";
-  const showOpenSeason = isDirector && seasonOver;
-  if (hub.myLeagues.length === 1 && all !== "1" && !tabParam && !showStartDrafts && !showOpenSeason) {
+  if (hub.myLeagues.length === 1 && all !== "1" && !tabParam) {
     redirect(`/dashboard/fantasy/${hub.myLeagues[0].id}`);
   }
 
@@ -69,7 +62,7 @@ export default async function FantasyHubPage({ searchParams }: { searchParams: P
         </div>
       )}
 
-      {(showStartDrafts || showOpenSeason) && <StaffSection>{showStartDrafts ? <StartDraftsButton /> : <OpenSeasonForm />}</StaffSection>}
+      {isDirector && <AdminLink />}
 
       <HubTabs
         key={tab}
@@ -144,12 +137,17 @@ function Shell({ children, subtitle }: { children: React.ReactNode; subtitle?: s
   );
 }
 
-function StaffSection({ children }: { children: React.ReactNode }) {
+// The season, the drafts, the switches and every league are run from the admin
+// panel's Season & League → Fantasy tab.
+function AdminLink() {
   return (
-    <section className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 flex flex-col items-center gap-2">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Staff</h2>
-      {children}
-    </section>
+    <p className="text-xs text-zinc-500 text-center">
+      Staff: run the season and its leagues from{" "}
+      <Link href="/dashboard/admin" className="text-indigo-400 hover:underline">
+        Admin → Season &amp; League → Fantasy
+      </Link>
+      .
+    </p>
   );
 }
 

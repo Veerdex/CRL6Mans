@@ -9,7 +9,9 @@ import { matchHasBegun } from "@/app/lib/match-state";
 import { collegeIdSignedUrl } from "@/app/lib/college-ids";
 import { displayRatingFromRow, shownRatingFromRow } from "@/app/lib/rating";
 import { SEASON_ACCOLADES } from "@/app/lib/accolades";
+import { Suspense } from "react";
 import { LeagueControls } from "./league-controls";
+import { FantasyPanel } from "./fantasy-panel";
 import { AdminNotificationToggles } from "./admin-notification-toggles";
 import { InsightsChart, type InsightsPoint } from "./insights-chart";
 import { FormatEditor, type SeasonFormatConfig } from "../season/format-editor";
@@ -1151,6 +1153,7 @@ export default async function AdminPage() {
         { id: "season-settings", label: "Season Settings", level: "director" },
         { id: "draft-pool", label: "Draft Pool", level: "director", value: enteredCount + draftPoolTournamentGroups.reduce((n, g) => n + g.playerEntries.length + g.teamSignups.length, 0) },
         { id: "league-controls", label: "League Controls", level: "director" },
+        { id: "fantasy", label: "Fantasy", level: "director" },
       ],
     },
     {
@@ -1670,6 +1673,21 @@ export default async function AdminPage() {
             subsEnabled={(settings?.subs_enabled as boolean | null) ?? true}
             isCEO={userIsCEO}
           />
+        </AdminSubSection>
+      )}
+
+      {/* ── Fantasy (Director+) ── */}
+      {userIsDirector && (
+        <AdminSubSection
+          sectionId="season-league"
+          tabId="fantasy"
+          title="Fantasy"
+          description="Run the fantasy season: who can see it, when the drafts start, whether trades are on, and every league's name, owner and managers."
+          defaultOpen={false}
+        >
+          <Suspense fallback={<p className="text-sm text-zinc-500">Loading fantasy…</p>}>
+            <FantasyPanel />
+          </Suspense>
         </AdminSubSection>
       )}
       </AdminSection>

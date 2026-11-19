@@ -223,25 +223,54 @@ export async function sweepFantasyAutopicks(): Promise<number> {
   return picks;
 }
 
-export async function startFantasyDrafts(): Promise<{ error?: string; message?: string }> {
-  const season = await getCurrentFantasySeason();
-  if (!season) return { error: "There's no fantasy season." };
-  if (season.status !== "open") return { error: "This fantasy season's drafts have already started." };
+export type DraftGate = { label: string; ok: boolean; error: string };
+type SeasonTiers = Awaited<ReturnType<typeof currentSeasonTiers>>;
 
-  const [{ data: settings }, statsOn, testRun] = await Promise.all([
+/**
+ * Everything that must hold before the drafts can start, in the order they're
+ * refused. The admin checklist draws these and startFantasyDrafts enforces
+ * them, so the two can't disagree.
+ */
+export async function fantasyDraftGates() {
+  const [season, { data: settings }, statsOn, testRun, tiers] = await Promise.all([
+    getCurrentFantasySeason(),
     supabaseAdmin.from("league_settings").select("team_size, draft_active, season_active").maybeSingle(),
     isStatsTrackingEnabled(),
     isTestEventActive(),
+    currentSeasonTiers(),
   ]);
   // §1: a 3v3 season with stats tracking; §8: after the real draft and before
   // Round 1. A test event gets a test run: see rollbackFantasyTestRun.
-  if (normalizeTeamSize(settings?.team_size) !== 3) return { error: "Fantasy only runs alongside a 3v3 season." };
-  if (!statsOn) return { error: "Turn stats tracking on first. Fantasy scores come from replay stats." };
-  if (settings?.draft_active) return { error: "Finish the season draft first." };
-  if (settings?.season_active) return { error: "The season has already started. Fantasy drafts run before Round 1." };
+  const gates: DraftGate[] = [
+    {
+      label: "A fantasy season is open",
+      ok: season?.status === "open",
+      error: season ? "This fantasy season's drafts have already started." : "There's no fantasy season.",
+    },
+    { label: "The season is 3v3", ok: normalizeTeamSize(settings?.team_size) === 3, error: "Fantasy only runs alongside a 3v3 season." },
+    { label: "Stats tracking is on", ok: statsOn, error: "Turn stats tracking on first. Fantasy scores come from replay stats." },
+    { label: "No season draft is running", ok: !settings?.draft_active, error: "Finish the season draft first." },
+    {
+      label: "Round 1 hasn't started",
+      ok: !settings?.season_active,
+      error: "The season has already started. Fantasy drafts run before Round 1.",
+    },
+    { label: "Players are rostered on teams", ok: tiers.length > 0, error: "Nobody is rostered yet. Run the season draft first." },
+  ];
+  return { season, gates, tiers, testRun };
+}
 
-  const tiers = await currentSeasonTiers();
-  if (!tiers.length) return { error: "Nobody is rostered yet. Run the season draft first." };
+/** The tiers a league's pool would run out of, given who manages in it. */
+export function rosterShortfall(tiers: SeasonTiers, memberIds: string[]): string[] {
+  const members = new Set(memberIds);
+  const pool = tierCounts(tiers.filter((t) => !members.has(t.playerId)).map((t) => t.tier));
+  return poolShortfall(pool, members.size).map((t) => TIER_LABEL[t]);
+}
+
+export async function startFantasyDrafts(): Promise<{ error?: string; message?: string }> {
+  const { season, gates, tiers, testRun } = await fantasyDraftGates();
+  const failed = gates.find((g) => !g.ok);
+  if (failed || !season) return { error: failed?.error ?? "There's no fantasy season." };
 
   // The claim: two staff pressing at once can't both start the drafts, and the
   // season leaving 'open' stops new leagues being created.
@@ -302,10 +331,8 @@ export async function startFantasyDrafts(): Promise<{ error?: string; message?: 
   // every roster would reach a pick with nobody legal to take.
   const short: string[] = [];
   for (const l of drafting) {
-    const members = new Set(membersOf.get(l.id));
-    const pool = tierCounts(tiers.filter((t) => !members.has(t.playerId)).map((t) => t.tier));
-    const missing = poolShortfall(pool, members.size);
-    if (missing.length) short.push(`${l.name} (${missing.map((t) => TIER_LABEL[t]).join(", ")})`);
+    const missing = rosterShortfall(tiers, membersOf.get(l.id)!);
+    if (missing.length) short.push(`${l.name} (${missing.join(", ")})`);
   }
   if (short.length) {
     await revert();
