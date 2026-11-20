@@ -429,9 +429,9 @@ export default async function DashboardPage({
                 <p className="text-[21px] text-indigo-300">{currentSeasonLabel}</p>
               ) : (
                 activeTournament && (
-                  <div className="text-lg text-zinc-400 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
-                    {activeTournament.draft_start_at && <span>Draft: <LocalTime iso={activeTournament.draft_start_at} /></span>}
-                    {activeTournament.season_start_at && <span>Tournament: <LocalTime iso={activeTournament.season_start_at} /></span>}
+                  <div className="text-lg text-zinc-400 flex flex-wrap gap-x-6 gap-y-1">
+                    {activeTournament.draft_start_at && <span className="sm:whitespace-nowrap">Draft:<LocalTime iso={activeTournament.draft_start_at} /></span>}
+                    {activeTournament.season_start_at && <span className="sm:whitespace-nowrap">Tournament:<LocalTime iso={activeTournament.season_start_at} /></span>}
                   </div>
                 )
               )}
