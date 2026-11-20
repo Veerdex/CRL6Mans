@@ -551,8 +551,8 @@ export function TournamentManager({
         </h3>
         {live && (
           <p className="text-xs text-amber-300/90 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
-            This tournament is running, so its format, teams, sign-ups, prizes and switches are locked.
-            You can change its name, overview, sponsor, and any time that hasn&rsquo;t passed yet.
+            This tournament is running, so its format, teams, sign-ups and switches are locked.
+            You can change its name, overview, sponsor, prize pool, and any time that hasn&rsquo;t passed yet.
             Moving the first stage also moves its opening matches. A later stage&rsquo;s time only changes
             what players see: its matches still open when the stage before finishes, unless you set a
             round time in Scheduling.
@@ -892,7 +892,10 @@ export function TournamentManager({
           </div>
         )}
 
-        {/* Prize pool */}
+        </fieldset>
+
+        {/* Prize pool — stays editable while live: payouts and career points are
+            only read from it when the tournament completes. */}
         <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
           <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Prize Pool (optional)</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -932,6 +935,7 @@ export function TournamentManager({
           </div>
         </div>
 
+        <fieldset disabled={live} className={`space-y-4 min-w-0 ${lockCls}`}>
         {/* Best Of settings — one block per independently-configurable bracket */}
         {bestOfBlocksForPreset(form.preset).map((slot) => {
           const slotConfig = form.roundBestOf[slot.key] ?? defaultStageBestOf(slot.kind);

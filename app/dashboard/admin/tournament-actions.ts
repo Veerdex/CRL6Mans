@@ -185,15 +185,8 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
   if (min3v3 !== null && (!Number.isInteger(min3v3) || min3v3 < 0 || min3v3 > 3000))
     return { error: "Min 3v3 MMR must be between 0 and 3000." };
 
-  const prize1st = input.prize_1st != null ? Number(input.prize_1st) : null;
-  const prize2nd = input.prize_2nd != null ? Number(input.prize_2nd) : null;
-  const prize3rd4th = input.prize_3rd4th != null ? Number(input.prize_3rd4th) : null;
-  if (prize1st !== null && (!Number.isInteger(prize1st) || prize1st < 0))
-    return { error: "1st place prize must be a non-negative whole number." };
-  if (prize2nd !== null && (!Number.isInteger(prize2nd) || prize2nd < 0))
-    return { error: "2nd place prize must be a non-negative whole number." };
-  if (prize3rd4th !== null && (!Number.isInteger(prize3rd4th) || prize3rd4th < 0))
-    return { error: "3rd-4th place prize must be a non-negative whole number." };
+  const prizes = sanitizePrizes(input);
+  if (!prizes.value) return { error: prizes.error };
 
   return {
     value: {
@@ -220,11 +213,24 @@ function sanitize(input: TournamentInput): { value?: TournamentInput; error?: st
       stats_enabled: input.stats_enabled ?? true,
       sponsor_id: input.sponsor_id?.trim() || null,
       design_id: input.design_id?.trim() || null,
-      prize_1st: prize1st || null,
-      prize_2nd: prize2nd || null,
-      prize_3rd4th: prize3rd4th || null,
+      ...prizes.value,
     },
   };
+}
+
+type Prizes = { prize_1st: number | null; prize_2nd: number | null; prize_3rd4th: number | null };
+
+function sanitizePrizes(input: TournamentInput): { value: Prizes; error?: undefined } | { value?: undefined; error: string } {
+  const prize1st = input.prize_1st != null ? Number(input.prize_1st) : null;
+  const prize2nd = input.prize_2nd != null ? Number(input.prize_2nd) : null;
+  const prize3rd4th = input.prize_3rd4th != null ? Number(input.prize_3rd4th) : null;
+  if (prize1st !== null && (!Number.isInteger(prize1st) || prize1st < 0))
+    return { error: "1st place prize must be a non-negative whole number." };
+  if (prize2nd !== null && (!Number.isInteger(prize2nd) || prize2nd < 0))
+    return { error: "2nd place prize must be a non-negative whole number." };
+  if (prize3rd4th !== null && (!Number.isInteger(prize3rd4th) || prize3rd4th < 0))
+    return { error: "3rd-4th place prize must be a non-negative whole number." };
+  return { value: { prize_1st: prize1st || null, prize_2nd: prize2nd || null, prize_3rd4th: prize3rd4th || null } };
 }
 
 // Off for now. Both announcements below are built and working; flip this to true
@@ -445,12 +451,17 @@ async function updateLiveTournament(id: string, input: TournamentInput) {
     supabaseAdmin.from("league_settings").select("draft_active, season_active").single(),
   ]);
   if (!t) return { error: "Tournament not found." };
+  const prizes = sanitizePrizes(input);
+  if (!prizes.value) return { error: prizes.error };
 
+  // Prizes are safe to change mid-event: payouts and career points are only read
+  // from them when the tournament completes.
   const update: Record<string, unknown> = {
     name,
     overview: input.overview?.trim() || null,
     sponsor_id: input.sponsor_id?.trim() || null,
     design_id: input.design_id?.trim() || null,
+    ...prizes.value,
     updated_at: new Date().toISOString(),
   };
 
