@@ -74,7 +74,7 @@ export async function GET(request: Request) {
       fired.push(`signups_closed:${s.name}`);
       // Awaited: a push left in flight when the cron response returns is not
       // guaranteed to finish, and this one now has a real audience to reach.
-      await pushToTournamentEntrants(s.id, s.join_mode, {
+      const notified = await pushToTournamentEntrants(s.id, s.join_mode, {
         title: `${s.name} Signups Closed`,
         body: s.team_assignment === "auto_balance"
           ? "Signups have closed. Teams will be generated soon."
@@ -83,14 +83,14 @@ export async function GET(request: Request) {
         tag: "signups-closed",
         category: "tournament",
         testTournament: !!s.is_test,
-      }).catch(() => {});
+      }).catch((): string[] => []);
       pushToAdmins({
         title: `${s.name} Signups Closed`,
         body: "Tournament signups have closed.",
         url: "/dashboard/admin",
         tag: "signups-closed-admin",
         testTournament: !!s.is_test,
-      }).catch(() => {});
+      }, undefined, { skipDiscordIds: notified }).catch(() => {});
     }
   }
 
@@ -301,24 +301,25 @@ export async function GET(request: Request) {
         // gets its own message, and goes to the players who actually landed on a
         // team rather than to everyone who signed up.
         // Awaited for the same reason as the close push above.
+        let notified: string[];
         if (isAutoBalance) {
-          await pushToRosteredPlayers({
+          notified = await pushToRosteredPlayers({
             title: "Teams Generated!",
             body: "Teams are set. Head to the My Team tab to see who you're teamed up with.",
             url: "/dashboard/my-team",
             tag: "teams-generated",
             category: "draft",
             testTournament: !!t.is_test,
-          }).catch(() => {});
+          }).catch((): string[] => []);
         } else {
-          await pushToEnteredDraft({
+          notified = await pushToEnteredDraft({
             title: "Draft Starting!",
             body: "The draft is now live. Head to the draft page to watch your team get picked.",
             url: "/dashboard/draft",
             tag: "draft-start",
             category: "draft",
             testTournament: !!t.is_test,
-          }).catch(() => {});
+          }).catch((): string[] => []);
         }
         pushToAdmins({
           title: isAutoBalance ? "Teams Generated!" : "Draft Starting!",
@@ -326,7 +327,7 @@ export async function GET(request: Request) {
           url: isAutoBalance ? "/dashboard/teams" : "/dashboard/draft",
           tag: isAutoBalance ? "teams-generated-admin" : "draft-start-admin",
           testTournament: !!t.is_test,
-        }).catch(() => {});
+        }, undefined, { skipDiscordIds: notified }).catch(() => {});
       } else {
         pushToAdmins({
           title: "Tournament auto-start failed",

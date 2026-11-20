@@ -190,7 +190,10 @@ async function sendToSubscriptions(
 // The feed row is written before the toggle is consulted, matching every other
 // category: the push is ephemeral and the row is the record, so switching the
 // toggle on later reveals the history instead of starting from nothing.
-export async function pushToTestTournamentAdmins(payload: PushPayload): Promise<PushResult> {
+export async function pushToTestTournamentAdmins(
+  payload: PushPayload,
+  opts: AdminPushOptions = {}
+): Promise<PushResult> {
   await recordNotification({ kind: "admins", adminCategory: "test_tournaments" }, payload);
   if (!(await notificationsEnabled())) return { ...EMPTY_RESULT, skipped: "notifications-off" };
   const { data: settings } = await supabaseAdmin
@@ -201,10 +204,10 @@ export async function pushToTestTournamentAdmins(payload: PushPayload): Promise<
   if (!adminCategoryEnabled(prefs, "test_tournaments")) return { ...EMPTY_RESULT, skipped: "category-off" };
 
   const { data: staff } = await supabaseAdmin.from("staff_roles").select("discord_id");
-  const ids = [...new Set([
+  const ids = withoutSkipped([...new Set([
     ...(staff ?? []).map((s) => s.discord_id as string).filter(Boolean),
     ...developerDiscordIds(),
-  ])];
+  ])], opts);
   if (!ids.length) return { ...EMPTY_RESULT, skipped: "no-staff" };
   const { data } = await supabaseAdmin
     .from("push_subscriptions")
@@ -230,12 +233,24 @@ const EVENT_ADMIN_CATEGORIES = new Set<AdminNotificationCategory>(["match_disput
 
 // Returns a delivery summary. Callers that fire-and-forget ignore it; the admin
 // test button is the one that needs to know whether anything actually landed.
+// A staff copy of a notice that also went to players: whoever already got the
+// player copy (a staff member signed up for the event) is skipped, so they get
+// one notification rather than two. Pass what the player-facing helper returned.
+type AdminPushOptions = { skipDiscordIds?: string[] };
+
+function withoutSkipped(ids: string[], opts: AdminPushOptions): string[] {
+  if (!opts.skipDiscordIds?.length) return ids;
+  const skip = new Set(opts.skipDiscordIds);
+  return ids.filter((id) => !skip.has(id));
+}
+
 export async function pushToAdmins(
   payload: PushPayload,
-  adminCategory?: AdminNotificationCategory
+  adminCategory?: AdminNotificationCategory,
+  opts: AdminPushOptions = {}
 ): Promise<PushResult> {
   const inferTest = !!adminCategory && EVENT_ADMIN_CATEGORIES.has(adminCategory);
-  if (payload.testTournament ?? (inferTest && (await isActiveTournamentTest()))) return pushToTestTournamentAdmins(payload);
+  if (payload.testTournament ?? (inferTest && (await isActiveTournamentTest()))) return pushToTestTournamentAdmins(payload, opts);
   await recordNotification({ kind: "admins", adminCategory }, payload);
   if (!(await notificationsEnabled())) return { ...EMPTY_RESULT, skipped: "notifications-off" };
   // Respect per-category admin notification toggles (default on when unset).
@@ -250,7 +265,7 @@ export async function pushToAdmins(
   const { data: staff } = await supabaseAdmin
     .from("staff_roles")
     .select("discord_id");
-  const ids = (staff ?? []).map((s) => s.discord_id as string).filter(Boolean);
+  const ids = withoutSkipped((staff ?? []).map((s) => s.discord_id as string).filter(Boolean), opts);
   if (!ids.length) return { ...EMPTY_RESULT, skipped: "no-staff" };
   const { data } = await supabaseAdmin
     .from("push_subscriptions")
@@ -308,15 +323,17 @@ export async function pushToAllApproved(payload: PushPayload) {
   if (data?.length) await sendToSubscriptions(data, payload);
 }
 
-export async function pushToDiscordIds(discordIds: string[], payload: PushPayload) {
-  if (!discordIds.length) return;
+// Returns who was sent to, so a staff copy of the same notice can skip them.
+export async function pushToDiscordIds(discordIds: string[], payload: PushPayload): Promise<string[]> {
+  if (!discordIds.length) return [];
   await recordNotification({ kind: "users", discordIds }, payload);
-  if (!(await notificationsEnabled())) return;
+  if (!(await notificationsEnabled())) return [];
   const { data } = await supabaseAdmin
     .from("push_subscriptions")
     .select("endpoint, p256dh, auth")
     .in("discord_id", discordIds);
   if (data?.length) await sendToSubscriptions(data, payload);
+  return discordIds;
 }
 
 export async function pushToTeam(teamId: string, payload: PushPayload) {
@@ -336,9 +353,9 @@ export async function pushToTeam(teamId: string, payload: PushPayload) {
   if (data?.length) await sendToSubscriptions(data, payload);
 }
 
-export async function pushToEnteredDraft(payload: PushPayload) {
+export async function pushToEnteredDraft(payload: PushPayload): Promise<string[]> {
   await recordNotification({ kind: "draft" }, payload);
-  if (!(await notificationsEnabled())) return;
+  if (!(await notificationsEnabled())) return [];
   const { data: players, error } = await supabaseAdmin
     .from("players")
     .select("discord_id, notification_prefs")
@@ -351,9 +368,10 @@ export async function pushToEnteredDraft(payload: PushPayload) {
   } else {
     ids = filterByCategory(players ?? [], payload.category);
   }
-  if (!ids.length) return;
+  if (!ids.length) return [];
   const { data } = await supabaseAdmin.from("push_subscriptions").select("endpoint, p256dh, auth").in("discord_id", ids);
   if (data?.length) await sendToSubscriptions(data, payload);
+  return ids;
 }
 
 // Shared tail for the audiences that resolve to an explicit set of players.
@@ -363,8 +381,8 @@ export async function pushToEnteredDraft(payload: PushPayload) {
 // from the people it was sent to.
 // players.id is the account id, so this is also how an audience of fantasy
 // managers, which are accounts, honours their category toggles.
-export async function pushToPlayerIds(playerIds: string[], payload: PushPayload) {
-  if (!playerIds.length) return;
+export async function pushToPlayerIds(playerIds: string[], payload: PushPayload): Promise<string[]> {
+  if (!playerIds.length) return [];
   const { data: players, error } = await supabaseAdmin
     .from("players")
     .select("discord_id, notification_prefs")
@@ -377,7 +395,7 @@ export async function pushToPlayerIds(playerIds: string[], payload: PushPayload)
   } else {
     ids = filterByCategory(players ?? [], payload.category);
   }
-  await pushToDiscordIds(ids, payload);
+  return pushToDiscordIds(ids, payload);
 }
 
 async function tournamentEntrantPlayerIds(
@@ -415,8 +433,8 @@ export async function pushToTournamentEntrants(
   tournamentId: string,
   joinMode: string | null | undefined,
   payload: PushPayload
-) {
-  await pushToPlayerIds(await tournamentEntrantPlayerIds(tournamentId, joinMode), payload);
+): Promise<string[]> {
+  return pushToPlayerIds(await tournamentEntrantPlayerIds(tournamentId, joinMode), payload);
 }
 
 /**
@@ -434,16 +452,16 @@ export async function pushToTournamentRoster(
   tournamentId: string,
   joinMode: string | null | undefined,
   payload: PushPayload
-) {
+): Promise<string[]> {
   const entrantIds = await tournamentEntrantPlayerIds(tournamentId, joinMode);
-  if (!entrantIds.length) return;
+  if (!entrantIds.length) return [];
   const { data: rostered } = await supabaseAdmin
     .from("players")
     .select("id")
     .eq("status", "approved")
     .in("id", entrantIds)
     .not("team_id", "is", null);
-  await pushToPlayerIds(rostered?.length ? rostered.map((p) => p.id as string) : entrantIds, payload);
+  return pushToPlayerIds(rostered?.length ? rostered.map((p) => p.id as string) : entrantIds, payload);
 }
 
 /**
@@ -454,11 +472,11 @@ export async function pushToTournamentRoster(
  * the last sign-up — and pointing those players at a team they don't have is
  * worse than sending them nothing.
  */
-export async function pushToRosteredPlayers(payload: PushPayload) {
+export async function pushToRosteredPlayers(payload: PushPayload): Promise<string[]> {
   const { data: players } = await supabaseAdmin
     .from("players")
     .select("id")
     .eq("status", "approved")
     .not("team_id", "is", null);
-  await pushToPlayerIds((players ?? []).map((p) => p.id as string), payload);
+  return pushToPlayerIds((players ?? []).map((p) => p.id as string), payload);
 }

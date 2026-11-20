@@ -488,7 +488,7 @@ export async function closeSignups(id: string) {
   revalidatePath("/dashboard/admin");
   revalidatePath("/dashboard");
 
-  pushToTournamentEntrants(id, tName?.join_mode, {
+  const notified = await pushToTournamentEntrants(id, tName?.join_mode, {
     title: `${tName?.name ?? "Tournament"} Signups Closed`,
     body: tName?.team_assignment === "auto_balance"
       ? "Signups have closed. Teams will be generated soon."
@@ -497,14 +497,14 @@ export async function closeSignups(id: string) {
     tag: "signups-closed",
     category: "tournament",
     testTournament: !!tName?.is_test,
-  }).catch(() => {});
+  }).catch((): string[] => []);
   pushToAdmins({
     title: `${tName?.name ?? "Tournament"} Signups Closed`,
     body: "Tournament signups have closed.",
     url: "/dashboard/admin",
     tag: "signups-closed-admin",
     testTournament: !!tName?.is_test,
-  }).catch(() => {});
+  }, undefined, { skipDiscordIds: notified }).catch(() => {});
 
   return { ok: true, message: "Sign-ups closed." };
 }

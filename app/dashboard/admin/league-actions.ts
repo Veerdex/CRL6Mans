@@ -393,20 +393,20 @@ export async function adminStartDraft(code: string, maxTeamsRaw?: string) {
   if (result.ok) {
     revalidatePath("/dashboard/teams");
     revalidatePath("/dashboard/draft");
-    pushToEnteredDraft({
+    const notified = await pushToEnteredDraft({
       title: "Draft Starting!",
       body: `The ${APP_NAME} draft is now live. Head to the draft page to watch your team get picked.`,
       url: "/dashboard/draft",
       tag: "draft-start",
       category: "draft",
-    }).catch(() => {});
+    }).catch((): string[] => []);
     pushToAdmins({
       title: "Draft Starting!",
       body: "The draft is now live.",
       url: "/dashboard/draft",
       tag: "draft-start-admin",
       testTournament: await isActiveTournamentTest(),
-    }).catch(() => {});
+    }, undefined, { skipDiscordIds: notified }).catch(() => {});
   }
   return result;
 }
@@ -424,20 +424,20 @@ export async function adminAutoBalance(code: string, maxTeamsRaw?: string) {
     revalidatePath("/dashboard/draft");
     // Same message the cron sends when it auto-balances, so a hand-run formation
     // isn't the one path that notifies nobody.
-    pushToRosteredPlayers({
+    const notified = await pushToRosteredPlayers({
       title: "Teams Generated!",
       body: "Teams are set. Head to the My Team tab to see who you're teamed up with.",
       url: "/dashboard/my-team",
       tag: "teams-generated",
       category: "draft",
-    }).catch(() => {});
+    }).catch((): string[] => []);
     pushToAdmins({
       title: "Teams Generated!",
       body: "Teams have been auto-balanced.",
       url: "/dashboard/teams",
       tag: "teams-generated-admin",
       testTournament: await isActiveTournamentTest(),
-    }).catch(() => {});
+    }, undefined, { skipDiscordIds: notified }).catch(() => {});
   }
   return result;
 }
@@ -448,20 +448,20 @@ export async function adminEndDraft(code: string) {
   const result = await execEndDraft();
   if (result.ok) {
     revalidatePath("/dashboard/teams");
-    pushToEnteredDraft({
+    const notified = await pushToEnteredDraft({
       title: "Draft Complete",
       body: "Teams have been finalized. Check your team on the My Team page.",
       url: "/dashboard/my-team",
       tag: "draft-end",
       category: "draft",
-    }).catch(() => {});
+    }).catch((): string[] => []);
     pushToAdmins({
       title: "Draft Complete",
       body: "Teams have been finalized.",
       url: "/dashboard/teams",
       tag: "draft-end-admin",
       testTournament: await isActiveTournamentTest(),
-    }).catch(() => {});
+    }, undefined, { skipDiscordIds: notified }).catch(() => {});
   }
   return result;
 }
@@ -521,19 +521,19 @@ export async function closeDraftSignups() {
   // The season's own entrants: while a tournament holds the live pool,
   // draft_entered is the tournament's.
   const { data: seasonEntrants } = await supabaseAdmin.from("season_entries").select("player_id");
-  pushToPlayerIds((seasonEntrants ?? []).map((e) => e.player_id as string), {
+  const notified = await pushToPlayerIds((seasonEntrants ?? []).map((e) => e.player_id as string), {
     title: "Season Signups Closed",
     body: "Season signups have closed. The draft will begin soon.",
     url: "/dashboard",
     tag: "signups-closed",
     category: "tournament",
-  }).catch(() => {});
+  }).catch((): string[] => []);
   pushToAdmins({
     title: "Season Signups Closed",
     body: "Season signups have closed.",
     url: "/dashboard/admin",
     tag: "signups-closed-admin",
-  }).catch(() => {});
+  }, undefined, { skipDiscordIds: notified }).catch(() => {});
 
   return { ok: true, message: "Draft signups closed." };
 }
