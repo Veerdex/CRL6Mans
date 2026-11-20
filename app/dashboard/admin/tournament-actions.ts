@@ -10,6 +10,7 @@ import { activateTournamentRuntime } from "@/app/lib/tournament-runtime";
 import { computeTopStats, type TopStats } from "@/app/lib/game-stats";
 import { fetchAllRows } from "@/app/lib/paginate";
 import { fetchEventWinner } from "@/app/lib/bracket-server";
+import { stampOpeningRoundTime } from "@/app/lib/discord-bot";
 import { computeFullArchive } from "./tournament-archive";
 import { recordEventResults } from "@/app/lib/event-results";
 import { resetSeason } from "./league-actions";
@@ -63,6 +64,8 @@ export type Tournament = TournamentInput & {
   hidden_from_home: boolean;
   is_test: boolean;
   stats_enabled: boolean;
+  teams_formed_at?: string | null;
+  bracket_generated_at?: string | null;
 };
 
 export type Season = {
@@ -334,6 +337,10 @@ export async function createTournament(input: TournamentInput) {
 
 export async function updateTournament(id: string, input: TournamentInput) {
   await verifyAdmin();
+  const { data: current } = await supabaseAdmin
+    .from("tournaments").select("status").eq("id", id).maybeSingle();
+  if (current?.status === "active") return updateLiveTournament(id, input);
+
   const { value, error } = sanitize(input);
   if (error) return { error };
 
@@ -408,6 +415,109 @@ export async function updateTournament(id: string, input: TournamentInput) {
     }).catch(() => {});
   }
 
+  return { ok: true, message: "Tournament updated." };
+}
+
+// The form round-trips times through a minute-precision datetime-local input, so
+// an untouched time can come back a few seconds off the stored one.
+function sameMinute(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) < 60_000;
+}
+
+const inFuture = (iso: string | null | undefined) => !!iso && new Date(iso).getTime() > Date.now();
+
+// A running tournament has copied its format, team size, stats switch and test
+// flag into league_settings and built its bracket from them, and its sign-ups are
+// closed. So only what nothing has consumed yet may change: the presentation, and
+// any time whose milestone hasn't happened. Every other field the form sends is
+// ignored rather than rejected, because the form sends the whole tournament.
+async function updateLiveTournament(id: string, input: TournamentInput) {
+  const name = input.name?.trim();
+  if (!name) return { error: "Tournament name is required." };
+
+  const [{ data: t }, { data: live }] = await Promise.all([
+    supabaseAdmin
+      .from("tournaments")
+      .select("join_mode, draft_start_at, season_start_at, stage_starts, teams_formed_at, bracket_generated_at")
+      .eq("id", id)
+      .single(),
+    supabaseAdmin.from("league_settings").select("draft_active, season_active").single(),
+  ]);
+  if (!t) return { error: "Tournament not found." };
+
+  const update: Record<string, unknown> = {
+    name,
+    overview: input.overview?.trim() || null,
+    sponsor_id: input.sponsor_id?.trim() || null,
+    design_id: input.design_id?.trim() || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  // Hand-built teams never stamp teams_formed_at, so the bracket and the runtime
+  // flags are checked too — a formation time moved past any of them would form
+  // teams again and reshuffle the rosters under a built bracket.
+  const teamsFormed = !!t.teams_formed_at || !!t.bracket_generated_at || !!live?.draft_active || !!live?.season_active;
+  let draftStart = t.draft_start_at as string | null;
+  if (t.join_mode === "players" && !sameMinute(input.draft_start_at, t.draft_start_at)) {
+    if (teamsFormed) return { error: "Teams are already formed, so their formation time can't change." };
+    if (!inFuture(input.draft_start_at)) return { error: "The new team formation time has to be in the future." };
+    draftStart = input.draft_start_at;
+    update.draft_start_at = draftStart;
+  }
+
+  // Gated on the season actually running rather than on the time having passed:
+  // a start that failed leaves a past time behind, and that is exactly the one
+  // that needs moving.
+  const storedStart = t.season_start_at as string | null;
+  const startMoved = !sameMinute(input.season_start_at, storedStart);
+  const seasonStart = startMoved ? input.season_start_at : storedStart;
+  if (startMoved) {
+    if (live?.season_active) return { error: "The tournament has already started, so its start time can't change." };
+    if (!inFuture(seasonStart)) return { error: "The new start time has to be in the future." };
+    update.season_start_at = seasonStart;
+    // A reminder sent for the old time would otherwise be the only one sent.
+    if (new Date(seasonStart!).getTime() - Date.now() > 24 * 60 * 60 * 1000) update.reminder_24h_sent_at = null;
+  }
+  if (!teamsFormed && draftStart && seasonStart && new Date(draftStart) >= new Date(seasonStart))
+    return { error: "Teams have to be formed before the tournament starts." };
+
+  // Merged key by key onto what is stored, so a stage the form leaves blank keeps
+  // its time and an empty schedule can't wipe the column. The form locks its
+  // preview team count while live, which is what keeps its stage keys stable.
+  const storedStages = (t.stage_starts as Record<string, string> | null) ?? {};
+  const inputStages = input.stage_starts ?? {};
+  const nextStages = { ...storedStages };
+  let stagesMoved = false;
+  for (const key of new Set([...Object.keys(storedStages), ...Object.keys(inputStages)])) {
+    const stored = storedStages[key] as string | undefined;
+    if (stored && sameMinute(stored, storedStart)) {
+      if (startMoved) { nextStages[key] = seasonStart!; stagesMoved = true; }
+      continue;
+    }
+    const next = inputStages[key];
+    if (!next || sameMinute(next, stored)) continue;
+    if (!stored && sameMinute(next, seasonStart)) { nextStages[key] = seasonStart!; stagesMoved = true; continue; }
+    if (stored && !inFuture(stored)) return { error: "A stage that has already started can't be moved." };
+    if (!inFuture(next)) return { error: "A new stage time has to be in the future." };
+    if (seasonStart && new Date(next) <= new Date(seasonStart))
+      return { error: "A later stage has to start after the tournament does." };
+    nextStages[key] = next;
+    stagesMoved = true;
+  }
+  if (stagesMoved) update.stage_starts = nextStages;
+
+  const { error } = await supabaseAdmin.from("tournaments").update(update).eq("id", id);
+  if (error) return { error: error.message };
+
+  // The bracket is built 30 minutes ahead, and its opening round carries the old
+  // start time everywhere a player looks.
+  if (startMoved && t.bracket_generated_at) await stampOpeningRoundTime(seasonStart!);
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard/my-team");
   return { ok: true, message: "Tournament updated." };
 }
 

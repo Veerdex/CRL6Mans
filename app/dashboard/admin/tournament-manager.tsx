@@ -278,6 +278,10 @@ export function TournamentManager({
   const [isPending, startTransition] = useTransition();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Set while editing a running tournament: everything but its presentation and
+  // the times that haven't happened yet is locked (updateLiveTournament).
+  const [liveEdit, setLiveEdit] = useState<Tournament | null>(null);
+  const [liveEditAt, setLiveEditAt] = useState(0);
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; action: "complete" | "cancel" } | null>(null);
   const [deleteConfirmKey, setDeleteConfirmKey] = useState<string | null>(null);
@@ -386,7 +390,16 @@ export function TournamentManager({
   const resetForm = () => {
     setForm(EMPTY_FORM);
     setEditingId(null);
+    setLiveEdit(null);
   };
+
+  const live = !!liveEdit;
+  const timePassed = (iso: string | null | undefined) => !!iso && new Date(iso).getTime() <= liveEditAt;
+  const draftStartLocked = !!liveEdit && (
+    !!liveEdit.teams_formed_at || !!liveEdit.bracket_generated_at || timePassed(liveEdit.draft_start_at)
+  );
+  const stageLocked = (key: string) => !!liveEdit && timePassed(liveEdit.stage_starts?.[key]);
+  const lockCls = "[&_:disabled]:opacity-50 [&_:disabled]:cursor-not-allowed";
 
   const validateDates = (): string | null => {
     const openAt  = form.draftOpenAt  ? new Date(form.draftOpenAt)  : null;
@@ -445,6 +458,8 @@ export function TournamentManager({
 
   const handleEdit = (t: Tournament) => {
     setEditingId(t.id);
+    setLiveEdit(t.status === "active" ? t : null);
+    setLiveEditAt(Date.now());
     const fmt = t.season_format as SeasonFormatConfig | null;
     const preset = fmt?.preset ?? "single_elimination";
     const tTeams = t.min_teams || 0;
@@ -532,8 +547,17 @@ export function TournamentManager({
       {/* Create / edit form */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
         <h3 className="text-sm font-semibold text-white">
-          {editingId ? "Edit Tournament" : "Schedule a Tournament"}
+          {live ? "Edit Running Tournament" : editingId ? "Edit Tournament" : "Schedule a Tournament"}
         </h3>
+        {live && (
+          <p className="text-xs text-amber-300/90 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
+            This tournament is running, so its format, teams, sign-ups, prizes and switches are locked.
+            You can change its name, overview, sponsor, and any time that hasn&rsquo;t passed yet.
+            Moving the first stage also moves its opening matches. A later stage&rsquo;s time only changes
+            what players see: its matches still open when the stage before finishes, unless you set a
+            round time in Scheduling.
+          </p>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
@@ -557,6 +581,7 @@ export function TournamentManager({
             />
           </div>
 
+          <fieldset disabled={live} className={`contents ${lockCls}`}>
           <div>
             <label className={labelCls}>Format</label>
             <select
@@ -699,6 +724,7 @@ export function TournamentManager({
               </div>
             </>
           )}
+          </fieldset>
 
           <div>
             <label className={labelCls}>Sponsor / Design (optional)</label>
@@ -732,6 +758,7 @@ export function TournamentManager({
             </select>
           </div>
 
+          <fieldset disabled={live} className={`contents ${lockCls}`}>
           <div>
             <label className={labelCls}>{isPlayers ? "Sign-ups open" : "Team registration opens"}</label>
             <input type="datetime-local" className={inputCls} value={form.draftOpenAt}
@@ -742,7 +769,9 @@ export function TournamentManager({
             <input type="datetime-local" className={inputCls} value={form.draftCloseAt}
               onChange={(e) => setForm({ ...form, draftCloseAt: e.target.value })} />
           </div>
+          </fieldset>
           {isPlayers && (
+            <fieldset disabled={draftStartLocked} className={`contents ${lockCls}`}>
             <div>
               <label className={labelCls}>
                 {form.teamAssignment === "auto_balance" ? "Teams auto-formed at" : "Draft starts"}
@@ -750,8 +779,10 @@ export function TournamentManager({
               <input type="datetime-local" className={inputCls} value={form.draftStartAt}
                 onChange={(e) => setForm({ ...form, draftStartAt: e.target.value })} />
             </div>
+            </fieldset>
           )}
 
+          <fieldset disabled={live} className={`contents ${lockCls}`}>
           <div className="sm:col-span-2">
             <div className="flex items-center justify-between bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2.5">
               <div>
@@ -799,8 +830,10 @@ export function TournamentManager({
               </button>
             </div>
           </div>
+          </fieldset>
         </div>
 
+        <fieldset disabled={live} className={`space-y-4 min-w-0 ${lockCls}`}>
         {/* Group stage settings */}
         {hasGroupStage && (
           <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
@@ -957,6 +990,7 @@ export function TournamentManager({
             </div>
           );
         })}
+        </fieldset>
 
         {/* Stage schedule */}
         {stages.length > 0 && (
@@ -968,6 +1002,7 @@ export function TournamentManager({
                 <input
                   type="number"
                   min={2}
+                  disabled={live}
                   value={form.previewTeams}
                   onChange={(e) => setForm(f => ({ ...f, previewTeams: e.target.value }))}
                   placeholder={String(previewCount || "—")}
@@ -989,7 +1024,7 @@ export function TournamentManager({
                 const tooEarly = !follows && !!(thisStart && prevEnd && thisStart <= prevEnd);
 
                 return (
-                  <div key={stage.key}>
+                  <fieldset key={stage.key} disabled={stageLocked(stage.key)} className={`min-w-0 ${lockCls}`}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs text-zinc-400 w-24 shrink-0">{stage.label}</span>
 
@@ -1038,7 +1073,7 @@ export function TournamentManager({
                         Must start after {stages[i - 1].label} ends (est. {fmtDuration(prevDisplay.estimatedMinutes)}).
                       </p>
                     )}
-                  </div>
+                  </fieldset>
                 );
               })}
             </div>
@@ -1212,10 +1247,16 @@ export function TournamentManager({
                   </>
                 )}
                 {t.status === "active" && (
-                  <button onClick={() => setConfirm({ id: t.id, action: "complete" })} disabled={isPending}
-                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded-lg transition-colors">
-                    Complete
-                  </button>
+                  <>
+                    <button onClick={() => setConfirm({ id: t.id, action: "complete" })} disabled={isPending}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded-lg transition-colors">
+                      Complete
+                    </button>
+                    <button onClick={() => handleEdit(t)} disabled={isPending}
+                      className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors">
+                      Edit
+                    </button>
+                  </>
                 )}
                 {t.status === "completed" && (!!t.full_archive || (summary?.finalStandings?.length ?? 0) > 0) && (
                   <ExportEventButton kind="tournament" id={t.id} hasArchive={!!t.full_archive} />
